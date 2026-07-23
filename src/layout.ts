@@ -151,6 +151,7 @@ export function getLayout(): string {
     /* Spinner */
     .spinner { border:3px solid #f3f3f3; border-top:3px solid var(--cpc-gold); border-radius:50%; width:20px; height:20px; animation:spin 0.8s linear infinite; display:inline-block; }
     @keyframes spin { 0%{transform:rotate(0deg)} 100%{transform:rotate(360deg)} }
+    @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.5;transform:scale(1.15)} }
 
     /* Toast */
     .toast { position:fixed; top:1rem; right:1rem; z-index:9999; padding:0.875rem 1.25rem; border-radius:10px; color:white; font-weight:500; opacity:0; transition:opacity 0.3s; box-shadow:0 4px 12px rgba(0,0,0,0.2); pointer-events:none; max-width:360px; }

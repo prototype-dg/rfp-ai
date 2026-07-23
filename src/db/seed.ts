@@ -125,6 +125,16 @@ export async function initDb(db: D1Database) {
     `ALTER TABLE evaluations ADD COLUMN business_score REAL`,
     // email_log.has_pdf
     `ALTER TABLE email_log ADD COLUMN has_pdf INTEGER DEFAULT 0`,
+    // email_log.from_email — sender address of inbound emails
+    `ALTER TABLE email_log ADD COLUMN from_email TEXT`,
+    // email_log.email_body_html — full HTML body of received email
+    `ALTER TABLE email_log ADD COLUMN email_body_html TEXT`,
+    // email_log.has_attachment — whether there was an Excel/file attachment
+    `ALTER TABLE email_log ADD COLUMN has_attachment INTEGER DEFAULT 0`,
+    // email_log.resend_email_id — Resend's email_id for the received email
+    `ALTER TABLE email_log ADD COLUMN resend_email_id TEXT`,
+    // questions.email_log_id — link question to the inbound email that contained it
+    `ALTER TABLE questions ADD COLUMN email_log_id INTEGER`,
   ]
   for (const sql of alterMigrations) {
     try {

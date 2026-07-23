@@ -23,12 +23,13 @@ let appState = {
 // ============================================================
 // UTILITIES
 // ============================================================
-function showToast(msg, type) {
+function showToast(msg, type, duration) {
   type = type || 'info';
+  duration = duration || 4000;
   const t = document.getElementById('toast');
   t.textContent = msg;
   t.className = 'toast show ' + type;
-  setTimeout(function() { t.className = 'toast'; }, 4000);
+  setTimeout(function() { t.className = 'toast'; }, duration);
 }
 
 function showModal(html) {
@@ -216,7 +217,7 @@ function renderLifecycleBar(rfp) {
 var RFP_TABS = [
   { id: 'generate',    icon: 'fa-file-alt',      label: 'Generate' },
   { id: 'vendors',     icon: 'fa-building',       label: 'Vendors' },
-  { id: 'emails',      icon: 'fa-envelope',       label: 'Invitations' },
+  { id: 'emails',      icon: 'fa-envelope',       label: 'Communications' },
   { id: 'qa',          icon: 'fa-comments',       label: 'Q&A' },
   { id: 'proposals',   icon: 'fa-inbox',          label: 'Proposals' },
   { id: 'scoring',     icon: 'fa-balance-scale',  label: 'Scoring Model' },
@@ -845,19 +846,23 @@ async function confirmSendInvitations(rfpId) {
   }
 }
 
-// --- TAB: EMAILS ---
+// --- TAB: EMAILS (Communications) ---
 rfpTabs.emails = async function(rfpId) {
-  const emails = await apiCall('GET', '/rfps/' + rfpId + '/emails').catch(function(){ return []; });
+  const [emails, received] = await Promise.all([
+    apiCall('GET', '/rfps/' + rfpId + '/emails').catch(function(){ return []; }),
+    apiCall('GET', '/rfps/' + rfpId + '/emails/received').catch(function(){ return []; }),
+  ]);
   appState.emails = emails;
+  appState.receivedEmails = received;
 
+  // ---- Sent/Simulated outbound table ----
   let rows = '';
   emails.forEach(function(e) {
+    if (e.status === 'received') return; // shown in inbound section instead
     const statusHtml = e.status === 'sent'
       ? '<span style="color:#065f46;font-weight:500"><i class="fas fa-check-circle mr-1"></i>Sent</span>'
       : e.status === 'simulated'
       ? '<span style="color:#1d4ed8;font-weight:500"><i class="fas fa-flask mr-1"></i>Simulated</span>'
-      : e.status === 'received'
-      ? '<span style="color:#7c3aed;font-weight:500"><i class="fas fa-inbox mr-1"></i>Received</span>'
       : '<span style="color:#6b7280">' + escHtml(e.status) + '</span>';
     const dateStr = e.created_at ? new Date(e.created_at).toLocaleString() : '-';
     const hasPdf = e.has_pdf ? '<i class="fas fa-paperclip" title="PDF attached" style="color:var(--cpc-gold);margin-left:4px"></i>' : '';
@@ -869,36 +874,176 @@ rfpTabs.emails = async function(rfpId) {
       + '<td style="font-size:0.8rem;color:#6b7280">' + dateStr + '</td>'
       + '</tr>';
   });
+  const outboundCount = emails.filter(function(e){ return e.status !== 'received'; }).length;
+
+  // ---- Received inbound emails ----
+  let inboundHtml = '';
+  if (received.length === 0) {
+    inboundHtml = '<div style="padding:2rem;text-align:center;color:#9ca3af">'
+      + '<i class="fas fa-satellite-dish" style="font-size:2rem;display:block;margin-bottom:0.75rem;color:#d1d5db"></i>'
+      + '<p style="font-weight:600;color:#6b7280;margin-bottom:0.25rem">Inbox is empty</p>'
+      + '<p style="font-size:0.82rem">Waiting for vendor replies at <strong>procurement@cpc-rfp.website</strong>.<br>'
+      + 'Resend will forward any incoming email here automatically.</p>'
+      + '</div>';
+  } else {
+    received.forEach(function(e, idx) {
+      const dateStr = e.created_at ? new Date(e.created_at).toLocaleString() : '-';
+      const attachBadge = e.has_attachment
+        ? '<span style="background:#fef3c7;color:#92400e;border-radius:4px;padding:2px 7px;font-size:0.72rem;font-weight:600;margin-left:6px"><i class="fas fa-file-excel mr-1"></i>Excel Attached</span>'
+        : '';
+      const collapseId = 'inbound-body-' + e.id;
+      // Render email body — prefer HTML but sanitize, fallback to plain text
+      const bodyContent = e.email_body_html
+        ? '<iframe srcdoc="' + escHtml(e.email_body_html) + '" style="width:100%;border:none;min-height:200px;border-radius:6px;background:white" sandbox="allow-same-origin"></iframe>'
+        : '<pre style="white-space:pre-wrap;font-size:0.85rem;color:#374151;font-family:inherit;margin:0">' + escHtml(e.body||'(no body)') + '</pre>';
+
+      inboundHtml += '<div class="card" style="padding:0;overflow:hidden;border:2px solid #7c3aed22" id="inbound-' + e.id + '">'
+        // Header
+        + '<div style="padding:0.875rem 1rem;background:linear-gradient(135deg,#7c3aed11,#4f46e511);display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="toggleInboundBody(\'' + collapseId + '\')">'
+        + '<div style="display:flex;align-items:center;gap:0.75rem">'
+        + '<div style="width:36px;height:36px;border-radius:50%;background:#7c3aed;display:flex;align-items:center;justify-content:center">'
+        + '<i class="fas fa-envelope-open" style="color:white;font-size:0.85rem"></i></div>'
+        + '<div>'
+        + '<div style="font-weight:700;font-size:0.9rem;color:#1f2937">' + escHtml(e.from_email || e.vendor_name || 'Unknown Sender') + '</div>'
+        + '<div style="font-size:0.8rem;color:#6b7280">' + escHtml(e.subject||'No Subject') + attachBadge + '</div>'
+        + '</div>'
+        + '</div>'
+        + '<div style="display:flex;align-items:center;gap:0.75rem">'
+        + '<span style="font-size:0.78rem;color:#9ca3af">' + dateStr + '</span>'
+        + '<span style="color:#7c3aed;font-size:0.75rem"><i class="fas fa-chevron-down" id="chevron-' + collapseId + '"></i></span>'
+        + '</div>'
+        + '</div>'
+        // Body (collapsible, first one open by default)
+        + '<div id="' + collapseId + '" style="' + (idx === 0 ? '' : 'display:none;') + 'padding:1rem;border-top:1px solid #ede9fe">'
+        + '<div style="font-size:0.75rem;font-weight:600;color:#7c3aed;margin-bottom:0.5rem;text-transform:uppercase;letter-spacing:0.05em">Email Body</div>'
+        + bodyContent
+        + (e.has_attachment ? '<div style="margin-top:0.75rem;padding:0.6rem 0.875rem;background:#fef9c3;border:1px solid #fde68a;border-radius:6px;font-size:0.82rem;color:#92400e"><i class="fas fa-file-excel mr-2"></i><strong>Excel attachment processed</strong> — questions extracted and added to Q&A tab automatically.</div>' : '')
+        + '</div>'
+        + '</div>';
+    });
+  }
+
+  // Auto-start inbox polling when on this tab
+  startInboxPolling(rfpId);
 
   setContent(
     '<div class="space-y-4">'
-    + '<div style="display:flex;align-items:center;justify-content:space-between">'
-    + '<div><h3 style="font-weight:700;font-size:0.95rem;color:#1f2937;margin:0">Email Correspondence</h3>'
-    + '<p style="font-size:0.8rem;color:#9ca3af;margin:0">' + emails.length + ' messages</p></div>'
-    + '<button class="btn-secondary" onclick="checkInboxForQA(' + rfpId + ')"><i class="fas fa-sync"></i>Check Inbox for Replies</button>'
+
+    // ---- INBOUND SECTION ----
+    + '<div>'
+    + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem">'
+    + '<div style="display:flex;align-items:center;gap:0.625rem">'
+    + '<div style="width:10px;height:10px;border-radius:50%;background:#22c55e;animation:pulse 2s infinite"></div>'
+    + '<h3 style="font-weight:700;font-size:0.95rem;color:#1f2937;margin:0">Inbox — <code style="font-size:0.82rem;background:#f3f4f6;padding:2px 6px;border-radius:4px">procurement@cpc-rfp.website</code></h3>'
+    + '<span style="font-size:0.78rem;color:#9ca3af">(' + received.length + ' received)</span>'
+    + '</div>'
+    + '<button class="btn-secondary" onclick="checkInboxForQA(' + rfpId + ')" id="checkInboxBtn"><i class="fas fa-sync"></i>Check Inbox</button>'
+    + '</div>'
+    + '<div>' + inboundHtml + '</div>'
+    + '</div>'
+
+    // ---- OUTBOUND SECTION ----
+    + '<div>'
+    + '<div style="display:flex;align-items:center;gap:0.625rem;margin-bottom:0.75rem">'
+    + '<h3 style="font-weight:700;font-size:0.95rem;color:#1f2937;margin:0">Outbound Invitations</h3>'
+    + '<span style="font-size:0.78rem;color:#9ca3af">(' + outboundCount + ' sent)</span>'
     + '</div>'
     + '<div class="card">'
-    + (emails.length === 0
-      ? '<div style="padding:3rem;text-align:center;color:#9ca3af"><i class="fas fa-envelope-open-text" style="font-size:2.5rem;display:block;margin-bottom:1rem;color:#d1d5db"></i><p>No emails yet. Send invitations from the Vendors tab.</p></div>'
-      : '<div style="overflow-x:auto"><table><thead><tr><th>To/From</th><th>Subject</th><th>Type</th><th>Status</th><th>Date</th></tr></thead><tbody>' + rows + '</tbody></table></div>')
+    + (outboundCount === 0
+      ? '<div style="padding:2.5rem;text-align:center;color:#9ca3af"><i class="fas fa-paper-plane" style="font-size:2rem;display:block;margin-bottom:0.75rem;color:#d1d5db"></i><p>No invitations sent yet.</p></div>'
+      : '<div style="overflow-x:auto"><table><thead><tr><th>Vendor</th><th>Subject</th><th>Type</th><th>Status</th><th>Date</th></tr></thead><tbody>' + rows + '</tbody></table></div>')
     + '</div>'
+    + '</div>'
+
     + '</div>'
   );
 };
 
-async function checkInboxForQA(rfpId) {
-  showToast('Checking inbox for vendor replies...', 'info');
+function toggleInboundBody(id) {
+  var el = document.getElementById(id);
+  var chevron = document.getElementById('chevron-' + id);
+  if (!el) return;
+  var hidden = el.style.display === 'none';
+  el.style.display = hidden ? 'block' : 'none';
+  if (chevron) chevron.className = hidden ? 'fas fa-chevron-up' : 'fas fa-chevron-down';
+}
+
+// Polling for new inbound emails — runs every 15s while on emails tab
+var _inboxPollTimer = null;
+var _inboxPollRfpId = null;
+function startInboxPolling(rfpId) {
+  if (_inboxPollTimer) clearInterval(_inboxPollTimer);
+  _inboxPollRfpId = rfpId;
+  _inboxPollTimer = setInterval(function() {
+    if (appState.currentRfpTab !== 'emails') { clearInterval(_inboxPollTimer); _inboxPollTimer = null; return; }
+    silentCheckInbox(rfpId);
+  }, 15000);
+}
+
+async function silentCheckInbox(rfpId) {
   try {
-    const result = await apiCall('POST', '/rfps/' + rfpId + '/emails/check-inbox', {});
-    if (result.newQuestions > 0) {
+    const received = await apiCall('GET', '/rfps/' + rfpId + '/emails/received').catch(function(){ return []; });
+    const prev = (appState.receivedEmails || []).length;
+    if (received.length > prev) {
+      // New email arrived!
+      appState.receivedEmails = received;
+      // Show toast + badge
+      const newCount = received.length - prev;
+      const newest = received[0];
+      const qCount = newest?.has_attachment ? 'with Excel attachment' : '';
+      showToast('📨 New email from ' + (newest?.from_email || 'vendor') + '! ' + qCount, 'success', 6000);
+      // Highlight Q&A tab
       appState.unreadQA = true;
       renderRfpTabs(appState.currentRfpTab, rfpId, true);
-      showToast(result.newQuestions + ' new vendor question(s) loaded! Check Q&A tab.', 'success');
+      // Pulse Q&A tab
+      pulseQATab();
+      // Refresh inbox view
+      rfpTabs.emails(rfpId);
+    }
+  } catch(e) {}
+}
+
+function pulseQATab() {
+  var tabs = document.querySelectorAll('.rfp-tab');
+  tabs.forEach(function(t) {
+    if (t.textContent && t.textContent.includes('Q&A')) {
+      t.style.animation = 'none';
+      t.style.background = '#7c3aed22';
+      t.style.borderColor = '#7c3aed';
+      setTimeout(function() { t.style.background = ''; t.style.borderColor = ''; }, 3000);
+    }
+  });
+}
+
+async function checkInboxForQA(rfpId) {
+  var btn = document.getElementById('checkInboxBtn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>Checking...'; }
+  try {
+    // Fetch received emails from DB (populated by Resend webhook)
+    const received = await apiCall('GET', '/rfps/' + rfpId + '/emails/received').catch(function(){ return []; });
+    const prev = (appState.receivedEmails || []).length;
+    appState.receivedEmails = received;
+
+    // Count questions loaded from these emails
+    const questions = await apiCall('GET', '/rfps/' + rfpId + '/questions').catch(function(){ return []; });
+    const emailQs = questions.filter(function(q){ return q.source === 'email'; }).length;
+
+    if (received.length > prev) {
+      appState.unreadQA = true;
+      renderRfpTabs(appState.currentRfpTab, rfpId, true);
+      pulseQATab();
+      showToast(received.length + ' vendor email(s) in inbox. ' + emailQs + ' question(s) extracted. Check Q&A tab!', 'success', 5000);
+    } else if (received.length > 0) {
+      showToast('Inbox up to date — ' + received.length + ' email(s), ' + emailQs + ' question(s) extracted.', 'info');
     } else {
-      showToast('No new vendor replies found.', 'info');
+      showToast('Inbox empty — no vendor replies yet. Waiting for email at procurement@cpc-rfp.website', 'info');
     }
     rfpTabs.emails(rfpId);
-  } catch(e) {}
+  } catch(e) {
+    showToast('Inbox check failed.', 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-sync"></i>Check Inbox'; }
+  }
 }
 
 // --- TAB: Q&A ---

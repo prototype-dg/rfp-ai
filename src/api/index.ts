@@ -397,6 +397,149 @@ apiRouter.post('/rfps/:id/emails/check-inbox', async (c) => {
 })
 
 // ============================================================
+// INBOUND EMAIL WEBHOOK — Resend calls this when email arrives
+// at procurement@cpc-rfp.website
+// ============================================================
+apiRouter.post('/webhook/inbound-email', async (c) => {
+  try {
+    const payload = await c.req.json() as any
+    // Only handle email.received events
+    if (payload.type !== 'email.received') return c.json({ ok: true })
+
+    const emailId = payload.data?.email_id
+    if (!emailId) return c.json({ ok: true })
+
+    const apiKey = c.env.RESEND_API_KEY || ''
+    if (!apiKey) return c.json({ ok: false, error: 'no api key' }, 500)
+
+    // Fetch full email content from Resend API
+    const emailRes = await fetch(`https://api.resend.com/emails/receiving/${emailId}`, {
+      headers: { 'Authorization': `Bearer ${apiKey}` }
+    })
+    if (!emailRes.ok) return c.json({ ok: false, error: 'failed to fetch email' }, 500)
+    const email = await emailRes.json() as any
+
+    const fromAddress: string = email.from || payload.data?.from || ''
+    const subject: string = email.subject || payload.data?.subject || 'No Subject'
+    const bodyText: string = email.text || ''
+    const bodyHtml: string = email.html || ''
+    const attachments: any[] = email.attachments || []
+
+    // Find the most active RFP in qa_open stage
+    const db = c.env.DB
+    const rfp = await db.prepare(`SELECT * FROM rfps WHERE stage='qa_open' ORDER BY updated_at DESC LIMIT 1`).first<any>()
+      || await db.prepare(`SELECT * FROM rfps ORDER BY updated_at DESC LIMIT 1`).first<any>()
+    if (!rfp) return c.json({ ok: true, note: 'no active rfp' })
+
+    const rfpId = rfp.id
+
+    // Find Andersen vendor
+    const andersen = await db.prepare(`SELECT * FROM vendors WHERE contact_email LIKE '%andersenlab.com%' LIMIT 1`).first<any>()
+    const vendorId = andersen?.id || null
+
+    // Check for Excel attachment and fetch questions from it
+    let excelQuestions: string[] = []
+    let hasAttachment = attachments.length > 0
+    const excelAttachment = attachments.find((a: any) =>
+      a.filename?.match(/\.(xlsx|xls|csv)$/i) ||
+      a.content_type?.includes('spreadsheet') ||
+      a.content_type?.includes('excel') ||
+      a.content_type?.includes('csv')
+    )
+
+    if (excelAttachment) {
+      try {
+        // Fetch the attachment list to get download_url
+        const attachListRes = await fetch(`https://api.resend.com/emails/receiving/${emailId}/attachments`, {
+          headers: { 'Authorization': `Bearer ${apiKey}` }
+        })
+        if (attachListRes.ok) {
+          const attachList = await attachListRes.json() as any
+          const attachData = (attachList.data || []).find((a: any) => a.id === excelAttachment.id)
+          if (attachData?.download_url) {
+            const fileRes = await fetch(attachData.download_url)
+            if (fileRes.ok) {
+              const fileBuffer = await fileRes.arrayBuffer()
+              // Try parsing as CSV or plain text (Excel CSV export)
+              const text = new TextDecoder('utf-8').decode(fileBuffer)
+              excelQuestions = parseQuestionsFromSpreadsheet(text)
+            }
+          }
+        }
+      } catch(e) {
+        // attachment parse failed — fall through
+      }
+    }
+
+    // Also extract questions from email body text (numbered list patterns)
+    const bodyQuestions = parseQuestionsFromBody(bodyText)
+    const allQuestions = [...new Set([...excelQuestions, ...bodyQuestions])]
+
+    // Log the inbound email in email_log
+    const insertResult = await db.prepare(`
+      INSERT INTO email_log (rfp_id, vendor_id, recipient, from_email, subject, body, email_body_html, email_type, status, has_attachment, resend_email_id, created_at)
+      VALUES (?,?,?,?,?,?,?,'qa_questions','received',?,?,datetime('now'))
+    `).bind(
+      rfpId,
+      vendorId,
+      'procurement@cpc-rfp.website',
+      fromAddress,
+      subject,
+      bodyText.slice(0, 4000),
+      bodyHtml.slice(0, 16000),
+      hasAttachment ? 1 : 0,
+      emailId
+    ).run()
+
+    const emailLogId = insertResult.meta.last_row_id
+
+    // Insert extracted questions into questions table
+    let newCount = 0
+    for (const question of allQuestions) {
+      const q = question.trim()
+      if (!q || q.length < 10) continue
+      const existing = await db.prepare('SELECT id FROM questions WHERE question=? AND rfp_id=?').bind(q, rfpId).first()
+      if (!existing) {
+        await db.prepare(`
+          INSERT INTO questions (rfp_id, question, vendor_id, published, source, email_log_id, created_at)
+          VALUES (?,?,?,0,'email',?,datetime('now'))
+        `).bind(rfpId, q, vendorId, emailLogId).run()
+        newCount++
+      }
+    }
+
+    return c.json({ ok: true, newQuestions: newCount, emailLogId })
+  } catch(e: any) {
+    return c.json({ ok: false, error: e.message }, 500)
+  }
+})
+
+// GET /rfps/:id/emails/received — fetch inbound emails with full body for display
+apiRouter.get('/rfps/:id/emails/received', async (c) => {
+  const rfpId = c.req.param('id')
+  const { results } = await c.env.DB.prepare(`
+    SELECT e.*, v.name as vendor_name
+    FROM email_log e
+    LEFT JOIN vendors v ON e.vendor_id = v.id
+    WHERE e.rfp_id=? AND e.status='received'
+    ORDER BY e.id DESC
+  `).bind(rfpId).all()
+  return c.json(results)
+})
+
+// GET /inbound-status — returns unread inbound count across all RFPs (for polling)
+apiRouter.get('/inbound-status', async (c) => {
+  try {
+    const result = await c.env.DB.prepare(`
+      SELECT COUNT(*) as cnt FROM email_log WHERE status='received' AND created_at > datetime('now', '-1 hour')
+    `).first<{cnt:number}>()
+    return c.json({ recentInbound: result?.cnt || 0 })
+  } catch {
+    return c.json({ recentInbound: 0 })
+  }
+})
+
+// ============================================================
 // PROPOSALS
 // ============================================================
 apiRouter.get('/rfps/:id/proposals', async (c) => {
@@ -1456,10 +1599,44 @@ async function sendRealEmail(to: string, subject: string, body: string, rfp: any
 }
 
 async function readVendorEmailReplies(rfp: any): Promise<string[]> {
-  // In production this would integrate with an email service (e.g., read from inbox via IMAP/API)
-  // For the demo, we simulate receiving an Excel attachment with questions parsed into text
-  // Return empty to trigger simulation
+  // Inbound emails are now handled via Resend webhook (POST /api/webhook/inbound-email)
+  // This function is kept for backward compatibility but is no longer the primary path
   return []
+}
+
+// Parse questions from CSV/Excel-exported text (each row = one question)
+function parseQuestionsFromSpreadsheet(text: string): string[] {
+  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0)
+  const questions: string[] = []
+  for (const line of lines) {
+    // Strip CSV quotes, BOM, leading numbers/letters like "1." or "Q1:"
+    let q = line.replace(/^[\uFEFF"]+|["]+$/g, '').replace(/^[0-9]+[.):\s]+/, '').replace(/^Q[0-9]+[.):\s]+/i, '').trim()
+    // Skip header rows (typically short or contain "question" literally)
+    if (q.length < 15) continue
+    if (/^(question|no\.|#|item|sr\.?)/i.test(q)) continue
+    // Avoid duplicate question marks
+    if (!q.endsWith('?')) q = q + (q.slice(-1) === '.' ? '' : '?')
+    questions.push(q)
+  }
+  return questions.slice(0, 30) // max 30 questions from attachment
+}
+
+// Parse numbered/bulleted questions from plain email body text
+function parseQuestionsFromBody(text: string): string[] {
+  if (!text) return []
+  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0)
+  const questions: string[] = []
+  for (const line of lines) {
+    // Match lines starting with number+dot/paren or bullet, containing a ?
+    const isNumbered = /^[0-9]{1,2}[.):\s]/.test(line)
+    const isBulleted = /^[-•*]\s/.test(line)
+    const hasQuestion = line.includes('?')
+    if ((isNumbered || isBulleted) && hasQuestion && line.length > 20) {
+      let q = line.replace(/^[0-9]{1,2}[.):\s]+/, '').replace(/^[-•*]\s+/, '').trim()
+      questions.push(q)
+    }
+  }
+  return questions.slice(0, 20)
 }
 
 function getAndersenSampleQuestions(): string[] {
