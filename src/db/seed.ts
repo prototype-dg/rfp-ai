@@ -135,6 +135,22 @@ export async function initDb(db: D1Database) {
     `ALTER TABLE email_log ADD COLUMN resend_email_id TEXT`,
     // questions.email_log_id — link question to the inbound email that contained it
     `ALTER TABLE questions ADD COLUMN email_log_id INTEGER`,
+    // questions.needs_manual — 1 if LLM could not confidently answer; requires manual entry
+    `ALTER TABLE questions ADD COLUMN needs_manual INTEGER DEFAULT 0`,
+    // rfps.arch_doc_text — extracted text from uploaded Conceptual Solution Architecture PDF
+    `ALTER TABLE rfps ADD COLUMN arch_doc_text TEXT`,
+    // proposals.proposed_duration — vendor's stated project duration from their proposal
+    `ALTER TABLE proposals ADD COLUMN proposed_duration TEXT`,
+    // proposals.pdf_attachment_url — URL/base64 of the received PDF proposal attachment
+    `ALTER TABLE proposals ADD COLUMN pdf_attachment_url TEXT`,
+    // proposals.pdf_filename — original filename of the PDF attachment
+    `ALTER TABLE proposals ADD COLUMN pdf_filename TEXT`,
+    // evaluations.scoring_details_json — JSON array of per-criterion scoring with justifications
+    `ALTER TABLE evaluations ADD COLUMN scoring_details_json TEXT`,
+    // evaluations.is_real — 1 if this is a real LLM evaluation (Andersen), 0 if simulated
+    `ALTER TABLE evaluations ADD COLUMN is_real INTEGER DEFAULT 0`,
+    // email_log.email_category — AI-classified category: 'questions'|'proposal'|'plain_email'
+    `ALTER TABLE email_log ADD COLUMN email_category TEXT`,
   ]
   for (const sql of alterMigrations) {
     try {

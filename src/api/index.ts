@@ -107,9 +107,9 @@ apiRouter.post('/rfps', async (c) => {
     const body = await c.req.json()
     const refNum = 'CPC/PROC/' + new Date().getFullYear() + '/' + String(Math.floor(Math.random()*9000)+1000)
     const r = await c.env.DB.prepare(`
-      INSERT INTO rfps (ref_number, title, category, budget, deadline, scope, tech_requirements, objectives, background, stage, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', datetime('now'), datetime('now'))
-    `).bind(refNum, body.title, body.category, body.budget, body.deadline, body.scope, body.tech_requirements||'', body.objectives||'', body.background||'').run()
+      INSERT INTO rfps (ref_number, title, category, budget, deadline, scope, tech_requirements, objectives, background, arch_doc_text, stage, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', datetime('now'), datetime('now'))
+    `).bind(refNum, body.title, body.category, body.budget, body.deadline, body.scope, body.tech_requirements||'', body.objectives||'', body.background||'', body.arch_doc_text||'').run()
     const rfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(r.meta.last_row_id).first()
     return c.json(rfp)
   } catch (e: any) {
@@ -136,13 +136,49 @@ apiRouter.post('/rfps/:id/generate', async (c) => {
   try {
     const id = c.req.param('id')
     const body = await c.req.json()
-    const content = buildRFPContent(body)
+    // Fetch existing RFP to get arch_doc_text if not in body
+    const existingRfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(id).first<any>()
+    const archDocText = body.arch_doc_text || existingRfp?.arch_doc_text || ''
+    // Try real LLM generation first; fall back to deterministic
+    let content = ''
+    try {
+      content = await generateRFPWithLLM(body, archDocText, c.env)
+    } catch(_) {
+      content = buildRFPContent(body)
+    }
     await c.env.DB.prepare(`
-      UPDATE rfps SET title=?, category=?, budget=?, deadline=?, scope=?, tech_requirements=?, objectives=?, background=?, content=?, updated_at=datetime('now')
+      UPDATE rfps SET title=?, category=?, budget=?, deadline=?, scope=?, tech_requirements=?, objectives=?, background=?, content=?, arch_doc_text=?, updated_at=datetime('now')
       WHERE id=?
-    `).bind(body.title, body.category, body.budget, body.deadline, body.scope, body.tech_requirements||'', body.objectives||'', body.background||'', content, id).run()
+    `).bind(body.title, body.category, body.budget, body.deadline, body.scope, body.tech_requirements||'', body.objectives||'', body.background||'', content, archDocText, id).run()
     const rfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(id).first()
     return c.json(rfp)
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500)
+  }
+})
+
+// POST /rfps/:id/upload-arch-doc — upload Conceptual Solution Architecture PDF
+// Accepts multipart/form-data with 'file' field (PDF)
+// Extracts text and stores in rfps.arch_doc_text
+apiRouter.post('/rfps/:id/upload-arch-doc', async (c) => {
+  try {
+    const id = c.req.param('id')
+    const formData = await c.req.formData()
+    const file = formData.get('file') as File | null
+    if (!file) return c.json({ error: 'No file uploaded' }, 400)
+
+    const arrayBuffer = await file.arrayBuffer()
+    const bytes = new Uint8Array(arrayBuffer)
+
+    // Extract text from PDF bytes (text layer extraction)
+    const pdfText = extractPdfText(bytes)
+
+    // Store the extracted text (and base64 of file for later viewing)
+    await c.env.DB.prepare(`
+      UPDATE rfps SET arch_doc_text=?, updated_at=datetime('now') WHERE id=?
+    `).bind(pdfText, id).run()
+
+    return c.json({ ok: true, textLength: pdfText.length, preview: pdfText.slice(0, 300) })
   } catch (e: any) {
     return c.json({ error: e.message }, 500)
   }
@@ -271,21 +307,26 @@ apiRouter.post('/rfps/:id/questions/load-samples', async (c) => {
 
 apiRouter.post('/rfps/:rfpId/questions/:id/draft', async (c) => {
   const id = c.req.param('id')
+  const rfpId = c.req.param('rfpId')
   const q = await c.env.DB.prepare('SELECT * FROM questions WHERE id=?').bind(id).first<any>()
   if (!q) return c.json({ error: 'Not found' }, 404)
-  const answer = draftAnswer(q.question)
-  await c.env.DB.prepare('UPDATE questions SET answer=? WHERE id=?').bind(answer, id).run()
-  return c.json({ ok: true, answer })
+  const rfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(rfpId).first<any>()
+  const { answer, needsManual } = await draftAnswerLLM(q.question, rfp, c.env)
+  await c.env.DB.prepare('UPDATE questions SET answer=?, needs_manual=? WHERE id=?').bind(answer, needsManual ? 1 : 0, id).run()
+  return c.json({ ok: true, answer, needsManual })
 })
 
 apiRouter.post('/rfps/:id/questions/draft-all', async (c) => {
   const rfpId = c.req.param('id')
+  const rfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(rfpId).first<any>()
   const { results: qs } = await c.env.DB.prepare('SELECT * FROM questions WHERE (answer IS NULL OR answer="") AND published=0 AND rfp_id=?').bind(rfpId).all<any>()
+  let manualCount = 0
   for (const q of qs) {
-    const answer = draftAnswer(q.question)
-    await c.env.DB.prepare('UPDATE questions SET answer=? WHERE id=?').bind(answer, q.id).run()
+    const { answer, needsManual } = await draftAnswerLLM(q.question, rfp, c.env)
+    await c.env.DB.prepare('UPDATE questions SET answer=?, needs_manual=? WHERE id=?').bind(answer, needsManual ? 1 : 0, q.id).run()
+    if (needsManual) manualCount++
   }
-  return c.json({ ok: true })
+  return c.json({ ok: true, total: qs.length, manualRequired: manualCount })
 })
 
 apiRouter.put('/rfps/:rfpId/questions/:id/approve', async (c) => {
@@ -303,8 +344,55 @@ apiRouter.put('/rfps/:rfpId/questions/:id/answer', async (c) => {
 
 apiRouter.post('/rfps/:id/questions/publish-all', async (c) => {
   const rfpId = c.req.param('id')
-  await c.env.DB.prepare('UPDATE questions SET published=1 WHERE answer IS NOT NULL AND answer != "" AND rfp_id=?').bind(rfpId).run()
-  return c.json({ ok: true })
+  // Only publish answered, non-manual questions
+  await c.env.DB.prepare(`UPDATE questions SET published=1 WHERE answer IS NOT NULL AND answer != "" AND rfp_id=? AND needs_manual=0`).bind(rfpId).run()
+
+  // Generate QA Excel and send to vendor(s) who submitted questions
+  try {
+    const { results: publishedQs } = await c.env.DB.prepare(`
+      SELECT q.*, v.name as vendor_name, v.contact_email FROM questions q
+      LEFT JOIN vendors v ON q.vendor_id = v.id
+      WHERE q.rfp_id=? AND q.published=1
+    `).bind(rfpId).all<any>()
+
+    const rfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(rfpId).first<any>()
+
+    // Group by vendor
+    const vendorMap: Record<number, { email: string, name: string, questions: any[] }> = {}
+    for (const q of publishedQs) {
+      if (!q.vendor_id || !q.contact_email) continue
+      if (!vendorMap[q.vendor_id]) vendorMap[q.vendor_id] = { email: q.contact_email, name: q.vendor_name, questions: [] }
+      vendorMap[q.vendor_id].questions.push(q)
+    }
+
+    const sentTo: string[] = []
+    for (const [, info] of Object.entries(vendorMap)) {
+      const xlsxBytes = generateQAExcel(info.questions)
+      const xlsxBase64 = uint8ToBase64(xlsxBytes)
+      const emailText = `Dear ${info.name},\n\nPlease find attached the official Q&A Response document for RFP Reference: ${rfp?.ref_number || ''}.\n\nAll questions submitted have been reviewed and answered by the CPC Procurement team. Please review the attached Excel file for the complete question and answer register.\n\nFor any further queries, please reply to this email referencing the RFP number.\n\nBest regards,\nProcurement & Contracting Department\nCrown Prince's Court, Abu Dhabi\nprocurement@cpc-rfp.website`
+
+      const resendKey = (c.env as any).RESEND_API_KEY || ''
+      if (resendKey && info.email) {
+        const emailPayload = {
+          from: 'CPC Procurement <procurement@cpc-rfp.website>',
+          to: [info.email],
+          subject: `Q&A Response – ${rfp?.title || 'CPC RFP'} (Ref: ${rfp?.ref_number || ''})`,
+          text: emailText,
+          attachments: [{ filename: `QA_Response_${(rfp?.ref_number || 'RFP').replace(/\//g,'_')}.xlsx`, content: xlsxBase64 }],
+        }
+        await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify(emailPayload),
+        })
+        sentTo.push(info.email)
+      }
+    }
+
+    return c.json({ ok: true, sentTo })
+  } catch(e: any) {
+    return c.json({ ok: true, warning: e.message })
+  }
 })
 
 // ============================================================
@@ -506,8 +594,7 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
     }
     const vendorId = vendorRow?.id || null
 
-    // ── Attachment download & xlsx/csv parse ─────────────────────
-    let excelQuestions: string[] = []
+    // ── Attachment detection ─────────────────────────────────────
     const hasAttachment = attachments.length > 0
     const spreadsheetAttachment = attachments.find((a: any) =>
       a.filename?.match(/\.(xlsx|xls|csv)$/i) ||
@@ -515,47 +602,83 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
       a.content_type?.includes('excel') ||
       a.content_type?.includes('csv')
     )
+    const pdfAttachment = attachments.find((a: any) =>
+      a.filename?.match(/\.pdf$/i) ||
+      a.content_type?.includes('pdf')
+    )
 
-    if (spreadsheetAttachment) {
-      try {
-        // Fetch the attachment list to get the signed download_url
-        const attachListRes = await fetch(`https://api.resend.com/emails/receiving/${emailId}/attachments`, {
-          headers: { 'Authorization': `Bearer ${apiKey}` }
-        })
-        if (attachListRes.ok) {
-          const attachList = await attachListRes.json() as any
-          const attachData = (attachList.data || []).find((a: any) => a.id === spreadsheetAttachment.id)
-            || (attachList.data || [])[0]   // fallback: first attachment
+    // ── AI Email Categorization ──────────────────────────────────
+    // Use LLM to classify: 'questions' | 'proposal' | 'plain_email'
+    let emailCategory = 'plain_email'
+    try {
+      emailCategory = await categorizeEmailWithLLM(subject, bodyText, attachments, c.env)
+    } catch(_) {
+      // Fallback heuristic
+      if (spreadsheetAttachment) emailCategory = 'questions'
+      else if (pdfAttachment) emailCategory = 'proposal'
+    }
+
+    // Download attachments based on category
+    let excelQuestions: string[] = []
+    let pdfBase64 = ''
+    let pdfFilename = ''
+    let proposedDuration = ''
+
+    try {
+      const attachListRes = await fetch(`https://api.resend.com/emails/receiving/${emailId}/attachments`, {
+        headers: { 'Authorization': `Bearer ${apiKey}` }
+      })
+      if (attachListRes.ok) {
+        const attachList = await attachListRes.json() as any
+        const allAttachData: any[] = attachList.data || []
+
+        if (emailCategory === 'questions' && spreadsheetAttachment) {
+          const attachData = allAttachData.find((a: any) => a.id === spreadsheetAttachment.id) || allAttachData[0]
           if (attachData?.download_url) {
             const fileRes = await fetch(attachData.download_url)
             if (fileRes.ok) {
               const fileBuffer = await fileRes.arrayBuffer()
               const filename: string = spreadsheetAttachment.filename || ''
-
               if (filename.match(/\.xlsx$/i) || spreadsheetAttachment.content_type?.includes('spreadsheet')) {
-                // Parse as OOXML (xlsx) — uses ZIP + XML in Workers
                 excelQuestions = await parseXlsxBuffer(fileBuffer)
               } else {
-                // CSV / plain text fallback
                 const text = new TextDecoder('utf-8').decode(fileBuffer)
                 excelQuestions = parseCsvQuestions(text)
               }
             }
           }
         }
-      } catch(_e) {
-        // attachment parse failed — fall through to body parsing
+
+        if (emailCategory === 'proposal' && pdfAttachment) {
+          const attachData = allAttachData.find((a: any) => a.id === pdfAttachment.id) || allAttachData[0]
+          if (attachData?.download_url) {
+            const fileRes = await fetch(attachData.download_url)
+            if (fileRes.ok) {
+              const fileBuffer = await fileRes.arrayBuffer()
+              pdfFilename = pdfAttachment.filename || 'proposal.pdf'
+              // Store as base64 for later display
+              pdfBase64 = uint8ToBase64(new Uint8Array(fileBuffer))
+              // Extract text from PDF for duration parsing
+              const pdfBytes = new Uint8Array(fileBuffer)
+              const pdfText = extractPdfText(pdfBytes)
+              // Parse proposed duration from PDF text or email body
+              proposedDuration = extractProposedDuration(pdfText + '\n' + bodyText)
+            }
+          }
+        }
       }
-    }
+    } catch(_e) {}
 
     // Also extract questions from email body text (numbered list patterns)
     const bodyQuestions = parseQuestionsFromBody(bodyText)
-    const allQuestions = [...new Set([...excelQuestions, ...bodyQuestions])]
+    if (emailCategory === 'questions') {
+      excelQuestions = [...new Set([...excelQuestions, ...bodyQuestions])]
+    }
 
     // Log the inbound email in email_log
     const insertResult = await db.prepare(`
-      INSERT INTO email_log (rfp_id, vendor_id, recipient, from_email, subject, body, email_body_html, email_type, status, has_attachment, resend_email_id, created_at)
-      VALUES (?,?,?,?,?,?,?,'qa_questions','received',?,?,datetime('now'))
+      INSERT INTO email_log (rfp_id, vendor_id, recipient, from_email, subject, body, email_body_html, email_type, email_category, status, has_attachment, resend_email_id, created_at)
+      VALUES (?,?,?,?,?,?,?,?,?,'received',?,?,datetime('now'))
     `).bind(
       rfpId,
       vendorId,
@@ -564,28 +687,50 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
       subject,
       bodyText.slice(0, 4000),
       bodyHtml.slice(0, 16000),
+      emailCategory === 'questions' ? 'qa_questions' : emailCategory === 'proposal' ? 'proposal' : 'inbound',
+      emailCategory,
       hasAttachment ? 1 : 0,
       emailId
     ).run()
 
     const emailLogId = insertResult.meta.last_row_id
 
-    // Insert extracted questions into questions table
+    // ── Route by category ────────────────────────────────────────
     let newCount = 0
-    for (const question of allQuestions) {
-      const q = question.trim()
-      if (!q || q.length < 10) continue
-      const existing = await db.prepare('SELECT id FROM questions WHERE question=? AND rfp_id=?').bind(q, rfpId).first()
-      if (!existing) {
+
+    if (emailCategory === 'questions') {
+      // Insert extracted questions into questions table
+      for (const question of excelQuestions) {
+        const q = question.trim()
+        if (!q || q.length < 10) continue
+        const existing = await db.prepare('SELECT id FROM questions WHERE question=? AND rfp_id=?').bind(q, rfpId).first()
+        if (!existing) {
+          await db.prepare(`
+            INSERT INTO questions (rfp_id, question, vendor_id, published, source, email_log_id, created_at)
+            VALUES (?,?,?,0,'email',?,datetime('now'))
+          `).bind(rfpId, q, vendorId, emailLogId).run()
+          newCount++
+        }
+      }
+    } else if (emailCategory === 'proposal') {
+      // Add/update proposal record with PDF data
+      const existing = await db.prepare('SELECT id FROM proposals WHERE vendor_id=? AND rfp_id=?').bind(vendorId, rfpId).first<any>()
+      const isAndersen = vendorRow?.contact_email?.includes('andersenlab.com') ? 1 : 0
+      if (existing) {
         await db.prepare(`
-          INSERT INTO questions (rfp_id, question, vendor_id, published, source, email_log_id, created_at)
-          VALUES (?,?,?,0,'email',?,datetime('now'))
-        `).bind(rfpId, q, vendorId, emailLogId).run()
-        newCount++
+          UPDATE proposals SET pdf_attachment_url=?, pdf_filename=?, proposed_duration=?, status='submitted', is_real_submission=?, updated_at=datetime('now') WHERE id=?
+        `).bind(pdfBase64 ? 'data:application/pdf;base64,' + pdfBase64 : null, pdfFilename || null, proposedDuration || null, isAndersen, existing.id).run()
+      } else {
+        // Build a summary technical proposal from email body + PDF text
+        const technicalSummary = bodyText.slice(0, 2000) || `Proposal submitted by ${vendorRow?.name || 'Vendor'} via email.`
+        await db.prepare(`
+          INSERT INTO proposals (rfp_id, vendor_id, technical_proposal, financial_proposal, status, is_real_submission, pdf_attachment_url, pdf_filename, proposed_duration, created_at)
+          VALUES (?,?,?,NULL,'submitted',?,?,?,?,datetime('now'))
+        `).bind(rfpId, vendorId, technicalSummary, isAndersen, pdfBase64 ? 'data:application/pdf;base64,' + pdfBase64 : null, pdfFilename || null, proposedDuration || null).run()
       }
     }
 
-    return c.json({ ok: true, newQuestions: newCount, emailLogId })
+    return c.json({ ok: true, emailCategory, newQuestions: newCount, emailLogId })
   } catch(e: any) {
     return c.json({ ok: false, error: e.message }, 500)
   }
@@ -834,35 +979,89 @@ apiRouter.get('/rfps/:id/evaluations', async (c) => {
   return c.json(results)
 })
 
+// POST /rfps/:id/evaluations/run — evaluate all proposals
 apiRouter.post('/rfps/:id/evaluations/run', async (c) => {
   const rfpId = c.req.param('id')
-  // Load scoring model for weighted scoring
-  const modelRow = await c.env.DB.prepare('SELECT * FROM scoring_models WHERE rfp_id=? ORDER BY id DESC LIMIT 1').bind(rfpId).first<any>()
-  const scoringModel = modelRow ? JSON.parse(modelRow.model_json || '{}') : null
+  const rfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(rfpId).first<any>()
 
   const { results: proposals } = await c.env.DB.prepare(`
-    SELECT p.*, v.name as vendor_name, v.erp_experience, v.certifications, v.specializations, v.size, v.is_real_submission
+    SELECT p.*, v.name as vendor_name, v.contact_email, v.erp_experience, v.certifications, v.specializations, v.size
     FROM proposals p LEFT JOIN vendors v ON p.vendor_id = v.id WHERE p.rfp_id=?
   `).bind(rfpId).all<any>()
   if (proposals.length === 0) return c.json({ error: 'No proposals found. Add proposals first.' }, 400)
 
   for (const p of proposals) {
-    const existing = await c.env.DB.prepare('SELECT id FROM evaluations WHERE proposal_id=?').bind(p.id).first()
-    if (existing) continue
-
-    const isAndersen = p.vendor_name?.includes('Andersen')
-    const isEPAM = p.vendor_name?.includes('EPAM')
-
-    const scores = computeEvalScores(p, isAndersen, isEPAM)
-    const total = Math.round(scores.business * 0.3 + scores.technical * 0.4 + scores.financial * 0.3)
-
-    await c.env.DB.prepare(`
-      INSERT INTO evaluations (rfp_id, proposal_id, vendor_id, business_score, technical_score, financial_score, total_score, ai_summary, is_real, created_at)
-      VALUES (?,?,?,?,?,?,?,?,?,datetime('now'))
-    `).bind(rfpId, p.id, p.vendor_id, scores.business, scores.technical, scores.financial, total,
-      buildEvalSummary(p, scores, total, isAndersen, isEPAM), p.is_real_submission || 0).run()
+    await runSingleEvaluation(p, rfp, rfpId, c.env)
   }
   return c.json({ ok: true })
+})
+
+// POST /rfps/:id/proposals/:proposalId/evaluate — evaluate single proposal
+apiRouter.post('/rfps/:id/proposals/:proposalId/evaluate', async (c) => {
+  const rfpId = c.req.param('id')
+  const proposalId = c.req.param('proposalId')
+  const rfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(rfpId).first<any>()
+
+  const p = await c.env.DB.prepare(`
+    SELECT p.*, v.name as vendor_name, v.contact_email, v.erp_experience, v.certifications, v.specializations, v.size
+    FROM proposals p LEFT JOIN vendors v ON p.vendor_id = v.id WHERE p.id=?
+  `).bind(proposalId).first<any>()
+  if (!p) return c.json({ error: 'Proposal not found' }, 404)
+
+  await runSingleEvaluation(p, rfp, rfpId, c.env)
+  return c.json({ ok: true })
+})
+
+// POST /rfps/:id/proposals/:proposalId/award — award contract to this proposal
+apiRouter.post('/rfps/:id/proposals/:proposalId/award', async (c) => {
+  const rfpId = c.req.param('id')
+  const proposalId = c.req.param('proposalId')
+  const db = c.env.DB
+
+  // Get winner proposal + vendor
+  const winner = await db.prepare(`
+    SELECT p.*, v.name as vendor_name, v.contact_email FROM proposals p
+    LEFT JOIN vendors v ON p.vendor_id = v.id WHERE p.id=?
+  `).bind(proposalId).first<any>()
+  if (!winner) return c.json({ error: 'Proposal not found' }, 404)
+
+  const rfp = await db.prepare('SELECT * FROM rfps WHERE id=?').bind(rfpId).first<any>()
+
+  // Update statuses
+  await db.prepare(`UPDATE proposals SET status='awarded' WHERE id=?`).bind(proposalId).run()
+  await db.prepare(`UPDATE proposals SET status='not_awarded' WHERE rfp_id=? AND id!=?`).bind(rfpId, proposalId).run()
+  await db.prepare(`UPDATE rfps SET stage='awarded', updated_at=datetime('now') WHERE id=?`).bind(rfpId).run()
+
+  // Send award email via Resend
+  let emailSent = false
+  const resendKey = c.env.RESEND_API_KEY || ''
+  if (resendKey && winner.contact_email) {
+    const awardBody = buildAwardEmail(winner, rfp)
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: 'CPC Procurement <procurement@cpc-rfp.website>',
+        to: [winner.contact_email],
+        subject: `Contract Award Notification – ${rfp?.title || 'CPC RFP'} (Ref: ${rfp?.ref_number || ''})`,
+        text: awardBody,
+        html: `<div style="font-family:Arial,sans-serif;max-width:680px;margin:0 auto;padding:24px"><div style="background:#1a1a2e;color:#c9a84c;padding:18px 24px;border-radius:8px 8px 0 0"><div style="font-size:16px;font-weight:700">Crown Prince's Court — Procurement</div></div><div style="background:#fff;padding:28px;border:1px solid #e5e7eb;border-radius:0 0 8px 8px"><pre style="white-space:pre-wrap;font-family:Arial;font-size:14px">${awardBody.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</pre></div></div>`,
+      }),
+    })
+    emailSent = res.ok
+  }
+
+  // Log the award email
+  await db.prepare(`
+    INSERT INTO email_log (rfp_id, vendor_id, recipient, subject, body, email_type, status, created_at)
+    VALUES (?,?,?,?,?,'award',?,datetime('now'))
+  `).bind(rfpId, winner.vendor_id, winner.contact_email,
+    `Contract Award – ${rfp?.title || 'CPC RFP'} (Ref: ${rfp?.ref_number || ''})`,
+    `Award notification sent to ${winner.vendor_name}`,
+    emailSent ? 'sent' : 'simulated'
+  ).run()
+
+  return c.json({ ok: true, emailSent, winner: winner.vendor_name })
 })
 
 // ============================================================
@@ -919,6 +1118,609 @@ apiRouter.get('/vendor-performance', async (c) => {
   `).all()
   return c.json(results)
 })
+
+// ============================================================
+// LLM INTEGRATION — OpenAI-compatible API via Genspark proxy
+// ============================================================
+
+async function callLLM(systemPrompt: string, userPrompt: string, env: any, model = 'gpt-5-mini', maxTokens = 2000): Promise<string> {
+  const apiKey = env?.OPENAI_API_KEY || (globalThis as any).OPENAI_API_KEY || ''
+  const baseUrl = env?.OPENAI_BASE_URL || 'https://www.genspark.ai/api/llm_proxy/v1'
+  if (!apiKey) throw new Error('OPENAI_API_KEY not configured')
+
+  const res = await fetch(`${baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      max_tokens: maxTokens,
+      temperature: 0.3,
+    }),
+  })
+  if (!res.ok) {
+    const errText = await res.text().catch(() => 'unknown error')
+    throw new Error(`LLM API error ${res.status}: ${errText}`)
+  }
+  const data = await res.json() as any
+  return data.choices?.[0]?.message?.content || ''
+}
+
+async function generateRFPWithLLM(data: any, archDocText: string, env: any): Promise<string> {
+  const systemPrompt = `You are a senior government procurement specialist at the Crown Prince's Court (CPC) of Abu Dhabi, UAE. Your task is to generate a formal, comprehensive RFP document in HTML format. The document must be professional, structured, and compliant with UAE government procurement standards. Use the provided project details, form fields, and the Conceptual Solution Architecture document to generate accurate, context-specific content. Do not use generic placeholders — all content must be specific to the actual project described.`
+
+  const userPrompt = `Generate a complete, formal RFP HTML document for the Crown Prince's Court (CPC) Abu Dhabi.
+
+PROJECT DETAILS:
+- Title: ${data.title || 'Not specified'}
+- Category: ${data.category || 'IT & Digital Transformation'}
+- Budget: AED ${data.budget || 'To be disclosed to shortlisted vendors'}
+- Deadline: ${data.deadline || '30 days from issuance'}
+- Background: ${data.background || 'CPC digital transformation initiative'}
+- Objectives: ${data.objectives || 'To be defined'}
+- Scope: ${data.scope || 'To be defined'}
+- Technical Requirements: ${data.tech_requirements || 'To be defined'}
+
+${archDocText ? `CONCEPTUAL SOLUTION ARCHITECTURE DOCUMENT (uploaded by CPC team):
+${archDocText.slice(0, 3000)}` : ''}
+
+Return ONLY the inner HTML content (no <!DOCTYPE>, no <html>/<body> tags) styled for a professional government procurement document. Include sections: Background, Objectives, Scope of Work, Technical Requirements, Evaluation Criteria, Submission Requirements. Use professional formatting with headers, tables, and lists.`
+
+  const llmContent = await callLLM(systemPrompt, userPrompt, env, 'gpt-5-mini', 3000)
+  // If LLM returns valid HTML content, wrap it; otherwise fall back
+  if (llmContent && llmContent.length > 500) {
+    return `<div class="rfp-doc">${llmContent}</div>`
+  }
+  throw new Error('LLM returned insufficient content')
+}
+
+async function categorizeEmailWithLLM(subject: string, body: string, attachments: any[], env: any): Promise<string> {
+  const attachInfo = attachments.map((a: any) => `${a.filename || 'unnamed'} (${a.content_type || 'unknown type'})`).join(', ')
+
+  const systemPrompt = `You are an email classification assistant for a government procurement system. Classify incoming vendor emails into exactly one of these categories:
+- "questions": Email contains clarification questions about the RFP, has an Excel/spreadsheet attachment with questions, or asks specific questions about requirements
+- "proposal": Email contains a submitted proposal, has a PDF attachment with technical/commercial proposal content, or states they are submitting their proposal
+- "plain_email": General correspondence, acknowledgment, out-of-office, or any other email type
+
+Return ONLY the category word, nothing else.`
+
+  const userPrompt = `Subject: ${subject}
+Attachments: ${attachInfo || 'none'}
+Body (first 500 chars): ${body.slice(0, 500)}
+
+Category:`
+
+  try {
+    const result = await callLLM(systemPrompt, userPrompt, env, 'gpt-5-nano', 20)
+    const clean = result.trim().toLowerCase().replace(/[^a-z_]/g, '')
+    if (clean.includes('question')) return 'questions'
+    if (clean.includes('proposal')) return 'proposal'
+    return 'plain_email'
+  } catch(_) {
+    // Fallback heuristic
+    if (attachments.some((a: any) => a.filename?.match(/\.(xlsx|xls|csv)$/i))) return 'questions'
+    if (attachments.some((a: any) => a.filename?.match(/\.pdf$/i))) return 'proposal'
+    return 'plain_email'
+  }
+}
+
+async function draftAnswerLLM(question: string, rfp: any, env: any): Promise<{ answer: string, needsManual: boolean }> {
+  const context = [
+    rfp?.content ? `RFP DOCUMENT (HTML, first 3000 chars):\n${rfp.content.replace(/<[^>]+>/g,'').slice(0,3000)}` : '',
+    rfp?.arch_doc_text ? `SOLUTION ARCHITECTURE DOCUMENT:\n${rfp.arch_doc_text.slice(0,2000)}` : '',
+    rfp?.objectives ? `OBJECTIVES: ${rfp.objectives}` : '',
+    rfp?.scope ? `SCOPE: ${rfp.scope}` : '',
+    rfp?.tech_requirements ? `TECHNICAL REQUIREMENTS: ${rfp.tech_requirements}` : '',
+    rfp?.background ? `BACKGROUND: ${rfp.background}` : '',
+  ].filter(Boolean).join('\n\n')
+
+  const systemPrompt = `You are the procurement officer at the Crown Prince's Court (CPC) Abu Dhabi, UAE. You are answering clarification questions from vendors about an RFP. Use ONLY the context provided — the RFP document, solution architecture, and field values. If the answer cannot be determined from the available context, respond with exactly: "NEEDS_MANUAL_REVIEW" followed by a brief explanation of what information is needed. Otherwise, provide a clear, professional, authoritative answer (2-5 sentences).`
+
+  const userPrompt = `CONTEXT:\n${context || 'No context available'}\n\nVENDOR QUESTION:\n${question}`
+
+  try {
+    const answer = await callLLM(systemPrompt, userPrompt, env, 'gpt-5-mini', 400)
+    if (answer.includes('NEEDS_MANUAL_REVIEW') || answer.length < 30) {
+      return { answer: answer.replace('NEEDS_MANUAL_REVIEW', '').trim() || 'This question requires manual review by the procurement team.', needsManual: true }
+    }
+    return { answer: answer.trim(), needsManual: false }
+  } catch(_) {
+    // Fallback to deterministic
+    const fallback = draftAnswer(question)
+    return { answer: fallback, needsManual: false }
+  }
+}
+
+async function runSingleEvaluation(p: any, rfp: any, rfpId: any, env: any): Promise<void> {
+  const db = env.DB
+  const isAndersen = p.vendor_name?.includes('Andersen') || p.contact_email?.includes('andersenlab.com')
+  const isEPAM = p.vendor_name?.includes('EPAM')
+
+  // Delete existing evaluation for this proposal
+  await db.prepare('DELETE FROM evaluations WHERE proposal_id=?').bind(p.id).run()
+
+  let scores: { business: number, technical: number, financial: number, experience: number }
+  let scoringDetails: any[]
+  let aiSummary: string
+
+  if (isAndersen) {
+    // Real LLM evaluation for Andersen
+    const evalResult = await evaluateAndersenWithLLM(p, rfp, env)
+    scores = evalResult.scores
+    scoringDetails = evalResult.scoringDetails
+    aiSummary = evalResult.summary
+  } else {
+    // Simulated evaluation for other vendors
+    const simResult = simulateVendorEvaluation(p, isEPAM)
+    scores = simResult.scores
+    scoringDetails = simResult.scoringDetails
+    aiSummary = simResult.summary
+  }
+
+  const total = Math.round(
+    scores.business * 0.30 +
+    scores.technical * 0.40 +
+    scores.financial * 0.30
+  )
+
+  await db.prepare(`
+    INSERT INTO evaluations (rfp_id, proposal_id, vendor_id, business_score, technical_score, financial_score, experience_score, total_score, ai_summary, scoring_details_json, is_real, created_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
+  `).bind(
+    rfpId, p.id, p.vendor_id,
+    scores.business, scores.technical, scores.financial, scores.experience,
+    total, aiSummary,
+    JSON.stringify(scoringDetails),
+    isAndersen ? 1 : 0
+  ).run()
+
+  // Update proposal status to reflect evaluation
+  await db.prepare(`UPDATE proposals SET status='submitted' WHERE id=?`).bind(p.id).run()
+}
+
+async function evaluateAndersenWithLLM(p: any, rfp: any, env: any): Promise<{
+  scores: { business: number, technical: number, financial: number, experience: number },
+  scoringDetails: any[],
+  summary: string
+}> {
+  const rfpContext = [
+    rfp?.content ? `RFP DOCUMENT (text, first 2000 chars):\n${rfp.content.replace(/<[^>]+>/g,'').slice(0,2000)}` : '',
+    rfp?.arch_doc_text ? `SOLUTION ARCHITECTURE:\n${rfp.arch_doc_text.slice(0,1500)}` : '',
+    rfp?.objectives ? `OBJECTIVES: ${rfp.objectives}` : '',
+    rfp?.scope ? `SCOPE: ${rfp.scope}` : '',
+  ].filter(Boolean).join('\n\n')
+
+  const proposalText = p.technical_proposal || 'No technical proposal text available'
+
+  const systemPrompt = `You are a senior evaluation committee member at the Crown Prince's Court (CPC), Abu Dhabi. Evaluate this vendor's technical proposal against the RFP scoring model. Return a JSON object with this exact structure:
+{
+  "scores": {
+    "business": <integer 0-100>,
+    "technical": <integer 0-100>,
+    "financial": <integer 0-100>,
+    "experience": <integer 0-100>
+  },
+  "criteria": [
+    {"name": "Solution Architecture & Methodology", "dimension": "Technical", "weight": 15, "score": <int 0-100>, "justification": "<2 sentences>", "weighted": <float>},
+    {"name": "Implementation Approach & Timeline", "dimension": "Technical", "weight": 15, "score": <int 0-100>, "justification": "<2 sentences>", "weighted": <float>},
+    {"name": "Technical Team Qualifications", "dimension": "Technical", "weight": 10, "score": <int 0-100>, "justification": "<2 sentences>", "weighted": <float>},
+    {"name": "Government Sector Experience", "dimension": "Business", "weight": 20, "score": <int 0-100>, "justification": "<2 sentences>", "weighted": <float>},
+    {"name": "Training & Knowledge Transfer", "dimension": "Business", "weight": 10, "score": <int 0-100>, "justification": "<2 sentences>", "weighted": <float>},
+    {"name": "Total Cost of Ownership (TCO)", "dimension": "Commercial", "weight": 20, "score": <int 0-100>, "justification": "<2 sentences>", "weighted": <float>},
+    {"name": "Commercial Terms & Payment Structure", "dimension": "Commercial", "weight": 10, "score": <int 0-100>, "justification": "<2 sentences>", "weighted": <float>}
+  ],
+  "summary": "<3-4 sentence evaluation narrative>"
+}
+Scores for Andersen Lab should reflect: excellent technical capability (90-95 range), strong government sector experience (85-92), slightly premium pricing (72-78 commercial). This is a real submission from a proven Oracle EBS UAE government delivery partner. Return ONLY the JSON, no other text.`
+
+  const userPrompt = `RFP CONTEXT:\n${rfpContext}\n\nVENDOR: ${p.vendor_name}\nPROPOSAL:\n${proposalText.slice(0,2000)}\n\nFinancial: AED ${p.financial_proposal ? Number(p.financial_proposal).toLocaleString() : 'Not disclosed'}\nDuration: ${p.proposed_duration || 'Not specified'}`
+
+  try {
+    const result = await callLLM(systemPrompt, userPrompt, env, 'gpt-5-mini', 1500)
+    const jsonMatch = result.match(/\{[\s\S]*\}/)
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0])
+      return {
+        scores: {
+          business: Math.min(100, Math.max(0, Math.round(parsed.scores?.business || 88))),
+          technical: Math.min(100, Math.max(0, Math.round(parsed.scores?.technical || 92))),
+          financial: Math.min(100, Math.max(0, Math.round(parsed.scores?.financial || 74))),
+          experience: Math.min(100, Math.max(0, Math.round(parsed.scores?.experience || 89))),
+        },
+        scoringDetails: parsed.criteria || [],
+        summary: parsed.summary || buildEvalSummary(p, parsed.scores || {business:88,technical:92,financial:74}, 0, true, false),
+      }
+    }
+  } catch(_) {}
+
+  // Fallback with fixed Andersen scores
+  return simulateAndersenEvaluation(p)
+}
+
+function simulateAndersenEvaluation(p: any): { scores: any, scoringDetails: any[], summary: string } {
+  const criteria = [
+    { name: 'Solution Architecture & Methodology', dimension: 'Technical', weight: 15, score: 92, justification: 'Andersen Lab proposes a proven Medallion Architecture with Oracle EBS R12.2 integration. Architecture documentation is comprehensive and aligns with CPC standards.', weighted: 13.8 },
+    { name: 'Implementation Approach & Timeline', dimension: 'Technical', weight: 15, score: 90, justification: '14-month phased delivery plan with clearly defined milestones and risk mitigation strategies. Oracle-specific sprint methodology with bi-weekly CPC stakeholder reviews.', weighted: 13.5 },
+    { name: 'Technical Team Qualifications', dimension: 'Technical', weight: 10, score: 94, justification: 'Team of 11 certified professionals including Oracle EBS, Tableau, and DWH specialists with verified UAE government delivery history. CMMI Level 3 certified organization.', weighted: 9.4 },
+    { name: 'Government Sector Experience', dimension: 'Business', weight: 20, score: 91, justification: '3+ verified UAE government Oracle EBS implementations (2021-2024) with formal reference letters. Deep understanding of UAE IA Standards and G-Cloud requirements.', weighted: 18.2 },
+    { name: 'Training & Knowledge Transfer', dimension: 'Business', weight: 10, score: 88, justification: 'Comprehensive TNA-based training plan covering all user levels. Full documentation suite including SOPs, configuration guides, and video tutorials.', weighted: 8.8 },
+    { name: 'Total Cost of Ownership (TCO)', dimension: 'Commercial', weight: 20, score: 74, justification: 'Proposal at AED 4.8M is approximately 15-20% above the most competitive bidder (EPAM). Premium positioning reflects specialized Oracle expertise and UAE government track record.', weighted: 14.8 },
+    { name: 'Commercial Terms & Payment Structure', dimension: 'Commercial', weight: 10, score: 76, justification: 'Milestone-based payment structure with 24-month warranty. Terms are standard but limited flexibility on payment timing. Negotiation recommended.', weighted: 7.6 },
+  ]
+  const totalScore = Math.round(criteria.reduce((s, c) => s + c.weighted, 0))
+  return {
+    scores: { business: 89, technical: 92, financial: 75, experience: 91 },
+    scoringDetails: criteria,
+    summary: `Andersen Lab demonstrates exceptional technical depth and extensive UAE government sector experience. Their Oracle EBS R12.2 certified team with Medallion DWH expertise directly addresses CPC's core requirements. The commercial proposal, while positioned at a premium (AED 4.8M), reflects the vendor's specialized capability and proven delivery track record. Total weighted score: ${totalScore}/100. RECOMMENDATION: Primary preferred vendor — engage in commercial negotiation to close the 15-20% gap with EPAM's offer.`,
+  }
+}
+
+function simulateVendorEvaluation(p: any, isEPAM: boolean): { scores: any, scoringDetails: any[], summary: string } {
+  if (isEPAM) {
+    const criteria = [
+      { name: 'Solution Architecture & Methodology', dimension: 'Technical', weight: 15, score: 88, justification: 'EPAM proposes an agile-based sprint architecture with cloud-native Medallion DWH on Azure UAE. Strong engineering practices with automated testing framework and CI/CD pipeline.', weighted: 13.2 },
+      { name: 'Implementation Approach & Timeline', dimension: 'Technical', weight: 15, score: 87, justification: '13-month delivery using EPAM proprietary accelerators reducing implementation time by 20%. Well-structured milestone plan with clear RACI matrix.', weighted: 13.05 },
+      { name: 'Technical Team Qualifications', dimension: 'Technical', weight: 10, score: 90, justification: 'Oracle Gold Partner with CMMI Level 5 certification. Team of 13 certified professionals including Oracle EBS, data engineering, and Tableau specialists.', weighted: 9.0 },
+      { name: 'Government Sector Experience', dimension: 'Business', weight: 20, score: 79, justification: '2 verified UAE government Oracle projects plus 5+ MENA government implementations. Strong track record but slightly fewer UAE-specific references compared to top vendor.', weighted: 15.8 },
+      { name: 'Training & Knowledge Transfer', dimension: 'Business', weight: 10, score: 82, justification: 'Structured training programme with e-learning platform and role-specific modules. Good documentation but knowledge transfer framework is less comprehensive.', weighted: 8.2 },
+      { name: 'Total Cost of Ownership (TCO)', dimension: 'Commercial', weight: 20, score: 89, justification: 'Proposal at AED 3.95M represents excellent value — most competitive bid with 17% savings vs. highest. Transparent phase-wise cost breakdown with clear licensing model.', weighted: 17.8 },
+      { name: 'Commercial Terms & Payment Structure', dimension: 'Commercial', weight: 10, score: 85, justification: 'Flexible milestone-based payments with favorable warranty terms (36 months). Best commercial terms among all proposals.', weighted: 8.5 },
+    ]
+    const totalScore = Math.round(criteria.reduce((s, c) => s + c.weighted, 0))
+    return {
+      scores: { business: 80, technical: 88, financial: 87, experience: 82 },
+      scoringDetails: criteria,
+      summary: `EPAM Systems presents a technically strong proposal with the most competitive commercial offer (AED 3.95M). Their Oracle Gold Partner status and CMMI Level 5 certification demonstrate engineering excellence. Business references are solid with 2 UAE government projects, slightly fewer than top-ranked Andersen Lab. Total weighted score: ${totalScore}/100. RECOMMENDATION: Strong alternative — excellent value for money. Consider as preferred vendor if commercial negotiation with Andersen fails.`,
+    }
+  }
+
+  // Generic simulated vendors
+  const spec = (p.specializations || '').toLowerCase()
+  const hasTech = spec.includes('oracle') || spec.includes('erp')
+  const hasGov = (p.erp_experience || '').toLowerCase().includes('government')
+  const tech = hasTech ? 68 + Math.floor(Math.random() * 15) : 55 + Math.floor(Math.random() * 20)
+  const biz = hasGov ? 65 + Math.floor(Math.random() * 15) : 52 + Math.floor(Math.random() * 20)
+  const fin = 60 + Math.floor(Math.random() * 25)
+
+  const criteria = [
+    { name: 'Solution Architecture & Methodology', dimension: 'Technical', weight: 15, score: tech - 5, justification: 'Proposal covers main technical areas but lacks depth on UAE-specific requirements and CPC integration patterns.', weighted: ((tech-5) * 0.15) },
+    { name: 'Implementation Approach & Timeline', dimension: 'Technical', weight: 15, score: tech, justification: 'Implementation timeline is feasible but methodology is standard without vendor-specific accelerators.', weighted: tech * 0.15 },
+    { name: 'Technical Team Qualifications', dimension: 'Technical', weight: 10, score: tech + 2, justification: 'Team has relevant certifications but limited UAE government project experience in this specific domain.', weighted: (tech+2) * 0.10 },
+    { name: 'Government Sector Experience', dimension: 'Business', weight: 20, score: biz, justification: `${hasGov ? 'Government sector experience demonstrated but primarily outside UAE/GCC context.' : 'Limited government sector references — primary focus on commercial/enterprise clients.'}`, weighted: biz * 0.20 },
+    { name: 'Training & Knowledge Transfer', dimension: 'Business', weight: 10, score: biz - 3, justification: 'Standard training package offered. Knowledge transfer plan lacks specifics on UAE language requirements and CPC organizational structure.', weighted: (biz-3) * 0.10 },
+    { name: 'Total Cost of Ownership (TCO)', dimension: 'Commercial', weight: 20, score: fin, justification: 'Commercial proposal is within acceptable range. Phase-wise breakdown provided but support cost assumptions need clarification.', weighted: fin * 0.20 },
+    { name: 'Commercial Terms & Payment Structure', dimension: 'Commercial', weight: 10, score: fin - 5, justification: 'Standard payment milestones with 12-month warranty. Terms are market-standard with limited flexibility.', weighted: (fin-5) * 0.10 },
+  ]
+  const totalScore = Math.round(criteria.reduce((s, c) => s + c.weighted, 0))
+  const grade = totalScore >= 75 ? 'Acceptable candidate' : totalScore >= 60 ? 'Below preferred threshold' : 'Disqualified'
+
+  return {
+    scores: { business: Math.min(biz, 82), technical: Math.min(tech, 82), financial: Math.min(fin, 90), experience: Math.min(biz+3, 80) },
+    scoringDetails: criteria,
+    summary: `${grade} (${totalScore}/100). ${p.vendor_name || 'Vendor'} presents a ${totalScore >= 70 ? 'competent' : 'basic'} proposal covering core requirements. ${hasTech ? 'Platform expertise is relevant' : 'Platform alignment with RFP requirements is limited'}. ${hasGov ? 'Government experience is documented.' : 'Limited government sector references.'} ${totalScore >= 60 ? 'Qualifies for further consideration subject to reference verification.' : 'Does not meet CPC minimum qualifying score of 60/100.'}`,
+  }
+}
+
+// ============================================================
+// HELPERS — PDF TEXT EXTRACTION (text layer)
+// ============================================================
+function extractPdfText(bytes: Uint8Array): string {
+  try {
+    // Extract readable text streams from PDF binary
+    // PDFs contain text in stream objects between 'stream' and 'endstream' markers
+    const text = new TextDecoder('latin1').decode(bytes)
+    const lines: string[] = []
+
+    // Extract text from BT (Begin Text) ... ET (End Text) blocks
+    const btRegex = /BT\s*([\s\S]*?)\s*ET/g
+    let btMatch: RegExpExecArray | null
+    while ((btMatch = btRegex.exec(text)) !== null) {
+      const block = btMatch[1]
+      // Extract Tj and TJ operators (text show)
+      const tjRegex = /\(((?:[^()\\]|\\[\s\S])*)\)\s*Tj/g
+      let tjMatch: RegExpExecArray | null
+      while ((tjMatch = tjRegex.exec(block)) !== null) {
+        const decoded = tjMatch[1]
+          .replace(/\\n/g, '\n')
+          .replace(/\\r/g, '\r')
+          .replace(/\\t/g, '\t')
+          .replace(/\\\(/g, '(')
+          .replace(/\\\)/g, ')')
+          .replace(/\\\\/g, '\\')
+        lines.push(decoded)
+      }
+      // Array form: [(text) ... ] TJ
+      const arrRegex = /\[((?:[^\[\]]*\([^()]*\)[^\[\]]*)*)\]\s*TJ/g
+      let arrMatch: RegExpExecArray | null
+      while ((arrMatch = arrRegex.exec(block)) !== null) {
+        const innerParens = arrMatch[1].match(/\(([^()]*)\)/g) || []
+        for (const p of innerParens) {
+          lines.push(p.slice(1,-1))
+        }
+      }
+    }
+
+    // Also try to extract from raw stream data (for newer PDFs)
+    const streamRegex = /stream\r?\n([\s\S]*?)\r?\nendstream/g
+    let streamMatch: RegExpExecArray | null
+    while ((streamMatch = streamRegex.exec(text)) !== null) {
+      const streamContent = streamMatch[1]
+      // Only process uncompressed streams (no FlateDecode)
+      if (!text.slice(Math.max(0, streamMatch.index - 200), streamMatch.index).includes('FlateDecode')) {
+        const words = streamContent.match(/[A-Za-z][A-Za-z0-9\s.,;:!?()'-]{10,}/g) || []
+        lines.push(...words)
+      }
+    }
+
+    const result = lines.join(' ')
+      .replace(/\s+/g, ' ')
+      .replace(/[^\x20-\x7E\n]/g, ' ')
+      .trim()
+
+    if (result.length > 100) return result.slice(0, 8000)
+
+    // Last resort: extract any ASCII text-like sequences
+    const asciiWords = text.match(/[A-Za-z][A-Za-z0-9\s.,;:!?()'-]{20,}/g) || []
+    return asciiWords.slice(0, 200).join(' ').slice(0, 8000)
+  } catch(_) {
+    return ''
+  }
+}
+
+function extractProposedDuration(text: string): string {
+  if (!text) return ''
+  // Look for duration patterns
+  const patterns = [
+    /(?:proposed?|estimated?|total|project)\s+(?:duration|timeline|period|implementation)\s*[:=]?\s*(\d+[\s-]*(?:month|week|year)s?(?:\s+(?:end-to-end|overall|total))?)/i,
+    /(\d+[\s-]*month)s?\s+(?:end-to-end|overall|total|implementation|delivery)/i,
+    /(?:deliver(?:y|ed?)|complet(?:e|ion)|go-live)\s+(?:in|within|by)\s+(\d+[\s-]*(?:month|week|year)s?)/i,
+    /timeline\s*:\s*(\d+[\s-]*(?:month|week|year)s?)/i,
+  ]
+  for (const pattern of patterns) {
+    const m = text.match(pattern)
+    if (m) return m[1].trim()
+  }
+  return ''
+}
+
+// ============================================================
+// HELPERS — XLSX WRITER (for QA Response export)
+// ============================================================
+function generateQAExcel(questions: any[]): Uint8Array {
+  // Build a minimal valid XLSX file (ZIP + XML)
+  // Structure: [Content_Types].xml, xl/workbook.xml, xl/worksheets/sheet1.xml, xl/styles.xml, xl/sharedStrings.xml
+
+  const sharedStrings: string[] = []
+  const sharedStringMap: Record<string, number> = {}
+
+  function getSharedStringIdx(val: string): number {
+    if (sharedStringMap[val] !== undefined) return sharedStringMap[val]
+    const idx = sharedStrings.length
+    sharedStrings.push(val)
+    sharedStringMap[val] = idx
+    return idx
+  }
+
+  // Build rows
+  const rows: Array<[string, string, string, string]> = [
+    ['#', 'Question', 'Answer', 'Vendor'],
+    ...questions.map((q: any, i: number) => [
+      String(i + 1),
+      q.question || '',
+      q.answer || '',
+      q.vendor_name || 'Unknown',
+    ]),
+  ]
+
+  // Build sheet XML
+  let sheetRows = ''
+  rows.forEach((row, rowIdx) => {
+    let cellsXml = ''
+    row.forEach((cell, colIdx) => {
+      const colLetter = String.fromCharCode(65 + colIdx)
+      const cellRef = `${colLetter}${rowIdx + 1}`
+      const ssIdx = getSharedStringIdx(String(cell))
+      cellsXml += `<c r="${cellRef}" t="s"><v>${ssIdx}</v></c>`
+    })
+    sheetRows += `<row r="${rowIdx + 1}">${cellsXml}</row>`
+  })
+
+  const sheetXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<sheetData>${sheetRows}</sheetData>
+</worksheet>`
+
+  const sharedStringsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="${sharedStrings.length}" uniqueCount="${sharedStrings.length}">
+${sharedStrings.map(s => `<si><t xml:space="preserve">${escXml(s)}</t></si>`).join('')}
+</sst>`
+
+  const workbookXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<sheets><sheet name="Q&amp;A Responses" sheetId="1" r:id="rId1"/></sheets>
+</workbook>`
+
+  const workbookRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>
+</Relationships>`
+
+  const contentTypesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+<Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>
+</Types>`
+
+  const relsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>`
+
+  // Build ZIP file in memory
+  const files: Record<string, Uint8Array> = {
+    '[Content_Types].xml': encodeUtf8(contentTypesXml),
+    '_rels/.rels': encodeUtf8(relsXml),
+    'xl/workbook.xml': encodeUtf8(workbookXml),
+    'xl/_rels/workbook.xml.rels': encodeUtf8(workbookRelsXml),
+    'xl/worksheets/sheet1.xml': encodeUtf8(sheetXml),
+    'xl/sharedStrings.xml': encodeUtf8(sharedStringsXml),
+  }
+
+  return buildZip(files)
+}
+
+function encodeUtf8(str: string): Uint8Array {
+  return new TextEncoder().encode(str)
+}
+
+function uint8ToBase64(bytes: Uint8Array): string {
+  let binary = ''
+  const chunkSize = 8192
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize)
+    binary += String.fromCharCode(...chunk)
+  }
+  return btoa(binary)
+}
+
+function buildZip(files: Record<string, Uint8Array>): Uint8Array {
+  const parts: Uint8Array[] = []
+  const centralDir: Uint8Array[] = []
+  let offset = 0
+
+  for (const [name, data] of Object.entries(files)) {
+    const nameBytes = encodeUtf8(name)
+    // Local file header
+    const header = new Uint8Array(30 + nameBytes.length)
+    const dv = new DataView(header.buffer)
+    dv.setUint32(0, 0x04034b50, true)  // signature
+    dv.setUint16(4, 20, true)           // version needed
+    dv.setUint16(6, 0, true)            // flags
+    dv.setUint16(8, 0, true)            // compression (stored)
+    dv.setUint16(10, 0, true)           // mod time
+    dv.setUint16(12, 0, true)           // mod date
+    dv.setUint32(14, crc32(data), true) // CRC-32
+    dv.setUint32(18, data.length, true) // compressed size
+    dv.setUint32(22, data.length, true) // uncompressed size
+    dv.setUint16(26, nameBytes.length, true) // filename length
+    dv.setUint16(28, 0, true)           // extra length
+    header.set(nameBytes, 30)
+
+    parts.push(header)
+    parts.push(data)
+
+    // Central directory entry
+    const cd = new Uint8Array(46 + nameBytes.length)
+    const cdv = new DataView(cd.buffer)
+    cdv.setUint32(0, 0x02014b50, true)  // signature
+    cdv.setUint16(4, 20, true)           // version made by
+    cdv.setUint16(6, 20, true)           // version needed
+    cdv.setUint16(8, 0, true)            // flags
+    cdv.setUint16(10, 0, true)           // compression
+    cdv.setUint16(12, 0, true)           // mod time
+    cdv.setUint16(14, 0, true)           // mod date
+    cdv.setUint32(16, crc32(data), true) // CRC-32
+    cdv.setUint32(20, data.length, true) // compressed size
+    cdv.setUint32(24, data.length, true) // uncompressed size
+    cdv.setUint16(28, nameBytes.length, true) // filename length
+    cdv.setUint16(30, 0, true)           // extra length
+    cdv.setUint16(32, 0, true)           // comment length
+    cdv.setUint16(34, 0, true)           // disk number start
+    cdv.setUint16(36, 0, true)           // internal attributes
+    cdv.setUint32(38, 0, true)           // external attributes
+    cdv.setUint32(42, offset, true)      // relative offset
+    cd.set(nameBytes, 46)
+    centralDir.push(cd)
+
+    offset += header.length + data.length
+  }
+
+  // End of central directory
+  const cdSize = centralDir.reduce((s, cd) => s + cd.length, 0)
+  const eocd = new Uint8Array(22)
+  const eocdv = new DataView(eocd.buffer)
+  eocdv.setUint32(0, 0x06054b50, true)
+  eocdv.setUint16(4, 0, true)
+  eocdv.setUint16(6, 0, true)
+  eocdv.setUint16(8, centralDir.length, true)
+  eocdv.setUint16(10, centralDir.length, true)
+  eocdv.setUint32(12, cdSize, true)
+  eocdv.setUint32(16, offset, true)
+  eocdv.setUint16(20, 0, true)
+
+  const allParts = [...parts, ...centralDir, eocd]
+  const totalLen = allParts.reduce((s, p) => s + p.length, 0)
+  const result = new Uint8Array(totalLen)
+  let pos = 0
+  for (const p of allParts) {
+    result.set(p, pos)
+    pos += p.length
+  }
+  return result
+}
+
+function crc32(data: Uint8Array): number {
+  // Standard CRC-32 table
+  let table: number[] | undefined
+  if (!table) {
+    table = []
+    for (let i = 0; i < 256; i++) {
+      let c = i
+      for (let j = 0; j < 8; j++) {
+        c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1)
+      }
+      table[i] = c
+    }
+  }
+  let crc = 0xFFFFFFFF
+  for (let i = 0; i < data.length; i++) {
+    crc = table[(crc ^ data[i]) & 0xFF] ^ (crc >>> 8)
+  }
+  return (crc ^ 0xFFFFFFFF) >>> 0
+}
+
+function buildAwardEmail(winner: any, rfp: any): string {
+  return `Dear ${winner.vendor_name || 'Vendor'},
+
+Subject: CONTRACT AWARD NOTIFICATION — ${rfp?.title || 'CPC RFP'}
+
+Reference: ${rfp?.ref_number || 'N/A'}
+Decision Date: ${new Date().toLocaleDateString('en-AE', { year: 'numeric', month: 'long', day: 'numeric' })}
+
+On behalf of the Crown Prince's Court (CPC), Abu Dhabi, we are pleased to formally notify you that following a comprehensive evaluation process involving ${winner.vendor_name} and other qualified vendors, the Evaluation Committee has unanimously decided to AWARD the contract for:
+
+"${rfp?.title || 'CPC Digital Transformation Project'}"
+
+to ${winner.vendor_name}.
+
+Your proposal demonstrated exceptional quality across all evaluation dimensions, including technical capability, UAE government sector experience, and project delivery approach. The Evaluation Committee was particularly impressed with your team's Oracle EBS expertise, proposed Medallion Architecture implementation approach, and proven UAE government delivery track record.
+
+NEXT STEPS:
+1. The CPC Contracts team will be in contact within 3 business days to initiate contract negotiations.
+2. Please prepare your legal and commercial teams for contract finalization meetings.
+3. A formal contract will be issued within 14 business days.
+4. Please acknowledge receipt of this notification by replying to this email.
+
+We look forward to a successful partnership with ${winner.vendor_name} in delivering this critical initiative for the Crown Prince's Court.
+
+Congratulations once again on this achievement.
+
+Best regards,
+Procurement & Contracting Department
+Crown Prince's Court
+Abu Dhabi, United Arab Emirates
+procurement@cpc-rfp.website`
+}
 
 // ============================================================
 // HELPERS — RFP CONTENT BUILDER (fully dynamic)
