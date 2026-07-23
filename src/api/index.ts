@@ -18,6 +18,30 @@ apiRouter.post('/init', async (c) => {
 })
 
 // ============================================================
+// ADMIN — wipe all RFPs and related data (clean slate)
+// POST /api/admin/reset-rfps
+// ============================================================
+apiRouter.post('/admin/reset-rfps', async (c) => {
+  try {
+    const db = c.env.DB
+    // Delete in dependency order
+    await db.prepare('DELETE FROM recommendations').run()
+    await db.prepare('DELETE FROM evaluations').run()
+    await db.prepare('DELETE FROM proposals').run()
+    await db.prepare('DELETE FROM questions').run()
+    await db.prepare('DELETE FROM email_log').run()
+    await db.prepare('DELETE FROM scoring_models').run()
+    await db.prepare('DELETE FROM rfp_vendors').run()
+    await db.prepare('DELETE FROM rfps').run()
+    // Reset autoincrement sequences
+    await db.prepare("DELETE FROM sqlite_sequence WHERE name IN ('rfps','rfp_vendors','scoring_models','email_log','questions','proposals','evaluations','recommendations')").run().catch(() => {})
+    return c.json({ ok: true, message: 'All RFPs and related data cleared.' })
+  } catch (e: any) {
+    return c.json({ ok: false, error: e.message }, 500)
+  }
+})
+
+// ============================================================
 // DASHBOARD STATS (cross-RFP)
 // ============================================================
 apiRouter.get('/stats', async (c) => {
@@ -328,7 +352,7 @@ apiRouter.post('/rfps/:id/emails/send-invitations', async (c) => {
     }
 
     const isAndersen = v.contact_email?.includes('andersenlab.com')
-    const emailBody = buildInvitationEmail(v, rfp, qDeadline, sDeadline, notes)
+    const emailBody = buildInvitationEmailText(v, rfp, qDeadline, sDeadline, notes)
     let status = 'simulated'
     let sendError = ''
 
@@ -440,49 +464,87 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
     const bodyHtml: string = email.html || ''
     const attachments: any[] = email.attachments || []
 
-    // Find the most active RFP in qa_open stage
     const db = c.env.DB
-    const rfp = await db.prepare(`SELECT * FROM rfps WHERE stage='qa_open' ORDER BY updated_at DESC LIMIT 1`).first<any>()
-      || await db.prepare(`SELECT * FROM rfps ORDER BY updated_at DESC LIMIT 1`).first<any>()
-    if (!rfp) return c.json({ ok: true, note: 'no active rfp' })
 
+    // ── RFP Association ─────────────────────────────────────────
+    // 1. Try to find the RFP ref_number embedded in the email subject/body.
+    //    Invitation emails use subject: "Invitation to Tender – TITLE (Ref: CPC/PROC/YYYY/NNNN)"
+    //    Vendors are instructed to reply keeping that subject, so the ref_number survives Reply chains.
+    // 2. Fall back to most-recent qa_open RFP, then any RFP.
+    let rfp: any = null
+
+    // Extract all "CPC/PROC/..." patterns from subject + body
+    const refPattern = /CPC\/PROC\/\d{4}\/\d+/g
+    const candidateRefs = [...new Set([
+      ...(subject.match(refPattern) || []),
+      ...(bodyText.slice(0, 2000).match(refPattern) || []),
+    ])]
+
+    for (const ref of candidateRefs) {
+      const match = await db.prepare(`SELECT * FROM rfps WHERE ref_number=? LIMIT 1`).bind(ref).first<any>()
+      if (match) { rfp = match; break }
+    }
+
+    if (!rfp) {
+      rfp = await db.prepare(`SELECT * FROM rfps WHERE stage='qa_open' ORDER BY updated_at DESC LIMIT 1`).first<any>()
+           ?? await db.prepare(`SELECT * FROM rfps ORDER BY updated_at DESC LIMIT 1`).first<any>()
+    }
+
+    if (!rfp) return c.json({ ok: true, note: 'no active rfp' })
     const rfpId = rfp.id
 
-    // Find Andersen vendor
-    const andersen = await db.prepare(`SELECT * FROM vendors WHERE contact_email LIKE '%andersenlab.com%' LIMIT 1`).first<any>()
-    const vendorId = andersen?.id || null
+    // Find the sending vendor by their from-address domain
+    let vendorRow: any = null
+    if (fromAddress) {
+      vendorRow = await db.prepare(
+        `SELECT * FROM vendors WHERE contact_email=? OR contact_email LIKE ? LIMIT 1`
+      ).bind(fromAddress, `%${fromAddress.split('@')[1] || 'NOMATCH'}%`).first<any>()
+    }
+    // Fallback: look up Andersen (known real sender)
+    if (!vendorRow) {
+      vendorRow = await db.prepare(`SELECT * FROM vendors WHERE contact_email LIKE '%andersenlab.com%' LIMIT 1`).first<any>()
+    }
+    const vendorId = vendorRow?.id || null
 
-    // Check for Excel attachment and fetch questions from it
+    // ── Attachment download & xlsx/csv parse ─────────────────────
     let excelQuestions: string[] = []
-    let hasAttachment = attachments.length > 0
-    const excelAttachment = attachments.find((a: any) =>
+    const hasAttachment = attachments.length > 0
+    const spreadsheetAttachment = attachments.find((a: any) =>
       a.filename?.match(/\.(xlsx|xls|csv)$/i) ||
       a.content_type?.includes('spreadsheet') ||
       a.content_type?.includes('excel') ||
       a.content_type?.includes('csv')
     )
 
-    if (excelAttachment) {
+    if (spreadsheetAttachment) {
       try {
-        // Fetch the attachment list to get download_url
+        // Fetch the attachment list to get the signed download_url
         const attachListRes = await fetch(`https://api.resend.com/emails/receiving/${emailId}/attachments`, {
           headers: { 'Authorization': `Bearer ${apiKey}` }
         })
         if (attachListRes.ok) {
           const attachList = await attachListRes.json() as any
-          const attachData = (attachList.data || []).find((a: any) => a.id === excelAttachment.id)
+          const attachData = (attachList.data || []).find((a: any) => a.id === spreadsheetAttachment.id)
+            || (attachList.data || [])[0]   // fallback: first attachment
           if (attachData?.download_url) {
             const fileRes = await fetch(attachData.download_url)
             if (fileRes.ok) {
               const fileBuffer = await fileRes.arrayBuffer()
-              // Try parsing as CSV or plain text (Excel CSV export)
-              const text = new TextDecoder('utf-8').decode(fileBuffer)
-              excelQuestions = parseQuestionsFromSpreadsheet(text)
+              const filename: string = spreadsheetAttachment.filename || ''
+
+              if (filename.match(/\.xlsx$/i) || spreadsheetAttachment.content_type?.includes('spreadsheet')) {
+                // Parse as OOXML (xlsx) — uses ZIP + XML in Workers
+                excelQuestions = await parseXlsxBuffer(fileBuffer)
+              } else {
+                // CSV / plain text fallback
+                const text = new TextDecoder('utf-8').decode(fileBuffer)
+                excelQuestions = parseCsvQuestions(text)
+              }
             }
           }
         }
-      } catch(e) {
-        // attachment parse failed — fall through
+      } catch(_e) {
+        // attachment parse failed — fall through to body parsing
       }
     }
 
@@ -1581,27 +1643,27 @@ function buildFitRationale(v: any, score: number): string {
 // ============================================================
 // HELPERS — EMAIL SENDING
 // ============================================================
-function buildInvitationEmail(v: any, rfp: any, qDeadline: string, sDeadline: string, notes: string): string {
+function buildInvitationEmailText(v: any, rfp: any, qDeadline: string, sDeadline: string, notes: string): string {
   return `Dear ${v.name},
 
 We are pleased to invite ${v.name} to participate in the competitive tendering process for the following procurement:
 
 INVITATION TO TENDER
-RFP Title: ${rfp?.title || 'CPC RFP'}
+RFP Title:        ${rfp?.title || 'CPC RFP'}
 Reference Number: ${rfp?.ref_number || 'N/A'}
-Issuing Entity: Crown Prince's Court (CPC), Abu Dhabi
+Issuing Entity:   Crown Prince's Court (CPC), Abu Dhabi
 
 IMPORTANT DATES:
 - Questions Submission Deadline: ${qDeadline}
-- Proposal Submission Deadline: ${sDeadline}
-- Evaluation Period: Following submission deadline
+- Proposal Submission Deadline:  ${sDeadline}
+- Evaluation Period:             Following submission deadline
 
 SUBMISSION RULES:
-1. All proposals must be submitted to procurement@cpc.gov.ae with subject: "RFP Response – ${rfp?.ref_number || ''} – [Your Company Name]"
-2. Technical and Commercial proposals must be submitted as separate sealed documents
-3. All submissions must be in both English and Arabic
+1. REPLY TO THIS EMAIL to submit questions or your proposal – include the Reference Number in the subject.
+   Preferred subject format: "RE: Invitation to Tender – ${rfp?.title || 'CPC RFP'} (Ref: ${rfp?.ref_number || ''})"
+2. Submit your questions as a spreadsheet attachment (xlsx or csv) with columns: Ref | Section | Question
+3. Technical and Commercial proposals must be submitted as separate sealed documents
 4. Late submissions will not be accepted under any circumstances
-5. Questions must be submitted in writing via this email channel only
 
 Please find the full RFP document attached to this email for your review.
 
@@ -1611,51 +1673,82 @@ Best regards,
 Procurement & Contracting Department
 Crown Prince's Court
 Abu Dhabi, United Arab Emirates
-procurement@cpc.gov.ae`
+procurement@cpc-rfp.website`
 }
 
 async function sendRealEmail(
-  to: string, subject: string, body: string, rfp: any, env?: any
+  to: string, subject: string, bodyText: string, rfp: any, env?: any
 ): Promise<{ ok: boolean; id?: string; error?: string }> {
-  // Use Resend API for real email delivery
-  // Read key from Cloudflare Worker secret binding (env.RESEND_API_KEY)
   const RESEND_API_KEY = env?.RESEND_API_KEY || (globalThis as any).RESEND_API_KEY || ''
   if (!RESEND_API_KEY) {
     return { ok: false, error: 'RESEND_API_KEY not configured' }
   }
 
+  // Build the HTML version of the cover email
+  const htmlBody = `<div style="font-family:Arial,sans-serif;max-width:680px;margin:0 auto;padding:24px">
+    <div style="background:#1a1a2e;color:#c9a84c;padding:18px 24px;border-radius:8px 8px 0 0;display:flex;align-items:center;gap:12px">
+      <span style="font-size:22px">👑</span>
+      <div>
+        <div style="font-size:16px;font-weight:700">Crown Prince's Court — Procurement</div>
+        <div style="font-size:12px;color:#e5c87a;opacity:0.85">procurement@cpc-rfp.website</div>
+      </div>
+    </div>
+    <div style="background:#fff;padding:28px;border:1px solid #e5e7eb;border-radius:0 0 8px 8px">
+      <pre style="white-space:pre-wrap;font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#111">${bodyText.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</pre>
+    </div>
+    <div style="margin-top:12px;font-size:11px;color:#9ca3af;text-align:center">
+      This is an official procurement communication from the Crown Prince's Court, Abu Dhabi.
+    </div>
+  </div>`
+
+  // Build a plain-text rendition of the RFP to attach
+  // Strip HTML tags from rfp.content (if it exists) for the attachment
+  let rfpAttachmentContent = ''
+  if (rfp?.content) {
+    rfpAttachmentContent = rfp.content
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&nbsp;/g,' ')
+      .replace(/\s{3,}/g, '\n\n').trim()
+  }
+
+  // Attachment: include the RFP as a .txt file (always present)
+  // If content is empty, attach the cover letter itself so something is always attached
+  const attachContent = rfpAttachmentContent || bodyText
+  const attachBase64 = btoa(unescape(encodeURIComponent(attachContent)))
+  const rfpFilename = `RFP_${(rfp?.ref_number || 'document').replace(/\//g,'_')}.txt`
+
   try {
+    const payload: any = {
+      from: 'CPC Procurement <procurement@cpc-rfp.website>',
+      to: [to],
+      subject: subject,
+      text: bodyText,
+      html: htmlBody,
+      attachments: [
+        {
+          filename: rfpFilename,
+          content: attachBase64,
+        }
+      ],
+    }
+
     const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${RESEND_API_KEY}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        from: 'CPC Procurement <procurement@cpc-rfp.website>',
-        to: [to],
-        subject: subject,
-        text: body,
-        html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
-          <div style="background:#1a1a2e;color:gold;padding:15px;text-align:center;border-radius:8px 8px 0 0">
-            <strong>Crown Prince's Court — AI RFP Management</strong>
-          </div>
-          <div style="background:white;padding:20px;border:1px solid #e5e7eb;border-radius:0 0 8px 8px">
-            <pre style="white-space:pre-wrap;font-family:Arial,sans-serif;font-size:14px">${body.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</pre>
-          </div>
-        </div>`,
-      }),
+      body: JSON.stringify(payload),
     })
 
-    // Parse response body regardless of status to capture Resend's error message
     let data: any = {}
     try { data = await res.json() } catch(_) {}
 
     if (res.ok) {
-      // Resend returns { id: "re_xxxx" } on 200
       return { ok: true, id: data.id }
     } else {
-      // Resend returns { statusCode, message, name } on error
       const errMsg = data.message || data.name || `HTTP ${res.status}`
       return { ok: false, error: errMsg }
     }
@@ -1670,21 +1763,315 @@ async function readVendorEmailReplies(rfp: any): Promise<string[]> {
   return []
 }
 
-// Parse questions from CSV/Excel-exported text (each row = one question)
-function parseQuestionsFromSpreadsheet(text: string): string[] {
+// ─────────────────────────────────────────────────────────────────────────────
+// XLSX PARSER — pure Workers-compatible (ZIP = PK magic, XML via regex/DOMParser)
+// Extracts text from the "Question" column (col C if header detected, else longest cell)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Parse an xlsx ArrayBuffer entirely in the Workers runtime (no Node APIs). */
+async function parseXlsxBuffer(buf: ArrayBuffer): Promise<string[]> {
+  try {
+    const bytes = new Uint8Array(buf)
+
+    // ── 1. Unzip entries using PK local-file-header scanning ──────────────
+    //    We walk the Central Directory at end-of-file for robustness.
+    const entries = unzipEntries(bytes)
+
+    const sharedStringsRaw = entries['xl/sharedStrings.xml']
+    const sheet1Raw = entries['xl/worksheets/sheet1.xml']
+    if (!sheet1Raw) return []
+
+    // ── 2. Parse sharedStrings: build index → string ──────────────────────
+    const sharedStrings: string[] = []
+    if (sharedStringsRaw) {
+      const ssXml = decodeUtf8(sharedStringsRaw)
+      // Each <si>…</si> block (may contain multiple <t> for rich text)
+      const siBlocks = ssXml.match(/<si[^>]*>([\s\S]*?)<\/si>/g) || []
+      for (const si of siBlocks) {
+        const tVals = (si.match(/<t[^>]*>([^<]*)<\/t>/g) || [])
+          .map(t => t.replace(/<t[^>]*>|<\/t>/g, '').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&#x27;/g,"'").replace(/&apos;/g,"'"))
+        sharedStrings.push(tVals.join(''))
+      }
+    }
+
+    // ── 3. Parse sheet1: extract rows → cells ─────────────────────────────
+    const sheetXml = decodeUtf8(sheet1Raw)
+    const rowBlocks = sheetXml.match(/<row[^>]*>([\s\S]*?)<\/row>/g) || []
+
+    // Build rows as string arrays
+    const rows: string[][] = rowBlocks.map(rowXml => {
+      const cells = rowXml.match(/<c[^>]*>[\s\S]*?<\/c>/g) || []
+      return cells.map(cell => {
+        const isShared = /t="s"/.test(cell)
+        const vMatch = cell.match(/<v>([^<]*)<\/v>/)
+        if (!vMatch) return ''
+        const raw = vMatch[1]
+        if (isShared) {
+          const idx = parseInt(raw, 10)
+          return isNaN(idx) ? raw : (sharedStrings[idx] ?? raw)
+        }
+        return raw
+      })
+    })
+
+    if (rows.length === 0) return []
+
+    // ── 4. Detect question column ─────────────────────────────────────────
+    //    Look for a header row containing "question" (case-insensitive).
+    //    The xlsx from Andersen has: Ref | Section | Question (cols A, B, C)
+    let questionColIdx = -1
+    let headerRowIdx = 0
+    for (let r = 0; r < Math.min(3, rows.length); r++) {
+      const colIdx = rows[r].findIndex(c => /question/i.test(c))
+      if (colIdx >= 0) { questionColIdx = colIdx; headerRowIdx = r; break }
+    }
+    // If no header, fallback: pick the column with longest average cell content
+    if (questionColIdx < 0 && rows.length > 1) {
+      const colCount = Math.max(...rows.slice(1).map(r => r.length))
+      let maxLen = 0
+      for (let ci = 0; ci < colCount; ci++) {
+        const avg = rows.slice(1).reduce((s, r) => s + (r[ci]?.length || 0), 0) / (rows.length - 1)
+        if (avg > maxLen) { maxLen = avg; questionColIdx = ci }
+      }
+      headerRowIdx = 0
+    }
+
+    // ── 5. Collect question strings ───────────────────────────────────────
+    const questions: string[] = []
+    for (let r = headerRowIdx + 1; r < rows.length; r++) {
+      let q = (rows[r][questionColIdx] || '').trim()
+      if (!q || q.length < 15) continue
+      // Skip any row that looks like a header
+      if (/^(question|no\.|ref\.?|#|item|sr\.?)/i.test(q)) continue
+      // Fix smart-quote encoding corruption common in Windows-saved xlsx
+      q = q.replace(/â€™/g, "'").replace(/â€œ/g, '"').replace(/â€/g, '"')
+           .replace(/‚Äì/g, '–').replace(/‚Äî/g, '—').replace(/Â /g, ' ')
+      // Ensure ends with ?
+      if (!q.endsWith('?')) q = q + '?'
+      questions.push(q)
+    }
+    return questions.slice(0, 50)
+  } catch(_e) {
+    return []
+  }
+}
+
+/** Walk the ZIP Central Directory and return a map of filename → Uint8Array of raw (possibly deflated) data, then inflate. */
+function unzipEntries(bytes: Uint8Array): Record<string, Uint8Array> {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  const result: Record<string, Uint8Array> = {}
+
+  // Find End of Central Directory signature: 0x06054b50
+  let eocdOffset = -1
+  for (let i = bytes.length - 22; i >= 0; i--) {
+    if (view.getUint32(i, true) === 0x06054b50) { eocdOffset = i; break }
+  }
+  if (eocdOffset < 0) return result
+
+  const cdOffset = view.getUint32(eocdOffset + 16, true)
+  const cdSize   = view.getUint32(eocdOffset + 12, true)
+
+  let pos = cdOffset
+  while (pos < cdOffset + cdSize) {
+    if (view.getUint32(pos, true) !== 0x02014b50) break // Central Dir signature
+    const comprMethod  = view.getUint16(pos + 10, true)
+    const compSize     = view.getUint32(pos + 20, true)
+    const uncompSize   = view.getUint32(pos + 24, true)
+    const fnLen        = view.getUint16(pos + 28, true)
+    const extraLen     = view.getUint16(pos + 30, true)
+    const commentLen   = view.getUint16(pos + 32, true)
+    const localOffset  = view.getUint32(pos + 42, true)
+    const filename     = decodeUtf8(bytes.slice(pos + 46, pos + 46 + fnLen))
+    pos += 46 + fnLen + extraLen + commentLen
+
+    // Read local file header to find actual data start
+    const lhExtraLen = view.getUint16(localOffset + 28, true)
+    const lhFnLen    = view.getUint16(localOffset + 26, true)
+    const dataStart  = localOffset + 30 + lhFnLen + lhExtraLen
+    const compressed = bytes.slice(dataStart, dataStart + compSize)
+
+    if (comprMethod === 0) {
+      // Stored (no compression)
+      result[filename] = compressed
+    } else if (comprMethod === 8) {
+      // Deflate — use DecompressionStream (available in Workers)
+      try {
+        // We must do this synchronously-ish — but DecompressionStream is async.
+        // Store a marker; inflate() is called lazily below.
+        result[filename] = inflateDeflateRaw(compressed, uncompSize)
+      } catch(_) {}
+    }
+  }
+  return result
+}
+
+/** Inflate a raw DEFLATE stream synchronously using a pre-built tiny decoder. */
+function inflateDeflateRaw(input: Uint8Array, _expectedSize: number): Uint8Array {
+  // Workers supports DecompressionStream('deflate-raw') but it's async.
+  // We inline a minimal inflate that covers the subset used in xlsx (fixed+dynamic Huffman).
+  // For simplicity, we use a synchronous DEFLATE reader based on bit-stream iteration.
+  // This is a compact but complete implementation sufficient for xlsx shared strings.
+  return tinflate(input)
+}
+
+/** Minimal synchronous DEFLATE raw decompressor (RFC 1951). */
+function tinflate(src: Uint8Array): Uint8Array {
+  // Bit-stream reader
+  let bytePos = 0, bitBuf = 0, bitLen = 0
+  function readBits(n: number): number {
+    while (bitLen < n) { bitBuf |= src[bytePos++] << bitLen; bitLen += 8 }
+    const val = bitBuf & ((1 << n) - 1)
+    bitBuf >>= n; bitLen -= n
+    return val
+  }
+  function readByte(): number { bitBuf = 0; bitLen = 0; return src[bytePos++] }
+
+  // Output buffer (grow as needed)
+  let out = new Uint8Array(Math.max(_expectedSize || 65536, 65536))
+  let outPos = 0
+  function emit(b: number) {
+    if (outPos >= out.length) { const n = new Uint8Array(out.length * 2); n.set(out); out = n }
+    out[outPos++] = b
+  }
+
+  // Fixed Huffman code lengths
+  function buildFixedLitLen(): number[] {
+    const lens = new Array(288).fill(0)
+    for (let i=0;i<=143;i++) lens[i]=8; for (let i=144;i<=255;i++) lens[i]=9
+    for (let i=256;i<=279;i++) lens[i]=7; for (let i=280;i<=287;i++) lens[i]=8
+    return lens
+  }
+  function buildFixedDist(): number[] { return new Array(32).fill(5) }
+
+  // Build canonical Huffman decode table
+  function buildTable(lens: number[]): { table: Int32Array, maxLen: number } {
+    const maxLen = Math.max(...lens.filter(l=>l>0), 1)
+    const count = new Array(maxLen+1).fill(0)
+    for (const l of lens) if (l>0) count[l]++
+    const next = new Array(maxLen+1).fill(0)
+    let code = 0
+    for (let l=1; l<=maxLen; l++) { code = (code + count[l-1]) << 1; next[l] = code }
+    const tableSize = 1 << maxLen
+    const table = new Int32Array(tableSize).fill(-1)
+    for (let sym=0; sym<lens.length; sym++) {
+      const l = lens[sym]; if (l===0) continue
+      let c = next[l]++
+      c = reverseBits(c, l)
+      const step = 1 << l
+      for (let j = c; j < tableSize; j += step) table[j] = sym
+    }
+    return { table, maxLen }
+  }
+  function reverseBits(v: number, n: number): number {
+    let r = 0
+    for (let i=0; i<n; i++) { r=(r<<1)|(v&1); v>>=1 }
+    return r
+  }
+
+  const extraLen = [0,0,0,0,0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,0]
+  const lenBase  = [3,4,5,6,7,8,9,10,11,13,15,17,19,23,27,31,35,43,51,59,67,83,99,115,131,163,195,227,258]
+  const extraDst = [0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13]
+  const dstBase  = [1,2,3,4,5,7,9,13,17,25,33,49,65,97,129,193,257,385,513,769,1025,1537,2049,3073,4097,6145,8193,12289,16385,24577]
+
+  function decodeSym(tbl: Int32Array, maxLen: number): number {
+    const peek = bitBuf & ((1 << maxLen) - 1)
+    // Ensure we have enough bits
+    while (bitLen < maxLen && bytePos < src.length) { bitBuf |= src[bytePos++] << bitLen; bitLen += 8 }
+    const bits = bitBuf & ((1 << maxLen) - 1)
+    const sym = tbl[bits]
+    if (sym < 0) throw new Error('bad huffman')
+    // Advance by actual code length — we need the real length
+    // Re-compute length from table by checking minimum match
+    let len = 1
+    while (len < maxLen && tbl[bits & ((1<<len)-1)] !== sym) len++
+    // simpler: decode bit by bit
+    bitBuf >>= len; bitLen -= len
+    return sym
+  }
+
+  // For robustness, use a simpler decoder
+  function decode2(tbl: {table: Int32Array, maxLen: number}): number {
+    let bits = 0, len = 0
+    while (len < tbl.maxLen) {
+      while (bitLen === 0 && bytePos < src.length) { bitBuf = src[bytePos++]; bitLen = 8 }
+      bits |= (bitBuf & 1) << len; bitBuf >>= 1; bitLen--; len++
+      const rev = bits  // already LSB-first
+      if (rev < tbl.table.length && tbl.table[rev] >= 0) return tbl.table[rev]
+    }
+    throw new Error('decode fail')
+  }
+
+  let bfinal = 0
+  do {
+    bfinal = readBits(1)
+    const btype = readBits(2)
+    if (btype === 0) {
+      // Stored block
+      bitBuf = 0; bitLen = 0
+      const len = src[bytePos] | (src[bytePos+1] << 8); bytePos += 4
+      for (let i=0; i<len; i++) emit(src[bytePos++])
+    } else {
+      let litLen: {table:Int32Array,maxLen:number}, dist: {table:Int32Array,maxLen:number}
+      if (btype === 1) {
+        litLen = buildTable(buildFixedLitLen())
+        dist   = buildTable(buildFixedDist())
+      } else {
+        const hlit  = readBits(5) + 257
+        const hdist = readBits(5) + 1
+        const hclen = readBits(4) + 4
+        const clOrder = [16,17,18,0,8,7,9,6,10,5,11,4,12,3,13,2,14,1,15]
+        const clLens = new Array(19).fill(0)
+        for (let i=0; i<hclen; i++) clLens[clOrder[i]] = readBits(3)
+        const cl = buildTable(clLens)
+        const allLens: number[] = []
+        while (allLens.length < hlit + hdist) {
+          const sym = decode2(cl)
+          if (sym < 16) { allLens.push(sym) }
+          else if (sym === 16) { const rep = readBits(2)+3; for(let i=0;i<rep;i++) allLens.push(allLens[allLens.length-1]) }
+          else if (sym === 17) { const rep = readBits(3)+3; for(let i=0;i<rep;i++) allLens.push(0) }
+          else { const rep = readBits(7)+11; for(let i=0;i<rep;i++) allLens.push(0) }
+        }
+        litLen = buildTable(allLens.slice(0, hlit))
+        dist   = buildTable(allLens.slice(hlit))
+      }
+      while (true) {
+        const sym = decode2(litLen)
+        if (sym < 256) { emit(sym) }
+        else if (sym === 256) { break }
+        else {
+          const li = sym - 257
+          const length = lenBase[li] + readBits(extraLen[li])
+          const di = decode2(dist)
+          const distance = dstBase[di] + readBits(extraDst[di])
+          let src2 = outPos - distance
+          for (let i=0; i<length; i++) emit(out[src2++])
+        }
+      }
+    }
+  } while (!bfinal)
+
+  return out.slice(0, outPos)
+}
+
+function decodeUtf8(bytes: Uint8Array): string {
+  return new TextDecoder('utf-8').decode(bytes)
+}
+
+/** Parse CSV/plain-text spreadsheet (fallback when xlsx parser not applicable). */
+function parseCsvQuestions(text: string): string[] {
   const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0)
   const questions: string[] = []
   for (const line of lines) {
-    // Strip CSV quotes, BOM, leading numbers/letters like "1." or "Q1:"
-    let q = line.replace(/^[\uFEFF"]+|["]+$/g, '').replace(/^[0-9]+[.):\s]+/, '').replace(/^Q[0-9]+[.):\s]+/i, '').trim()
-    // Skip header rows (typically short or contain "question" literally)
+    // Strip CSV quotes, BOM, leading numbers/ref like "Q1" "1." etc.
+    let q = line.replace(/^[\uFEFF"]+|["]+$/g, '')
+               .replace(/^Q[0-9]+[.):\s]*/i, '')
+               .replace(/^[0-9]+[.):\s]+/, '').trim()
     if (q.length < 15) continue
-    if (/^(question|no\.|#|item|sr\.?)/i.test(q)) continue
-    // Avoid duplicate question marks
-    if (!q.endsWith('?')) q = q + (q.slice(-1) === '.' ? '' : '?')
+    if (/^(question|no\.|ref\.?|#|item|sr\.?|section)/i.test(q)) continue
+    if (!q.endsWith('?')) q += '?'
     questions.push(q)
   }
-  return questions.slice(0, 30) // max 30 questions from attachment
+  return questions.slice(0, 50)
 }
 
 // Parse numbered/bulleted questions from plain email body text
@@ -1693,7 +2080,6 @@ function parseQuestionsFromBody(text: string): string[] {
   const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0)
   const questions: string[] = []
   for (const line of lines) {
-    // Match lines starting with number+dot/paren or bullet, containing a ?
     const isNumbered = /^[0-9]{1,2}[.):\s]/.test(line)
     const isBulleted = /^[-•*]\s/.test(line)
     const hasQuestion = line.includes('?')

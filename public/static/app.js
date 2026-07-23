@@ -875,9 +875,11 @@ async function confirmSendInvitations(rfpId) {
     document.getElementById('pageSubtitle').textContent = (rfp.ref_number||'') + ' \u2022 ' + stageLabelMap(rfp.stage||'draft');
     renderLifecycleBar(rfp);
     renderRfpTabs('emails', rfpId, appState.unreadQA);
-    showToast('Invitations sent! Stage advanced to Q&A Open.', 'success');
+    showToast('Invitations sent with RFP document attached! Stage advanced to Q&A Open.', 'success');
     closeModal();
     switchRfpTab('emails', rfpId);
+    // Start 5s global background poller — runs regardless of active tab for 2h
+    startGlobalInboxPolling(rfpId);
   } catch(e) {
     setLoading(btn, false);
   }
@@ -1005,16 +1007,40 @@ function toggleInboundBody(id) {
   if (chevron) chevron.className = hidden ? 'fas fa-chevron-up' : 'fas fa-chevron-down';
 }
 
-// Polling for new inbound emails — runs every 15s while on emails tab
+// Polling for new inbound emails — runs every 5s while on emails tab
+// Also runs as a global background poller (5s) after invitations are sent,
+// so new emails are detected even when the user is on a different tab.
 var _inboxPollTimer = null;
 var _inboxPollRfpId = null;
+
+// Start tab-scoped polling (stops when user leaves the emails tab)
 function startInboxPolling(rfpId) {
   if (_inboxPollTimer) clearInterval(_inboxPollTimer);
   _inboxPollRfpId = rfpId;
   _inboxPollTimer = setInterval(function() {
     if (appState.currentRfpTab !== 'emails') { clearInterval(_inboxPollTimer); _inboxPollTimer = null; return; }
     silentCheckInbox(rfpId);
-  }, 15000);
+  }, 5000);
+}
+
+// Global background poller — keeps running regardless of active tab.
+// Started once per RFP when invitations are sent; stops after 2 hours.
+var _globalPollTimer = null;
+var _globalPollRfpId = null;
+var _globalPollStart = 0;
+function startGlobalInboxPolling(rfpId) {
+  if (_globalPollTimer) clearInterval(_globalPollTimer);
+  _globalPollRfpId = rfpId;
+  _globalPollStart = Date.now();
+  _globalPollTimer = setInterval(function() {
+    // Auto-stop after 2 hours
+    if (Date.now() - _globalPollStart > 2 * 60 * 60 * 1000) {
+      clearInterval(_globalPollTimer); _globalPollTimer = null; return;
+    }
+    // Skip if the tab-scoped poller is already running (avoids double calls)
+    if (_inboxPollTimer && appState.currentRfpTab === 'emails') return;
+    silentCheckInbox(rfpId);
+  }, 5000);
 }
 
 async function silentCheckInbox(rfpId) {
@@ -1024,18 +1050,17 @@ async function silentCheckInbox(rfpId) {
     if (received.length > prev) {
       // New email arrived!
       appState.receivedEmails = received;
-      // Show toast + badge
-      const newCount = received.length - prev;
       const newest = received[0];
-      const qCount = newest?.has_attachment ? 'with Excel attachment' : '';
-      showToast('📨 New email from ' + (newest?.from_email || 'vendor') + '! ' + qCount, 'success', 6000);
-      // Highlight Q&A tab
+      const attachBadge = newest?.has_attachment ? ' (Excel attached)' : '';
+      // Fetch updated question count
+      const questions = await apiCall('GET', '/rfps/' + rfpId + '/questions').catch(function(){ return []; });
+      const emailQs = questions.filter(function(q){ return q.source === 'email'; }).length;
+      showToast('📨 New email from ' + (newest?.from_email || 'vendor') + attachBadge + '! ' + (emailQs ? emailQs + ' question(s) extracted.' : ''), 'success', 8000);
       appState.unreadQA = true;
       renderRfpTabs(appState.currentRfpTab, rfpId, true);
-      // Pulse Q&A tab
       pulseQATab();
-      // Refresh inbox view
-      rfpTabs.emails(rfpId);
+      // If on the emails tab, refresh it live
+      if (appState.currentRfpTab === 'emails') rfpTabs.emails(rfpId);
     }
   } catch(e) {}
 }
