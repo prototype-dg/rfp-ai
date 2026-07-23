@@ -420,6 +420,14 @@ export function getLayout(): string {
     .perf-high { background:#d1fae5; color:#065f46; }
     .perf-mid { background:#fef3c7; color:#92400e; }
     .perf-low { background:#fee2e2; color:#991b1b; }
+
+    /* ===== NOTIFICATION SYSTEM ===== */
+    #bellBtn { position:relative; background:rgba(255,255,255,0.15); border:none; color:white; border-radius:8px; padding:0.4rem 0.6rem; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; font-size:1rem; transition:background 0.2s; }
+    #bellBtn:hover { background:rgba(255,255,255,0.25); }
+    #bellBadge { position:absolute; top:-6px; right:-6px; background:#ef4444; color:white; border-radius:50%; width:18px; height:18px; display:none; align-items:center; justify-content:center; font-size:0.65rem; font-weight:700; border:2px solid var(--cpc-blue); }
+    #notifPanel { position:absolute; top:60px; right:1rem; width:360px; background:white; border:1px solid #e5e7eb; border-radius:12px; box-shadow:0 12px 40px rgba(0,0,0,0.18); z-index:9999; }
+    @keyframes notifSlideIn { from { opacity:0; transform:translateX(40px); } to { opacity:1; transform:translateX(0); } }
+    @keyframes notifSlideOut { from { opacity:1; transform:translateX(0); } to { opacity:0; transform:translateX(40px); } }
   </style>
 </head>
 <body>
@@ -482,10 +490,16 @@ export function getLayout(): string {
           <p style="color:#bfdbfe;font-size:0.72rem;margin:0" id="pageSubtitle">AI-Powered Procurement Management</p>
         </div>
       </div>
-      <div style="display:flex;align-items:center;gap:1rem">
+      <div style="display:flex;align-items:center;gap:0.875rem">
         <div style="font-size:0.8rem;color:#bfdbfe" id="headerDate"></div>
+        <button id="bellBtn" onclick="toggleNotifPanel()" title="Notifications">
+          <i class="fas fa-bell"></i>
+          <span id="bellBadge">0</span>
+        </button>
       </div>
     </header>
+    <!-- Notification panel (absolute positioned below header) -->
+    <div id="notifPanel" style="display:none"></div>
 
     <!-- RFP lifecycle bar (hidden unless on RFP detail) -->
     <div id="lifecycleBar" style="display:none"></div>

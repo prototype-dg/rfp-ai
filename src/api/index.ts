@@ -604,6 +604,141 @@ apiRouter.get('/rfps/:id/emails/received', async (c) => {
   return c.json(results)
 })
 
+// GET /rfps/:id/vendors/:vendorId/emails — all emails for a specific vendor on this RFP
+apiRouter.get('/rfps/:id/vendors/:vendorId/emails', async (c) => {
+  const rfpId = c.req.param('id')
+  const vendorId = c.req.param('vendorId')
+  const { results } = await c.env.DB.prepare(`
+    SELECT e.*, v.name as vendor_name
+    FROM email_log e
+    LEFT JOIN vendors v ON e.vendor_id = v.id
+    WHERE e.rfp_id=? AND e.vendor_id=?
+    ORDER BY e.id ASC
+  `).bind(rfpId, vendorId).all()
+  return c.json(results)
+})
+
+// POST /rfps/:id/vendors/:vendorId/reply — send a reply email to a vendor
+apiRouter.post('/rfps/:id/vendors/:vendorId/reply', async (c) => {
+  const rfpId = c.req.param('id')
+  const vendorId = c.req.param('vendorId')
+  try {
+    const body = await c.req.json() as any
+    const { subject, text } = body
+
+    const rfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(rfpId).first<any>()
+    const vendor = await c.env.DB.prepare('SELECT * FROM vendors WHERE id=?').bind(vendorId).first<any>()
+    if (!vendor) return c.json({ ok: false, error: 'Vendor not found' }, 404)
+
+    const replySubject = subject || `RE: Invitation to Tender – ${rfp?.title || 'CPC RFP'} (Ref: ${rfp?.ref_number || ''})`
+    const result = await sendRealEmail(vendor.contact_email, replySubject, text || '', rfp, c.env)
+
+    await c.env.DB.prepare(`
+      INSERT INTO email_log (rfp_id, vendor_id, recipient, subject, body, email_type, status, created_at)
+      VALUES (?,?,?,?,?,'reply',?,datetime('now'))
+    `).bind(rfpId, vendorId, vendor.contact_email, replySubject, text || '', result.ok ? 'sent' : 'simulated').run()
+
+    return c.json({ ok: result.ok, error: result.error })
+  } catch(e: any) {
+    return c.json({ ok: false, error: e.message }, 500)
+  }
+})
+
+// POST /rfps/:id/emails/reprocess-questions — re-parse received emails to extract questions
+// Useful when the original parse failed (e.g. tinflate bug) or when re-testing
+apiRouter.post('/rfps/:id/emails/reprocess-questions', async (c) => {
+  const rfpId = c.req.param('id')
+  const db = c.env.DB
+  const apiKey = c.env.RESEND_API_KEY || ''
+
+  // Get all received emails for this RFP that have attachments
+  const { results: receivedEmails } = await db.prepare(`
+    SELECT * FROM email_log WHERE rfp_id=? AND status='received' ORDER BY id DESC
+  `).bind(rfpId).all<any>()
+
+  let totalNew = 0
+  const log: any[] = []
+
+  for (const email of receivedEmails) {
+    const emailLogId = email.id
+    const vendorId = email.vendor_id
+    const resendEmailId = email.resend_email_id
+
+    let questions: string[] = []
+
+    // Attempt 1: re-fetch attachment from Resend if we have the email_id
+    if (resendEmailId && apiKey) {
+      try {
+        const emailRes = await fetch(`https://api.resend.com/emails/receiving/${resendEmailId}`, {
+          headers: { 'Authorization': `Bearer ${apiKey}` }
+        })
+        if (emailRes.ok) {
+          const emailData = await emailRes.json() as any
+          const attachments: any[] = emailData.attachments || []
+          const spreadsheetAttachment = attachments.find((a: any) =>
+            a.filename?.match(/\.(xlsx|xls|csv)$/i) ||
+            a.content_type?.includes('spreadsheet') ||
+            a.content_type?.includes('excel') ||
+            a.content_type?.includes('csv')
+          )
+
+          if (spreadsheetAttachment) {
+            const attachListRes = await fetch(`https://api.resend.com/emails/receiving/${resendEmailId}/attachments`, {
+              headers: { 'Authorization': `Bearer ${apiKey}` }
+            })
+            if (attachListRes.ok) {
+              const attachList = await attachListRes.json() as any
+              const attachData = (attachList.data || []).find((a: any) => a.id === spreadsheetAttachment.id)
+                || (attachList.data || [])[0]
+              if (attachData?.download_url) {
+                const fileRes = await fetch(attachData.download_url)
+                if (fileRes.ok) {
+                  const fileBuffer = await fileRes.arrayBuffer()
+                  const filename: string = spreadsheetAttachment.filename || ''
+                  if (filename.match(/\.xlsx$/i) || spreadsheetAttachment.content_type?.includes('spreadsheet')) {
+                    questions = await parseXlsxBuffer(fileBuffer)
+                  } else {
+                    const text = new TextDecoder('utf-8').decode(fileBuffer)
+                    questions = parseCsvQuestions(text)
+                  }
+                  log.push({ emailId: emailLogId, source: 'attachment_refetch', count: questions.length })
+                }
+              }
+            }
+          }
+
+          // Also parse body for numbered questions
+          const bodyText: string = emailData.text || email.body || ''
+          const bodyQs = parseQuestionsFromBody(bodyText)
+          questions = [...new Set([...questions, ...bodyQs])]
+        }
+      } catch(_) {}
+    }
+
+    // Attempt 2: parse stored body text
+    if (questions.length === 0 && email.body) {
+      questions = parseQuestionsFromBody(email.body)
+      log.push({ emailId: emailLogId, source: 'body_text', count: questions.length })
+    }
+
+    // Insert new questions
+    for (const q of questions) {
+      const trimmed = q.trim()
+      if (!trimmed || trimmed.length < 10) continue
+      const existing = await db.prepare('SELECT id FROM questions WHERE question=? AND rfp_id=?').bind(trimmed, rfpId).first()
+      if (!existing) {
+        await db.prepare(`
+          INSERT INTO questions (rfp_id, question, vendor_id, published, source, email_log_id, created_at)
+          VALUES (?,?,?,0,'email',?,datetime('now'))
+        `).bind(rfpId, trimmed, vendorId, emailLogId).run()
+        totalNew++
+      }
+    }
+  }
+
+  return c.json({ ok: true, totalNew, processedEmails: receivedEmails.length, log })
+})
+
 // GET /inbound-status — returns unread inbound count across all RFPs (for polling)
 apiRouter.get('/inbound-status', async (c) => {
   try {
@@ -1701,23 +1836,50 @@ async function sendRealEmail(
     </div>
   </div>`
 
-  // Build a plain-text rendition of the RFP to attach
-  // Strip HTML tags from rfp.content (if it exists) for the attachment
-  let rfpAttachmentContent = ''
+  // Build a styled HTML document for the RFP attachment
+  // This replicates the "Download RFP" button output with full CSS styling
+  const rfpRef = (rfp?.ref_number || 'document').replace(/\//g,'_')
+  const rfpFilename = `RFP_${rfpRef}.html`
+
+  let rfpHtmlContent = ''
   if (rfp?.content) {
-    rfpAttachmentContent = rfp.content
-      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-      .replace(/<[^>]+>/g, ' ')
-      .replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&nbsp;/g,' ')
-      .replace(/\s{3,}/g, '\n\n').trim()
+    // rfp.content is already styled HTML — wrap in a complete standalone document
+    rfpHtmlContent = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RFP – ${rfp?.ref_number || ''}: ${rfp?.title || 'CPC RFP'}</title>
+<style>
+  @page { margin: 2cm; }
+  body { font-family: 'Times New Roman', Times, serif; font-size: 11pt; line-height: 1.6; color: #1a1a1a; max-width: 900px; margin: 0 auto; padding: 2rem; }
+  h1 { font-size: 18pt; font-weight: 700; color: #1a1a2e; border-bottom: 3px solid #c9a84c; padding-bottom: 0.5rem; margin-bottom: 1.5rem; }
+  h2 { font-size: 14pt; font-weight: 700; color: #1a1a2e; margin-top: 1.5rem; margin-bottom: 0.75rem; }
+  h3 { font-size: 12pt; font-weight: 700; color: #374151; margin-top: 1rem; }
+  .header-block { background: #1a1a2e; color: #c9a84c; padding: 1.5rem 2rem; border-radius: 8px; margin-bottom: 2rem; }
+  .header-block .title { font-size: 20pt; font-weight: 700; margin: 0; }
+  .header-block .sub { font-size: 11pt; color: #e5c87a; margin-top: 0.5rem; }
+  .meta-table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+  .meta-table td { padding: 0.4rem 0.75rem; border-bottom: 1px solid #e5e7eb; font-size: 10.5pt; }
+  .meta-table td:first-child { font-weight: 600; color: #374151; width: 30%; }
+  .section { margin: 1.5rem 0; padding: 1rem 1.25rem; border-left: 4px solid #c9a84c; background: #fefce8; border-radius: 0 6px 6px 0; }
+  .footer { margin-top: 3rem; padding-top: 1rem; border-top: 2px solid #e5e7eb; font-size: 9pt; color: #6b7280; text-align: center; }
+</style>
+</head>
+<body>
+${rfp.content}
+<div class="footer">
+  This is an official procurement document issued by the Crown Prince's Court, Abu Dhabi, UAE.<br>
+  Reference: ${rfp.ref_number || ''} | Generated: ${new Date().toLocaleDateString('en-GB')}
+</div>
+</body>
+</html>`
+  } else {
+    // Fallback: plain text as HTML
+    rfpHtmlContent = `<!DOCTYPE html><html><body><pre style="font-family:Arial;font-size:11pt;line-height:1.6">${bodyText.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</pre></body></html>`
   }
 
-  // Attachment: include the RFP as a .txt file (always present)
-  // If content is empty, attach the cover letter itself so something is always attached
-  const attachContent = rfpAttachmentContent || bodyText
-  const attachBase64 = btoa(unescape(encodeURIComponent(attachContent)))
-  const rfpFilename = `RFP_${(rfp?.ref_number || 'document').replace(/\//g,'_')}.txt`
+  const attachBase64 = btoa(unescape(encodeURIComponent(rfpHtmlContent)))
 
   try {
     const payload: any = {
@@ -1764,298 +1926,185 @@ async function readVendorEmailReplies(rfp: any): Promise<string[]> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// XLSX PARSER — pure Workers-compatible (ZIP = PK magic, XML via regex/DOMParser)
-// Extracts text from the "Question" column (col C if header detected, else longest cell)
+// XLSX PARSER — Workers-native async DecompressionStream (replaces broken tinflate)
+// Uses native Workers DecompressionStream('deflate-raw') for DEFLATE decompression
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Parse an xlsx ArrayBuffer entirely in the Workers runtime (no Node APIs). */
-async function parseXlsxBuffer(buf: ArrayBuffer): Promise<string[]> {
-  try {
-    const bytes = new Uint8Array(buf)
-
-    // ── 1. Unzip entries using PK local-file-header scanning ──────────────
-    //    We walk the Central Directory at end-of-file for robustness.
-    const entries = unzipEntries(bytes)
-
-    const sharedStringsRaw = entries['xl/sharedStrings.xml']
-    const sheet1Raw = entries['xl/worksheets/sheet1.xml']
-    if (!sheet1Raw) return []
-
-    // ── 2. Parse sharedStrings: build index → string ──────────────────────
-    const sharedStrings: string[] = []
-    if (sharedStringsRaw) {
-      const ssXml = decodeUtf8(sharedStringsRaw)
-      // Each <si>…</si> block (may contain multiple <t> for rich text)
-      const siBlocks = ssXml.match(/<si[^>]*>([\s\S]*?)<\/si>/g) || []
-      for (const si of siBlocks) {
-        const tVals = (si.match(/<t[^>]*>([^<]*)<\/t>/g) || [])
-          .map(t => t.replace(/<t[^>]*>|<\/t>/g, '').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&#x27;/g,"'").replace(/&apos;/g,"'"))
-        sharedStrings.push(tVals.join(''))
-      }
-    }
-
-    // ── 3. Parse sheet1: extract rows → cells ─────────────────────────────
-    const sheetXml = decodeUtf8(sheet1Raw)
-    const rowBlocks = sheetXml.match(/<row[^>]*>([\s\S]*?)<\/row>/g) || []
-
-    // Build rows as string arrays
-    const rows: string[][] = rowBlocks.map(rowXml => {
-      const cells = rowXml.match(/<c[^>]*>[\s\S]*?<\/c>/g) || []
-      return cells.map(cell => {
-        const isShared = /t="s"/.test(cell)
-        const vMatch = cell.match(/<v>([^<]*)<\/v>/)
-        if (!vMatch) return ''
-        const raw = vMatch[1]
-        if (isShared) {
-          const idx = parseInt(raw, 10)
-          return isNaN(idx) ? raw : (sharedStrings[idx] ?? raw)
-        }
-        return raw
-      })
-    })
-
-    if (rows.length === 0) return []
-
-    // ── 4. Detect question column ─────────────────────────────────────────
-    //    Look for a header row containing "question" (case-insensitive).
-    //    The xlsx from Andersen has: Ref | Section | Question (cols A, B, C)
-    let questionColIdx = -1
-    let headerRowIdx = 0
-    for (let r = 0; r < Math.min(3, rows.length); r++) {
-      const colIdx = rows[r].findIndex(c => /question/i.test(c))
-      if (colIdx >= 0) { questionColIdx = colIdx; headerRowIdx = r; break }
-    }
-    // If no header, fallback: pick the column with longest average cell content
-    if (questionColIdx < 0 && rows.length > 1) {
-      const colCount = Math.max(...rows.slice(1).map(r => r.length))
-      let maxLen = 0
-      for (let ci = 0; ci < colCount; ci++) {
-        const avg = rows.slice(1).reduce((s, r) => s + (r[ci]?.length || 0), 0) / (rows.length - 1)
-        if (avg > maxLen) { maxLen = avg; questionColIdx = ci }
-      }
-      headerRowIdx = 0
-    }
-
-    // ── 5. Collect question strings ───────────────────────────────────────
-    const questions: string[] = []
-    for (let r = headerRowIdx + 1; r < rows.length; r++) {
-      let q = (rows[r][questionColIdx] || '').trim()
-      if (!q || q.length < 15) continue
-      // Skip any row that looks like a header
-      if (/^(question|no\.|ref\.?|#|item|sr\.?)/i.test(q)) continue
-      // Fix smart-quote encoding corruption common in Windows-saved xlsx
-      q = q.replace(/â€™/g, "'").replace(/â€œ/g, '"').replace(/â€/g, '"')
-           .replace(/‚Äì/g, '–').replace(/‚Äî/g, '—').replace(/Â /g, ' ')
-      // Ensure ends with ?
-      if (!q.endsWith('?')) q = q + '?'
-      questions.push(q)
-    }
-    return questions.slice(0, 50)
-  } catch(_e) {
-    return []
+/** Inflate a DEFLATE-compressed (method 8) byte array using native Workers API. */
+async function inflateAsync(compressed: Uint8Array): Promise<Uint8Array> {
+  const ds = new DecompressionStream('deflate-raw')
+  const writer = ds.writable.getWriter()
+  const reader = ds.readable.getReader()
+  // Write all compressed data then close the writer
+  await writer.write(compressed)
+  await writer.close()
+  // Collect decompressed chunks
+  const chunks: Uint8Array[] = []
+  let totalLen = 0
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    chunks.push(value)
+    totalLen += value.length
   }
-}
-
-/** Walk the ZIP Central Directory and return a map of filename → Uint8Array of raw (possibly deflated) data, then inflate. */
-function unzipEntries(bytes: Uint8Array): Record<string, Uint8Array> {
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-  const result: Record<string, Uint8Array> = {}
-
-  // Find End of Central Directory signature: 0x06054b50
-  let eocdOffset = -1
-  for (let i = bytes.length - 22; i >= 0; i--) {
-    if (view.getUint32(i, true) === 0x06054b50) { eocdOffset = i; break }
-  }
-  if (eocdOffset < 0) return result
-
-  const cdOffset = view.getUint32(eocdOffset + 16, true)
-  const cdSize   = view.getUint32(eocdOffset + 12, true)
-
-  let pos = cdOffset
-  while (pos < cdOffset + cdSize) {
-    if (view.getUint32(pos, true) !== 0x02014b50) break // Central Dir signature
-    const comprMethod  = view.getUint16(pos + 10, true)
-    const compSize     = view.getUint32(pos + 20, true)
-    const uncompSize   = view.getUint32(pos + 24, true)
-    const fnLen        = view.getUint16(pos + 28, true)
-    const extraLen     = view.getUint16(pos + 30, true)
-    const commentLen   = view.getUint16(pos + 32, true)
-    const localOffset  = view.getUint32(pos + 42, true)
-    const filename     = decodeUtf8(bytes.slice(pos + 46, pos + 46 + fnLen))
-    pos += 46 + fnLen + extraLen + commentLen
-
-    // Read local file header to find actual data start
-    const lhExtraLen = view.getUint16(localOffset + 28, true)
-    const lhFnLen    = view.getUint16(localOffset + 26, true)
-    const dataStart  = localOffset + 30 + lhFnLen + lhExtraLen
-    const compressed = bytes.slice(dataStart, dataStart + compSize)
-
-    if (comprMethod === 0) {
-      // Stored (no compression)
-      result[filename] = compressed
-    } else if (comprMethod === 8) {
-      // Deflate — use DecompressionStream (available in Workers)
-      try {
-        // We must do this synchronously-ish — but DecompressionStream is async.
-        // Store a marker; inflate() is called lazily below.
-        result[filename] = inflateDeflateRaw(compressed, uncompSize)
-      } catch(_) {}
-    }
+  // Concatenate all chunks into a single Uint8Array
+  const result = new Uint8Array(totalLen)
+  let offset = 0
+  for (const chunk of chunks) {
+    result.set(chunk, offset)
+    offset += chunk.length
   }
   return result
 }
 
-/** Inflate a raw DEFLATE stream synchronously using a pre-built tiny decoder. */
-function inflateDeflateRaw(input: Uint8Array, _expectedSize: number): Uint8Array {
-  // Workers supports DecompressionStream('deflate-raw') but it's async.
-  // We inline a minimal inflate that covers the subset used in xlsx (fixed+dynamic Huffman).
-  // For simplicity, we use a synchronous DEFLATE reader based on bit-stream iteration.
-  // This is a compact but complete implementation sufficient for xlsx shared strings.
-  return tinflate(input)
+/** Unzip all ZIP entries from raw bytes. Returns map of { filename → bytes }. */
+async function unzipEntries(bytes: Uint8Array): Promise<Record<string, Uint8Array>> {
+  const entries: Record<string, Uint8Array> = {}
+
+  // Validate ZIP magic: PK\x03\x04
+  if (bytes[0] !== 0x50 || bytes[1] !== 0x4B || bytes[2] !== 0x03 || bytes[3] !== 0x04) {
+    throw new Error('Not a valid ZIP file')
+  }
+
+  // Walk through local file headers (signature PK\x03\x04 = 0x04034B50)
+  let pos = 0
+  while (pos < bytes.length - 4) {
+    const sig = (bytes[pos] | (bytes[pos+1] << 8) | (bytes[pos+2] << 16) | (bytes[pos+3] << 24)) >>> 0
+    if (sig !== 0x04034B50) break  // Not a local file header — stop
+
+    const method       = bytes[pos+8]  | (bytes[pos+9] << 8)
+    const compSize     = bytes[pos+18] | (bytes[pos+19] << 8) | (bytes[pos+20] << 16) | (bytes[pos+21] << 24)
+    const uncompSize   = bytes[pos+22] | (bytes[pos+23] << 8) | (bytes[pos+24] << 16) | (bytes[pos+25] << 24)
+    const fnLen        = bytes[pos+26] | (bytes[pos+27] << 8)
+    const extraLen     = bytes[pos+28] | (bytes[pos+29] << 8)
+
+    const fnStart  = pos + 30
+    const dataStart = fnStart + fnLen + extraLen
+    const filename  = new TextDecoder('utf-8').decode(bytes.slice(fnStart, fnStart + fnLen))
+    const compData  = bytes.slice(dataStart, dataStart + compSize)
+
+    if (method === 0) {
+      // Stored — no compression
+      entries[filename] = compData
+    } else if (method === 8) {
+      // DEFLATE — use native Workers DecompressionStream
+      try {
+        entries[filename] = await inflateAsync(compData)
+      } catch (_) {
+        // Skip files we can't decompress
+      }
+    }
+    // Skip other methods (method 12 = bzip2, etc.) — xlsx never uses them
+
+    pos = dataStart + compSize
+  }
+  return entries
 }
 
-/** Minimal synchronous DEFLATE raw decompressor (RFC 1951). */
-function tinflate(src: Uint8Array): Uint8Array {
-  // Bit-stream reader
-  let bytePos = 0, bitBuf = 0, bitLen = 0
-  function readBits(n: number): number {
-    while (bitLen < n) { bitBuf |= src[bytePos++] << bitLen; bitLen += 8 }
-    const val = bitBuf & ((1 << n) - 1)
-    bitBuf >>= n; bitLen -= n
-    return val
-  }
-  function readByte(): number { bitBuf = 0; bitLen = 0; return src[bytePos++] }
+/** Parse an xlsx ArrayBuffer entirely in the Workers runtime (no Node APIs).
+ *  Returns the list of question strings found in the spreadsheet. */
+async function parseXlsxBuffer(buf: ArrayBuffer): Promise<string[]> {
+  try {
+    const bytes = new Uint8Array(buf)
+    const entries = await unzipEntries(bytes)
 
-  // Output buffer (grow as needed)
-  let out = new Uint8Array(Math.max(_expectedSize || 65536, 65536))
-  let outPos = 0
-  function emit(b: number) {
-    if (outPos >= out.length) { const n = new Uint8Array(out.length * 2); n.set(out); out = n }
-    out[outPos++] = b
-  }
+    // Find the shared strings table (xl/sharedStrings.xml)
+    const ssKey = Object.keys(entries).find(k => k.endsWith('sharedStrings.xml'))
+    const ssXml = ssKey ? new TextDecoder('utf-8').decode(entries[ssKey]) : ''
 
-  // Fixed Huffman code lengths
-  function buildFixedLitLen(): number[] {
-    const lens = new Array(288).fill(0)
-    for (let i=0;i<=143;i++) lens[i]=8; for (let i=144;i<=255;i++) lens[i]=9
-    for (let i=256;i<=279;i++) lens[i]=7; for (let i=280;i<=287;i++) lens[i]=8
-    return lens
-  }
-  function buildFixedDist(): number[] { return new Array(32).fill(5) }
-
-  // Build canonical Huffman decode table
-  function buildTable(lens: number[]): { table: Int32Array, maxLen: number } {
-    const maxLen = Math.max(...lens.filter(l=>l>0), 1)
-    const count = new Array(maxLen+1).fill(0)
-    for (const l of lens) if (l>0) count[l]++
-    const next = new Array(maxLen+1).fill(0)
-    let code = 0
-    for (let l=1; l<=maxLen; l++) { code = (code + count[l-1]) << 1; next[l] = code }
-    const tableSize = 1 << maxLen
-    const table = new Int32Array(tableSize).fill(-1)
-    for (let sym=0; sym<lens.length; sym++) {
-      const l = lens[sym]; if (l===0) continue
-      let c = next[l]++
-      c = reverseBits(c, l)
-      const step = 1 << l
-      for (let j = c; j < tableSize; j += step) table[j] = sym
-    }
-    return { table, maxLen }
-  }
-  function reverseBits(v: number, n: number): number {
-    let r = 0
-    for (let i=0; i<n; i++) { r=(r<<1)|(v&1); v>>=1 }
-    return r
-  }
-
-  const extraLen = [0,0,0,0,0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,0]
-  const lenBase  = [3,4,5,6,7,8,9,10,11,13,15,17,19,23,27,31,35,43,51,59,67,83,99,115,131,163,195,227,258]
-  const extraDst = [0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13]
-  const dstBase  = [1,2,3,4,5,7,9,13,17,25,33,49,65,97,129,193,257,385,513,769,1025,1537,2049,3073,4097,6145,8193,12289,16385,24577]
-
-  function decodeSym(tbl: Int32Array, maxLen: number): number {
-    const peek = bitBuf & ((1 << maxLen) - 1)
-    // Ensure we have enough bits
-    while (bitLen < maxLen && bytePos < src.length) { bitBuf |= src[bytePos++] << bitLen; bitLen += 8 }
-    const bits = bitBuf & ((1 << maxLen) - 1)
-    const sym = tbl[bits]
-    if (sym < 0) throw new Error('bad huffman')
-    // Advance by actual code length — we need the real length
-    // Re-compute length from table by checking minimum match
-    let len = 1
-    while (len < maxLen && tbl[bits & ((1<<len)-1)] !== sym) len++
-    // simpler: decode bit by bit
-    bitBuf >>= len; bitLen -= len
-    return sym
-  }
-
-  // For robustness, use a simpler decoder
-  function decode2(tbl: {table: Int32Array, maxLen: number}): number {
-    let bits = 0, len = 0
-    while (len < tbl.maxLen) {
-      while (bitLen === 0 && bytePos < src.length) { bitBuf = src[bytePos++]; bitLen = 8 }
-      bits |= (bitBuf & 1) << len; bitBuf >>= 1; bitLen--; len++
-      const rev = bits  // already LSB-first
-      if (rev < tbl.table.length && tbl.table[rev] >= 0) return tbl.table[rev]
-    }
-    throw new Error('decode fail')
-  }
-
-  let bfinal = 0
-  do {
-    bfinal = readBits(1)
-    const btype = readBits(2)
-    if (btype === 0) {
-      // Stored block
-      bitBuf = 0; bitLen = 0
-      const len = src[bytePos] | (src[bytePos+1] << 8); bytePos += 4
-      for (let i=0; i<len; i++) emit(src[bytePos++])
-    } else {
-      let litLen: {table:Int32Array,maxLen:number}, dist: {table:Int32Array,maxLen:number}
-      if (btype === 1) {
-        litLen = buildTable(buildFixedLitLen())
-        dist   = buildTable(buildFixedDist())
-      } else {
-        const hlit  = readBits(5) + 257
-        const hdist = readBits(5) + 1
-        const hclen = readBits(4) + 4
-        const clOrder = [16,17,18,0,8,7,9,6,10,5,11,4,12,3,13,2,14,1,15]
-        const clLens = new Array(19).fill(0)
-        for (let i=0; i<hclen; i++) clLens[clOrder[i]] = readBits(3)
-        const cl = buildTable(clLens)
-        const allLens: number[] = []
-        while (allLens.length < hlit + hdist) {
-          const sym = decode2(cl)
-          if (sym < 16) { allLens.push(sym) }
-          else if (sym === 16) { const rep = readBits(2)+3; for(let i=0;i<rep;i++) allLens.push(allLens[allLens.length-1]) }
-          else if (sym === 17) { const rep = readBits(3)+3; for(let i=0;i<rep;i++) allLens.push(0) }
-          else { const rep = readBits(7)+11; for(let i=0;i<rep;i++) allLens.push(0) }
-        }
-        litLen = buildTable(allLens.slice(0, hlit))
-        dist   = buildTable(allLens.slice(hlit))
+    // Parse shared strings: <si><t>VALUE</t></si>
+    const sharedStrings: string[] = []
+    const siRegex = /<si>([\s\S]*?)<\/si>/g
+    let siMatch: RegExpExecArray | null
+    while ((siMatch = siRegex.exec(ssXml)) !== null) {
+      // Collect all <t>...</t> runs inside the <si>
+      const tRegex = /<t[^>]*>([\s\S]*?)<\/t>/g
+      let text = ''
+      let tMatch: RegExpExecArray | null
+      while ((tMatch = tRegex.exec(siMatch[1])) !== null) {
+        text += tMatch[1]
       }
-      while (true) {
-        const sym = decode2(litLen)
-        if (sym < 256) { emit(sym) }
-        else if (sym === 256) { break }
-        else {
-          const li = sym - 257
-          const length = lenBase[li] + readBits(extraLen[li])
-          const di = decode2(dist)
-          const distance = dstBase[di] + readBits(extraDst[di])
-          let src2 = outPos - distance
-          for (let i=0; i<length; i++) emit(out[src2++])
-        }
-      }
+      sharedStrings.push(text.replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&apos;/g,"'"))
     }
-  } while (!bfinal)
 
-  return out.slice(0, outPos)
+    // Find the first worksheet (xl/worksheets/sheet1.xml)
+    const sheetKey = Object.keys(entries).find(k => k.match(/xl\/worksheets\/sheet\d+\.xml/))
+    if (!sheetKey) return []
+    const sheetXml = new TextDecoder('utf-8').decode(entries[sheetKey])
+
+    // Parse all rows and cells
+    type CellMap = Record<string, string>
+    const rows: CellMap[] = []
+    const rowRegex = /<row[^>]*r="(\d+)"[^>]*>([\s\S]*?)<\/row>/g
+    let rowMatch: RegExpExecArray | null
+    while ((rowMatch = rowRegex.exec(sheetXml)) !== null) {
+      const rowNum = parseInt(rowMatch[1]) - 1
+      const rowXml = rowMatch[2]
+      const cells: CellMap = {}
+      const cellRegex = /<c\s+r="([A-Z]+)(\d+)"([^>]*)>([\s\S]*?)<\/c>/g
+      let cellMatch: RegExpExecArray | null
+      while ((cellMatch = cellRegex.exec(rowXml)) !== null) {
+        const col = cellMatch[1]
+        const attrs = cellMatch[3]
+        const inner = cellMatch[4]
+        // Get cell value
+        const vMatch = /<v>([\s\S]*?)<\/v>/.exec(inner)
+        const tMatch = /<t[^>]*>([\s\S]*?)<\/t>/.exec(inner)
+        let val = ''
+        if (attrs.includes('t="s"') && vMatch) {
+          // Shared string reference
+          const idx = parseInt(vMatch[1])
+          val = sharedStrings[idx] || ''
+        } else if (attrs.includes('t="inlineStr"') && tMatch) {
+          val = tMatch[1]
+        } else if (vMatch) {
+          val = vMatch[1]
+        }
+        cells[col] = val
+      }
+      while (rows.length <= rowNum) rows.push({})
+      Object.assign(rows[rowNum], cells)
+    }
+
+    if (rows.length === 0) return []
+
+    // Detect header row (first row) — look for a column containing "question"
+    const headerRow = rows[0]
+    let questionCol = ''
+    for (const [col, val] of Object.entries(headerRow)) {
+      if (/question/i.test(String(val))) { questionCol = col; break }
+    }
+    // Fallback: use column C (typically "Question" in CPC template)
+    if (!questionCol) questionCol = 'C'
+
+    // Extract questions from data rows (skip header)
+    const questions: string[] = []
+    for (let i = 1; i < rows.length; i++) {
+      const row = rows[i]
+      if (!row || Object.keys(row).length === 0) continue
+      let q = (row[questionCol] || '').trim()
+      // If question column is empty, try the longest cell
+      if (!q) {
+        let longest = ''
+        for (const v of Object.values(row)) { if (String(v).length > longest.length) longest = String(v) }
+        q = longest.trim()
+      }
+      if (q.length < 10) continue
+      if (/^(question|ref|section|no\.|#|item)/i.test(q)) continue
+      if (!q.endsWith('?')) q += '?'
+      questions.push(q)
+    }
+
+    return questions.slice(0, 50)
+  } catch (_e) {
+    return []
+  }
 }
 
 function decodeUtf8(bytes: Uint8Array): string {
   return new TextDecoder('utf-8').decode(bytes)
 }
+
 
 /** Parse CSV/plain-text spreadsheet (fallback when xlsx parser not applicable). */
 function parseCsvQuestions(text: string): string[] {

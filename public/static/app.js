@@ -15,9 +15,12 @@ let appState = {
   proposals: [],
   evaluations: [],
   emails: [],
+  receivedEmails: [],
   currentRfp: null,
   previousPage: null,
   unreadQA: false,
+  notifications: [],
+  unreadNotifications: 0,
 };
 
 // ============================================================
@@ -31,6 +34,171 @@ function showToast(msg, type, duration) {
   t.className = 'toast show ' + type;
   setTimeout(function() { t.className = 'toast'; }, duration);
 }
+
+// ============================================================
+// NOTIFICATION SYSTEM — bell icon + popup cards
+// ============================================================
+var _notifIdCounter = 0;
+
+function addNotification(type, title, message, rfpId, tab) {
+  const id = ++_notifIdCounter;
+  const notif = {
+    id: id,
+    type: type,          // 'email' | 'questions' | 'proposal' | 'info'
+    title: title,
+    message: message,
+    rfpId: rfpId || null,
+    tab: tab || null,
+    time: new Date(),
+    read: false,
+  };
+  appState.notifications.unshift(notif);
+  if (appState.notifications.length > 50) appState.notifications.pop();
+  appState.unreadNotifications = appState.notifications.filter(function(n){ return !n.read; }).length;
+  updateBellBadge();
+  showNotifPopup(notif);
+}
+
+function updateBellBadge() {
+  const badge = document.getElementById('bellBadge');
+  const count = appState.unreadNotifications;
+  if (badge) {
+    badge.textContent = count > 9 ? '9+' : String(count);
+    badge.style.display = count > 0 ? 'flex' : 'none';
+  }
+}
+
+function showNotifPopup(notif) {
+  const icons = { email: 'fa-envelope', questions: 'fa-question-circle', proposal: 'fa-inbox', info: 'fa-info-circle' };
+  const colors = { email: '#7c3aed', questions: '#0f3460', proposal: '#c9a84c', info: '#6b7280' };
+  const icon = icons[notif.type] || 'fa-bell';
+  const color = colors[notif.type] || '#6b7280';
+  const popupId = 'notif-popup-' + notif.id;
+  const navigateBtn = (notif.rfpId && notif.tab)
+    ? '<button onclick="navigateFromNotif(' + notif.id + ')" style="background:' + color + ';color:white;border:none;border-radius:6px;padding:4px 10px;font-size:0.75rem;cursor:pointer;margin-right:6px">View</button>'
+    : '';
+  const popup = document.createElement('div');
+  popup.id = popupId;
+  popup.style.cssText = 'position:fixed;bottom:' + (80 + appState.notifications.filter(function(n,i){ return i < 5 && !n.popupDismissed; }).length * 0) + 'px;right:20px;z-index:10000;background:white;border:1px solid #e5e7eb;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,0.15);padding:14px 16px;min-width:300px;max-width:380px;animation:notifSlideIn 0.35s ease;border-left:4px solid ' + color;
+  popup.innerHTML = '<div style="display:flex;align-items:flex-start;gap:10px">'
+    + '<div style="width:32px;height:32px;border-radius:50%;background:' + color + '22;display:flex;align-items:center;justify-content:center;flex-shrink:0">'
+    + '<i class="fas ' + icon + '" style="color:' + color + ';font-size:0.875rem"></i></div>'
+    + '<div style="flex:1;min-width:0">'
+    + '<div style="font-weight:700;font-size:0.82rem;color:#1f2937;margin-bottom:2px">' + escHtml(notif.title) + '</div>'
+    + '<div style="font-size:0.77rem;color:#6b7280;line-height:1.4">' + escHtml(notif.message) + '</div>'
+    + '<div style="margin-top:8px;display:flex;align-items:center">' + navigateBtn
+    + '<button onclick="dismissNotifPopup(\'' + popupId + '\',' + notif.id + ')" style="background:#f3f4f6;color:#374151;border:none;border-radius:6px;padding:4px 10px;font-size:0.75rem;cursor:pointer">Dismiss</button>'
+    + '</div></div>'
+    + '<button onclick="dismissNotifPopup(\'' + popupId + '\',' + notif.id + ')" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1rem;line-height:1;padding:0;margin-left:4px">&times;</button>'
+    + '</div>';
+  // Stack popups
+  var existingPopups = document.querySelectorAll('[id^="notif-popup-"]');
+  var offset = 20;
+  existingPopups.forEach(function(p) { offset += p.offsetHeight + 10; });
+  popup.style.bottom = offset + 'px';
+  document.body.appendChild(popup);
+  // Auto-dismiss after 8 seconds
+  setTimeout(function() { dismissNotifPopup(popupId, notif.id); }, 8000);
+}
+
+function dismissNotifPopup(popupId, notifId) {
+  const popup = document.getElementById(popupId);
+  if (popup) {
+    popup.style.animation = 'notifSlideOut 0.3s ease forwards';
+    setTimeout(function() { if (popup.parentNode) popup.parentNode.removeChild(popup); repositionPopups(); }, 300);
+  }
+  const notif = appState.notifications.find(function(n){ return n.id === notifId; });
+  if (notif) notif.popupDismissed = true;
+}
+
+function repositionPopups() {
+  var popups = Array.from(document.querySelectorAll('[id^="notif-popup-"]'));
+  var offset = 20;
+  popups.forEach(function(p) {
+    p.style.bottom = offset + 'px';
+    offset += p.offsetHeight + 10;
+  });
+}
+
+function navigateFromNotif(notifId) {
+  const notif = appState.notifications.find(function(n){ return n.id === notifId; });
+  if (!notif) return;
+  markNotifRead(notifId);
+  dismissNotifPopup('notif-popup-' + notifId, notifId);
+  if (notif.rfpId && notif.tab) {
+    navigateTo('rfp_detail', { rfpId: notif.rfpId });
+    setTimeout(function() { switchRfpTab(notif.tab, notif.rfpId); }, 400);
+  }
+}
+
+function markNotifRead(notifId) {
+  const notif = appState.notifications.find(function(n){ return n.id === notifId; });
+  if (notif) notif.read = true;
+  appState.unreadNotifications = appState.notifications.filter(function(n){ return !n.read; }).length;
+  updateBellBadge();
+}
+
+function markAllNotifsRead() {
+  appState.notifications.forEach(function(n){ n.read = true; });
+  appState.unreadNotifications = 0;
+  updateBellBadge();
+}
+
+function toggleNotifPanel() {
+  var panel = document.getElementById('notifPanel');
+  if (!panel) return;
+  var isOpen = panel.style.display !== 'none';
+  if (isOpen) {
+    panel.style.display = 'none';
+  } else {
+    renderNotifPanel();
+    panel.style.display = 'block';
+    markAllNotifsRead();
+  }
+}
+
+function renderNotifPanel() {
+  var panel = document.getElementById('notifPanel');
+  if (!panel) return;
+  const typeColors = { email: '#7c3aed', questions: '#0f3460', proposal: '#c9a84c', info: '#6b7280' };
+  const typeIcons = { email: 'fa-envelope', questions: 'fa-question-circle', proposal: 'fa-inbox', info: 'fa-info-circle' };
+  let html = '<div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid #f3f4f6">'
+    + '<span style="font-weight:700;font-size:0.875rem;color:#1f2937"><i class="fas fa-bell mr-1"></i>Notifications</span>'
+    + '<button onclick="markAllNotifsRead();renderNotifPanel()" style="font-size:0.72rem;color:#7c3aed;background:none;border:none;cursor:pointer">Mark all read</button>'
+    + '</div>';
+  if (appState.notifications.length === 0) {
+    html += '<div style="padding:2rem;text-align:center;color:#9ca3af;font-size:0.82rem"><i class="fas fa-bell-slash" style="display:block;font-size:1.5rem;margin-bottom:0.5rem"></i>No notifications yet</div>';
+  } else {
+    html += '<div style="max-height:400px;overflow-y:auto">';
+    appState.notifications.slice(0, 20).forEach(function(n) {
+      const color = typeColors[n.type] || '#6b7280';
+      const icon = typeIcons[n.type] || 'fa-bell';
+      const timeStr = n.time ? n.time.toLocaleTimeString('en-AE', { hour: '2-digit', minute: '2-digit' }) : '';
+      const unreadDot = !n.read ? '<span style="width:8px;height:8px;border-radius:50%;background:#7c3aed;display:inline-block;margin-left:4px"></span>' : '';
+      const clickable = (n.rfpId && n.tab) ? 'cursor:pointer' : '';
+      html += '<div style="padding:10px 16px;border-bottom:1px solid #f9fafb;display:flex;gap:10px;align-items:flex-start;' + (n.read ? '' : 'background:#faf5ff;') + '" '
+        + (n.rfpId && n.tab ? 'onclick="navigateFromNotif(' + n.id + ');toggleNotifPanel()" style="' + clickable + '"' : '') + '>'
+        + '<div style="width:28px;height:28px;border-radius:50%;background:' + color + '22;display:flex;align-items:center;justify-content:center;flex-shrink:0">'
+        + '<i class="fas ' + icon + '" style="color:' + color + ';font-size:0.75rem"></i></div>'
+        + '<div style="flex:1;min-width:0">'
+        + '<div style="font-weight:600;font-size:0.8rem;color:#1f2937">' + escHtml(n.title) + unreadDot + '</div>'
+        + '<div style="font-size:0.75rem;color:#6b7280;line-height:1.4">' + escHtml(n.message) + '</div>'
+        + '<div style="font-size:0.7rem;color:#9ca3af;margin-top:2px">' + timeStr + '</div>'
+        + '</div></div>';
+    });
+    html += '</div>';
+  }
+  panel.innerHTML = html;
+}
+
+// Close notif panel when clicking outside
+document.addEventListener('click', function(e) {
+  const panel = document.getElementById('notifPanel');
+  const bell = document.getElementById('bellBtn');
+  if (panel && panel.style.display !== 'none' && !panel.contains(e.target) && e.target !== bell && !bell.contains(e.target)) {
+    panel.style.display = 'none';
+  }
+});
 
 function showModal(html) {
   document.getElementById('modalContent').innerHTML = html;
@@ -215,23 +383,25 @@ function renderLifecycleBar(rfp) {
 // RFP TABS BAR
 // ============================================================
 var RFP_TABS = [
-  { id: 'generate',    icon: 'fa-file-alt',      label: 'Generate' },
-  { id: 'vendors',     icon: 'fa-building',       label: 'Vendors' },
-  { id: 'emails',      icon: 'fa-envelope',       label: 'Communications' },
-  { id: 'qa',          icon: 'fa-comments',       label: 'Q&A' },
-  { id: 'proposals',   icon: 'fa-inbox',          label: 'Proposals' },
-  { id: 'scoring',     icon: 'fa-balance-scale',  label: 'Scoring Model' },
-  { id: 'evaluation',  icon: 'fa-star-half-alt',  label: 'Evaluation' },
-  { id: 'recommendation', icon: 'fa-trophy',      label: 'Recommendation' },
+  { id: 'generate',        icon: 'fa-file-alt',      label: 'Generate' },
+  { id: 'vendors',         icon: 'fa-building',       label: 'Vendors' },
+  { id: 'emails',          icon: 'fa-envelope',       label: 'Communications' },
+  { id: 'qa',              icon: 'fa-comments',       label: 'Q&A' },
+  { id: 'proposals',       icon: 'fa-inbox',          label: 'Proposals' },
+  { id: 'scoring',         icon: 'fa-balance-scale',  label: 'Scoring Model' },
+  { id: 'evaluation',      icon: 'fa-star-half-alt',  label: 'Evaluation' },
+  { id: 'recommendation',  icon: 'fa-trophy',         label: 'Recommendation' },
 ];
 
 function renderRfpTabs(activeTab, rfpId, qaBadge) {
   let html = '<div class="rfp-tabs">';
   RFP_TABS.forEach(function(tab) {
     const isActive = tab.id === activeTab;
-    const badge = (tab.id === 'qa' && qaBadge) ? '<span style="background:#ef4444;color:white;border-radius:10px;padding:1px 6px;font-size:0.68rem;margin-left:4px">!</span>' : '';
+    const qaBadgeHtml = (tab.id === 'qa' && qaBadge) ? '<span style="background:#ef4444;color:white;border-radius:10px;padding:1px 6px;font-size:0.68rem;margin-left:4px">!</span>' : '';
+    const emailBadgeCount = appState.unreadEmailCount || 0;
+    const emailBadgeHtml = (tab.id === 'emails' && emailBadgeCount > 0) ? '<span style="background:#7c3aed;color:white;border-radius:10px;padding:1px 6px;font-size:0.68rem;margin-left:4px">' + emailBadgeCount + '</span>' : '';
     html += '<div class="rfp-tab' + (isActive ? ' active' : '') + '" onclick="switchRfpTab(\'' + tab.id + '\',' + rfpId + ')">';
-    html += '<i class="fas ' + tab.icon + '"></i>' + escHtml(tab.label) + badge;
+    html += '<i class="fas ' + tab.icon + '"></i>' + escHtml(tab.label) + qaBadgeHtml + emailBadgeHtml;
     html += '</div>';
   });
   html += '</div>';
@@ -716,12 +886,31 @@ function downloadRfpPdf(rfpId) {
 
 // --- TAB: VENDORS ---
 rfpTabs.vendors = async function(rfpId, rfp) {
-  const vendors = await apiCall('GET', '/rfps/' + rfpId + '/vendors').catch(function(){ return []; });
+  const [vendors, emailLog] = await Promise.all([
+    apiCall('GET', '/rfps/' + rfpId + '/vendors').catch(function(){ return []; }),
+    apiCall('GET', '/rfps/' + rfpId + '/emails').catch(function(){ return []; }),
+  ]);
   appState.rfpVendors = vendors;
 
   const shortlistedVendors = vendors.filter(function(v){ return v.shortlisted; });
   const otherVendors = vendors.filter(function(v){ return !v.shortlisted; });
   const shortlistedCount = shortlistedVendors.length;
+
+  // Build invitation status map per vendor
+  const invitationMap = {};
+  emailLog.forEach(function(e) {
+    if (e.email_type === 'invitation' && e.vendor_id) {
+      invitationMap[e.vendor_id] = e;
+    }
+  });
+  // Build received email map per vendor
+  const receivedMap = {};
+  emailLog.forEach(function(e) {
+    if (e.status === 'received' && e.vendor_id) {
+      if (!receivedMap[e.vendor_id]) receivedMap[e.vendor_id] = 0;
+      receivedMap[e.vendor_id]++;
+    }
+  });
 
   function buildVendorRow(v, allowRemove) {
     const score = v.rfp_fit_score || v.fit_score || 0;
@@ -731,6 +920,24 @@ rfpTabs.vendors = async function(rfpId, rfp) {
     const actionBtn = allowRemove
       ? '<button class="btn-danger btn-sm" onclick="toggleVendorShortlist(' + rfpId + ',' + v.id + ',false)"><i class="fas fa-minus"></i>Remove</button>'
       : '<button class="btn-secondary btn-sm" onclick="toggleVendorShortlist(' + rfpId + ',' + v.id + ',true)"><i class="fas fa-plus"></i>Add</button>';
+
+    // Invitation status badge
+    const inv = invitationMap[v.id];
+    let invBadge = '';
+    if (!inv) {
+      invBadge = '<span style="background:#f3f4f6;color:#6b7280;border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:500">Not Invited</span>';
+    } else if (inv.status === 'sent') {
+      invBadge = '<span style="background:#d1fae5;color:#065f46;border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:600"><i class="fas fa-check-circle mr-1"></i>Invited</span>';
+    } else {
+      invBadge = '<span style="background:#ede9fe;color:#5b21b6;border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:500"><i class="fas fa-flask mr-1"></i>Simulated</span>';
+    }
+
+    // Received emails count
+    const rxCount = receivedMap[v.id] || 0;
+    const rxBadge = rxCount > 0
+      ? '<span style="background:#ede9fe;color:#7c3aed;border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:600;margin-left:4px"><i class="fas fa-reply mr-1"></i>' + rxCount + ' replied</span>'
+      : '';
+
     return '<tr>'
       + '<td><div style="display:flex;align-items:center;gap:0.75rem">'
       + '<div style="width:34px;height:34px;border-radius:8px;background:var(--cpc-blue);display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:0.82rem;flex-shrink:0">' + escHtml(v.name.charAt(0)) + '</div>'
@@ -738,9 +945,8 @@ rfpTabs.vendors = async function(rfpId, rfp) {
       + '<div style="font-size:0.72rem;color:#9ca3af">' + escHtml(v.country||'UAE') + ' &bull; ' + escHtml(v.size||'') + '</div>'
       + '</div></div></td>'
       + '<td><div>' + tags + '</div></td>'
-      + '<td><span class="perf-badge ' + fitCls + '">' + score + '/100</span>'
-      + (v.rfp_fit_rationale ? '<div style="font-size:0.72rem;color:#6b7280;margin-top:2px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + escHtml(v.rfp_fit_rationale||'') + '">' + escHtml((v.rfp_fit_rationale||'').substring(0,60)) + '...</div>' : '')
-      + '</td>'
+      + '<td><span class="perf-badge ' + fitCls + '">' + score + '/100</span></td>'
+      + '<td>' + invBadge + rxBadge + '</td>'
       + '<td style="text-align:center">' + actionBtn + '</td>'
       + '<td><button class="btn-ghost btn-sm" onclick="viewVendorDetail(' + v.id + ')"><i class="fas fa-eye"></i></button></td>'
       + '</tr>';
@@ -754,7 +960,7 @@ rfpTabs.vendors = async function(rfpId, rfp) {
   let otherRows = '';
   otherVendors.forEach(function(v){ otherRows += buildVendorRow(v, false); });
 
-  const tableHead = '<thead><tr><th>Vendor</th><th>Specializations</th><th>AI Fit Score</th><th style="text-align:center">Shortlist</th><th></th></tr></thead>';
+  const tableHead = '<thead><tr><th>Vendor</th><th>Specializations</th><th>AI Fit Score</th><th>Participation Status</th><th style="text-align:center">Shortlist</th><th></th></tr></thead>';
 
   setContent(
     '<div class="space-y-4">'
@@ -762,8 +968,8 @@ rfpTabs.vendors = async function(rfpId, rfp) {
     // Header with actions
     + '<div style="display:flex;align-items:center;justify-content:space-between">'
     + '<div>'
-    + '<h3 style="font-weight:700;font-size:0.95rem;color:#1f2937;margin:0">Vendor Shortlist for this RFP</h3>'
-    + '<p style="font-size:0.8rem;color:#9ca3af;margin:0">' + shortlistedCount + ' shortlisted &bull; ' + otherVendors.length + ' not shortlisted (hidden)</p>'
+    + '<h3 style="font-weight:700;font-size:0.95rem;color:#1f2937;margin:0">Vendor Shortlist & Participation</h3>'
+    + '<p style="font-size:0.8rem;color:#9ca3af;margin:0">' + shortlistedCount + ' shortlisted &bull; Invitation status and vendor responses tracked below</p>'
     + '</div>'
     + '<div style="display:flex;gap:0.5rem">'
     + '<button class="btn-secondary" id="aiShortlistBtn" onclick="aiShortlistVendors(' + rfpId + ')"><i class="fas fa-robot"></i>AI Suggested Vendors</button>'
@@ -876,6 +1082,7 @@ async function confirmSendInvitations(rfpId) {
     renderLifecycleBar(rfp);
     renderRfpTabs('emails', rfpId, appState.unreadQA);
     showToast('Invitations sent with RFP document attached! Stage advanced to Q&A Open.', 'success');
+    addNotification('email', 'Invitations Sent', 'RFP invitations sent to ' + shortlisted.length + ' vendors with PDF attachment', rfpId, 'vendors');
     closeModal();
     switchRfpTab('emails', rfpId);
     // Start 5s global background poller — runs regardless of active tab for 2h
@@ -885,114 +1092,151 @@ async function confirmSendInvitations(rfpId) {
   }
 }
 
-// --- TAB: EMAILS (Communications) ---
+// --- TAB: EMAILS (Communications — per-vendor threads with reply) ---
 rfpTabs.emails = async function(rfpId) {
-  const [emails, received] = await Promise.all([
+  const [allEmails, received] = await Promise.all([
     apiCall('GET', '/rfps/' + rfpId + '/emails').catch(function(){ return []; }),
     apiCall('GET', '/rfps/' + rfpId + '/emails/received').catch(function(){ return []; }),
   ]);
-  appState.emails = emails;
+  appState.emails = allEmails;
   appState.receivedEmails = received;
+  appState.unreadEmailCount = 0; // reset unread count when viewing
 
-  // ---- Sent/Simulated outbound table ----
-  let rows = '';
-  emails.forEach(function(e) {
-    if (e.status === 'received') return; // shown in inbound section instead
-    const statusHtml = e.status === 'sent'
-      ? '<span style="color:#065f46;font-weight:500"><i class="fas fa-check-circle mr-1"></i>Sent</span>'
-      : e.status === 'simulated'
-      ? '<span style="color:#1d4ed8;font-weight:500"><i class="fas fa-flask mr-1"></i>Simulated</span>'
-      : '<span style="color:#6b7280">' + escHtml(e.status) + '</span>';
-    const dateStr = e.created_at ? new Date(e.created_at).toLocaleString() : '-';
-    const hasPdf = e.has_pdf ? '<i class="fas fa-paperclip" title="PDF attached" style="color:var(--cpc-gold);margin-left:4px"></i>' : '';
-    rows += '<tr>'
-      + '<td style="font-weight:500">' + escHtml(e.vendor_name||e.recipient||'') + '</td>'
-      + '<td>' + escHtml(e.subject||'') + hasPdf + '</td>'
-      + '<td><span class="tag">' + escHtml(e.email_type||'') + '</span></td>'
-      + '<td>' + statusHtml + '</td>'
-      + '<td style="font-size:0.8rem;color:#6b7280">' + dateStr + '</td>'
-      + '</tr>';
+  // Group all emails by vendor
+  const vendorMap = {}; // vendorId -> { vendor_name, emails[] }
+  allEmails.forEach(function(e) {
+    const vid = e.vendor_id || 'unknown';
+    if (!vendorMap[vid]) vendorMap[vid] = { vendor_name: e.vendor_name || e.recipient || 'Unknown Vendor', emails: [] };
+    vendorMap[vid].emails.push(e);
   });
-  const outboundCount = emails.filter(function(e){ return e.status !== 'received'; }).length;
+  received.forEach(function(e) {
+    const vid = e.vendor_id || 'unknown';
+    if (!vendorMap[vid]) vendorMap[vid] = { vendor_name: e.vendor_name || e.from_email || 'Unknown Vendor', emails: [] };
+    // avoid duplicates (received is already in allEmails via status=received)
+    const exists = vendorMap[vid].emails.find(function(x){ return x.id === e.id; });
+    if (!exists) vendorMap[vid].emails.push(e);
+  });
 
-  // ---- Received inbound emails ----
-  let inboundHtml = '';
-  if (received.length === 0) {
-    inboundHtml = '<div style="padding:2rem;text-align:center;color:#9ca3af">'
-      + '<i class="fas fa-satellite-dish" style="font-size:2rem;display:block;margin-bottom:0.75rem;color:#d1d5db"></i>'
-      + '<p style="font-weight:600;color:#6b7280;margin-bottom:0.25rem">Inbox is empty</p>'
-      + '<p style="font-size:0.82rem">Waiting for vendor replies at <strong>procurement@cpc-rfp.website</strong>.<br>'
-      + 'Resend will forward any incoming email here automatically.</p>'
+  // Auto-start inbox polling
+  startInboxPolling(rfpId);
+
+  // Header
+  const totalVendors = Object.keys(vendorMap).length;
+  const inboxCount = received.length;
+
+  let vendorThreadsHtml = '';
+  if (totalVendors === 0) {
+    vendorThreadsHtml = '<div class="card" style="padding:2.5rem;text-align:center;color:#9ca3af">'
+      + '<i class="fas fa-comments" style="font-size:2rem;display:block;margin-bottom:0.75rem;color:#d1d5db"></i>'
+      + '<p style="font-weight:600;color:#6b7280;margin-bottom:0.25rem">No email correspondence yet</p>'
+      + '<p style="font-size:0.82rem">Send invitations from the <strong>Vendors</strong> tab to start vendor communication.<br>'
+      + 'Incoming replies will appear here automatically via <strong>procurement@cpc-rfp.website</strong>.</p>'
       + '</div>';
   } else {
-    received.forEach(function(e, idx) {
-      const dateStr = e.created_at ? new Date(e.created_at).toLocaleString() : '-';
-      const attachBadge = e.has_attachment
-        ? '<span style="background:#fef3c7;color:#92400e;border-radius:4px;padding:2px 7px;font-size:0.72rem;font-weight:600;margin-left:6px"><i class="fas fa-file-excel mr-1"></i>Excel Attached</span>'
-        : '';
-      const collapseId = 'inbound-body-' + e.id;
-      // Render email body — prefer HTML but sanitize, fallback to plain text
-      const bodyContent = e.email_body_html
-        ? '<iframe srcdoc="' + escHtml(e.email_body_html) + '" style="width:100%;border:none;min-height:200px;border-radius:6px;background:white" sandbox="allow-same-origin"></iframe>'
-        : '<pre style="white-space:pre-wrap;font-size:0.85rem;color:#374151;font-family:inherit;margin:0">' + escHtml(e.body||'(no body)') + '</pre>';
+    Object.entries(vendorMap).forEach(function(entry) {
+      const vid = entry[0];
+      const vdata = entry[1];
+      const vEmails = vdata.emails.slice().sort(function(a,b){ return (a.id||0)-(b.id||0); });
+      const vReceivedCount = vEmails.filter(function(e){ return e.status === 'received'; }).length;
+      const threadId = 'thread-vendor-' + vid;
+      const isNumericVid = vid !== 'unknown' && !isNaN(Number(vid));
 
-      inboundHtml += '<div class="card" style="padding:0;overflow:hidden;border:2px solid #7c3aed22" id="inbound-' + e.id + '">'
-        // Header
-        + '<div style="padding:0.875rem 1rem;background:linear-gradient(135deg,#7c3aed11,#4f46e511);display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="toggleInboundBody(\'' + collapseId + '\')">'
+      let threadEmails = '';
+      vEmails.forEach(function(e) {
+        const isInbound = e.status === 'received';
+        const dateStr = e.created_at ? new Date(e.created_at).toLocaleString('en-AE') : '-';
+        const attachBadge = e.has_attachment
+          ? '<span style="background:#fef3c7;color:#92400e;border-radius:4px;padding:2px 6px;font-size:0.7rem;font-weight:600"><i class="fas fa-paperclip mr-1"></i>Attachment</span>'
+          : (e.has_pdf ? '<span style="background:#ede9fe;color:#7c3aed;border-radius:4px;padding:2px 6px;font-size:0.7rem;font-weight:600"><i class="fas fa-file-pdf mr-1"></i>PDF</span>' : '');
+        const typeBadge = '<span style="background:#f3f4f6;color:#6b7280;border-radius:4px;padding:2px 6px;font-size:0.7rem">' + escHtml(e.email_type||'') + '</span>';
+
+        const bodyCollapseId = 'email-body-' + e.id;
+        const bodyContent = e.email_body_html
+          ? '<iframe srcdoc="' + escHtml(e.email_body_html) + '" style="width:100%;border:none;min-height:180px;border-radius:6px;background:white" sandbox="allow-same-origin"></iframe>'
+          : '<pre style="white-space:pre-wrap;font-size:0.82rem;color:#374151;font-family:inherit;margin:0;background:#f9fafb;padding:0.75rem;border-radius:6px">' + escHtml((e.body||'(no body)').slice(0,2000)) + '</pre>';
+
+        threadEmails += '<div style="display:flex;gap:0.75rem;margin-bottom:0.875rem;flex-direction:' + (isInbound ? 'row' : 'row-reverse') + '">'
+          // Avatar
+          + '<div style="width:32px;height:32px;border-radius:50%;background:' + (isInbound ? '#7c3aed' : 'var(--cpc-gold)') + ';display:flex;align-items:center;justify-content:center;flex-shrink:0">'
+          + '<i class="fas ' + (isInbound ? 'fa-user' : 'fa-crown') + '" style="color:white;font-size:0.75rem"></i></div>'
+          // Bubble
+          + '<div style="flex:1;max-width:85%">'
+          + '<div style="background:' + (isInbound ? '#f5f3ff' : '#fff7e6') + ';border:1px solid ' + (isInbound ? '#ede9fe' : '#fde68a') + ';border-radius:' + (isInbound ? '0 12px 12px 12px' : '12px 0 12px 12px') + ';padding:0.75rem 1rem">'
+          + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.4rem;gap:0.5rem;flex-wrap:wrap">'
+          + '<span style="font-weight:600;font-size:0.8rem;color:' + (isInbound ? '#7c3aed' : '#b45309') + '">' + escHtml(isInbound ? (e.from_email||vdata.vendor_name) : 'CPC Procurement') + '</span>'
+          + '<div style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap">' + typeBadge + attachBadge + '<span style="font-size:0.7rem;color:#9ca3af">' + dateStr + '</span></div>'
+          + '</div>'
+          + '<div style="font-size:0.82rem;font-weight:600;color:#374151;margin-bottom:0.4rem">' + escHtml(e.subject||'(no subject)') + '</div>'
+          + '<button onclick="toggleInboundBody(\'' + bodyCollapseId + '\')" style="font-size:0.72rem;color:' + (isInbound ? '#7c3aed' : '#b45309') + ';background:none;border:none;cursor:pointer;padding:0;margin-bottom:0.4rem">'
+          + '<i class="fas fa-chevron-down" id="chevron-' + bodyCollapseId + '"></i> View body</button>'
+          + '<div id="' + bodyCollapseId + '" style="display:none;margin-top:0.5rem">' + bodyContent + '</div>'
+          + (isInbound && e.has_attachment ? '<div style="margin-top:0.5rem;font-size:0.75rem;color:#92400e;background:#fef3c7;padding:4px 8px;border-radius:4px"><i class="fas fa-file-excel mr-1"></i>Attachment processed — see Q&A tab</div>' : '')
+          + '</div>'
+          + '</div>'
+          + '</div>';
+      });
+
+      const replyFormId = 'reply-form-' + vid;
+      const replyTextId = 'reply-text-' + vid;
+      const replySubjId = 'reply-subj-' + vid;
+
+      const replySection = isNumericVid ? (
+        '<div id="' + replyFormId + '" style="display:none;padding:1rem;border-top:1px solid #f3f4f6;background:#fafafa">'
+        + '<div style="font-weight:600;font-size:0.8rem;color:#374151;margin-bottom:0.5rem"><i class="fas fa-reply mr-1"></i>Reply to ' + escHtml(vdata.vendor_name) + '</div>'
+        + '<input id="' + replySubjId + '" type="text" placeholder="Subject..." style="width:100%;padding:7px 10px;border:1px solid #e5e7eb;border-radius:6px;font-size:0.82rem;margin-bottom:0.5rem;box-sizing:border-box">'
+        + '<textarea id="' + replyTextId + '" rows="4" placeholder="Your reply message..." style="width:100%;padding:8px 10px;border:1px solid #e5e7eb;border-radius:6px;font-size:0.82rem;resize:vertical;box-sizing:border-box"></textarea>'
+        + '<div style="display:flex;gap:0.5rem;margin-top:0.5rem">'
+        + '<button class="btn-primary btn-sm" onclick="sendVendorReply(' + rfpId + ',' + vid + ')"><i class="fas fa-paper-plane"></i>Send Reply</button>'
+        + '<button class="btn-ghost btn-sm" onclick="document.getElementById(\'' + replyFormId + '\').style.display=\'none\'">Cancel</button>'
+        + '</div>'
+        + '</div>'
+      ) : '';
+
+      vendorThreadsHtml += '<div class="card" style="padding:0;overflow:hidden;margin-bottom:0.875rem">'
+        // Thread header
+        + '<div style="padding:0.875rem 1rem;background:linear-gradient(135deg,#1a1a2e0a,#4f46e508);display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #f3f4f6">'
         + '<div style="display:flex;align-items:center;gap:0.75rem">'
-        + '<div style="width:36px;height:36px;border-radius:50%;background:#7c3aed;display:flex;align-items:center;justify-content:center">'
-        + '<i class="fas fa-envelope-open" style="color:white;font-size:0.85rem"></i></div>'
+        + '<div style="width:36px;height:36px;border-radius:8px;background:var(--cpc-blue);display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:0.85rem">' + escHtml((vdata.vendor_name||'?').charAt(0)) + '</div>'
         + '<div>'
-        + '<div style="font-weight:700;font-size:0.9rem;color:#1f2937">' + escHtml(e.from_email || e.vendor_name || 'Unknown Sender') + '</div>'
-        + '<div style="font-size:0.8rem;color:#6b7280">' + escHtml(e.subject||'No Subject') + attachBadge + '</div>'
+        + '<div style="font-weight:700;font-size:0.9rem;color:#1f2937">' + escHtml(vdata.vendor_name) + '</div>'
+        + '<div style="font-size:0.75rem;color:#9ca3af">' + vEmails.length + ' message(s)' + (vReceivedCount > 0 ? ' &bull; <span style="color:#7c3aed;font-weight:600">' + vReceivedCount + ' received</span>' : '') + '</div>'
         + '</div>'
         + '</div>'
-        + '<div style="display:flex;align-items:center;gap:0.75rem">'
-        + '<span style="font-size:0.78rem;color:#9ca3af">' + dateStr + '</span>'
-        + '<span style="color:#7c3aed;font-size:0.75rem"><i class="fas fa-chevron-down" id="chevron-' + collapseId + '"></i></span>'
+        + '<div style="display:flex;gap:0.5rem">'
+        + (isNumericVid ? '<button class="btn-ghost btn-sm" onclick="toggleVendorReply(\'' + replyFormId + '\')"><i class="fas fa-reply"></i>Reply</button>' : '')
+        + '<button class="btn-ghost btn-sm" onclick="toggleThreadBody(\'' + threadId + '\')"><i class="fas fa-chevron-down" id="chevron-' + threadId + '"></i></button>'
         + '</div>'
         + '</div>'
-        // Body (collapsible, first one open by default)
-        + '<div id="' + collapseId + '" style="' + (idx === 0 ? '' : 'display:none;') + 'padding:1rem;border-top:1px solid #ede9fe">'
-        + '<div style="font-size:0.75rem;font-weight:600;color:#7c3aed;margin-bottom:0.5rem;text-transform:uppercase;letter-spacing:0.05em">Email Body</div>'
-        + bodyContent
-        + (e.has_attachment ? '<div style="margin-top:0.75rem;padding:0.6rem 0.875rem;background:#fef9c3;border:1px solid #fde68a;border-radius:6px;font-size:0.82rem;color:#92400e"><i class="fas fa-file-excel mr-2"></i><strong>Excel attachment processed</strong> — questions extracted and added to Q&A tab automatically.</div>' : '')
+        // Thread body (collapsible)
+        + '<div id="' + threadId + '" style="padding:1rem">'
+        + (threadEmails || '<div style="padding:1rem;color:#9ca3af;font-size:0.82rem;text-align:center">No emails yet</div>')
         + '</div>'
+        // Reply form
+        + replySection
         + '</div>';
     });
   }
 
-  // Auto-start inbox polling when on this tab
-  startInboxPolling(rfpId);
-
   setContent(
     '<div class="space-y-4">'
 
-    // ---- INBOUND SECTION ----
+    // Header
+    + '<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:0.5rem">'
     + '<div>'
-    + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem">'
-    + '<div style="display:flex;align-items:center;gap:0.625rem">'
-    + '<div style="width:10px;height:10px;border-radius:50%;background:#22c55e;animation:pulse 2s infinite"></div>'
-    + '<h3 style="font-weight:700;font-size:0.95rem;color:#1f2937;margin:0">Inbox — <code style="font-size:0.82rem;background:#f3f4f6;padding:2px 6px;border-radius:4px">procurement@cpc-rfp.website</code></h3>'
-    + '<span style="font-size:0.78rem;color:#9ca3af">(' + received.length + ' received)</span>'
+    + '<h3 style="font-weight:700;font-size:0.95rem;color:#1f2937;margin:0"><i class="fas fa-comments mr-2" style="color:var(--cpc-blue)"></i>Email Correspondence</h3>'
+    + '<p style="font-size:0.8rem;color:#9ca3af;margin:0">'
+    + totalVendors + ' vendor thread(s) &bull; '
+    + '<div style="display:inline-flex;align-items:center;gap:4px"><div style="width:8px;height:8px;border-radius:50%;background:#22c55e;animation:pulse 2s infinite"></div>'
+    + ' <code style="font-size:0.78rem;background:#f3f4f6;padding:1px 5px;border-radius:4px">procurement@cpc-rfp.website</code></div>'
+    + '</p>'
     + '</div>'
-    + '<button class="btn-secondary" onclick="checkInboxForQA(' + rfpId + ')" id="checkInboxBtn"><i class="fas fa-sync"></i>Check Inbox</button>'
+    + '<div style="display:flex;gap:0.5rem">'
+    + '<button class="btn-secondary" onclick="checkInboxForQA(' + rfpId + ')" id="checkInboxBtn"><i class="fas fa-sync"></i>Refresh</button>'
     + '</div>'
-    + '<div>' + inboundHtml + '</div>'
     + '</div>'
 
-    // ---- OUTBOUND SECTION ----
-    + '<div>'
-    + '<div style="display:flex;align-items:center;gap:0.625rem;margin-bottom:0.75rem">'
-    + '<h3 style="font-weight:700;font-size:0.95rem;color:#1f2937;margin:0">Outbound Invitations</h3>'
-    + '<span style="font-size:0.78rem;color:#9ca3af">(' + outboundCount + ' sent)</span>'
-    + '</div>'
-    + '<div class="card">'
-    + (outboundCount === 0
-      ? '<div style="padding:2.5rem;text-align:center;color:#9ca3af"><i class="fas fa-paper-plane" style="font-size:2rem;display:block;margin-bottom:0.75rem;color:#d1d5db"></i><p>No invitations sent yet.</p></div>'
-      : '<div style="overflow-x:auto"><table><thead><tr><th>Vendor</th><th>Subject</th><th>Type</th><th>Status</th><th>Date</th></tr></thead><tbody>' + rows + '</tbody></table></div>')
-    + '</div>'
-    + '</div>'
+    // Vendor threads
+    + '<div>' + vendorThreadsHtml + '</div>'
 
     + '</div>'
   );
@@ -1005,6 +1249,42 @@ function toggleInboundBody(id) {
   var hidden = el.style.display === 'none';
   el.style.display = hidden ? 'block' : 'none';
   if (chevron) chevron.className = hidden ? 'fas fa-chevron-up' : 'fas fa-chevron-down';
+}
+
+function toggleVendorReply(formId) {
+  var form = document.getElementById(formId);
+  if (!form) return;
+  form.style.display = form.style.display === 'none' ? 'block' : 'none';
+}
+
+function toggleThreadBody(threadId) {
+  var el = document.getElementById(threadId);
+  var chevron = document.getElementById('chevron-' + threadId);
+  if (!el) return;
+  var hidden = el.style.display === 'none';
+  el.style.display = hidden ? 'block' : 'none';
+  if (chevron) chevron.className = hidden ? 'fas fa-chevron-up' : 'fas fa-chevron-down';
+}
+
+async function sendVendorReply(rfpId, vendorId) {
+  const subjEl = document.getElementById('reply-subj-' + vendorId);
+  const textEl = document.getElementById('reply-text-' + vendorId);
+  if (!textEl || !textEl.value.trim()) { showToast('Please enter a reply message', 'error'); return; }
+  try {
+    const result = await apiCall('POST', '/rfps/' + rfpId + '/vendors/' + vendorId + '/reply', {
+      subject: subjEl ? subjEl.value : '',
+      text: textEl.value,
+    });
+    if (result.ok) {
+      showToast('Reply sent successfully!', 'success');
+      addNotification('email', 'Reply Sent', 'Reply sent to vendor', rfpId, 'emails');
+    } else {
+      showToast('Reply simulated (no real API key): ' + (result.error || ''), 'info');
+    }
+    rfpTabs.emails(rfpId);
+  } catch(e) {
+    showToast('Failed to send reply: ' + e.message, 'error');
+  }
 }
 
 // Polling for new inbound emails — runs every 5s while on emails tab
@@ -1048,17 +1328,41 @@ async function silentCheckInbox(rfpId) {
     const received = await apiCall('GET', '/rfps/' + rfpId + '/emails/received').catch(function(){ return []; });
     const prev = (appState.receivedEmails || []).length;
     if (received.length > prev) {
-      // New email arrived!
+      // New email(s) arrived!
+      const newCount = received.length - prev;
       appState.receivedEmails = received;
+      appState.unreadEmailCount = (appState.unreadEmailCount || 0) + newCount;
       const newest = received[0];
-      const attachBadge = newest?.has_attachment ? ' (Excel attached)' : '';
+      const attachBadge = newest && newest.has_attachment ? ' with Excel attachment' : '';
+      const senderName = (newest && (newest.vendor_name || newest.from_email)) || 'vendor';
+
       // Fetch updated question count
       const questions = await apiCall('GET', '/rfps/' + rfpId + '/questions').catch(function(){ return []; });
       const emailQs = questions.filter(function(q){ return q.source === 'email'; }).length;
-      showToast('📨 New email from ' + (newest?.from_email || 'vendor') + attachBadge + '! ' + (emailQs ? emailQs + ' question(s) extracted.' : ''), 'success', 8000);
-      appState.unreadQA = true;
-      renderRfpTabs(appState.currentRfpTab, rfpId, true);
-      pulseQATab();
+
+      // Add notification
+      if (newest && newest.has_attachment && emailQs > 0) {
+        addNotification('questions',
+          '📋 Questions Received',
+          senderName + ' sent ' + emailQs + ' question(s)' + attachBadge,
+          rfpId, 'qa'
+        );
+        addNotification('email',
+          '📨 New Email from ' + senderName,
+          (newest.subject || 'No Subject') + attachBadge,
+          rfpId, 'emails'
+        );
+        appState.unreadQA = true;
+        pulseQATab();
+      } else {
+        addNotification('email',
+          '📨 New Email from ' + senderName,
+          (newest && newest.subject ? newest.subject : 'No Subject') + attachBadge,
+          rfpId, 'emails'
+        );
+      }
+
+      renderRfpTabs(appState.currentRfpTab, rfpId, appState.unreadQA);
       // If on the emails tab, refresh it live
       if (appState.currentRfpTab === 'emails') rfpTabs.emails(rfpId);
     }
@@ -1094,7 +1398,11 @@ async function checkInboxForQA(rfpId) {
       appState.unreadQA = true;
       renderRfpTabs(appState.currentRfpTab, rfpId, true);
       pulseQATab();
-      showToast(received.length + ' vendor email(s) in inbox. ' + emailQs + ' question(s) extracted. Check Q&A tab!', 'success', 5000);
+      const newCount = received.length - prev;
+      addNotification('email', 'New Email(s) Received', newCount + ' new vendor email(s). ' + emailQs + ' question(s) extracted.', rfpId, 'emails');
+      if (emailQs > 0) {
+        addNotification('questions', 'Questions Extracted', emailQs + ' vendor question(s) ready for Q&A tab', rfpId, 'qa');
+      }
     } else if (received.length > 0) {
       showToast('Inbox up to date — ' + received.length + ' email(s), ' + emailQs + ' question(s) extracted.', 'info');
     } else {
@@ -1104,7 +1412,7 @@ async function checkInboxForQA(rfpId) {
   } catch(e) {
     showToast('Inbox check failed.', 'error');
   } finally {
-    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-sync"></i>Check Inbox'; }
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-sync"></i>Refresh'; }
   }
 }
 
@@ -1125,9 +1433,10 @@ rfpTabs.qa = async function(rfpId) {
     qCards = '<div class="card" style="padding:2.5rem;text-align:center;color:#9ca3af">'
       + '<i class="fas fa-comments" style="font-size:2.5rem;display:block;margin-bottom:1rem;color:#d1d5db"></i>'
       + '<p style="margin-bottom:0.5rem;font-weight:600;color:#374151">No vendor questions yet</p>'
-      + '<p style="margin-bottom:1rem;font-size:0.85rem">Vendors submit questions by replying to the RFP invitation email.<br>Click <strong>Check Inbox</strong> in the Invitations tab to pull new replies from the mailbox.</p>'
-      + '<div style="display:flex;gap:0.75rem;justify-content:center">'
-      + '<button class="btn-secondary" onclick="switchRfpTab(\'emails\',' + rfpId + ')"><i class="fas fa-envelope"></i>Go to Invitations</button>'
+      + '<p style="margin-bottom:1rem;font-size:0.85rem">Vendors submit questions by replying to the RFP invitation email with an Excel attachment.<br>If you received an email but questions are not showing, try <strong>Re-extract Questions</strong> below.</p>'
+      + '<div style="display:flex;gap:0.75rem;justify-content:center;flex-wrap:wrap">'
+      + '<button class="btn-secondary" id="reprocessQBtn" onclick="reprocessQuestions(' + rfpId + ')"><i class="fas fa-sync"></i>Re-extract Questions from Emails</button>'
+      + '<button class="btn-secondary" onclick="switchRfpTab(\'emails\',' + rfpId + ')"><i class="fas fa-envelope"></i>Go to Communications</button>'
       + '<button class="btn-ghost" onclick="loadSampleQs(' + rfpId + ')"><i class="fas fa-flask"></i>Load Demo Questions</button>'
       + '</div>'
       + '</div>';
@@ -1178,7 +1487,8 @@ rfpTabs.qa = async function(rfpId) {
     + '<span style="font-size:0.82rem;color:#92400e"><strong>' + answered + '</strong> awaiting approval</span>'
     + '<span style="font-size:0.82rem;color:#065f46"><strong>' + published + '</strong> published</span>'
     + '</div>'
-    + '<div style="display:flex;gap:0.5rem">'
+    + '<div style="display:flex;gap:0.5rem;flex-wrap:wrap">'
+    + '<button class="btn-ghost btn-sm" id="reprocessQBtn" onclick="reprocessQuestions(' + rfpId + ')" title="Re-extract questions from received emails"><i class="fas fa-sync"></i>Re-extract</button>'
     + '<button class="btn-secondary" onclick="draftAllQAnswers(' + rfpId + ')"><i class="fas fa-robot"></i>AI Draft All</button>'
     + '<button class="btn-primary" onclick="publishAllQAnswers(' + rfpId + ')"><i class="fas fa-paper-plane"></i>Publish All Approved</button>'
     + '</div>'
@@ -1241,6 +1551,24 @@ async function loadSampleQs(rfpId) {
   await apiCall('POST', '/rfps/' + rfpId + '/questions/load-samples', {});
   showToast('Sample questions loaded!', 'success');
   rfpTabs.qa(rfpId);
+}
+
+async function reprocessQuestions(rfpId) {
+  var btn = document.getElementById('reprocessQBtn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>Re-extracting...'; }
+  try {
+    const result = await apiCall('POST', '/rfps/' + rfpId + '/emails/reprocess-questions', {});
+    if (result.totalNew > 0) {
+      showToast(result.totalNew + ' new question(s) extracted from received emails!', 'success', 6000);
+      addNotification('questions', 'Questions Extracted', result.totalNew + ' question(s) extracted from email attachments', rfpId, 'qa');
+    } else {
+      showToast('No new questions found in received emails. Check the Communications tab for email content.', 'info', 5000);
+    }
+    rfpTabs.qa(rfpId);
+  } catch(e) {
+    showToast('Re-extraction failed: ' + e.message, 'error');
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-sync"></i>Re-extract'; }
+  }
 }
 
 // --- TAB: PROPOSALS ---
@@ -1682,7 +2010,7 @@ async function createRfp() {
       category: document.getElementById('newRfpCat').value,
       budget: document.getElementById('newRfpBudget').value,
       deadline: document.getElementById('newRfpDeadline').value,
-      scope: desc,
+      scope: '',
       background: desc,
     });
     showToast('RFP created!', 'success');
