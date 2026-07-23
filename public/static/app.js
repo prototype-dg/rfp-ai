@@ -2342,11 +2342,11 @@ pages.reports = async function() {
 // CREATE RFP MODAL (two-step: step 1 = title + arch doc, step 2 = details)
 // ============================================================
 var _createRfpStep = 1;
-var _createRfpArchFile = null;
+var _createRfpDocFiles = [];   // array of { file, label } for all uploaded PDFs
 
 function showCreateRfpModal() {
   _createRfpStep = 1;
-  _createRfpArchFile = null;
+  _createRfpDocFiles = [];
   renderCreateRfpStep1();
 }
 
@@ -2374,14 +2374,11 @@ function renderCreateRfpStep1() {
     + '</div>'
     + '<div class="form-group"><label>Submission Deadline</label><input type="date" id="newRfpDeadline" value="' + getDateOffset(30) + '"></div>'
 
-    // Architecture doc upload
+    // Supporting documents upload — two named slots
     + '<div class="form-group">'
-    + '<label style="display:flex;align-items:center;gap:6px"><i class="fas fa-file-pdf" style="color:#dc2626"></i>Conceptual Solution Architecture (PDF) <span style="font-weight:400;color:#9ca3af;font-size:0.75rem">— Optional but recommended</span></label>'
-    + '<div id="archDocDropzone" onclick="document.getElementById(\'archDocFile\').click()" style="border:2px dashed #d1d5db;border-radius:8px;padding:1.25rem;text-align:center;cursor:pointer;transition:border-color 0.2s;background:#fafafa" onmouseover="this.style.borderColor=\'var(--cpc-gold)\'" onmouseout="this.style.borderColor=\'#d1d5db\'">'
-    + '<i class="fas fa-cloud-upload-alt" style="font-size:1.5rem;color:#d1d5db;display:block;margin-bottom:0.5rem"></i>'
-    + '<div id="archDocLabel" style="font-size:0.82rem;color:#9ca3af">Click to upload Solution Architecture PDF<br><span style="font-size:0.72rem">AI will use this document to generate a more accurate RFP</span></div>'
-    + '</div>'
-    + '<input type="file" id="archDocFile" accept=".pdf" style="display:none" onchange="handleArchDocSelect(event)">'
+    + '<label style="display:flex;align-items:center;gap:6px"><i class="fas fa-file-pdf" style="color:#dc2626"></i>Supporting Documents <span style="font-weight:400;color:#9ca3af;font-size:0.75rem">— Optional. AI will extract context from each PDF.</span></label>'
+    + buildDocUploadSlot('doc0', 'Conceptual Solution Architecture', 'fa-sitemap', '#7c3aed')
+    + buildDocUploadSlot('doc1', 'Business Requirements Document', 'fa-clipboard-list', '#0f3460')
     + '</div>'
 
     + '<div style="display:flex;gap:0.5rem;margin-top:0.5rem">'
@@ -2391,14 +2388,34 @@ function renderCreateRfpStep1() {
   );
 }
 
-function handleArchDocSelect(event) {
+function buildDocUploadSlot(slotId, docLabel, icon, color) {
+  return '<div id="slot-wrap-' + slotId + '" onclick="document.getElementById(\'file-' + slotId + '\').click()" '
+    + 'style="border:2px dashed #d1d5db;border-radius:8px;padding:0.875rem 1rem;display:flex;align-items:center;gap:0.875rem;cursor:pointer;transition:border-color 0.2s;background:#fafafa;margin-bottom:0.5rem" '
+    + 'onmouseover="this.style.borderColor=\'' + color + '\'" onmouseout="if(!document.getElementById(\'file-' + slotId + '\').files.length){this.style.borderColor=\'#d1d5db\'}">'
+    + '<div style="width:36px;height:36px;border-radius:8px;background:' + color + '18;display:flex;align-items:center;justify-content:center;flex-shrink:0">'
+    + '<i class="fas ' + icon + '" style="color:' + color + ';font-size:0.9rem"></i></div>'
+    + '<div style="flex:1;min-width:0">'
+    + '<div style="font-size:0.8rem;font-weight:600;color:#374151">' + docLabel + '</div>'
+    + '<div id="slot-label-' + slotId + '" style="font-size:0.72rem;color:#9ca3af">Click to upload PDF</div>'
+    + '</div>'
+    + '<i class="fas fa-cloud-upload-alt" id="slot-icon-' + slotId + '" style="color:#d1d5db;font-size:1.1rem"></i>'
+    + '</div>'
+    + '<input type="file" id="file-' + slotId + '" accept=".pdf" style="display:none" onchange="handleDocSlotSelect(\'' + slotId + '\',\'' + docLabel + '\',event)">';
+}
+
+function handleDocSlotSelect(slotId, docLabel, event) {
   const file = event.target.files[0];
   if (!file) return;
-  _createRfpArchFile = file;
-  const label = document.getElementById('archDocLabel');
-  const dropzone = document.getElementById('archDocDropzone');
-  if (label) label.innerHTML = '<i class="fas fa-check-circle" style="color:#065f46;margin-right:6px"></i><strong style="color:#065f46">' + escHtml(file.name) + '</strong><br><span style="font-size:0.72rem;color:#9ca3af">' + (file.size/1024).toFixed(1) + ' KB</span>';
-  if (dropzone) dropzone.style.borderColor = '#065f46';
+  // Remove any previous entry for this slot
+  _createRfpDocFiles = _createRfpDocFiles.filter(function(d){ return d.slotId !== slotId; });
+  _createRfpDocFiles.push({ slotId: slotId, file: file, label: docLabel });
+  // Update UI
+  const labelEl = document.getElementById('slot-label-' + slotId);
+  const iconEl  = document.getElementById('slot-icon-' + slotId);
+  const wrapEl  = document.getElementById('slot-wrap-' + slotId);
+  if (labelEl) labelEl.innerHTML = '<strong style="color:#065f46">' + escHtml(file.name) + '</strong> &bull; ' + (file.size/1024).toFixed(1) + ' KB';
+  if (iconEl)  { iconEl.className = 'fas fa-check-circle'; iconEl.style.color = '#065f46'; }
+  if (wrapEl)  wrapEl.style.borderColor = '#065f46';
 }
 
 function goToCreateRfpStep2() {
@@ -2427,7 +2444,12 @@ function goToCreateRfpStep2() {
     + '<div style="flex:1;height:4px;border-radius:0 4px 4px 0;background:var(--cpc-gold)"></div>'
     + '</div>'
 
-    + (_createRfpArchFile ? '<div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:6px;padding:0.5rem 0.75rem;font-size:0.78rem;color:#065f46;margin-bottom:1rem"><i class="fas fa-file-pdf mr-1"></i><strong>' + escHtml(_createRfpArchFile.name) + '</strong> will be uploaded and used by AI to generate a more accurate RFP document.</div>' : '')
+    + (_createRfpDocFiles.length > 0
+      ? '<div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:8px;padding:0.625rem 0.875rem;font-size:0.78rem;color:#065f46;margin-bottom:1rem">'
+        + '<div style="font-weight:700;margin-bottom:4px"><i class="fas fa-file-pdf mr-1"></i>' + _createRfpDocFiles.length + ' document(s) will be uploaded &amp; used by AI:</div>'
+        + _createRfpDocFiles.map(function(d){ return '<div style="padding-left:1rem">• <strong>' + escHtml(d.label) + '</strong>: ' + escHtml(d.file.name) + ' (' + (d.file.size/1024).toFixed(1) + ' KB)</div>'; }).join('')
+        + '</div>'
+      : '')
 
     + '<div class="form-group"><label>Project Background</label><textarea id="newRfpBg" rows="3" placeholder="Describe the current situation and drivers..."></textarea></div>'
     + '<div class="form-group"><label>Key Objectives</label><textarea id="newRfpObj" rows="3" placeholder="List the key objectives by phase (e.g. Phase 1: Digitalise core processes...)"></textarea></div>'
@@ -2458,27 +2480,33 @@ async function createRfp() {
       tech_requirements: document.getElementById('newRfpTech') ? document.getElementById('newRfpTech').value : '',
     });
 
-    // If arch doc selected, upload it
-    if (_createRfpArchFile) {
-      try {
-        setLoading(btn, true, 'Uploading Architecture Doc...');
-        const formData = new FormData();
-        formData.append('file', _createRfpArchFile);
-        const uploadRes = await fetch(API + '/rfps/' + rfp.id + '/upload-arch-doc', {
-          method: 'POST',
-          body: formData,
-        });
-        if (uploadRes.ok) {
-          showToast('Architecture document uploaded and processed!', 'success', 4000);
+    // Upload each supporting document in sequence
+    if (_createRfpDocFiles.length > 0) {
+      setLoading(btn, true, 'Uploading Documents...');
+      let uploadedCount = 0;
+      for (var di = 0; di < _createRfpDocFiles.length; di++) {
+        var docEntry = _createRfpDocFiles[di];
+        try {
+          const formData = new FormData();
+          formData.append('file', docEntry.file);
+          formData.append('doc_label', docEntry.label);
+          const uploadRes = await fetch(API + '/rfps/' + rfp.id + '/upload-arch-doc', {
+            method: 'POST',
+            body: formData,
+          });
+          if (uploadRes.ok) uploadedCount++;
+        } catch(uploadErr) {
+          showToast('Could not upload "' + docEntry.label + '": ' + uploadErr.message, 'info', 4000);
         }
-      } catch(uploadErr) {
-        showToast('RFP created, but architecture doc upload failed: ' + uploadErr.message, 'info', 5000);
+      }
+      if (uploadedCount > 0) {
+        showToast(uploadedCount + ' document(s) uploaded — AI will use them during RFP generation.', 'success', 5000);
       }
     }
 
     showToast('RFP created! Go to Generate tab to produce the AI document.', 'success');
     closeModal();
-    _createRfpArchFile = null;
+    _createRfpDocFiles = [];
     window._rfpStep1 = null;
     navigateTo('rfp_detail', { rfpId: rfp.id, tab: 'generate' });
   } catch(e) {
