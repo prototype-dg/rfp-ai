@@ -593,29 +593,179 @@ async function advanceRfpStage(rfpId, stage) {
 }
 
 function downloadRfpPdf(rfpId) {
-  const rfp = appState.currentRfp;
+  var rfp = appState.currentRfp;
   if (!rfp || !rfp.content) {
     showToast('Please generate the RFP document first', 'error');
     return;
   }
-  // Use browser print-to-PDF
-  const printWin = window.open('', '_blank', 'width=900,height=700');
+  var printWin = window.open('', '_blank', 'width=960,height=800');
   if (!printWin) { showToast('Please allow popups for PDF download', 'error'); return; }
-  printWin.document.write('<html><head><title>' + escHtml(rfp.title||'RFP') + '</title>');
-  printWin.document.write('<style>');
-  printWin.document.write('body{font-family:Georgia,serif;margin:0;padding:0;background:white;color:#1a1a1a}');
-  printWin.document.write(':root{--cpc-navy:#1a1a2e;--cpc-blue:#0f3460;--cpc-gold:#c9a84c;--cpc-gold-light:#e8c96e}');
-  // copy all stylesheet text
-  const allStyles = Array.from(document.styleSheets).map(function(ss) {
-    try { return Array.from(ss.cssRules).map(function(r){ return r.cssText; }).join('\n'); }
-    catch(e){ return ''; }
-  }).join('\n');
-  printWin.document.write(allStyles);
-  printWin.document.write('</style></head><body>');
+
+  var css = [
+    /* ── Base & fonts ── */
+    "@import url('https://fonts.googleapis.com/css2?family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&family=Source+Sans+Pro:wght@300;400;600;700&display=swap');",
+    ":root{--cpc-navy:#0a1128;--cpc-blue:#0f3460;--cpc-blue2:#163A6A;--cpc-gold:#C8952A;--cpc-gold-light:#E5B84A;--cpc-cream:#F7F4EE;--cpc-rule:#D0C098;}",
+    "*{box-sizing:border-box;margin:0;padding:0;}",
+    "body{font-family:'Source Sans Pro','Segoe UI',Arial,sans-serif;font-size:10.5pt;color:#1a1a1a;background:white;-webkit-print-color-adjust:exact;print-color-adjust:exact;}",
+
+    /* ── Page layout ── */
+    "@page{size:A4;margin:0;}",
+    "@page:first{margin:0;}",
+
+    /* ══════════════════════════════════════
+       COVER PAGE — matches CPC reference doc
+       ══════════════════════════════════════ */
+    ".rfp-doc{max-width:100%;margin:0;}",
+
+    /* Cover wrapper — full A4 page, dark gradient */
+    ".rfp-cover{",
+      "display:flex;flex-direction:column;align-items:center;",
+      "min-height:297mm;width:210mm;",
+      "background:linear-gradient(160deg,#05091a 0%,#0a1a40 40%,#0f3460 70%,#122650 100%);",
+      "color:white;position:relative;overflow:hidden;page-break-after:always;",
+    "}",
+
+    /* Decorative diagonal stripe overlay */
+    ".rfp-cover::before{",
+      "content:'';position:absolute;top:0;left:0;right:0;bottom:0;",
+      "background:repeating-linear-gradient(135deg,rgba(200,149,42,0.03) 0px,rgba(200,149,42,0.03) 1px,transparent 1px,transparent 60px);",
+      "pointer-events:none;",
+    "}",
+
+    /* Top accent bar */
+    ".rfp-cover::after{",
+      "content:'';position:absolute;top:0;left:0;right:0;height:6px;",
+      "background:linear-gradient(90deg,var(--cpc-gold),var(--cpc-gold-light),var(--cpc-gold));",
+    "}",
+
+    /* Logo row */
+    ".rfp-cover-logo{",
+      "display:flex;align-items:center;gap:18px;",
+      "width:100%;padding:42pt 36pt 22pt;",
+      "border-bottom:1px solid rgba(200,149,42,0.3);",
+      "position:relative;z-index:1;",
+    "}",
+
+    /* Emblem circle */
+    ".rfp-logo-emblem{",
+      "width:72pt;height:72pt;border-radius:50%;",
+      "background:rgba(200,149,42,0.12);",
+      "border:2px solid rgba(200,149,42,0.55);",
+      "display:flex;align-items:center;justify-content:center;",
+      "flex-shrink:0;",
+    "}",
+    ".rfp-logo-emblem svg{display:block;}",
+
+    /* Text stack */
+    ".rfp-logo-text{display:flex;flex-direction:column;gap:3px;}",
+    ".rfp-logo-text .rfp-org-name{font-family:'Libre Baskerville',Georgia,serif;font-size:15pt;font-weight:700;color:white;letter-spacing:0.04em;}",
+    ".rfp-logo-text .rfp-org-arabic{font-size:12pt;color:var(--cpc-gold-light);direction:rtl;letter-spacing:0.02em;}",
+    ".rfp-logo-text .rfp-org-sub{font-size:8pt;color:#93c5fd;letter-spacing:0.05em;font-weight:300;}",
+
+    /* Gold divider */
+    ".rfp-cover-divider{",
+      "width:calc(100% - 72pt);height:1.5pt;",
+      "background:linear-gradient(90deg,transparent,var(--cpc-gold) 20%,var(--cpc-gold-light) 50%,var(--cpc-gold) 80%,transparent);",
+      "margin:0 36pt;flex-shrink:0;position:relative;z-index:1;",
+    "}",
+
+    /* Central body */
+    ".rfp-cover-body{",
+      "flex:1;display:flex;flex-direction:column;",
+      "align-items:center;justify-content:center;",
+      "padding:40pt 48pt;text-align:center;width:100%;",
+      "position:relative;z-index:1;",
+    "}",
+    ".rfp-cover-body .rfp-doc-type{",
+      "font-size:8pt;font-weight:700;letter-spacing:0.25em;",
+      "color:var(--cpc-gold-light);text-transform:uppercase;",
+      "border:1px solid rgba(200,149,42,0.45);",
+      "padding:5pt 18pt;border-radius:20pt;display:inline-block;margin-bottom:22pt;",
+    "}",
+    ".rfp-cover-body .rfp-doc-title{",
+      "font-family:'Libre Baskerville',Georgia,serif;",
+      "font-size:22pt;font-weight:700;line-height:1.3;",
+      "color:white;margin:0 0 10pt;text-shadow:0 2px 12px rgba(0,0,0,0.4);",
+    "}",
+    ".rfp-cover-body .rfp-doc-subtitle{font-size:11pt;color:#bfdbfe;margin:0 0 8pt;}",
+    ".rfp-cover-body .rfp-doc-date{font-size:8.5pt;color:#93c5fd;letter-spacing:0.12em;}",
+
+    /* Confidential footer bar */
+    ".rfp-cover-footer-bar{",
+      "width:100%;",
+      "background:rgba(0,0,0,0.5);",
+      "border-top:1px solid rgba(200,149,42,0.35);",
+      "padding:10pt 36pt;",
+      "font-size:7.5pt;color:var(--cpc-gold-light);",
+      "letter-spacing:0.14em;text-align:center;",
+      "font-weight:700;text-transform:uppercase;",
+      "position:relative;z-index:1;",
+    "}",
+
+    /* ══════════════════════════════════════
+       INTERIOR PAGES — running header/footer
+       ══════════════════════════════════════ */
+    ".rfp-meta-table,",
+    ".rfp-toc,",
+    ".rfp-section,",
+    ".rfp-footer{",
+      "padding-left:28pt;padding-right:28pt;",
+    "}",
+
+    /* Meta summary table */
+    ".rfp-meta-table{width:100%;border-collapse:collapse;margin:0;font-size:9pt;}",
+    ".rfp-meta-table th{background:#0f3460;color:white;padding:7pt 10pt;font-family:'Source Sans Pro',sans-serif;font-weight:700;font-size:8.5pt;border:1pt solid #1e4a80;text-transform:none;letter-spacing:0;}",
+    ".rfp-meta-table td{background:white;padding:7pt 10pt;font-size:9pt;border:1pt solid #d1d5db;vertical-align:top;}",
+
+    /* TOC */
+    ".rfp-toc{padding-top:18pt;padding-bottom:18pt;background:var(--cpc-cream);}",
+    ".rfp-toc-item{display:flex;justify-content:space-between;padding:4pt 0;font-size:9.5pt;color:#0f3460;border-bottom:0.5pt dotted #c8952a;}",
+    ".rfp-section-title{font-family:'Libre Baskerville',Georgia,serif;font-size:10.5pt;font-weight:700;color:#0a1128;margin-bottom:8pt;}",
+
+    /* Section body */
+    ".rfp-section{display:flex;gap:14pt;padding-top:18pt;padding-bottom:18pt;border-bottom:0.5pt solid #e5e7eb;}",
+    ".rfp-section-num{width:32pt;height:32pt;border-radius:50%;background:var(--cpc-gold);color:#0a1128;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:11pt;flex-shrink:0;margin-top:2pt;}",
+    ".rfp-section-body{flex:1;}",
+    ".rfp-section-body .rfp-section-title{font-size:12pt;color:#0a1128;margin-bottom:7pt;}",
+    ".rfp-section p{font-size:9.5pt;line-height:1.75;margin:0 0 7pt;}",
+    ".rfp-section ul{margin:4pt 0 7pt 16pt;}",
+    ".rfp-section li{font-size:9.5pt;line-height:1.7;margin-bottom:2pt;}",
+
+    /* Subsections */
+    ".rfp-subsection{margin:10pt 0 5pt;}",
+    ".rfp-subsection-title{font-size:9.5pt;font-weight:700;color:#0f3460;margin-bottom:5pt;padding-left:6pt;border-left:2.5pt solid var(--cpc-gold);}",
+
+    /* Deliverables box */
+    ".rfp-deliverables{background:#fffbeb;border:0.75pt solid #fde68a;border-radius:4pt;padding:6pt 10pt;font-size:8.5pt;color:#374151;margin-top:5pt;line-height:1.65;}",
+
+    /* Spec tables */
+    ".rfp-spec-table{width:100%;border-collapse:collapse;margin:8pt 0;font-size:9pt;}",
+    ".rfp-spec-table th{background:#0a1128;color:white;padding:6pt 10pt;font-weight:700;text-transform:none;letter-spacing:0;font-size:8.5pt;}",
+    ".rfp-spec-table td{padding:5.5pt 10pt;border:0.75pt solid #e5e7eb;line-height:1.5;}",
+    ".rfp-spec-table tr:nth-child(even) td{background:#f8f6f0;}",
+
+    /* Footer */
+    ".rfp-footer{background:#0a1128;color:white;padding:14pt 28pt;text-align:center;font-size:8pt;line-height:1.9;}",
+
+    /* Print control */
+    "@media print{",
+      ".rfp-cover{page-break-after:always;-webkit-print-color-adjust:exact;print-color-adjust:exact;}",
+      ".rfp-section{page-break-inside:avoid;}",
+      "h2,h3,.rfp-section-title{page-break-after:avoid;}",
+      "@page{margin:12mm 15mm 16mm 15mm;}",
+      "@page:first{margin:0;}",
+    "}"
+  ].join('\n');
+
+  printWin.document.write('<!DOCTYPE html><html><head>');
+  printWin.document.write('<meta charset="UTF-8">');
+  printWin.document.write('<title>' + (rfp.title || 'RFP') + '</title>');
+  printWin.document.write('<style>' + css + '</style>');
+  printWin.document.write('</head><body>');
   printWin.document.write(rfp.content);
   printWin.document.write('</body></html>');
   printWin.document.close();
-  setTimeout(function() { printWin.print(); }, 600);
+  setTimeout(function() { printWin.print(); }, 900);
 }
 
 // --- TAB: VENDORS ---

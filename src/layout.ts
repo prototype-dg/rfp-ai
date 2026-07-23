@@ -202,7 +202,7 @@ export function getLayout(): string {
 
     /* ===== RFP DOCUMENT STYLES ===== */
     .rfp-doc { font-family:'Georgia',serif; color:#1a1a1a; max-width:860px; margin:0 auto; background:white; }
-    .rfp-cover { text-align:center; padding:3rem 2rem 2.5rem; border-bottom:4px solid var(--cpc-gold); background:linear-gradient(135deg,var(--cpc-navy) 0%,var(--cpc-blue) 100%); color:white; border-radius:8px 8px 0 0; }
+    /* .rfp-cover base overridden by new structured block below */
     .rfp-emblem { font-size:3.5rem; margin-bottom:0.5rem; }
     .rfp-org-name { font-size:1.4rem; font-weight:700; letter-spacing:0.04em; }
     .rfp-org-arabic { font-size:1.1rem; margin-top:0.25rem; color:var(--cpc-gold-light); }
@@ -231,6 +231,67 @@ export function getLayout(): string {
     .rfp-spec-table td { padding:0.6rem 0.875rem; border:1px solid #e5e7eb; line-height:1.5; }
     .rfp-spec-table tr:nth-child(even) td { background:#f9fafb; }
     .rfp-footer { background:var(--cpc-navy); color:white; padding:1.25rem 2rem; text-align:center; font-size:0.82rem; line-height:1.8; border-radius:0 0 8px 8px; }
+
+    /* ===== RFP COVER — new structured layout ===== */
+    /* Outer cover: dark gradient full-bleed */
+    .rfp-cover {
+      display:flex; flex-direction:column; align-items:center;
+      padding:0; border-bottom:4px solid var(--cpc-gold);
+      background:linear-gradient(160deg,#0a0f1e 0%,#0f3460 55%,#1a1a2e 100%);
+      color:white; border-radius:8px 8px 0 0; overflow:hidden;
+      min-height:420px; position:relative;
+    }
+    /* Logo row: emblem + text side by side */
+    .rfp-cover-logo {
+      display:flex; align-items:center; gap:1.25rem;
+      padding:2.5rem 2.5rem 1.5rem; width:100%;
+      border-bottom:1px solid rgba(201,168,76,0.25);
+    }
+    /* SVG emblem circle container */
+    .rfp-logo-emblem {
+      width:80px; height:80px; border-radius:50%;
+      background:rgba(201,168,76,0.1);
+      border:2px solid rgba(201,168,76,0.5);
+      display:flex; align-items:center; justify-content:center;
+      flex-shrink:0;
+    }
+    /* Text stack next to emblem */
+    .rfp-logo-text { display:flex; flex-direction:column; gap:2px; }
+    .rfp-logo-text .rfp-org-name { font-size:1.25rem; font-weight:700; letter-spacing:0.04em; color:white; margin:0; }
+    .rfp-logo-text .rfp-org-arabic { font-size:1rem; color:var(--cpc-gold-light); margin:0; direction:rtl; }
+    .rfp-logo-text .rfp-org-sub { font-size:0.78rem; color:#bfdbfe; margin:0; letter-spacing:0.03em; }
+    /* Gold divider rule */
+    .rfp-cover-divider {
+      width:calc(100% - 5rem); height:2px;
+      background:linear-gradient(90deg,transparent,var(--cpc-gold),transparent);
+      margin:0 2.5rem; flex-shrink:0;
+    }
+    /* Central body: type + title + date */
+    .rfp-cover-body {
+      flex:1; display:flex; flex-direction:column;
+      align-items:center; justify-content:center;
+      padding:2rem 2.5rem; text-align:center; width:100%;
+    }
+    .rfp-cover-body .rfp-doc-type {
+      font-size:0.82rem; font-weight:800; letter-spacing:0.22em;
+      color:var(--cpc-gold-light); text-transform:uppercase;
+      border:1px solid rgba(201,168,76,0.4);
+      padding:0.3rem 1.1rem; border-radius:20px; display:inline-block; margin-bottom:1rem;
+    }
+    .rfp-cover-body .rfp-doc-title {
+      font-size:1.65rem; font-weight:700; line-height:1.3;
+      color:white; margin:0 0 0.6rem; text-shadow:0 2px 8px rgba(0,0,0,0.3);
+    }
+    .rfp-cover-body .rfp-doc-subtitle { font-size:0.9rem; color:#bfdbfe; margin:0 0 0.75rem; }
+    .rfp-cover-body .rfp-doc-date { font-size:0.8rem; color:#93c5fd; letter-spacing:0.1em; margin:0; }
+    /* Footer bar across full width */
+    .rfp-cover-footer-bar {
+      width:100%; background:rgba(0,0,0,0.45);
+      border-top:1px solid rgba(201,168,76,0.3);
+      padding:0.65rem 2.5rem; font-size:0.74rem;
+      color:var(--cpc-gold-light); letter-spacing:0.1em;
+      text-align:center; font-weight:600; text-transform:uppercase;
+    }
 
     /* Chart placeholder */
     .mini-bar { display:flex; align-items:flex-end; gap:6px; height:60px; }
