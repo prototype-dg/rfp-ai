@@ -754,11 +754,11 @@ async function generateRfpDoc(rfpId) {
     };
     const result = await apiCall('POST', '/rfps/' + rfpId + '/generate', data);
     appState.currentRfp = result;
-    document.getElementById('pageSubtitle').textContent = (result.ref_number||'') + ' \u2022 ' + stageLabelMap(result.stage||'draft');
-    document.getElementById('rfpPreviewArea').innerHTML = result.content || '';
     showToast('RFP document generated!', 'success');
-    // refresh tab buttons
+    // Re-render the whole generate tab so hasContent=true — this makes
+    // Download PDF + Publish RFP buttons appear immediately without a tab switch.
     renderRfpTabs('generate', rfpId, appState.unreadQA);
+    rfpTabs.generate(rfpId, result);
   } catch(e) {
     // error shown by apiCall
   } finally {

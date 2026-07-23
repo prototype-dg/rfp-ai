@@ -172,8 +172,8 @@ apiRouter.post('/rfps/:id/upload-arch-doc', async (c) => {
     const arrayBuffer = await file.arrayBuffer()
     const bytes = new Uint8Array(arrayBuffer)
 
-    // Extract text from PDF bytes (text layer extraction)
-    const pdfText = extractPdfText(bytes)
+    // Extract text from PDF bytes (handles both compressed and uncompressed PDFs)
+    const pdfText = await extractPdfText(bytes)
 
     // Store the extracted text (and base64 of file for later viewing)
     await c.env.DB.prepare(`
@@ -662,7 +662,7 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
               pdfBase64 = uint8ToBase64(new Uint8Array(fileBuffer))
               // Extract text from PDF for duration parsing
               const pdfBytes = new Uint8Array(fileBuffer)
-              const pdfText = extractPdfText(pdfBytes)
+              const pdfText = await extractPdfText(pdfBytes)
               // Parse proposed duration from PDF text or email body
               proposedDuration = extractProposedDuration(pdfText + '\n' + bodyText)
             }
@@ -1440,66 +1440,149 @@ function simulateVendorEvaluation(p: any, isEPAM: boolean): { scores: any, scori
 
 // ============================================================
 // HELPERS — PDF TEXT EXTRACTION (text layer)
+// Supports both uncompressed and FlateDecode-compressed streams
+// using the Workers-native DecompressionStream('deflate-raw') API.
 // ============================================================
-function extractPdfText(bytes: Uint8Array): string {
-  try {
-    // Extract readable text streams from PDF binary
-    // PDFs contain text in stream objects between 'stream' and 'endstream' markers
-    const text = new TextDecoder('latin1').decode(bytes)
-    const lines: string[] = []
 
-    // Extract text from BT (Begin Text) ... ET (End Text) blocks
+/** Inflate a DEFLATE (FlateDecode) byte stream using the native Workers API. */
+async function inflatePdfStream(compressed: Uint8Array): Promise<Uint8Array> {
+  // PDF FlateDecode uses raw DEFLATE (zlib header + data). We try deflate-raw
+  // first (strips 2-byte zlib header); if that fails, try 'deflate' (with header).
+  for (const format of ['deflate-raw', 'deflate'] as const) {
+    try {
+      const ds = new DecompressionStream(format)
+      const writer = ds.writable.getWriter()
+      const reader = ds.readable.getReader()
+      await writer.write(compressed)
+      await writer.close()
+      const chunks: Uint8Array[] = []
+      let totalLen = 0
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        chunks.push(value)
+        totalLen += value.length
+      }
+      const result = new Uint8Array(totalLen)
+      let offset = 0
+      for (const chunk of chunks) { result.set(chunk, offset); offset += chunk.length }
+      return result
+    } catch (_) { /* try next format */ }
+  }
+  return new Uint8Array(0)
+}
+
+/** Extract printable text from a decompressed PDF stream buffer.
+ *  Handles both Latin-1 (legacy) and UTF-16BE (FEFF BOM) encodings. */
+function extractTextFromStreamBytes(buf: Uint8Array): string {
+  // Detect UTF-16BE (starts with FEFF BOM)
+  if (buf.length >= 2 && buf[0] === 0xFE && buf[1] === 0xFF) {
+    try {
+      const utf16text = new TextDecoder('utf-16be').decode(buf.slice(2))
+      return utf16text.replace(/[^\x20-\x7E\n\r\t\u0600-\u06FF]/g, ' ')
+    } catch (_) { /* fall through */ }
+  }
+  const latin = new TextDecoder('latin1').decode(buf)
+  const lines: string[] = []
+
+  // BT...ET text blocks with Tj / TJ operators
+  const btRegex = /BT\s*([\s\S]*?)\s*ET/g
+  let btMatch: RegExpExecArray | null
+  while ((btMatch = btRegex.exec(latin)) !== null) {
+    const block = btMatch[1]
+    const tjRegex = /\(((?:[^()\\]|\\[\s\S])*)\)\s*Tj/g
+    let m: RegExpExecArray | null
+    while ((m = tjRegex.exec(block)) !== null) {
+      lines.push(m[1].replace(/\\n/g,'\n').replace(/\\r/g,'\r').replace(/\\\(/g,'(').replace(/\\\)/g,')').replace(/\\\\/g,'\\'))
+    }
+    const arrRegex = /\[((?:[^\[\]]*\([^()]*\)[^\[\]]*)*)\]\s*TJ/g
+    while ((m = arrRegex.exec(block)) !== null) {
+      const inner = m[1].match(/\(([^()]*)\)/g) || []
+      for (const p of inner) lines.push(p.slice(1,-1))
+    }
+  }
+
+  // If no BT/ET found, treat the whole stream as plain text (for some stream types)
+  if (lines.length === 0) {
+    const words = latin.match(/[A-Za-z][A-Za-z0-9 .,;:!?()\-']{8,}/g) || []
+    lines.push(...words)
+  }
+  return lines.join(' ').replace(/\s+/g,' ').replace(/[^\x20-\x7E\n]/g,' ').trim()
+}
+
+async function extractPdfText(bytes: Uint8Array): Promise<string> {
+  try {
+    const latin = new TextDecoder('latin1').decode(bytes)
+    const collectedText: string[] = []
+
+    // --- Pass 1: uncompressed BT/ET text blocks (for PDFs without compression) ---
     const btRegex = /BT\s*([\s\S]*?)\s*ET/g
     let btMatch: RegExpExecArray | null
-    while ((btMatch = btRegex.exec(text)) !== null) {
+    while ((btMatch = btRegex.exec(latin)) !== null) {
       const block = btMatch[1]
-      // Extract Tj and TJ operators (text show)
       const tjRegex = /\(((?:[^()\\]|\\[\s\S])*)\)\s*Tj/g
-      let tjMatch: RegExpExecArray | null
-      while ((tjMatch = tjRegex.exec(block)) !== null) {
-        const decoded = tjMatch[1]
-          .replace(/\\n/g, '\n')
-          .replace(/\\r/g, '\r')
-          .replace(/\\t/g, '\t')
-          .replace(/\\\(/g, '(')
-          .replace(/\\\)/g, ')')
-          .replace(/\\\\/g, '\\')
-        lines.push(decoded)
+      let m: RegExpExecArray | null
+      while ((m = tjRegex.exec(block)) !== null) {
+        collectedText.push(m[1].replace(/\\n/g,'\n').replace(/\\\(/g,'(').replace(/\\\)/g,')').replace(/\\\\/g,'\\'))
       }
-      // Array form: [(text) ... ] TJ
       const arrRegex = /\[((?:[^\[\]]*\([^()]*\)[^\[\]]*)*)\]\s*TJ/g
-      let arrMatch: RegExpExecArray | null
-      while ((arrMatch = arrRegex.exec(block)) !== null) {
-        const innerParens = arrMatch[1].match(/\(([^()]*)\)/g) || []
-        for (const p of innerParens) {
-          lines.push(p.slice(1,-1))
-        }
+      while ((m = arrRegex.exec(block)) !== null) {
+        const inner = m[1].match(/\(([^()]*)\)/g) || []
+        for (const p of inner) collectedText.push(p.slice(1,-1))
       }
     }
 
-    // Also try to extract from raw stream data (for newer PDFs)
-    const streamRegex = /stream\r?\n([\s\S]*?)\r?\nendstream/g
-    let streamMatch: RegExpExecArray | null
-    while ((streamMatch = streamRegex.exec(text)) !== null) {
-      const streamContent = streamMatch[1]
-      // Only process uncompressed streams (no FlateDecode)
-      if (!text.slice(Math.max(0, streamMatch.index - 200), streamMatch.index).includes('FlateDecode')) {
-        const words = streamContent.match(/[A-Za-z][A-Za-z0-9\s.,;:!?()'-]{10,}/g) || []
-        lines.push(...words)
+    // --- Pass 2: decompress FlateDecode streams ---
+    // Locate each stream object header and extract compressed payload
+    const streamStartRe = /stream\r?\n/g
+    const streamEndMarker = 'endstream'
+    let sMatch: RegExpExecArray | null
+    let streamCount = 0
+    while ((sMatch = streamStartRe.exec(latin)) !== null && streamCount < 80) {
+      streamCount++
+      const headerStart = Math.max(0, sMatch.index - 400)
+      const headerSlice = latin.slice(headerStart, sMatch.index)
+
+      // Only decompress FlateDecode streams
+      if (!headerSlice.includes('FlateDecode')) continue
+
+      // Try to find Length from the object dictionary
+      const lenMatch = headerSlice.match(/\/Length\s+(\d+)/)
+      const dataStart = sMatch.index + sMatch[0].length
+
+      let compressedBytes: Uint8Array
+      if (lenMatch) {
+        const declaredLen = parseInt(lenMatch[1], 10)
+        if (declaredLen <= 0 || declaredLen > 2_000_000) continue
+        compressedBytes = bytes.slice(dataStart, dataStart + declaredLen)
+      } else {
+        // Fallback: scan for 'endstream' marker in latin string
+        const endIdx = latin.indexOf(streamEndMarker, dataStart)
+        if (endIdx < 0 || endIdx - dataStart > 2_000_000) continue
+        // Strip trailing \r\n before endstream
+        let endPos = endIdx
+        if (endPos > 0 && latin[endPos-1] === '\n') endPos--
+        if (endPos > 0 && latin[endPos-1] === '\r') endPos--
+        compressedBytes = bytes.slice(dataStart, endPos)
       }
+
+      if (compressedBytes.length < 4) continue
+
+      const decompressed = await inflatePdfStream(compressedBytes)
+      if (decompressed.length === 0) continue
+
+      const streamText = extractTextFromStreamBytes(decompressed)
+      if (streamText.length > 10) collectedText.push(streamText)
     }
 
-    const result = lines.join(' ')
-      .replace(/\s+/g, ' ')
-      .replace(/[^\x20-\x7E\n]/g, ' ')
-      .trim()
+    const combined = collectedText.join(' ').replace(/\s+/g,' ').replace(/[^\x20-\x7E\n]/g,' ').trim()
+    if (combined.length > 100) return combined.slice(0, 8000)
 
-    if (result.length > 100) return result.slice(0, 8000)
-
-    // Last resort: extract any ASCII text-like sequences
-    const asciiWords = text.match(/[A-Za-z][A-Za-z0-9\s.,;:!?()'-]{20,}/g) || []
+    // --- Last resort: ASCII word sequences from raw bytes ---
+    const asciiWords = latin.match(/[A-Za-z][A-Za-z0-9 .,;:!?()\-']{20,}/g) || []
     return asciiWords.slice(0, 200).join(' ').slice(0, 8000)
-  } catch(_) {
+  } catch(err) {
+    console.error('[extractPdfText] error:', err)
     return ''
   }
 }
