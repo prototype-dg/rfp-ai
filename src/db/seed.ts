@@ -1,6 +1,6 @@
 export async function initDb(db: D1Database) {
-  await db.exec(`
-    CREATE TABLE IF NOT EXISTS rfps (
+  const statements = [
+    `CREATE TABLE IF NOT EXISTS rfps (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       title TEXT,
       category TEXT,
@@ -12,9 +12,8 @@ export async function initDb(db: D1Database) {
       stage TEXT DEFAULT 'draft',
       created_at TEXT,
       updated_at TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS vendors (
+    )`,
+    `CREATE TABLE IF NOT EXISTS vendors (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
       category TEXT,
@@ -28,18 +27,16 @@ export async function initDb(db: D1Database) {
       shortlisted INTEGER DEFAULT 0,
       fit_score INTEGER,
       fit_rationale TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS questions (
+    )`,
+    `CREATE TABLE IF NOT EXISTS questions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       question TEXT NOT NULL,
       answer TEXT,
       vendor_id INTEGER,
       published INTEGER DEFAULT 0,
       created_at TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS proposals (
+    )`,
+    `CREATE TABLE IF NOT EXISTS proposals (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       vendor_id INTEGER,
       technical_proposal TEXT,
@@ -47,9 +44,8 @@ export async function initDb(db: D1Database) {
       technical_score REAL,
       status TEXT DEFAULT 'submitted',
       created_at TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS evaluations (
+    )`,
+    `CREATE TABLE IF NOT EXISTS evaluations (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       proposal_id INTEGER,
       vendor_id INTEGER,
@@ -59,17 +55,15 @@ export async function initDb(db: D1Database) {
       total_score REAL,
       ai_summary TEXT,
       created_at TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS recommendations (
+    )`,
+    `CREATE TABLE IF NOT EXISTS recommendations (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       top_vendor TEXT,
       rankings_json TEXT,
       summary TEXT,
       created_at TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS email_log (
+    )`,
+    `CREATE TABLE IF NOT EXISTS email_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       vendor_id INTEGER,
       recipient TEXT,
@@ -78,8 +72,12 @@ export async function initDb(db: D1Database) {
       email_type TEXT,
       status TEXT DEFAULT 'simulated',
       created_at TEXT
-    );
-  `)
+    )`,
+  ]
+
+  for (const sql of statements) {
+    await db.prepare(sql).run()
+  }
 }
 
 export async function seedVendors(db: D1Database) {
@@ -106,9 +104,9 @@ export async function seedVendors(db: D1Database) {
   ]
 
   for (const v of vendors) {
-    await db.prepare(`
-      INSERT INTO vendors (name, category, country, size, contact_name, contact_email, specializations, certifications, erp_experience)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).bind(v.name, v.category, v.country, v.size, v.contact_name, v.contact_email, v.specializations, v.certifications, v.erp_experience).run()
+    await db.prepare(
+      `INSERT INTO vendors (name, category, country, size, contact_name, contact_email, specializations, certifications, erp_experience)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(v.name, v.category, v.country, v.size, v.contact_name, v.contact_email, v.specializations, v.certifications, v.erp_experience).run()
   }
 }
