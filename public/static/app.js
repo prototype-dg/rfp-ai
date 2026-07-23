@@ -1,10 +1,14 @@
 // ============================================================
-// CPC RFP TOOL - Main Application JS (external static file)
+// CPC RFP TOOL — Multi-RFP Frontend
 // ============================================================
+'use strict';
 const API = '/api';
-let currentPage = 'dashboard';
-let appState = {
-  rfp: null,
+
+var appState = {
+  currentPage: 'dashboard',
+  currentRfpId: null,
+  currentRfpTab: 'generate',
+  rfps: [],
   vendors: [],
   questions: [],
   proposals: [],
@@ -13,25 +17,76 @@ let appState = {
 };
 
 // ============================================================
-// Utilities
+// UTILITIES
 // ============================================================
 function showToast(msg, type) {
   type = type || 'info';
-  const t = document.getElementById('toast');
+  var t = document.getElementById('toast');
   t.textContent = msg;
   t.className = 'toast show ' + type;
-  setTimeout(function() { t.className = 'toast'; }, 3500);
+  setTimeout(function() { t.className = 'toast'; }, 3800);
 }
 
 function showModal(html) {
   document.getElementById('modalContent').innerHTML = html;
   document.getElementById('modalOverlay').classList.add('open');
 }
-
 function closeModal() {
   document.getElementById('modalOverlay').classList.remove('open');
 }
 
+function escHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function scoreBar(val) {
+  return '<div class="score-bar"><div class="score-fill" style="width:' + (val||0) + '%"></div></div>';
+}
+
+function stageBadgeHtml(stage) {
+  var labels = {
+    draft:'Draft', published:'Published', qa_open:'Q&amp;A Open',
+    submissions_closed:'Submissions Closed', evaluation:'Evaluation', awarded:'Awarded'
+  };
+  var cls = 'stage-' + (stage||'draft');
+  return '<span class="stage-badge ' + cls + '">' + (labels[stage]||stage) + '</span>';
+}
+
+function setLoading(el, loading, text) {
+  if (!el) return;
+  if (loading) {
+    el.disabled = true;
+    el.dataset.origHtml = el.innerHTML;
+    el.innerHTML = '<span class="spinner" style="margin-right:6px;width:14px;height:14px;border-width:2px"></span>' + (text||'Processing...');
+  } else {
+    el.disabled = false;
+    el.innerHTML = el.dataset.origHtml || text || '';
+  }
+}
+
+function setContent(html) {
+  document.getElementById('pageContent').innerHTML = html;
+}
+
+async function apiCall(method, path, data) {
+  try {
+    var opts = { method: method, headers: { 'Content-Type': 'application/json' } };
+    if (data) opts.body = JSON.stringify(data);
+    var r = await fetch(API + path, opts);
+    var json = await r.json();
+    if (!r.ok) throw new Error(json.error || json.message || 'Request failed ' + r.status);
+    return json;
+  } catch(e) {
+    showToast(e.message, 'error');
+    throw e;
+  }
+}
+
+// ============================================================
+// NAVIGATION
+// ============================================================
 document.getElementById('modalOverlay').addEventListener('click', function(e) {
   if (e.target.id === 'modalOverlay') closeModal();
 });
@@ -40,567 +95,668 @@ document.getElementById('headerDate').textContent = new Date().toLocaleDateStrin
   weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
 });
 
-async function apiCall(method, path, data) {
-  try {
-    const opts = { method: method, headers: { 'Content-Type': 'application/json' } };
-    if (data) opts.body = JSON.stringify(data);
-    const r = await fetch(API + path, opts);
-    const json = await r.json();
-    if (!r.ok) throw new Error(json.error || json.message || 'Request failed');
-    return json;
-  } catch(e) {
-    showToast(e.message, 'error');
-    throw e;
-  }
-}
-
-function setLoading(el, loading, text) {
-  if (loading) {
-    el.disabled = true;
-    el.dataset.originalText = el.innerHTML;
-    el.innerHTML = '<span class="spinner" style="margin-right:6px"></span>' + (text || 'Processing...');
-  } else {
-    el.disabled = false;
-    el.innerHTML = el.dataset.originalText || text || '';
-  }
-}
-
-function setContent(html) {
-  document.getElementById('pageContent').innerHTML = html;
-}
-
-function scoreBar(val) {
-  return '<div class="score-bar"><div class="score-fill" style="width:' + (val || 0) + '%"></div></div>';
-}
-
-function stageBadgeClass(stage) {
-  if (stage === 'awarded') return 'stage-awarded';
-  if (stage === 'evaluation' || stage === 'submissions_closed') return 'stage-evaluation';
-  if (stage === 'draft') return 'stage-draft';
-  return 'stage-published';
-}
-
-// ============================================================
-// Navigation
-// ============================================================
-var pageTitles = {
-  dashboard:      ['Dashboard', 'AI-Powered Procurement Overview'],
-  rfp:            ['RFP Generation', 'Generate & Manage Request for Proposal'],
-  vendors:        ['Vendor Shortlisting', 'Select & Manage Qualified Vendors'],
-  emails:         ['Email Invitations', 'Track All Correspondence'],
-  qa:             ['Q&A Management', 'Vendor Questions & AI-Drafted Answers'],
-  proposals:      ['Proposal Submissions', 'Review Vendor Proposals'],
-  evaluation:     ['AI Evaluation', 'Automated Scoring & Analysis'],
-  recommendation: ['Award Recommendation', 'Final Decision & Contract Award'],
-};
-
 document.getElementById('mainNav').addEventListener('click', function(e) {
-  const link = e.target.closest('[data-page]');
+  var link = e.target.closest('[data-page]');
   if (!link) return;
   e.preventDefault();
   navigateTo(link.dataset.page);
 });
 
+var pageTitles = {
+  dashboard:  ['Dashboard',        'Cross-RFP Analytics & Overview'],
+  rfps:       ['All RFPs',         'Active & Historical RFP Pipeline'],
+  vendors:    ['Vendor Registry',  'Global Vendor Database & Performance'],
+  reports:    ['Reports',          'Vendor Performance & Procurement Analytics'],
+};
+
 function navigateTo(page) {
-  currentPage = page;
+  appState.currentPage = page;
+  appState.currentRfpId = null;
+
+  // Update nav active state
   document.querySelectorAll('[data-page]').forEach(function(el) {
     el.classList.toggle('active', el.dataset.page === page);
   });
-  const info = pageTitles[page] || [page, ''];
+
+  var info = pageTitles[page] || [page, ''];
   document.getElementById('pageTitle').textContent = info[0];
   document.getElementById('pageSubtitle').textContent = info[1];
-  setContent('<div class="flex items-center justify-center h-40"><div class="spinner" style="width:36px;height:36px;border-width:4px"></div></div>');
+
+  // Hide lifecycle bar and tabs
+  document.getElementById('lifecycleBar').style.display = 'none';
+  document.getElementById('rfpTabsBar').style.display = 'none';
+  document.getElementById('backBtn').style.display = 'none';
+
+  setContent('<div style="display:flex;align-items:center;justify-content:center;height:200px"><div class="spinner" style="width:36px;height:36px;border-width:4px"></div></div>');
+
   if (pages[page]) pages[page]();
+}
+
+function goBack() {
+  if (appState.currentRfpId) {
+    navigateTo('rfps');
+  } else {
+    navigateTo('dashboard');
+  }
+}
+
+// ============================================================
+// LIFECYCLE BAR RENDERER
+// ============================================================
+var LC_STAGES = ['draft','published','qa_open','submissions_closed','evaluation','awarded'];
+var LC_LABELS = ['Draft','Published','Q&A Open','Closed','Evaluation','Awarded'];
+var LC_ICONS  = ['fa-pencil','fa-paper-plane','fa-comments','fa-lock','fa-star','fa-trophy'];
+var LC_INFOS  = {
+  draft:               'RFP is being authored. Complete and publish to invite vendors.',
+  published:           'RFP is published. Open Q&A period to accept vendor questions.',
+  qa_open:             'Vendors can submit questions. Draft and publish official answers.',
+  submissions_closed:  'Submission window is closed. Collect proposals before evaluation.',
+  evaluation:          'Proposals are under AI-powered evaluation and scoring.',
+  awarded:             'Contract has been awarded. Procurement cycle is complete.',
+};
+
+function showLifecycleBar(stage, rfpId) {
+  var idx = LC_STAGES.indexOf(stage);
+  var html = '';
+  LC_STAGES.forEach(function(s, i) {
+    var cls = i < idx ? 'lc-done' : (i === idx ? 'lc-active' : 'lc-pending');
+    var icon = i < idx ? 'fa-check' : LC_ICONS[i];
+    html += '<div class="lc-step ' + cls + '">';
+    html += '<div class="lc-node">';
+    html += '<div class="lc-circle"><i class="fas ' + icon + '" style="font-size:0.7rem"></i></div>';
+    html += '<div class="lc-label">' + LC_LABELS[i] + '</div>';
+    html += '</div>';
+    if (i < LC_STAGES.length - 1) html += '<div class="lc-connector"></div>';
+    html += '</div>';
+  });
+  html += '<div class="lc-info-pill"><i class="fas fa-info-circle" style="margin-right:4px"></i>' + (LC_INFOS[stage]||stage) + '</div>';
+
+  // Stage advance button
+  var nextStage = LC_STAGES[idx + 1];
+  var nextLabel = LC_LABELS[idx + 1];
+  var advBtns = '';
+  if (nextStage) {
+    advBtns = '<button class="btn-primary btn-sm" style="margin-left:auto;flex-shrink:0" onclick="advanceRfpStage(' + rfpId + ',\'' + nextStage + '\')"><i class="fas fa-arrow-right"></i> ' + nextLabel + '</button>';
+  } else {
+    advBtns = '<span class="stage-badge stage-awarded" style="margin-left:auto;padding:0.35rem 0.875rem"><i class="fas fa-trophy" style="margin-right:4px"></i>Awarded</span>';
+  }
+
+  var bar = document.getElementById('lifecycleBar');
+  bar.className = 'lifecycle-bar';
+  bar.style.display = 'flex';
+  bar.innerHTML = html + advBtns;
+}
+
+// ============================================================
+// RFP TABS RENDERER
+// ============================================================
+var TABS = [
+  { id:'generate',       label:'Generate',    icon:'fa-magic' },
+  { id:'vendors',        label:'Vendors',     icon:'fa-building' },
+  { id:'qa',             label:'Q&A',         icon:'fa-comments' },
+  { id:'emails',         label:'Emails',      icon:'fa-envelope' },
+  { id:'proposals',      label:'Proposals',   icon:'fa-inbox' },
+  { id:'evaluation',     label:'Evaluation',  icon:'fa-star-half-alt' },
+  { id:'recommendation', label:'Award',       icon:'fa-trophy' },
+];
+
+function showRfpTabs(activeTab, rfpId) {
+  var html = '';
+  TABS.forEach(function(t) {
+    var cls = t.id === activeTab ? 'rfp-tab active' : 'rfp-tab';
+    html += '<div class="' + cls + '" onclick="switchRfpTab(' + rfpId + ',\'' + t.id + '\')">'
+      + '<i class="fas ' + t.icon + '"></i>' + t.label + '</div>';
+  });
+  var bar = document.getElementById('rfpTabsBar');
+  bar.className = 'rfp-tabs';
+  bar.style.display = 'flex';
+  bar.innerHTML = html;
+}
+
+function switchRfpTab(rfpId, tab) {
+  appState.currentRfpTab = tab;
+  showRfpTabs(tab, rfpId);
+  setContent('<div style="display:flex;align-items:center;justify-content:center;height:200px"><div class="spinner" style="width:36px;height:36px;border-width:4px"></div></div>');
+  rfpTabPages[tab](rfpId);
 }
 
 // ============================================================
 // INIT
 // ============================================================
 async function init() {
-  try {
-    await apiCall('POST', '/init', {});
-  } catch(e) {
-    // ignore init errors, tables may already exist
-  }
+  try { await apiCall('POST', '/init', {}); } catch(e) {}
   navigateTo('dashboard');
 }
 
 // ============================================================
-// PAGE: DASHBOARD
+// PAGE: DASHBOARD (cross-RFP stats)
 // ============================================================
 var pages = {};
 
 pages.dashboard = async function() {
-  let stats, rfp;
+  var stats, perf;
   try {
-    [stats, rfp] = await Promise.all([
+    [stats, perf] = await Promise.all([
       apiCall('GET', '/stats'),
-      apiCall('GET', '/rfp').catch(function() { return null; })
+      apiCall('GET', '/vendor-performance').catch(function() { return []; })
     ]);
   } catch(e) {
-    stats = { vendors: 0, shortlisted: 0, proposals: 0, emails: 0 };
-    rfp = null;
-  }
-  appState.rfp = rfp;
-
-  const stage = (rfp && rfp.stage) ? rfp.stage : 'draft';
-  const stages = ['draft','published','qa_open','submissions_closed','evaluation','awarded'];
-  const stageLabels = ['Draft','Published','Q&A Open','Submissions Closed','Evaluation','Awarded'];
-  const stageIdx = stages.indexOf(stage);
-
-  // Build stage progress steps
-  let stepsHtml = '';
-  for (let i = 0; i < stageLabels.length; i++) {
-    const cls = i < stageIdx ? 'step-done' : (i === stageIdx ? 'step-active' : 'step-pending');
-    const icon = i < stageIdx ? '<i class="fas fa-check" style="font-size:0.7rem"></i>' : String(i + 1);
-    const labelCls = i === stageIdx ? 'font-semibold' : '';
-    stepsHtml += '<div class="progress-step ' + cls + '">';
-    stepsHtml += '<div class="flex flex-col items-center">';
-    stepsHtml += '<div class="step-circle">' + icon + '</div>';
-    stepsHtml += '<div class="text-xs mt-1 text-center ' + labelCls + '" style="width:60px;color:' + (i===stageIdx?'#1a1a2e':'#9ca3af') + '">' + stageLabels[i] + '</div>';
-    stepsHtml += '</div>';
-    if (i < stageLabels.length - 1) {
-      stepsHtml += '<div class="step-line mx-1" style="margin-bottom:20px"></div>';
-    }
-    stepsHtml += '</div>';
+    stats = {};
+    perf = [];
   }
 
-  // Stage action buttons
-  let stageActions = '';
-  if (rfp) {
-    if (stage === 'draft')               stageActions += '<button class="btn-primary" onclick="advanceStage(\'published\')"><i class="fas fa-paper-plane mr-2"></i>Publish RFP</button>';
-    if (stage === 'published')           stageActions += '<button class="btn-primary" onclick="advanceStage(\'qa_open\')"><i class="fas fa-comments mr-2"></i>Open Q&amp;A</button>';
-    if (stage === 'qa_open')             stageActions += '<button class="btn-primary" onclick="advanceStage(\'submissions_closed\')"><i class="fas fa-lock mr-2"></i>Close Submissions</button>';
-    if (stage === 'submissions_closed')  stageActions += '<button class="btn-primary" onclick="advanceStage(\'evaluation\')"><i class="fas fa-star mr-2"></i>Start Evaluation</button>';
-    if (stage === 'evaluation')          stageActions += '<button class="btn-primary" onclick="navigateTo(\'evaluation\')"><i class="fas fa-robot mr-2"></i>Run AI Evaluation</button>';
-  }
+  var stageBreakdown = stats.stageBreakdown || [];
+  var stageLabels = { draft:'Draft', published:'Published', qa_open:'Q&A Open', submissions_closed:'Closed', evaluation:'Evaluation', awarded:'Awarded' };
+  var stageColors = { draft:'#94a3b8', published:'#3b82f6', qa_open:'#8b5cf6', submissions_closed:'#f59e0b', evaluation:'#f97316', awarded:'#10b981' };
 
-  const badgeClass = stageBadgeClass(stage);
-  const stageDisplay = rfp
-    ? '<span class="stage-badge ' + badgeClass + '">' + (stageLabels[stageIdx] || stage) + '</span>'
-    : '<span style="color:#9ca3af;font-size:0.875rem">No active RFP</span>';
+  // Stage breakdown bars
+  var maxCnt = Math.max(1, Math.max.apply(null, stageBreakdown.map(function(s){return s.cnt;})));
+  var stageBarHtml = stageBreakdown.length === 0
+    ? '<div style="color:#9ca3af;font-size:0.875rem;padding:1rem 0">No RFPs yet</div>'
+    : stageBreakdown.map(function(s) {
+        var pct = Math.round((s.cnt/maxCnt)*100);
+        var col = stageColors[s.stage] || '#94a3b8';
+        return '<div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.6rem">'
+          + '<div style="width:110px;font-size:0.78rem;color:#374151;font-weight:500">' + (stageLabels[s.stage]||s.stage) + '</div>'
+          + '<div style="flex:1;background:#f3f4f6;border-radius:6px;height:18px;overflow:hidden">'
+          + '<div style="width:' + pct + '%;background:' + col + ';height:100%;border-radius:6px;transition:width 0.6s"></div></div>'
+          + '<div style="width:28px;text-align:right;font-size:0.8rem;font-weight:600;color:#374151">' + s.cnt + '</div>'
+          + '</div>';
+      }).join('');
+
+  // Top performers table
+  var topPerf = (perf||[]).slice(0, 5);
+  var perfRows = topPerf.length === 0
+    ? '<tr><td colspan="4" style="text-align:center;color:#9ca3af;padding:2rem">No vendor data yet</td></tr>'
+    : topPerf.map(function(v) {
+        var avgScore = v.avg_score ? Math.round(v.avg_score) : 0;
+        var grade = avgScore >= 75 ? 'perf-high' : avgScore >= 50 ? 'perf-mid' : 'perf-low';
+        return '<tr>'
+          + '<td><span style="font-weight:600">' + escHtml(v.name) + '</span><br><span style="font-size:0.75rem;color:#9ca3af">' + escHtml(v.category||'') + '</span></td>'
+          + '<td style="text-align:center">' + (v.rfps_shortlisted||0) + '</td>'
+          + '<td style="text-align:center">' + (v.proposals_submitted||0) + '</td>'
+          + '<td style="text-align:center"><span class="perf-badge ' + grade + '">' + (avgScore||'—') + (avgScore?'/100':'') + '</span></td>'
+          + '</tr>';
+      }).join('');
 
   // Stats cards
-  const statsData = [
-    { icon: 'fa-building',    label: 'Total Vendors',  value: stats.vendors || 0,    color: '#0f3460' },
-    { icon: 'fa-check-circle',label: 'Shortlisted',    value: stats.shortlisted || 0, color: '#c9a84c' },
-    { icon: 'fa-inbox',       label: 'Proposals',      value: stats.proposals || 0,   color: '#065f46' },
-    { icon: 'fa-envelope',    label: 'Emails Sent',    value: stats.emails || 0,      color: '#7c3aed' },
+  var kpis = [
+    { icon:'fa-layer-group',  label:'Total RFPs',       value: stats.totalRfps||0,       color:'#0f3460' },
+    { icon:'fa-bolt',         label:'Active RFPs',      value: stats.activeRfps||0,       color:'#3b82f6' },
+    { icon:'fa-trophy',       label:'Awarded',          value: stats.awardedRfps||0,      color:'#065f46' },
+    { icon:'fa-percent',      label:'Win Rate',         value: (stats.winRate||0)+'%',    color:'#c9a84c' },
+    { icon:'fa-building',     label:'Registered Vendors', value: stats.totalVendors||0,   color:'#7c3aed' },
+    { icon:'fa-inbox',        label:'Total Proposals',  value: stats.totalProposals||0,   color:'#0891b2' },
+    { icon:'fa-clock',        label:'Avg Duration',     value: stats.avgDuration ? stats.avgDuration+'d' : 'N/A', color:'#9ca3af' },
+    { icon:'fa-star',         label:'Top Vendor',       value: stats.topVendor ? stats.topVendor.split(' ')[0] : 'N/A', color:'#f59e0b' },
   ];
-  let statsHtml = '';
-  statsData.forEach(function(s) {
-    statsHtml += '<div class="card p-5">'
-      + '<div class="flex items-center justify-between mb-2">'
-      + '<div class="w-10 h-10 rounded-lg flex items-center justify-center" style="background:' + s.color + '20">'
-      + '<i class="fas ' + s.icon + '" style="color:' + s.color + '"></i></div>'
-      + '<span class="text-3xl font-bold" style="color:' + s.color + '">' + s.value + '</span>'
+  var kpiHtml = kpis.map(function(k) {
+    return '<div class="stat-card">'
+      + '<div style="display:flex;justify-content:space-between;align-items:flex-start">'
+      + '<div class="stat-value" style="color:' + k.color + '">' + k.value + '</div>'
+      + '<div style="width:34px;height:34px;border-radius:8px;display:flex;align-items:center;justify-content:center" style="background:' + k.color + '18">'
+      + '<i class="fas ' + k.icon + '" style="color:' + k.color + ';font-size:0.9rem"></i></div>'
       + '</div>'
-      + '<div class="text-sm text-gray-500 font-medium">' + s.label + '</div>'
+      + '<div class="stat-label">' + k.label + '</div>'
       + '</div>';
-  });
-
-  // Quick actions
-  const actions = [
-    { icon: 'fa-file-contract',  label: 'Generate RFP',    page: 'rfp' },
-    { icon: 'fa-building',       label: 'Shortlist Vendors',page: 'vendors' },
-    { icon: 'fa-comments',       label: 'Manage Q&A',       page: 'qa' },
-    { icon: 'fa-star-half-alt',  label: 'Run Evaluation',   page: 'evaluation' },
-  ];
-  let actionsHtml = '';
-  actions.forEach(function(a) {
-    actionsHtml += '<button class="btn-secondary py-4 flex flex-col items-center gap-2 text-sm" onclick="navigateTo(\'' + a.page + '\')">'
-      + '<i class="fas ' + a.icon + ' text-xl" style="color:var(--cpc-gold)"></i>'
-      + '<span>' + a.label + '</span></button>';
-  });
-
-  // RFP info section
-  let rfpSection = '';
-  if (rfp) {
-    rfpSection = '<div class="card p-6">'
-      + '<h2 class="text-lg font-bold text-gray-800 mb-4"><i class="fas fa-file-contract mr-2 cpc-gold"></i>Active RFP</h2>'
-      + '<div class="grid grid-cols-2 gap-4">'
-      + '<div><label>Title</label><p class="font-medium">' + (rfp.title || '-') + '</p></div>'
-      + '<div><label>Category</label><p class="font-medium">' + (rfp.category || '-') + '</p></div>'
-      + '<div><label>Budget</label><p class="font-medium">' + (rfp.budget || 'TBD') + '</p></div>'
-      + '<div><label>Deadline</label><p class="font-medium">' + (rfp.deadline ? new Date(rfp.deadline).toLocaleDateString() : 'TBD') + '</p></div>'
-      + '</div></div>';
-  } else {
-    rfpSection = '<div class="card p-10 text-center">'
-      + '<i class="fas fa-file-circle-plus text-5xl mb-4" style="color:#e5e7eb"></i>'
-      + '<p class="text-gray-500 mb-4">No active RFP. Start by generating one with AI.</p>'
-      + '<button class="btn-primary" onclick="navigateTo(\'rfp\')"><i class="fas fa-magic mr-2"></i>Generate RFP with AI</button>'
-      + '</div>';
-  }
+  }).join('');
 
   setContent(
     '<div class="space-y-6">'
-    + '<div class="card p-6">'
-    + '<div class="flex items-center justify-between mb-4">'
-    + '<h2 class="text-lg font-bold text-gray-800"><i class="fas fa-route mr-2 cpc-gold"></i>Procurement Stage</h2>'
-    + stageDisplay
+    // KPI grid
+    + '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:0.875rem">' + kpiHtml + '</div>'
+
+    // Two-column row: Stage breakdown + Top vendors
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">'
+
+    // Stage breakdown card
+    + '<div class="card" style="padding:1.25rem">'
+    + '<h3 style="font-weight:700;color:#1f2937;margin-bottom:1rem;font-size:0.95rem"><i class="fas fa-chart-bar mr-2 cpc-gold"></i>RFPs by Stage</h3>'
+    + stageBarHtml
     + '</div>'
-    + '<div class="flex items-center">' + stepsHtml + '</div>'
-    + (stageActions ? '<div class="mt-4 pt-4" style="border-top:1px solid #e5e7eb;display:flex;gap:0.75rem">' + stageActions + '</div>' : '')
+
+    // Top vendor perf card
+    + '<div class="card" style="padding:1.25rem">'
+    + '<h3 style="font-weight:700;color:#1f2937;margin-bottom:1rem;font-size:0.95rem"><i class="fas fa-medal mr-2 cpc-gold"></i>Top Vendors</h3>'
+    + '<div style="overflow-x:auto">'
+    + '<table style="font-size:0.82rem"><thead><tr>'
+    + '<th>Vendor</th><th style="text-align:center">RFPs</th><th style="text-align:center">Props</th><th style="text-align:center">Avg Score</th>'
+    + '</tr></thead><tbody>' + perfRows + '</tbody></table></div>'
     + '</div>'
-    + '<div class="grid grid-cols-2 gap-4" style="grid-template-columns:repeat(4,1fr)">' + statsHtml + '</div>'
-    + '<div class="card p-6">'
-    + '<h2 class="text-lg font-bold text-gray-800 mb-4"><i class="fas fa-bolt mr-2 cpc-gold"></i>Quick Actions</h2>'
-    + '<div class="grid grid-cols-4 gap-3">' + actionsHtml + '</div>'
     + '</div>'
-    + rfpSection
+
+    // Quick actions
+    + '<div class="card" style="padding:1.25rem">'
+    + '<h3 style="font-weight:700;color:#1f2937;margin-bottom:1rem;font-size:0.95rem"><i class="fas fa-bolt mr-2 cpc-gold"></i>Quick Actions</h3>'
+    + '<div style="display:flex;gap:0.75rem;flex-wrap:wrap">'
+    + '<button class="btn-primary" onclick="openCreateRfpModal()"><i class="fas fa-plus"></i>New RFP</button>'
+    + '<button class="btn-secondary" onclick="navigateTo(\'rfps\')"><i class="fas fa-layer-group"></i>View All RFPs</button>'
+    + '<button class="btn-ghost" onclick="navigateTo(\'vendors\')"><i class="fas fa-building"></i>Vendor Registry</button>'
+    + '<button class="btn-ghost" onclick="navigateTo(\'reports\')"><i class="fas fa-chart-bar"></i>Full Report</button>'
+    + '</div>'
+    + '</div>'
     + '</div>'
   );
 };
 
 // ============================================================
-// PAGE: RFP GENERATION
+// PAGE: ALL RFPs LIST
 // ============================================================
-pages.rfp = async function() {
-  const rfp = await apiCall('GET', '/rfp').catch(function() { return null; });
-  appState.rfp = rfp;
+pages.rfps = async function() {
+  var rfps;
+  try { rfps = await apiCall('GET', '/rfps'); } catch(e) { rfps = []; }
+  appState.rfps = rfps;
 
-  const titleVal = (rfp && rfp.title) ? rfp.title : 'Enterprise Resource Planning (ERP) System Implementation';
-  const catVal = (rfp && rfp.category) ? rfp.category : 'IT & Digital Transformation';
-  const budgetVal = (rfp && rfp.budget) ? rfp.budget : '';
-  const deadlineVal = (rfp && rfp.deadline) ? rfp.deadline : '';
-  const scopeVal = (rfp && rfp.scope) ? rfp.scope : 'Implementation of a comprehensive ERP system covering HR, Finance, Procurement, and Operations modules for the Crown Prince Court of Abu Dhabi.';
-  const techVal = (rfp && rfp.tech_requirements) ? rfp.tech_requirements : 'Cloud-based SaaS deployment, Arabic language support, UAE Pass integration, ISO 27001 certified infrastructure, 99.9% SLA uptime';
-  const previewHtml = (rfp && rfp.content) ? rfp.content : '<div class="text-center py-10" style="color:#9ca3af"><i class="fas fa-file-alt" style="font-size:3rem;display:block;margin-bottom:1rem"></i><p>Click "Generate with AI" to create your RFP document</p></div>';
+  if (rfps.length === 0) {
+    setContent(
+      '<div class="space-y-4">'
+      + '<div style="display:flex;justify-content:space-between;align-items:center">'
+      + '<h2 style="font-weight:700;color:#1f2937;font-size:1.05rem">All RFPs</h2>'
+      + '<button class="btn-primary" onclick="openCreateRfpModal()"><i class="fas fa-plus"></i>Create New RFP</button>'
+      + '</div>'
+      + '<div class="card" style="padding:3rem;text-align:center;color:#9ca3af">'
+      + '<i class="fas fa-layer-group" style="font-size:3rem;display:block;margin-bottom:1rem"></i>'
+      + '<p style="margin-bottom:1rem">No RFPs yet. Create your first RFP to get started.</p>'
+      + '<button class="btn-primary" onclick="openCreateRfpModal()"><i class="fas fa-magic"></i>Create RFP with AI</button>'
+      + '</div></div>'
+    );
+    return;
+  }
+
+  var cards = rfps.map(function(rfp) {
+    var created = rfp.created_at ? new Date(rfp.created_at).toLocaleDateString('en-AE', {year:'numeric',month:'short',day:'numeric'}) : '-';
+    var stageIdx = LC_STAGES.indexOf(rfp.stage);
+    var progress = Math.round(((stageIdx < 0 ? 0 : stageIdx) / (LC_STAGES.length - 1)) * 100);
+    return '<div class="rfp-card" onclick="openRfp(' + rfp.id + ')">'
+      + '<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:0.75rem">'
+      + '<div style="flex:1">'
+      + '<div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;margin-bottom:0.25rem">'
+      + '<span style="font-weight:700;color:#1f2937;font-size:0.95rem">' + escHtml(rfp.title||'Untitled RFP') + '</span>'
+      + stageBadgeHtml(rfp.stage)
+      + '</div>'
+      + '<div style="font-size:0.78rem;color:#6b7280">'
+      + '<span><i class="fas fa-hashtag" style="margin-right:3px"></i>' + escHtml(rfp.ref_number||'—') + '</span>'
+      + ' &bull; <span><i class="fas fa-tag" style="margin-right:3px"></i>' + escHtml(rfp.category||'—') + '</span>'
+      + ' &bull; <span><i class="fas fa-calendar" style="margin-right:3px"></i>' + created + '</span>'
+      + (rfp.budget ? ' &bull; <span><i class="fas fa-coins" style="margin-right:3px"></i>AED ' + escHtml(rfp.budget) + '</span>' : '')
+      + '</div>'
+      + '</div>'
+      + '<button class="btn-ghost btn-sm" style="flex-shrink:0;margin-left:1rem" onclick="event.stopPropagation();openRfp(' + rfp.id + ')">Open <i class="fas fa-arrow-right"></i></button>'
+      + '</div>'
+      // Progress line
+      + '<div style="display:flex;align-items:center;gap:0.5rem">'
+      + '<div style="flex:1;background:#e5e7eb;border-radius:6px;height:6px;overflow:hidden">'
+      + '<div style="width:' + progress + '%;background:var(--cpc-gold);height:100%;border-radius:6px;transition:width 0.5s"></div>'
+      + '</div>'
+      + '<span style="font-size:0.72rem;color:#9ca3af;white-space:nowrap">' + (stageIdx+1) + '/' + LC_STAGES.length + ' stages</span>'
+      + '</div>'
+      + '</div>';
+  }).join('');
 
   setContent(
-    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem">'
-    + '<div class="card p-6">'
-    + '<h2 class="text-lg font-bold text-gray-800 mb-4"><i class="fas fa-magic mr-2 cpc-gold"></i>AI RFP Generator</h2>'
-    + '<div class="space-y-4">'
-    + '<div><label>Project Title *</label><input id="rfpTitle" placeholder="e.g. ERP System Implementation" value="' + escHtml(titleVal) + '"></div>'
-    + '<div><label>Category</label><select id="rfpCategory">'
-    + '<option value="IT & Digital Transformation"' + (catVal === 'IT & Digital Transformation' ? ' selected' : '') + '>IT &amp; Digital Transformation</option>'
-    + '<option value="Consulting Services"' + (catVal === 'Consulting Services' ? ' selected' : '') + '>Consulting Services</option>'
-    + '<option value="Infrastructure"' + (catVal === 'Infrastructure' ? ' selected' : '') + '>Infrastructure</option>'
-    + '<option value="Professional Services"' + (catVal === 'Professional Services' ? ' selected' : '') + '>Professional Services</option>'
-    + '</select></div>'
-    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem">'
-    + '<div><label>Budget (AED)</label><input id="rfpBudget" placeholder="e.g. 5,000,000" value="' + escHtml(budgetVal) + '"></div>'
-    + '<div><label>Submission Deadline</label><input type="date" id="rfpDeadline" value="' + escHtml(deadlineVal) + '"></div>'
+    '<div class="space-y-4">'
+    + '<div style="display:flex;justify-content:space-between;align-items:center">'
+    + '<div><h2 style="font-weight:700;color:#1f2937;font-size:1.05rem">All RFPs</h2>'
+    + '<p style="font-size:0.82rem;color:#6b7280;margin:0">' + rfps.length + ' RFP' + (rfps.length!==1?'s':'') + ' in pipeline</p></div>'
+    + '<button class="btn-primary" onclick="openCreateRfpModal()"><i class="fas fa-plus"></i>Create New RFP</button>'
     + '</div>'
-    + '<div><label>Scope of Work</label><textarea id="rfpScope" rows="4">' + escHtml(scopeVal) + '</textarea></div>'
-    + '<div><label>Technical Requirements</label><textarea id="rfpTech" rows="3">' + escHtml(techVal) + '</textarea></div>'
-    + '<div style="display:flex;gap:0.75rem;padding-top:0.5rem">'
-    + '<button class="btn-primary" id="generateBtn" style="flex:1" onclick="generateRFP()"><i class="fas fa-robot mr-2"></i>Generate with AI</button>'
-    + '<button class="btn-secondary" onclick="saveRFP()"><i class="fas fa-save mr-2"></i>Save</button>'
-    + '</div></div></div>'
-    + '<div class="card p-6">'
-    + '<div class="flex items-center justify-between mb-4">'
-    + '<h2 class="text-lg font-bold text-gray-800"><i class="fas fa-eye mr-2 cpc-gold"></i>RFP Preview</h2>'
-    + ((rfp && rfp.content) ? '<button class="btn-primary text-sm" onclick="navigateTo(\'vendors\')"><i class="fas fa-arrow-right mr-1"></i>Next: Vendors</button>' : '')
+    + '<div style="display:grid;gap:0.75rem">' + cards + '</div>'
     + '</div>'
-    + '<div id="rfpPreview" class="rfp-preview" style="font-size:0.875rem;max-height:480px;overflow-y:auto">' + previewHtml + '</div>'
-    + '</div></div>'
   );
 };
 
 // ============================================================
-// PAGE: VENDORS
+// OPEN SINGLE RFP (detail view with lifecycle bar + tabs)
 // ============================================================
-pages.vendors = async function() {
-  const vendors = await apiCall('GET', '/vendors');
+async function openRfp(rfpId) {
+  appState.currentRfpId = rfpId;
+  appState.currentRfpTab = 'generate';
+
+  var rfp;
+  try { rfp = await apiCall('GET', '/rfps/' + rfpId); } catch(e) { return; }
+
+  // Update header
+  document.getElementById('pageTitle').textContent = rfp.title || 'RFP Detail';
+  document.getElementById('pageSubtitle').textContent = rfp.ref_number || '';
+
+  // Show back button
+  var bb = document.getElementById('backBtn');
+  bb.style.display = 'inline-flex';
+
+  // Remove active from nav
+  document.querySelectorAll('[data-page]').forEach(function(el) { el.classList.remove('active'); });
+
+  // Show lifecycle bar
+  showLifecycleBar(rfp.stage || 'draft', rfpId);
+
+  // Show tabs
+  showRfpTabs('generate', rfpId);
+
+  // Load first tab
+  rfpTabPages.generate(rfpId);
+}
+
+// ============================================================
+// RFP TAB PAGES
+// ============================================================
+var rfpTabPages = {};
+
+// --- GENERATE TAB ---
+rfpTabPages.generate = async function(rfpId) {
+  var rfp;
+  try { rfp = await apiCall('GET', '/rfps/' + rfpId); } catch(e) { rfp = {}; }
+
+  var previewHtml = rfp.content
+    ? rfp.content
+    : '<div style="text-align:center;padding:3rem;color:#9ca3af">'
+      + '<i class="fas fa-file-alt" style="font-size:3rem;display:block;margin-bottom:1rem"></i>'
+      + '<p>Fill in the details and click "Generate with AI" to create the RFP document</p>'
+      + '</div>';
+
+  var catOptions = ['IT & Digital Transformation','Consulting Services','Infrastructure','Professional Services','Construction','Healthcare','Legal']
+    .map(function(c) {
+      return '<option value="' + c + '"' + (rfp.category===c?' selected':'') + '>' + c + '</option>';
+    }).join('');
+
+  setContent(
+    '<div style="display:grid;grid-template-columns:420px 1fr;gap:1rem;height:calc(100vh - 220px)">'
+    // Left: form
+    + '<div class="card" style="padding:1.25rem;overflow-y:auto;display:flex;flex-direction:column;gap:0.875rem">'
+    + '<h3 style="font-weight:700;color:#1f2937;margin:0;font-size:0.95rem"><i class="fas fa-magic cpc-gold" style="margin-right:0.5rem"></i>RFP Generator</h3>'
+    + '<div class="form-group"><label>Project Title *</label><input id="rfpTitle" placeholder="e.g. ERP System Implementation" value="' + escHtml(rfp.title||'') + '"></div>'
+    + '<div class="form-group"><label>Category</label><select id="rfpCategory">' + catOptions + '</select></div>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem">'
+    + '<div class="form-group"><label>Budget (AED)</label><input id="rfpBudget" placeholder="e.g. 5,000,000" value="' + escHtml(rfp.budget||'') + '"></div>'
+    + '<div class="form-group"><label>Deadline</label><input type="date" id="rfpDeadline" value="' + escHtml(rfp.deadline||'') + '"></div>'
+    + '</div>'
+    + '<div class="form-group"><label>Background <span style="font-weight:400;color:#9ca3af">(human language)</span></label>'
+    + '<textarea id="rfpBackground" rows="3" placeholder="Describe the current situation and context...">' + escHtml(rfp.background||'') + '</textarea></div>'
+    + '<div class="form-group"><label>Objectives <span style="font-weight:400;color:#9ca3af">(what you want to achieve)</span></label>'
+    + '<textarea id="rfpObjectives" rows="3" placeholder="List the main goals of this project...">' + escHtml(rfp.objectives||'') + '</textarea></div>'
+    + '<div class="form-group"><label>Scope of Work</label>'
+    + '<textarea id="rfpScope" rows="3" placeholder="Key deliverables and areas to be covered...">' + escHtml(rfp.scope||'') + '</textarea></div>'
+    + '<div class="form-group"><label>Technical Requirements</label>'
+    + '<textarea id="rfpTech" rows="2" placeholder="Cloud, Arabic support, certifications...">' + escHtml(rfp.tech_requirements||'') + '</textarea></div>'
+    + '<div style="display:flex;gap:0.5rem;padding-top:0.25rem">'
+    + '<button class="btn-primary" id="generateBtn" style="flex:1" onclick="generateRfpContent(' + rfpId + ')"><i class="fas fa-robot"></i>Generate with AI</button>'
+    + '<button class="btn-ghost" onclick="saveRfpFields(' + rfpId + ')"><i class="fas fa-save"></i>Save</button>'
+    + '</div>'
+    + '</div>'
+    // Right: preview
+    + '<div class="card" style="padding:1.25rem;display:flex;flex-direction:column;overflow:hidden">'
+    + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.875rem;flex-shrink:0">'
+    + '<h3 style="font-weight:700;color:#1f2937;margin:0;font-size:0.95rem"><i class="fas fa-eye cpc-gold" style="margin-right:0.5rem"></i>RFP Document Preview</h3>'
+    + (rfp.content ? '<button class="btn-primary btn-sm" onclick="downloadRfpPdf(' + rfpId + ')"><i class="fas fa-file-pdf"></i>Download PDF</button>' : '')
+    + '</div>'
+    + '<div id="rfpPreview" style="flex:1;overflow-y:auto;font-size:0.875rem">' + previewHtml + '</div>'
+    + '</div>'
+    + '</div>'
+  );
+};
+
+// --- VENDORS TAB ---
+rfpTabPages.vendors = async function(rfpId) {
+  var vendors;
+  try { vendors = await apiCall('GET', '/rfps/' + rfpId + '/vendors'); } catch(e) { vendors = []; }
   appState.vendors = vendors;
 
-  let rows = '';
-  vendors.forEach(function(v) {
-    const tags = (v.specializations || '').split(',').filter(function(s) { return s.trim(); }).slice(0, 4)
+  var rows = vendors.map(function(v) {
+    var tags = (v.specializations||'').split(',').filter(Boolean).slice(0,3)
       .map(function(s) { return '<span class="tag">' + escHtml(s.trim()) + '</span>'; }).join('');
-
-    const scoreBar = v.fit_score
-      ? '<div class="mt-3 pt-3" style="border-top:1px solid #e5e7eb">'
-        + '<div style="display:flex;justify-content:space-between;font-size:0.75rem;color:#9ca3af;margin-bottom:4px"><span>AI Fit Score</span><span>' + v.fit_score + '/100</span></div>'
-        + '<div class="score-bar"><div class="score-fill" style="width:' + v.fit_score + '%"></div></div>'
-        + '</div>'
-      : '';
-
-    const addBtn = v.shortlisted
-      ? '<button class="btn-danger text-sm" onclick="toggleShortlist(' + v.id + ', false)"><i class="fas fa-times mr-1"></i>Remove</button>'
-      : '<button class="btn-primary text-sm" onclick="toggleShortlist(' + v.id + ', true)"><i class="fas fa-plus mr-1"></i>Add</button>';
-
-    rows += '<div class="card p-4" style="' + (v.shortlisted ? 'border:2px solid var(--cpc-gold)' : '') + '">'
-      + '<div style="display:flex;align-items:flex-start;justify-content:space-between">'
-      + '<div style="display:flex;align-items:flex-start;gap:1rem;flex:1">'
-      + '<div style="width:40px;height:40px;border-radius:8px;background:var(--cpc-blue);display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:0.875rem;flex-shrink:0">' + escHtml(v.name.charAt(0)) + '</div>'
+    var scored = v.rfp_fit_score ? '<span style="font-size:0.72rem;background:#fffbeb;color:#92400e;padding:2px 8px;border-radius:12px;font-weight:500">AI: ' + v.rfp_fit_score + '/100</span>' : '';
+    var btn = v.shortlisted
+      ? '<button class="btn-danger btn-sm" onclick="toggleShortlist(' + rfpId + ',' + v.id + ',false)"><i class="fas fa-times"></i></button>'
+      : '<button class="btn-primary btn-sm" onclick="toggleShortlist(' + rfpId + ',' + v.id + ',true)"><i class="fas fa-plus"></i>Add</button>';
+    return '<div class="card" style="padding:0.875rem;' + (v.shortlisted ? 'border:2px solid var(--cpc-gold)' : '') + ';margin-bottom:0.5rem">'
+      + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:0.75rem">'
+      + '<div style="display:flex;gap:0.75rem;flex:1">'
+      + '<div style="width:36px;height:36px;border-radius:8px;background:var(--cpc-blue);display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:0.82rem;flex-shrink:0">' + escHtml(v.name.charAt(0)) + '</div>'
       + '<div style="flex:1">'
-      + '<div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap">'
-      + '<span style="font-weight:600;color:#1f2937">' + escHtml(v.name) + '</span>'
+      + '<div style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap">'
+      + '<span style="font-weight:600;color:#1f2937;font-size:0.9rem">' + escHtml(v.name) + '</span>'
       + (v.shortlisted ? '<span class="stage-badge stage-published">&#10003; Shortlisted</span>' : '')
-      + (v.fit_score ? '<span style="font-size:0.75rem;background:#fffbeb;color:#92400e;padding:2px 8px;border-radius:12px;font-weight:500">AI Score: ' + v.fit_score + '/100</span>' : '')
+      + scored
       + '</div>'
-      + '<div style="font-size:0.875rem;color:#6b7280;margin-top:2px">' + escHtml(v.category || '') + ' &bull; ' + escHtml(v.country || 'UAE') + ' &bull; ' + escHtml(v.size || '') + '</div>'
-      + '<div style="margin-top:6px">' + tags + '</div>'
+      + '<div style="font-size:0.78rem;color:#6b7280;margin-top:2px">' + escHtml(v.category||'') + ' &bull; ' + escHtml(v.country||'UAE') + '</div>'
+      + '<div style="margin-top:4px">' + tags + '</div>'
+      + (v.rfp_fit_rationale ? '<div style="font-size:0.75rem;color:#6b7280;margin-top:4px;font-style:italic">' + escHtml(v.rfp_fit_rationale) + '</div>' : '')
       + '</div></div>'
-      + '<div style="display:flex;gap:0.5rem;margin-left:0.75rem">'
-      + addBtn
-      + '<button class="btn-secondary text-sm" onclick="viewVendor(' + v.id + ')"><i class="fas fa-eye"></i></button>'
-      + '</div></div>'
-      + scoreBar
-      + '</div>';
-  });
+      + '<div style="display:flex;gap:0.4rem;flex-shrink:0">' + btn + '</div>'
+      + '</div></div>';
+  }).join('');
+
+  var shortlistCount = vendors.filter(function(v) { return v.shortlisted; }).length;
 
   setContent(
     '<div class="space-y-4">'
     + '<div style="display:flex;align-items:center;justify-content:space-between">'
-    + '<div><h2 class="text-lg font-bold text-gray-800">Vendor Database</h2>'
-    + '<p style="font-size:0.875rem;color:#6b7280">' + vendors.length + ' vendors loaded from CPO ERP Scope of Work</p></div>'
-    + '<div style="display:flex;gap:0.75rem">'
-    + '<button class="btn-secondary" onclick="aiShortlist()"><i class="fas fa-robot mr-2"></i>AI Shortlist</button>'
-    + '<button class="btn-primary" onclick="sendInvitations()"><i class="fas fa-paper-plane mr-2"></i>Send Invitations</button>'
+    + '<p style="font-size:0.875rem;color:#6b7280">' + vendors.length + ' vendors &bull; <strong style="color:var(--cpc-navy)">' + shortlistCount + ' shortlisted</strong></p>'
+    + '<div style="display:flex;gap:0.5rem">'
+    + '<button class="btn-ghost" onclick="aiShortlistRfp(' + rfpId + ')"><i class="fas fa-robot"></i>AI Shortlist</button>'
+    + '<button class="btn-primary" onclick="sendRfpInvitations(' + rfpId + ')"><i class="fas fa-paper-plane"></i>Send Invitations</button>'
     + '</div></div>'
-    + '<div style="display:grid;gap:0.75rem">' + rows + '</div>'
+    + '<div>' + rows + '</div>'
     + '</div>'
   );
 };
 
-// ============================================================
-// PAGE: EMAILS
-// ============================================================
-pages.emails = async function() {
-  const emails = await apiCall('GET', '/emails');
-  appState.emails = emails;
+// --- Q&A TAB ---
+rfpTabPages.qa = async function(rfpId) {
+  var questions;
+  try { questions = await apiCall('GET', '/rfps/' + rfpId + '/questions'); } catch(e) { questions = []; }
+  appState.questions = questions;
 
-  let rows = '';
-  emails.forEach(function(e) {
-    const statusHtml = e.status === 'sent'
-      ? '<span style="color:#065f46;font-weight:500"><i class="fas fa-check-circle mr-1"></i>Sent</span>'
+  var pending   = questions.filter(function(q) { return !q.published && !q.answer; }).length;
+  var answered  = questions.filter(function(q) { return q.answer && !q.published; }).length;
+  var published = questions.filter(function(q) { return q.published; }).length;
+
+  var qCards = questions.length === 0
+    ? '<div class="card" style="padding:3rem;text-align:center;color:#9ca3af">'
+      + '<i class="fas fa-comments" style="font-size:3rem;display:block;margin-bottom:1rem"></i>'
+      + '<p style="margin-bottom:1rem">No questions yet.</p>'
+      + '<button class="btn-secondary" onclick="loadSampleQuestions(' + rfpId + ')">Load Sample Questions</button>'
+      + '</div>'
+    : questions.map(function(q) {
+        var badge = q.published
+          ? '<span class="stage-badge stage-published">Published</span>'
+          : q.answer ? '<span class="stage-badge" style="background:#fef3c7;color:#92400e">Awaiting Approval</span>'
+          : '<span class="stage-badge stage-draft">Unanswered</span>';
+        var answerBlock = q.answer
+          ? '<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:0.6rem 0.75rem;margin-top:0.6rem">'
+            + '<div style="font-size:0.72rem;font-weight:700;color:#92400e;margin-bottom:3px"><i class="fas fa-robot" style="margin-right:3px"></i>AI Draft</div>'
+            + '<p style="font-size:0.85rem;color:#374151;margin:0">' + escHtml(q.answer) + '</p>'
+            + '</div>' : '';
+        var btns = (!q.answer
+          ? '<button class="btn-secondary btn-sm" onclick="draftQAnswer(' + rfpId + ',' + q.id + ')"><i class="fas fa-robot"></i>Draft</button>'
+          : '') + (q.answer && !q.published
+          ? '<button class="btn-primary btn-sm" onclick="approveQAnswer(' + rfpId + ',' + q.id + ')"><i class="fas fa-check"></i>Approve</button>'
+          : '');
+        return '<div class="card" style="padding:0.875rem;margin-bottom:0.5rem" id="q-' + q.id + '">'
+          + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:0.75rem">'
+          + '<div style="flex:1">'
+          + '<div style="display:flex;align-items:center;gap:0.4rem;margin-bottom:0.4rem">'
+          + '<span style="font-size:0.72rem;font-weight:600;color:#9ca3af">Q' + q.id + ' &bull; ' + escHtml(q.vendor_name||'Vendor') + '</span>'
+          + badge + '</div>'
+          + '<p style="font-weight:500;color:#1f2937;font-size:0.875rem;margin:0">' + escHtml(q.question) + '</p>'
+          + answerBlock
+          + '</div>'
+          + '<div style="display:flex;flex-direction:column;gap:0.4rem;flex-shrink:0">' + btns + '</div>'
+          + '</div></div>';
+      }).join('');
+
+  setContent(
+    '<div class="space-y-4">'
+    + '<div style="display:flex;align-items:center;justify-content:space-between">'
+    + '<div style="display:flex;gap:1rem">'
+    + '<span style="font-size:0.82rem;color:#6b7280">' + pending + ' pending</span>'
+    + '<span style="font-size:0.82rem;color:#92400e">' + answered + ' awaiting approval</span>'
+    + '<span style="font-size:0.82rem;color:#065f46">' + published + ' published</span>'
+    + '</div>'
+    + '<div style="display:flex;gap:0.5rem">'
+    + '<button class="btn-ghost" onclick="draftAllQAnswers(' + rfpId + ')"><i class="fas fa-robot"></i>AI Draft All</button>'
+    + '<button class="btn-primary" onclick="publishAllQAnswers(' + rfpId + ')"><i class="fas fa-paper-plane"></i>Publish Approved</button>'
+    + '</div></div>'
+    + '<div>' + qCards + '</div>'
+    + '</div>'
+  );
+};
+
+// --- EMAILS TAB ---
+rfpTabPages.emails = async function(rfpId) {
+  var emails;
+  try { emails = await apiCall('GET', '/rfps/' + rfpId + '/emails'); } catch(e) { emails = []; }
+
+  var rows = emails.map(function(e) {
+    var statusHtml = e.status === 'sent'
+      ? '<span style="color:#065f46;font-weight:500"><i class="fas fa-check-circle" style="margin-right:3px"></i>Sent</span>'
       : e.status === 'simulated'
-      ? '<span style="color:#1d4ed8;font-weight:500"><i class="fas fa-flask mr-1"></i>Simulated</span>'
+      ? '<span style="color:#1d4ed8;font-weight:500"><i class="fas fa-flask" style="margin-right:3px"></i>Simulated</span>'
       : '<span style="color:#6b7280">' + escHtml(e.status) + '</span>';
-    const dateStr = e.created_at ? new Date(e.created_at).toLocaleString() : '-';
-    rows += '<tr>'
-      + '<td style="font-weight:500">' + escHtml(e.vendor_name || e.recipient || '') + '</td>'
-      + '<td>' + escHtml(e.subject || '') + '</td>'
-      + '<td><span class="tag">' + escHtml(e.email_type || '') + '</span></td>'
+    var dateStr = e.created_at ? new Date(e.created_at).toLocaleString() : '-';
+    return '<tr>'
+      + '<td style="font-weight:500">' + escHtml(e.vendor_name||e.recipient||'') + '</td>'
+      + '<td style="font-size:0.8rem">' + escHtml(e.subject||'') + '</td>'
+      + '<td><span class="tag">' + escHtml(e.email_type||'') + '</span></td>'
       + '<td>' + statusHtml + '</td>'
-      + '<td style="font-size:0.875rem;color:#6b7280">' + dateStr + '</td>'
+      + '<td style="font-size:0.78rem;color:#6b7280">' + dateStr + '</td>'
       + '</tr>';
-  });
+  }).join('');
 
-  const tableOrEmpty = emails.length === 0
+  var content = emails.length === 0
     ? '<div style="padding:3rem;text-align:center;color:#9ca3af">'
       + '<i class="fas fa-envelope-open-text" style="font-size:3rem;display:block;margin-bottom:1rem"></i>'
-      + '<p>No emails sent yet. Go to Vendor Shortlisting to send invitations.</p></div>'
+      + '<p>No emails sent yet. Go to Vendors tab to send invitations.</p></div>'
     : '<div style="overflow-x:auto"><table><thead><tr><th>To</th><th>Subject</th><th>Type</th><th>Status</th><th>Sent At</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
 
   setContent(
     '<div class="card">'
     + '<div style="padding:1rem;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between">'
-    + '<h2 style="font-weight:700;color:#1f2937">Email Correspondence Log</h2>'
-    + '<span style="font-size:0.875rem;color:#6b7280">' + emails.length + ' emails</span>'
-    + '</div>'
-    + tableOrEmpty
-    + '</div>'
+    + '<h3 style="font-weight:700;color:#1f2937;margin:0">Email Correspondence Log</h3>'
+    + '<span style="font-size:0.82rem;color:#6b7280">' + emails.length + ' emails</span>'
+    + '</div>' + content + '</div>'
   );
 };
 
-// ============================================================
-// PAGE: Q&A MANAGEMENT
-// ============================================================
-pages.qa = async function() {
-  const questions = await apiCall('GET', '/questions');
-  appState.questions = questions;
-
-  const pending   = questions.filter(function(q) { return !q.published && !q.answer; }).length;
-  const answered  = questions.filter(function(q) { return q.answer && !q.published; }).length;
-  const published = questions.filter(function(q) { return q.published; }).length;
-
-  let qCards = '';
-  if (questions.length === 0) {
-    qCards = '<div class="card p-10 text-center" style="color:#9ca3af">'
-      + '<i class="fas fa-comments" style="font-size:3rem;display:block;margin-bottom:1rem"></i>'
-      + '<p>No questions yet. Load sample questions to get started.</p>'
-      + '<button class="btn-secondary mt-4" onclick="loadSampleQuestions()" style="margin-top:1rem">Load Sample Questions</button>'
-      + '</div>';
-  } else {
-    questions.forEach(function(q) {
-      const badgeHtml = q.published
-        ? '<span class="stage-badge stage-published">Published</span>'
-        : q.answer
-        ? '<span class="stage-badge" style="background:#fef3c7;color:#92400e">Pending Approval</span>'
-        : '<span class="stage-badge stage-draft">Unanswered</span>';
-
-      const answerBlock = q.answer
-        ? '<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:0.75rem;margin-top:0.75rem">'
-          + '<div style="font-size:0.75rem;font-weight:700;color:#92400e;margin-bottom:4px"><i class="fas fa-robot mr-1"></i>AI Draft Answer</div>'
-          + '<p style="font-size:0.875rem;color:#374151">' + escHtml(q.answer) + '</p>'
-          + '</div>'
-        : '';
-
-      const btns = (!q.answer
-        ? '<button class="btn-secondary text-sm" onclick="draftAnswer(' + q.id + ')"><i class="fas fa-robot mr-1"></i>AI Draft</button>'
-        : '') + (q.answer && !q.published
-        ? '<button class="btn-primary text-sm" onclick="approveAnswer(' + q.id + ')"><i class="fas fa-check mr-1"></i>Approve</button>'
-          + '<button class="btn-secondary text-sm" onclick="editAnswer(' + q.id + ')"><i class="fas fa-edit mr-1"></i>Edit</button>'
-        : '');
-
-      qCards += '<div class="card p-5" id="q-' + q.id + '">'
-        + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:1rem">'
-        + '<div style="flex:1">'
-        + '<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.5rem">'
-        + '<span style="font-size:0.75rem;font-weight:600;color:#9ca3af">Q' + q.id + ' &bull; ' + escHtml(q.vendor_name || 'Anonymous') + '</span>'
-        + badgeHtml + '</div>'
-        + '<p style="font-weight:500;color:#1f2937">' + escHtml(q.question) + '</p>'
-        + answerBlock
-        + '</div>'
-        + '<div style="display:flex;flex-direction:column;gap:0.5rem">' + btns + '</div>'
-        + '</div></div>';
-    });
-  }
-
-  setContent(
-    '<div class="space-y-4">'
-    + '<div style="display:flex;align-items:center;justify-content:space-between">'
-    + '<div style="display:flex;gap:0.75rem">'
-    + '<span style="font-size:0.875rem;color:#6b7280">' + pending + ' pending</span>'
-    + '<span style="font-size:0.875rem;color:#92400e">' + answered + ' awaiting approval</span>'
-    + '<span style="font-size:0.875rem;color:#065f46">' + published + ' published</span>'
-    + '</div>'
-    + '<div style="display:flex;gap:0.75rem">'
-    + '<button class="btn-secondary" onclick="draftAllAnswers()"><i class="fas fa-robot mr-2"></i>AI Draft All</button>'
-    + '<button class="btn-primary" onclick="publishAllAnswers()"><i class="fas fa-paper-plane mr-2"></i>Publish All Approved</button>'
-    + '</div></div>'
-    + '<div style="display:grid;gap:0.75rem" id="qaList">' + qCards + '</div>'
-    + '</div>'
-  );
-};
-
-// ============================================================
-// PAGE: PROPOSALS
-// ============================================================
-pages.proposals = async function() {
-  const proposals = await apiCall('GET', '/proposals');
+// --- PROPOSALS TAB ---
+rfpTabPages.proposals = async function(rfpId) {
+  var proposals;
+  try { proposals = await apiCall('GET', '/rfps/' + rfpId + '/proposals'); } catch(e) { proposals = []; }
   appState.proposals = proposals;
 
-  let rows = '';
-  proposals.forEach(function(p) {
-    const badge = p.status === 'submitted'
-      ? '<span class="stage-badge stage-published">submitted</span>'
-      : '<span class="stage-badge stage-draft">' + escHtml(p.status) + '</span>';
-    const fin = p.financial_proposal ? 'AED ' + Number(p.financial_proposal).toLocaleString() : '-';
-    const dateStr = p.created_at ? new Date(p.created_at).toLocaleDateString() : '-';
-    rows += '<tr>'
-      + '<td style="font-weight:500">' + escHtml(p.vendor_name || 'Unknown') + '</td>'
-      + '<td style="font-size:0.875rem;color:#6b7280">' + dateStr + '</td>'
-      + '<td>' + (p.technical_score != null ? p.technical_score + '/100' : '<span style="color:#9ca3af">-</span>') + '</td>'
+  var rows = proposals.map(function(p) {
+    var fin = p.financial_proposal ? 'AED ' + Number(p.financial_proposal).toLocaleString() : '-';
+    var dateStr = p.created_at ? new Date(p.created_at).toLocaleDateString() : '-';
+    return '<tr>'
+      + '<td style="font-weight:500">' + escHtml(p.vendor_name||'Unknown') + '</td>'
+      + '<td style="font-size:0.8rem;color:#6b7280">' + dateStr + '</td>'
+      + '<td>' + (p.technical_score != null ? p.technical_score + '/100' : '<span style="color:#9ca3af">—</span>') + '</td>'
       + '<td>' + fin + '</td>'
-      + '<td>' + badge + '</td>'
-      + '<td><button class="btn-secondary text-sm" onclick="viewProposal(' + p.id + ')"><i class="fas fa-eye mr-1"></i>View</button></td>'
+      + '<td>' + stageBadgeHtml('published') + '</td>'
+      + '<td><button class="btn-ghost btn-sm" onclick="viewProposal(' + p.id + ')"><i class="fas fa-eye"></i></button></td>'
       + '</tr>';
-  });
+  }).join('');
 
-  const tableOrEmpty = proposals.length === 0
+  var content = proposals.length === 0
     ? '<div style="padding:3rem;text-align:center;color:#9ca3af">'
       + '<i class="fas fa-inbox" style="font-size:3rem;display:block;margin-bottom:1rem"></i>'
-      + '<p>No proposals submitted yet.</p></div>'
-    : '<div style="overflow-x:auto"><table><thead><tr><th>Vendor</th><th>Submitted</th><th>Tech Score</th><th>Financial</th><th>Status</th><th>Actions</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+      + '<p style="margin-bottom:1rem">No proposals yet.</p>'
+      + '<button class="btn-primary" onclick="addSampleProposals(' + rfpId + ')"><i class="fas fa-plus"></i>Add Sample Proposals</button>'
+      + '</div>'
+    : '<div style="overflow-x:auto"><table><thead><tr><th>Vendor</th><th>Submitted</th><th>Tech Score</th><th>Financial</th><th>Status</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>';
 
   setContent(
     '<div class="space-y-4">'
     + '<div style="display:flex;justify-content:space-between;align-items:center">'
     + '<p style="font-size:0.875rem;color:#6b7280">' + proposals.length + ' proposals received</p>'
-    + '<button class="btn-primary" onclick="addSampleProposal()"><i class="fas fa-plus mr-2"></i>Add Sample Proposals</button>'
+    + '<button class="btn-primary" onclick="addSampleProposals(' + rfpId + ')"><i class="fas fa-plus"></i>Add Sample Proposals</button>'
     + '</div>'
-    + '<div class="card">' + tableOrEmpty + '</div>'
+    + '<div class="card">' + content + '</div>'
     + '</div>'
   );
 };
 
-// ============================================================
-// PAGE: EVALUATION
-// ============================================================
-pages.evaluation = async function() {
-  const evaluations = await apiCall('GET', '/evaluations');
+// --- EVALUATION TAB ---
+rfpTabPages.evaluation = async function(rfpId) {
+  var evaluations;
+  try { evaluations = await apiCall('GET', '/rfps/' + rfpId + '/evaluations'); } catch(e) { evaluations = []; }
   appState.evaluations = evaluations;
 
-  let evalCards = '';
-  if (evaluations.length === 0) {
-    evalCards = '<div class="card p-10 text-center" style="color:#9ca3af">'
+  var evalCards = evaluations.length === 0
+    ? '<div class="card" style="padding:3rem;text-align:center;color:#9ca3af">'
       + '<i class="fas fa-star-half-alt" style="font-size:3rem;display:block;margin-bottom:1rem"></i>'
-      + '<p style="margin-bottom:1rem">No evaluations yet. Run AI evaluation to score all proposals.</p>'
-      + '<button class="btn-primary" onclick="runEvaluation()"><i class="fas fa-robot mr-2"></i>Run AI Evaluation</button>'
-      + '</div>';
-  } else {
-    evaluations.forEach(function(e) {
-      const scores = [
-        { label: 'Technical', val: e.technical_score },
-        { label: 'Financial', val: e.financial_score },
-        { label: 'Experience', val: e.experience_score },
-      ];
-      let scoresHtml = '';
-      scores.forEach(function(s) {
-        scoresHtml += '<div>'
-          + '<div style="display:flex;justify-content:space-between;font-size:0.75rem;color:#6b7280;margin-bottom:4px"><span>' + s.label + '</span><span>' + (s.val || 0) + '/100</span></div>'
-          + '<div class="score-bar"><div class="score-fill" style="width:' + (s.val || 0) + '%"></div></div>'
+      + '<p style="margin-bottom:1rem">No evaluations yet. Add proposals first, then run AI evaluation.</p>'
+      + '<button class="btn-primary" id="runEvalBtn" onclick="runRfpEvaluation(' + rfpId + ')"><i class="fas fa-robot"></i>Run AI Evaluation</button>'
+      + '</div>'
+    : evaluations.map(function(e) {
+        var scores = [
+          { label:'Technical', val:e.technical_score },
+          { label:'Financial', val:e.financial_score },
+          { label:'Experience', val:e.experience_score },
+        ];
+        var scoreHtml = scores.map(function(s) {
+          return '<div><div style="display:flex;justify-content:space-between;font-size:0.72rem;color:#6b7280;margin-bottom:3px"><span>' + s.label + '</span><span>' + (s.val||0) + '/100</span></div>'
+            + scoreBar(s.val) + '</div>';
+        }).join('');
+        return '<div class="card" style="padding:1.1rem;margin-bottom:0.75rem">'
+          + '<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:0.875rem">'
+          + '<div><h3 style="font-weight:600;color:#1f2937;font-size:0.95rem;margin:0">' + escHtml(e.vendor_name||'Vendor') + '</h3></div>'
+          + '<div style="text-align:right"><div style="font-size:1.75rem;font-weight:700;color:var(--cpc-gold)">' + (e.total_score||0) + '</div>'
+          + '<div style="font-size:0.72rem;color:#6b7280">/ 100</div></div>'
+          + '</div>'
+          + '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0.875rem;margin-bottom:0.75rem">' + scoreHtml + '</div>'
+          + (e.ai_summary ? '<p style="font-size:0.78rem;color:#4b5563;background:#f9fafb;border-radius:6px;padding:0.6rem;margin:0">' + escHtml(e.ai_summary) + '</p>' : '')
           + '</div>';
-      });
-      evalCards += '<div class="card p-5">'
-        + '<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:1rem">'
-        + '<div><h3 style="font-weight:600;color:#1f2937">' + escHtml(e.vendor_name || 'Vendor') + '</h3></div>'
-        + '<div style="text-align:right"><div style="font-size:1.75rem;font-weight:700;color:var(--cpc-gold)">' + (e.total_score || 0) + '</div>'
-        + '<div style="font-size:0.75rem;color:#6b7280">Total Score / 100</div></div>'
-        + '</div>'
-        + '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-bottom:0.75rem">' + scoresHtml + '</div>'
-        + (e.ai_summary ? '<p style="font-size:0.75rem;color:#4b5563;background:#f9fafb;border-radius:6px;padding:0.75rem">' + escHtml(e.ai_summary) + '</p>' : '')
-        + '</div>';
-    });
-  }
+      }).join('');
 
   setContent(
     '<div class="space-y-4">'
     + '<div style="display:flex;justify-content:space-between;align-items:center">'
-    + '<p style="font-size:0.875rem;color:#6b7280">' + evaluations.length + ' evaluations complete</p>'
-    + '<div style="display:flex;gap:0.75rem">'
-    + '<button class="btn-secondary" id="runEvalBtn" onclick="runEvaluation()"><i class="fas fa-robot mr-2"></i>Run AI Evaluation</button>'
-    + '<button class="btn-primary" onclick="navigateTo(\'recommendation\')"><i class="fas fa-trophy mr-2"></i>View Recommendation</button>'
+    + '<p style="font-size:0.875rem;color:#6b7280">' + evaluations.length + ' evaluations</p>'
+    + '<div style="display:flex;gap:0.5rem">'
+    + '<button class="btn-ghost" id="runEvalBtn" onclick="runRfpEvaluation(' + rfpId + ')"><i class="fas fa-robot"></i>Run AI Evaluation</button>'
+    + '<button class="btn-primary" onclick="switchRfpTab(' + rfpId + ',\'recommendation\')"><i class="fas fa-trophy"></i>View Award</button>'
     + '</div></div>'
     + evalCards
     + '</div>'
   );
 };
 
-// ============================================================
-// PAGE: RECOMMENDATION
-// ============================================================
-pages.recommendation = async function() {
-  const rec = await apiCall('GET', '/recommendation').catch(function() { return null; });
+// --- RECOMMENDATION / AWARD TAB ---
+rfpTabPages.recommendation = async function(rfpId) {
+  var rec;
+  try { rec = await apiCall('GET', '/rfps/' + rfpId + '/recommendation'); } catch(e) { rec = null; }
 
-  let content = '';
+  var content;
   if (!rec) {
-    content = '<div class="card p-10 text-center" style="color:#9ca3af">'
+    content = '<div class="card" style="padding:3rem;text-align:center;color:#9ca3af">'
       + '<i class="fas fa-trophy" style="font-size:3rem;display:block;margin-bottom:1rem"></i>'
-      + '<p style="margin-bottom:1rem">No recommendation yet. Complete the evaluation first.</p>'
-      + '<button class="btn-primary" onclick="generateRecommendation()"><i class="fas fa-robot mr-2"></i>Generate AI Recommendation</button>'
+      + '<p style="margin-bottom:1rem">No recommendation yet. Complete evaluation first.</p>'
+      + '<button class="btn-primary" onclick="generateRfpRecommendation(' + rfpId + ')"><i class="fas fa-robot"></i>Generate AI Recommendation</button>'
       + '</div>';
   } else {
-    const rankings = rec.rankings || [];
-    const medals = ['🥇', '🥈', '🥉'];
-    let rankCards = '';
-    rankings.forEach(function(r, i) {
-      const isBest = i === 0;
-      rankCards += '<div class="card p-5" style="' + (isBest ? 'border:2px solid var(--cpc-gold)' : '') + '">'
+    var rankings = rec.rankings || [];
+    var medals = ['🥇','🥈','🥉'];
+    var rankCards = rankings.map(function(r, i) {
+      var isBest = i === 0;
+      return '<div class="card" style="padding:1.25rem;' + (isBest ? 'border:2px solid var(--cpc-gold)' : '') + '">'
         + '<div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.75rem">'
-        + '<div style="width:40px;height:40px;border-radius:50%;background:' + (isBest ? 'var(--cpc-gold)' : i===1 ? '#e5e7eb' : '#fef3c7') + ';display:flex;align-items:center;justify-content:center;font-size:1.25rem">' + (medals[i] || String(i+1)) + '</div>'
+        + '<div style="width:40px;height:40px;border-radius:50%;background:' + (isBest?'var(--cpc-gold)':i===1?'#e5e7eb':'#fef3c7') + ';display:flex;align-items:center;justify-content:center;font-size:1.25rem">' + (medals[i]||String(i+1)) + '</div>'
         + '<div><div style="font-weight:700;color:#1f2937">' + escHtml(r.vendor_name) + '</div>'
         + '<div style="font-size:0.75rem;color:#6b7280">Rank #' + (i+1) + '</div></div>'
         + '</div>'
         + '<div style="font-size:2rem;font-weight:700;color:var(--cpc-gold)">' + r.total_score + '</div>'
-        + '<div style="font-size:0.75rem;color:#6b7280;margin-bottom:0.5rem">Total Score / 100</div>'
+        + '<div style="font-size:0.72rem;color:#6b7280;margin-bottom:0.5rem">/100</div>'
         + (isBest ? '<span class="stage-badge stage-awarded">Recommended</span>' : '')
         + '</div>';
-    });
+    }).join('');
 
-    content = '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1rem">' + rankCards + '</div>'
-      + '<div class="card p-6">'
-      + '<h2 style="font-size:1.125rem;font-weight:700;color:#1f2937;margin-bottom:0.75rem"><i class="fas fa-robot mr-2 cpc-gold"></i>AI Recommendation Summary</h2>'
-      + '<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:1rem;color:#374151;line-height:1.7">' + (rec.summary || '') + '</div>'
+    content = '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0.875rem;margin-bottom:1rem">' + rankCards + '</div>'
+      + '<div class="card" style="padding:1.25rem">'
+      + '<h3 style="font-weight:700;color:#1f2937;margin-bottom:0.75rem;font-size:0.95rem"><i class="fas fa-robot cpc-gold" style="margin-right:0.5rem"></i>AI Recommendation Summary</h3>'
+      + '<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:1rem;color:#374151;line-height:1.7;font-size:0.875rem">' + (rec.summary||'') + '</div>'
       + '<div style="margin-top:1rem;display:flex;gap:0.75rem">'
-      + '<button class="btn-primary" onclick="awardContract()"><i class="fas fa-handshake mr-2"></i>Award Contract</button>'
-      + '<button class="btn-secondary" onclick="generateRecommendation()"><i class="fas fa-sync mr-2"></i>Regenerate</button>'
+      + '<button class="btn-primary" onclick="awardRfpContract(' + rfpId + ')"><i class="fas fa-handshake"></i>Award Contract</button>'
+      + '<button class="btn-ghost" onclick="generateRfpRecommendation(' + rfpId + ')"><i class="fas fa-sync"></i>Regenerate</button>'
       + '</div></div>';
   }
 
@@ -608,222 +764,423 @@ pages.recommendation = async function() {
 };
 
 // ============================================================
-// HTML ESCAPE HELPER
+// PAGE: VENDORS (global registry + performance)
 // ============================================================
-function escHtml(str) {
-  if (!str) return '';
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+pages.vendors = async function() {
+  var vendors, perf;
+  try {
+    [vendors, perf] = await Promise.all([
+      apiCall('GET', '/vendors'),
+      apiCall('GET', '/vendor-performance').catch(function() { return []; })
+    ]);
+  } catch(e) { vendors = []; perf = []; }
+
+  var perfMap = {};
+  (perf||[]).forEach(function(p) { perfMap[p.id] = p; });
+
+  var rows = vendors.map(function(v) {
+    var p = perfMap[v.id] || {};
+    var avgScore = p.avg_score ? Math.round(p.avg_score) : 0;
+    var grade = avgScore >= 75 ? 'perf-high' : avgScore >= 50 ? 'perf-mid' : 'perf-low';
+    var tags = (v.specializations||'').split(',').filter(Boolean).slice(0,3)
+      .map(function(s) { return '<span class="tag">' + escHtml(s.trim()) + '</span>'; }).join('');
+    return '<tr>'
+      + '<td><span style="font-weight:600">' + escHtml(v.name) + '</span><br><span style="font-size:0.75rem;color:#9ca3af">' + escHtml(v.category||'') + '</span></td>'
+      + '<td>' + escHtml(v.country||'UAE') + '</td>'
+      + '<td>' + escHtml(v.size||'—') + '</td>'
+      + '<td>' + tags + '</td>'
+      + '<td style="text-align:center">' + (p.rfps_shortlisted||0) + '</td>'
+      + '<td style="text-align:center">' + (p.proposals_submitted||0) + '</td>'
+      + '<td style="text-align:center"><span class="perf-badge ' + grade + '">' + (avgScore||'—') + (avgScore?'/100':'') + '</span></td>'
+      + '<td style="text-align:center">' + (p.awards_won||0) + '</td>'
+      + '</tr>';
+  }).join('');
+
+  setContent(
+    '<div class="space-y-4">'
+    + '<div style="display:flex;justify-content:space-between;align-items:center">'
+    + '<div><h2 style="font-weight:700;color:#1f2937;font-size:1.05rem">Vendor Registry</h2>'
+    + '<p style="font-size:0.82rem;color:#6b7280;margin:0">' + vendors.length + ' registered vendors</p></div>'
+    + '</div>'
+    + '<div class="card" style="overflow-x:auto">'
+    + '<table><thead><tr>'
+    + '<th>Vendor</th><th>Country</th><th>Size</th><th>Specializations</th>'
+    + '<th style="text-align:center">RFPs Shortlisted</th><th style="text-align:center">Proposals</th>'
+    + '<th style="text-align:center">Avg Score</th><th style="text-align:center">Awards</th>'
+    + '</tr></thead><tbody>' + rows + '</tbody></table>'
+    + '</div></div>'
+  );
+};
+
+// ============================================================
+// PAGE: REPORTS
+// ============================================================
+pages.reports = async function() {
+  var perf, stats;
+  try {
+    [perf, stats] = await Promise.all([
+      apiCall('GET', '/vendor-performance').catch(function() { return []; }),
+      apiCall('GET', '/stats').catch(function() { return {}; })
+    ]);
+  } catch(e) { perf = []; stats = {}; }
+
+  var topPerf = (perf||[]).filter(function(v) { return v.proposals_submitted > 0; });
+
+  var perfRows = topPerf.length === 0
+    ? '<tr><td colspan="6" style="text-align:center;color:#9ca3af;padding:2rem">Run evaluations to see performance data</td></tr>'
+    : topPerf.map(function(v) {
+        var avgScore = v.avg_score ? Math.round(v.avg_score) : 0;
+        var grade = avgScore >= 75 ? 'perf-high' : avgScore >= 50 ? 'perf-mid' : 'perf-low';
+        var convRate = v.rfps_shortlisted > 0 ? Math.round((v.proposals_submitted / v.rfps_shortlisted) * 100) + '%' : '—';
+        return '<tr>'
+          + '<td><strong>' + escHtml(v.name) + '</strong></td>'
+          + '<td style="text-align:center">' + (v.rfps_shortlisted||0) + '</td>'
+          + '<td style="text-align:center">' + (v.proposals_submitted||0) + '</td>'
+          + '<td style="text-align:center"><span class="perf-badge ' + grade + '">' + (avgScore||'—') + (avgScore?'/100':'') + '</span></td>'
+          + '<td style="text-align:center">' + (v.awards_won||0) + '</td>'
+          + '<td style="text-align:center">' + convRate + '</td>'
+          + '</tr>';
+      }).join('');
+
+  var summaryCards = [
+    { label:'Total RFPs Issued',     value: stats.totalRfps||0,       icon:'fa-layer-group',  color:'#0f3460' },
+    { label:'Contracts Awarded',     value: stats.awardedRfps||0,     icon:'fa-handshake',    color:'#065f46' },
+    { label:'Overall Win Rate',      value: (stats.winRate||0)+'%',   icon:'fa-percent',      color:'#c9a84c' },
+    { label:'Total Proposals',       value: stats.totalProposals||0,  icon:'fa-inbox',        color:'#0891b2' },
+    { label:'Avg Cycle Duration',    value: stats.avgDuration ? stats.avgDuration+'d' : 'N/A', icon:'fa-clock', color:'#9ca3af' },
+    { label:'Registered Vendors',    value: stats.totalVendors||0,    icon:'fa-building',     color:'#7c3aed' },
+  ].map(function(k) {
+    return '<div class="stat-card"><div class="stat-value" style="color:' + k.color + '">' + k.value + '</div>'
+      + '<div class="stat-label"><i class="fas ' + k.icon + '" style="margin-right:4px;color:' + k.color + '"></i>' + k.label + '</div></div>';
+  }).join('');
+
+  setContent(
+    '<div class="space-y-6">'
+    + '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0.875rem">' + summaryCards + '</div>'
+    + '<div class="card" style="padding:1.25rem">'
+    + '<h3 style="font-weight:700;color:#1f2937;margin-bottom:1rem;font-size:0.95rem"><i class="fas fa-chart-line cpc-gold" style="margin-right:0.5rem"></i>Vendor Performance Report</h3>'
+    + '<div style="overflow-x:auto">'
+    + '<table><thead><tr>'
+    + '<th>Vendor</th><th style="text-align:center">Shortlisted</th><th style="text-align:center">Proposals</th>'
+    + '<th style="text-align:center">Avg Score</th><th style="text-align:center">Awards Won</th><th style="text-align:center">Conversion</th>'
+    + '</tr></thead><tbody>' + perfRows + '</tbody></table>'
+    + '</div></div>'
+    + '</div>'
+  );
+};
+
+// ============================================================
+// CREATE RFP MODAL
+// ============================================================
+function openCreateRfpModal() {
+  showModal(
+    '<div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:1.25rem">'
+    + '<div style="width:40px;height:40px;border-radius:10px;background:var(--cpc-gold);display:flex;align-items:center;justify-content:center;flex-shrink:0">'
+    + '<i class="fas fa-magic" style="color:var(--cpc-navy)"></i></div>'
+    + '<div><h3 style="margin:0;font-size:1.1rem;font-weight:700">Create New RFP</h3>'
+    + '<p style="margin:0;font-size:0.8rem;color:#6b7280">Describe in plain language — AI generates the full document</p>'
+    + '</div></div>'
+    + '<div class="form-group"><label>Project Title *</label>'
+    + '<input id="newRfpTitle" placeholder="e.g. Oracle ERP System Implementation" autofocus></div>'
+    + '<div class="form-group"><label>Category</label>'
+    + '<select id="newRfpCategory">'
+    + '<option>IT &amp; Digital Transformation</option><option>Consulting Services</option>'
+    + '<option>Infrastructure</option><option>Professional Services</option>'
+    + '<option>Construction</option><option>Healthcare</option>'
+    + '</select></div>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem">'
+    + '<div class="form-group"><label>Budget (AED)</label><input id="newRfpBudget" placeholder="e.g. 5,000,000"></div>'
+    + '<div class="form-group"><label>Deadline</label><input type="date" id="newRfpDeadline"></div>'
+    + '</div>'
+    + '<div class="form-group"><label>Background <span style="font-weight:400;color:#9ca3af">(describe the situation)</span></label>'
+    + '<textarea id="newRfpBackground" rows="3" placeholder="e.g. CPC is currently operating on legacy Oracle EBS. We need to upgrade to Oracle Fusion Cloud to improve process efficiency..."></textarea></div>'
+    + '<div class="form-group"><label>Objectives <span style="font-weight:400;color:#9ca3af">(what you want to achieve)</span></label>'
+    + '<textarea id="newRfpObjectives" rows="2" placeholder="e.g. Migrate to cloud ERP, reduce manual processes, improve reporting..."></textarea></div>'
+    + '<div class="form-group"><label>Scope of Work <span style="font-weight:400;color:#9ca3af">(key areas)</span></label>'
+    + '<textarea id="newRfpScope" rows="2" placeholder="e.g. HR, Finance, Procurement modules, data migration, training..."></textarea></div>'
+    + '<div style="display:flex;gap:0.75rem;margin-top:0.5rem">'
+    + '<button class="btn-primary" style="flex:1" id="createRfpBtn" onclick="createRfp()"><i class="fas fa-magic"></i>Create RFP</button>'
+    + '<button class="btn-ghost" onclick="closeModal()">Cancel</button>'
+    + '</div>'
+  );
+}
+
+async function createRfp() {
+  var btn = document.getElementById('createRfpBtn');
+  var title = document.getElementById('newRfpTitle').value.trim();
+  if (!title) { showToast('Please enter a project title', 'error'); return; }
+
+  setLoading(btn, true, 'Creating...');
+  try {
+    var data = {
+      title:             title,
+      category:          document.getElementById('newRfpCategory').value,
+      budget:            document.getElementById('newRfpBudget').value,
+      deadline:          document.getElementById('newRfpDeadline').value,
+      background:        document.getElementById('newRfpBackground').value,
+      objectives:        document.getElementById('newRfpObjectives').value,
+      scope:             document.getElementById('newRfpScope').value,
+      tech_requirements: '',
+    };
+    var rfp = await apiCall('POST', '/rfps', data);
+    closeModal();
+    showToast('RFP created! Now generate the document.', 'success');
+    openRfp(rfp.id);
+  } catch(e) {
+    setLoading(btn, false, '<i class="fas fa-magic"></i>Create RFP');
+  }
 }
 
 // ============================================================
-// ACTION HANDLERS
+// RFP ACTIONS
 // ============================================================
-async function generateRFP() {
-  const btn = document.getElementById('generateBtn');
+async function generateRfpContent(rfpId) {
+  var btn = document.getElementById('generateBtn');
   setLoading(btn, true, 'Generating...');
   try {
-    const data = {
+    var data = {
       title:             document.getElementById('rfpTitle').value,
       category:          document.getElementById('rfpCategory').value,
       budget:            document.getElementById('rfpBudget').value,
       deadline:          document.getElementById('rfpDeadline').value,
+      background:        document.getElementById('rfpBackground').value,
+      objectives:        document.getElementById('rfpObjectives').value,
       scope:             document.getElementById('rfpScope').value,
       tech_requirements: document.getElementById('rfpTech').value
     };
-    const result = await apiCall('POST', '/rfp/generate', data);
-    document.getElementById('rfpPreview').innerHTML = result.content || '';
-    appState.rfp = result;
-    showToast('RFP generated successfully!', 'success');
+    var rfp = await apiCall('POST', '/rfps/' + rfpId + '/generate', data);
+    var preview = document.getElementById('rfpPreview');
+    if (preview) preview.innerHTML = rfp.content || '';
+    showToast('RFP document generated!', 'success');
+    // Reload tab to show download button
+    rfpTabPages.generate(rfpId);
   } catch(e) {
-    // error already shown by apiCall
-  } finally {
-    setLoading(btn, false, '<i class="fas fa-robot mr-2"></i>Generate with AI');
+    setLoading(btn, false, '<i class="fas fa-robot"></i>Generate with AI');
   }
 }
 
-async function saveRFP() {
-  const data = {
-    title:             document.getElementById('rfpTitle').value,
-    category:          document.getElementById('rfpCategory').value,
-    budget:            document.getElementById('rfpBudget').value,
-    deadline:          document.getElementById('rfpDeadline').value,
-    scope:             document.getElementById('rfpScope').value,
-    tech_requirements: document.getElementById('rfpTech').value
-  };
-  await apiCall('POST', '/rfp', data);
-  showToast('RFP saved!', 'success');
+async function saveRfpFields(rfpId) {
+  try {
+    var data = {
+      title:             document.getElementById('rfpTitle').value,
+      category:          document.getElementById('rfpCategory').value,
+      budget:            document.getElementById('rfpBudget').value,
+      deadline:          document.getElementById('rfpDeadline').value,
+      background:        document.getElementById('rfpBackground').value,
+      objectives:        document.getElementById('rfpObjectives').value,
+      scope:             document.getElementById('rfpScope').value,
+      tech_requirements: document.getElementById('rfpTech').value
+    };
+    await apiCall('PUT', '/rfps/' + rfpId, data);
+    showToast('RFP fields saved!', 'success');
+  } catch(e) {}
 }
 
-async function advanceStage(stage) {
-  await apiCall('POST', '/rfp/stage', { stage: stage });
-  const labels = { published:'Published', qa_open:'Q&A Open', submissions_closed:'Submissions Closed', evaluation:'Evaluation', awarded:'Awarded' };
-  showToast('Stage advanced to: ' + (labels[stage] || stage), 'success');
-  navigateTo('dashboard');
+async function advanceRfpStage(rfpId, stage) {
+  try {
+    await apiCall('POST', '/rfps/' + rfpId + '/stage', { stage: stage });
+    var labels = { published:'Published', qa_open:'Q&A Open', submissions_closed:'Submissions Closed', evaluation:'Evaluation', awarded:'Awarded' };
+    showToast('Stage advanced to: ' + (labels[stage]||stage), 'success');
+    // Refresh lifecycle bar
+    var rfp = await apiCall('GET', '/rfps/' + rfpId);
+    showLifecycleBar(rfp.stage, rfpId);
+  } catch(e) {}
 }
 
-async function toggleShortlist(vendorId, shortlist) {
-  await apiCall('PUT', '/vendors/' + vendorId + '/shortlist', { shortlisted: shortlist });
+// ============================================================
+// VENDOR ACTIONS
+// ============================================================
+async function toggleShortlist(rfpId, vendorId, shortlist) {
+  await apiCall('PUT', '/rfps/' + rfpId + '/vendors/' + vendorId + '/shortlist', { shortlisted: shortlist });
   showToast(shortlist ? 'Vendor shortlisted!' : 'Removed from shortlist', 'success');
-  navigateTo('vendors');
+  rfpTabPages.vendors(rfpId);
 }
 
-async function aiShortlist() {
+async function aiShortlistRfp(rfpId) {
   showToast('Running AI shortlisting...', 'info');
-  await apiCall('POST', '/vendors/ai-shortlist', {});
-  showToast('AI shortlisting complete!', 'success');
-  navigateTo('vendors');
+  try {
+    await apiCall('POST', '/rfps/' + rfpId + '/vendors/ai-shortlist', {});
+    showToast('AI shortlisting complete!', 'success');
+    rfpTabPages.vendors(rfpId);
+  } catch(e) {}
 }
 
-async function sendInvitations() {
-  const shortlisted = appState.vendors.filter(function(v) { return v.shortlisted; });
+async function sendRfpInvitations(rfpId) {
+  var shortlisted = appState.vendors.filter(function(v) { return v.shortlisted; });
   if (shortlisted.length === 0) { showToast('Please shortlist vendors first', 'error'); return; }
-  await apiCall('POST', '/emails/send-invitations', {});
-  showToast('Invitations sent to ' + shortlisted.length + ' vendors!', 'success');
-  navigateTo('emails');
+  try {
+    await apiCall('POST', '/rfps/' + rfpId + '/emails/send-invitations', {});
+    showToast('Invitations sent to ' + shortlisted.length + ' vendors!', 'success');
+    switchRfpTab(rfpId, 'emails');
+  } catch(e) {}
 }
 
-async function draftAnswer(qId) {
-  const el = document.getElementById('q-' + qId);
-  const btn = el && el.querySelector('button');
-  if (btn) setLoading(btn, true, 'Drafting...');
+// ============================================================
+// Q&A ACTIONS
+// ============================================================
+async function draftQAnswer(rfpId, qId) {
   try {
-    await apiCall('POST', '/questions/' + qId + '/draft', {});
+    await apiCall('POST', '/rfps/' + rfpId + '/questions/' + qId + '/draft', {});
     showToast('AI answer drafted!', 'success');
-    navigateTo('qa');
-  } catch(e) {
-    if (btn) setLoading(btn, false, '<i class="fas fa-robot mr-1"></i>AI Draft');
-  }
+    rfpTabPages.qa(rfpId);
+  } catch(e) {}
 }
 
-async function draftAllAnswers() {
+async function draftAllQAnswers(rfpId) {
   showToast('AI drafting all answers...', 'info');
-  await apiCall('POST', '/questions/draft-all', {});
-  showToast('All answers drafted!', 'success');
-  navigateTo('qa');
-}
-
-async function approveAnswer(qId) {
-  await apiCall('PUT', '/questions/' + qId + '/approve', {});
-  showToast('Answer approved and published!', 'success');
-  navigateTo('qa');
-}
-
-async function editAnswer(qId) {
-  const q = appState.questions.find(function(q) { return q.id === qId; });
-  if (!q) return;
-  showModal(
-    '<h3 style="font-size:1.125rem;font-weight:700;margin-bottom:1rem">Edit Answer for Q' + qId + '</h3>'
-    + '<p style="color:#6b7280;margin-bottom:0.75rem">' + escHtml(q.question) + '</p>'
-    + '<label>Answer</label>'
-    + '<textarea id="editAnswerText" rows="6" style="margin-bottom:1rem">' + escHtml(q.answer || '') + '</textarea>'
-    + '<div style="display:flex;gap:0.75rem">'
-    + '<button class="btn-primary" onclick="saveAnswer(' + qId + ')">Save &amp; Approve</button>'
-    + '<button class="btn-secondary" onclick="closeModal()">Cancel</button>'
-    + '</div>'
-  );
-}
-
-async function saveAnswer(qId) {
-  const text = document.getElementById('editAnswerText').value;
-  await apiCall('PUT', '/questions/' + qId + '/answer', { answer: text });
-  showToast('Answer saved!', 'success');
-  closeModal();
-  navigateTo('qa');
-}
-
-async function publishAllAnswers() {
-  await apiCall('POST', '/questions/publish-all', {});
-  showToast('All approved answers published!', 'success');
-  navigateTo('qa');
-}
-
-async function loadSampleQuestions() {
-  await apiCall('POST', '/questions/load-samples', {});
-  showToast('Sample questions loaded!', 'success');
-  navigateTo('qa');
-}
-
-async function runEvaluation() {
-  const btn = document.getElementById('runEvalBtn');
-  if (btn) setLoading(btn, true, 'Running AI Evaluation...');
   try {
-    await apiCall('POST', '/evaluations/run', {});
+    await apiCall('POST', '/rfps/' + rfpId + '/questions/draft-all', {});
+    showToast('All answers drafted!', 'success');
+    rfpTabPages.qa(rfpId);
+  } catch(e) {}
+}
+
+async function approveQAnswer(rfpId, qId) {
+  try {
+    await apiCall('PUT', '/rfps/' + rfpId + '/questions/' + qId + '/approve', {});
+    showToast('Answer approved!', 'success');
+    rfpTabPages.qa(rfpId);
+  } catch(e) {}
+}
+
+async function publishAllQAnswers(rfpId) {
+  try {
+    await apiCall('POST', '/rfps/' + rfpId + '/questions/publish-all', {});
+    showToast('All approved answers published!', 'success');
+    rfpTabPages.qa(rfpId);
+  } catch(e) {}
+}
+
+async function loadSampleQuestions(rfpId) {
+  try {
+    await apiCall('POST', '/rfps/' + rfpId + '/questions/load-samples', {});
+    showToast('Sample questions loaded!', 'success');
+    rfpTabPages.qa(rfpId);
+  } catch(e) {}
+}
+
+// ============================================================
+// PROPOSALS / EVAL / AWARD
+// ============================================================
+async function addSampleProposals(rfpId) {
+  try {
+    await apiCall('POST', '/rfps/' + rfpId + '/proposals/sample', {});
+    showToast('Sample proposals added!', 'success');
+    rfpTabPages.proposals(rfpId);
+  } catch(e) {}
+}
+
+async function runRfpEvaluation(rfpId) {
+  var btn = document.getElementById('runEvalBtn');
+  if (btn) setLoading(btn, true, 'Running...');
+  try {
+    await apiCall('POST', '/rfps/' + rfpId + '/evaluations/run', {});
     showToast('AI evaluation complete!', 'success');
-    navigateTo('evaluation');
+    rfpTabPages.evaluation(rfpId);
   } catch(e) {
-    if (btn) setLoading(btn, false, '<i class="fas fa-robot mr-2"></i>Run AI Evaluation');
+    if (btn) setLoading(btn, false, '<i class="fas fa-robot"></i>Run AI Evaluation');
   }
 }
 
-async function generateRecommendation() {
-  showToast('Generating AI recommendation...', 'info');
-  await apiCall('POST', '/recommendation/generate', {});
-  showToast('Recommendation generated!', 'success');
-  navigateTo('recommendation');
+async function generateRfpRecommendation(rfpId) {
+  showToast('Generating recommendation...', 'info');
+  try {
+    await apiCall('POST', '/rfps/' + rfpId + '/recommendation/generate', {});
+    showToast('Recommendation generated!', 'success');
+    rfpTabPages.recommendation(rfpId);
+  } catch(e) {}
 }
 
-async function awardContract() {
-  await apiCall('POST', '/rfp/stage', { stage: 'awarded' });
-  showToast('Contract awarded successfully!', 'success');
-  navigateTo('dashboard');
+async function awardRfpContract(rfpId) {
+  try {
+    await apiCall('POST', '/rfps/' + rfpId + '/stage', { stage: 'awarded' });
+    showToast('Contract awarded successfully!', 'success');
+    var rfp = await apiCall('GET', '/rfps/' + rfpId);
+    showLifecycleBar(rfp.stage, rfpId);
+    rfpTabPages.recommendation(rfpId);
+  } catch(e) {}
 }
 
-async function addSampleProposal() {
-  await apiCall('POST', '/proposals/sample', {});
-  showToast('Sample proposals added!', 'success');
-  navigateTo('proposals');
-}
-
-function viewVendor(id) {
-  const v = appState.vendors.find(function(v) { return v.id === id; });
-  if (!v) return;
-  const scoreBlock = v.fit_score
-    ? '<div style="background:#fffbeb;border-radius:8px;padding:0.75rem;margin-bottom:1rem">'
-      + '<div style="font-size:0.875rem;font-weight:600;color:#92400e;margin-bottom:4px">AI Fit Score: ' + v.fit_score + '/100</div>'
-      + '<div class="score-bar"><div class="score-fill" style="width:' + v.fit_score + '%"></div></div>'
-      + (v.fit_rationale ? '<p style="font-size:0.75rem;color:#4b5563;margin-top:0.5rem">' + escHtml(v.fit_rationale) + '</p>' : '')
-      + '</div>'
-    : '';
-  showModal(
-    '<div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:1rem">'
-    + '<div style="width:48px;height:48px;border-radius:12px;background:var(--cpc-blue);display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:1.25rem">' + escHtml(v.name.charAt(0)) + '</div>'
-    + '<div><h3 style="font-size:1.125rem;font-weight:700">' + escHtml(v.name) + '</h3>'
-    + '<p style="color:#6b7280;font-size:0.875rem">' + escHtml(v.category || '') + '</p></div>'
-    + '</div>'
-    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem;font-size:0.875rem;margin-bottom:1rem">'
-    + '<div><label>Contact</label><p>' + escHtml(v.contact_name || '-') + '</p></div>'
-    + '<div><label>Email</label><p>' + escHtml(v.contact_email || '-') + '</p></div>'
-    + '<div><label>Country</label><p>' + escHtml(v.country || '-') + '</p></div>'
-    + '<div><label>Size</label><p>' + escHtml(v.size || '-') + '</p></div>'
-    + '<div><label>Certifications</label><p>' + escHtml(v.certifications || '-') + '</p></div>'
-    + '<div><label>ERP Experience</label><p>' + escHtml(v.erp_experience || '-') + '</p></div>'
-    + '</div>'
-    + scoreBlock
-    + '<button class="btn-secondary" style="width:100%" onclick="closeModal()">Close</button>'
-  );
-}
-
+// ============================================================
+// VIEW HELPERS
+// ============================================================
 function viewProposal(id) {
-  const p = appState.proposals.find(function(p) { return p.id === id; });
+  var p = appState.proposals.find(function(p) { return p.id === id; });
   if (!p) return;
   showModal(
-    '<h3 style="font-size:1.125rem;font-weight:700;margin-bottom:1rem">Proposal from ' + escHtml(p.vendor_name || 'Unknown') + '</h3>'
+    '<h3 style="font-size:1.1rem;font-weight:700;margin-bottom:1rem">Proposal — ' + escHtml(p.vendor_name||'Unknown') + '</h3>'
     + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem;font-size:0.875rem;margin-bottom:1rem">'
-    + '<div><label>Technical Score</label><p style="font-size:1.5rem;font-weight:700">' + (p.technical_score || '-') + '</p></div>'
-    + '<div><label>Financial Proposal</label><p style="font-size:1.25rem;font-weight:700">' + (p.financial_proposal ? 'AED ' + Number(p.financial_proposal).toLocaleString() : '-') + '</p></div>'
+    + '<div><label>Technical Score</label><p style="font-size:1.5rem;font-weight:700;margin:0">' + (p.technical_score||'—') + '</p></div>'
+    + '<div><label>Financial Proposal</label><p style="font-size:1.25rem;font-weight:700;margin:0">' + (p.financial_proposal ? 'AED ' + Number(p.financial_proposal).toLocaleString() : '—') + '</p></div>'
     + '</div>'
-    + (p.technical_proposal ? '<div style="margin-bottom:0.75rem"><label>Technical Proposal</label><div style="background:#f9fafb;border-radius:8px;padding:0.75rem;font-size:0.875rem;max-height:200px;overflow-y:auto">' + escHtml(p.technical_proposal) + '</div></div>' : '')
-    + '<button class="btn-secondary" style="width:100%" onclick="closeModal()">Close</button>'
+    + (p.technical_proposal ? '<div style="margin-bottom:1rem"><label>Technical Proposal</label><div style="background:#f9fafb;border-radius:8px;padding:0.75rem;font-size:0.82rem;max-height:200px;overflow-y:auto">' + escHtml(p.technical_proposal) + '</div></div>' : '')
+    + '<button class="btn-ghost" style="width:100%;justify-content:center" onclick="closeModal()">Close</button>'
   );
+}
+
+// ============================================================
+// PDF DOWNLOAD
+// ============================================================
+async function downloadRfpPdf(rfpId) {
+  try {
+    var rfp = await apiCall('GET', '/rfps/' + rfpId);
+    if (!rfp.content) { showToast('Generate the RFP document first', 'error'); return; }
+    showToast('Preparing PDF download...', 'info');
+
+    // Use window.print approach with a hidden iframe for clean PDF output
+    var printWindow = window.open('', '_blank', 'width=900,height=700');
+    printWindow.document.write('<!DOCTYPE html><html><head>'
+      + '<meta charset="UTF-8"><title>' + escHtml(rfp.title||'RFP') + '</title>'
+      + '<style>'
+      + 'body{font-family:Georgia,serif;color:#1a1a1a;margin:0;padding:20px}'
+      + '.rfp-cover{text-align:center;padding:40px 30px;background:linear-gradient(135deg,#1a1a2e,#0f3460);color:white;margin-bottom:0}'
+      + '.rfp-emblem{font-size:48px;margin-bottom:8px}'
+      + '.rfp-org-name{font-size:20px;font-weight:700}'
+      + '.rfp-org-arabic{font-size:16px;color:#e8c96e;margin:4px 0}'
+      + '.rfp-org-sub{font-size:12px;color:#bfdbfe;margin-bottom:30px}'
+      + '.rfp-doc-type{font-size:13px;font-weight:700;letter-spacing:0.15em;color:#e8c96e;text-transform:uppercase}'
+      + '.rfp-doc-title{font-size:24px;font-weight:700;margin:12px 0;color:white}'
+      + '.rfp-doc-subtitle{font-size:14px;color:#bfdbfe}'
+      + '.rfp-doc-date{font-size:12px;color:#bfdbfe;margin-top:10px}'
+      + '.rfp-meta-table{width:100%;border-collapse:collapse}'
+      + '.rfp-meta-table th{background:#f0f4f8;color:#1a1a2e;padding:10px;font-size:12px;border:1px solid #d1d5db}'
+      + '.rfp-meta-table td{background:white;padding:10px;font-size:13px;border:1px solid #d1d5db}'
+      + '.rfp-toc{padding:20px;background:#f8f6f0;border-bottom:1px solid #e5e7eb}'
+      + '.rfp-toc-item{display:flex;justify-content:space-between;padding:5px 0;font-size:13px;color:#0f3460;border-bottom:1px dotted #d1d5db}'
+      + '.rfp-section{display:flex;gap:20px;padding:24px 20px;border-bottom:1px solid #e5e7eb;page-break-inside:avoid}'
+      + '.rfp-section-num{width:36px;height:36px;border-radius:50%;background:#c9a84c;color:#1a1a2e;display:flex;align-items:center;justify-content:center;font-weight:700;flex-shrink:0}'
+      + '.rfp-section-body{flex:1}'
+      + '.rfp-section-title{font-size:15px;font-weight:700;color:#1a1a2e;margin-bottom:10px;font-family:Segoe UI,sans-serif}'
+      + '.rfp-section p,.rfp-section li{font-size:13px;line-height:1.7}'
+      + '.rfp-subsection-title{font-size:13px;font-weight:700;color:#0f3460;margin:12px 0 6px;border-left:3px solid #c9a84c;padding-left:8px}'
+      + '.rfp-deliverables{background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:8px 12px;font-size:12px;color:#374151;margin-top:8px}'
+      + '.rfp-spec-table{width:100%;border-collapse:collapse;margin:10px 0;font-size:12px}'
+      + '.rfp-spec-table th{background:#1a1a2e;color:white;padding:8px;font-weight:600}'
+      + '.rfp-spec-table td{padding:8px;border:1px solid #e5e7eb}'
+      + '.rfp-spec-table tr:nth-child(even) td{background:#f9fafb}'
+      + '.rfp-footer{background:#1a1a2e;color:white;padding:16px 20px;text-align:center;font-size:12px;line-height:1.8}'
+      + '@media print{body{padding:0}}'
+      + '</style></head><body>'
+      + rfp.content
+      + '</body></html>');
+    printWindow.document.close();
+    setTimeout(function() {
+      printWindow.focus();
+      printWindow.print();
+    }, 800);
+  } catch(e) {
+    showToast('Failed to open PDF: ' + e.message, 'error');
+  }
 }
 
 // ============================================================
 // START
 // ============================================================
+async function init() {
+  try { await apiCall('POST', '/init', {}); } catch(e) {}
+  navigateTo('dashboard');
+}
+
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', init);
 } else {
