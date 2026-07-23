@@ -309,27 +309,42 @@ apiRouter.post('/rfps/:id/emails/send-invitations', async (c) => {
   const sDeadline = body.submission_deadline || (rfp?.deadline || '30 days from today')
   const notes = body.notes || ''
 
+  const results: any[] = []
+
   for (const v of shortlisted) {
-    const already = await c.env.DB.prepare(`SELECT id FROM email_log WHERE vendor_id=? AND rfp_id=? AND email_type='invitation'`).bind(v.id, rfpId).first()
-    if (already) continue
+    // Only skip if a REAL (status='sent') invitation already went out.
+    // If previous attempt was 'simulated' (e.g. API key missing), delete it and retry.
+    const existing = await c.env.DB.prepare(
+      `SELECT id, status FROM email_log WHERE vendor_id=? AND rfp_id=? AND email_type='invitation'`
+    ).bind(v.id, rfpId).first<any>()
+
+    if (existing?.status === 'sent') {
+      results.push({ vendor: v.name, status: 'already_sent' })
+      continue
+    }
+    // Remove failed/simulated previous record so we can insert a fresh one
+    if (existing) {
+      await c.env.DB.prepare(`DELETE FROM email_log WHERE id=?`).bind(existing.id).run()
+    }
 
     const isAndersen = v.contact_email?.includes('andersenlab.com')
     const emailBody = buildInvitationEmail(v, rfp, qDeadline, sDeadline, notes)
     let status = 'simulated'
+    let sendError = ''
 
     if (isAndersen) {
-      try {
-        const sent = await sendRealEmail(
-          v.contact_email,
-          `Invitation to Tender – ${rfp?.title || 'CPC RFP'} (Ref: ${rfp?.ref_number || ''})`,
-          emailBody,
-          rfp,
-          c.env
-        )
-        status = sent ? 'sent' : 'simulated'
-      } catch(e) {
-        status = 'simulated'
-      }
+      const result = await sendRealEmail(
+        v.contact_email,
+        `Invitation to Tender – ${rfp?.title || 'CPC RFP'} (Ref: ${rfp?.ref_number || ''})`,
+        emailBody,
+        rfp,
+        c.env
+      )
+      status = result.ok ? 'sent' : 'simulated'
+      sendError = result.error || ''
+      results.push({ vendor: v.name, status, resendId: result.id, error: sendError })
+    } else {
+      results.push({ vendor: v.name, status: 'simulated' })
     }
 
     await c.env.DB.prepare(`
@@ -343,7 +358,7 @@ apiRouter.post('/rfps/:id/emails/send-invitations', async (c) => {
       status
     ).run()
   }
-  return c.json({ ok: true })
+  return c.json({ ok: true, results })
 })
 
 // ============================================================
@@ -536,6 +551,41 @@ apiRouter.get('/inbound-status', async (c) => {
     return c.json({ recentInbound: result?.cnt || 0 })
   } catch {
     return c.json({ recentInbound: 0 })
+  }
+})
+
+// ============================================================
+// DEBUG — clear simulated invitation records so real send can retry
+// POST /api/debug/clear-simulated-invitations  (no auth — internal use)
+// ============================================================
+apiRouter.post('/debug/clear-simulated-invitations', async (c) => {
+  try {
+    const { results: deleted } = await c.env.DB.prepare(`
+      SELECT id, vendor_id, rfp_id, status FROM email_log
+      WHERE email_type='invitation' AND status='simulated'
+    `).all<any>()
+    await c.env.DB.prepare(`
+      DELETE FROM email_log WHERE email_type='invitation' AND status='simulated'
+    `).run()
+    return c.json({ ok: true, deletedCount: deleted.length, deletedRecords: deleted })
+  } catch(e: any) {
+    return c.json({ ok: false, error: e.message }, 500)
+  }
+})
+
+// GET /api/debug/email-log — show recent email_log rows (for diagnosis)
+apiRouter.get('/debug/email-log', async (c) => {
+  try {
+    const { results } = await c.env.DB.prepare(`
+      SELECT e.id, e.rfp_id, e.vendor_id, v.name as vendor_name, e.email_type, e.status,
+             e.recipient, e.created_at, e.resend_email_id
+      FROM email_log e
+      LEFT JOIN vendors v ON e.vendor_id = v.id
+      ORDER BY e.id DESC LIMIT 50
+    `).all()
+    return c.json(results)
+  } catch(e: any) {
+    return c.json({ error: e.message }, 500)
   }
 })
 
@@ -1564,11 +1614,15 @@ Abu Dhabi, United Arab Emirates
 procurement@cpc.gov.ae`
 }
 
-async function sendRealEmail(to: string, subject: string, body: string, rfp: any, env?: any): Promise<boolean> {
+async function sendRealEmail(
+  to: string, subject: string, body: string, rfp: any, env?: any
+): Promise<{ ok: boolean; id?: string; error?: string }> {
   // Use Resend API for real email delivery
   // Read key from Cloudflare Worker secret binding (env.RESEND_API_KEY)
   const RESEND_API_KEY = env?.RESEND_API_KEY || (globalThis as any).RESEND_API_KEY || ''
-  if (!RESEND_API_KEY) return false
+  if (!RESEND_API_KEY) {
+    return { ok: false, error: 'RESEND_API_KEY not configured' }
+  }
 
   try {
     const res = await fetch('https://api.resend.com/emails', {
@@ -1578,7 +1632,7 @@ async function sendRealEmail(to: string, subject: string, body: string, rfp: any
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        from: 'procurement@cpc-rfp.website',
+        from: 'CPC Procurement <procurement@cpc-rfp.website>',
         to: [to],
         subject: subject,
         text: body,
@@ -1592,9 +1646,21 @@ async function sendRealEmail(to: string, subject: string, body: string, rfp: any
         </div>`,
       }),
     })
-    return res.ok
-  } catch(e) {
-    return false
+
+    // Parse response body regardless of status to capture Resend's error message
+    let data: any = {}
+    try { data = await res.json() } catch(_) {}
+
+    if (res.ok) {
+      // Resend returns { id: "re_xxxx" } on 200
+      return { ok: true, id: data.id }
+    } else {
+      // Resend returns { statusCode, message, name } on error
+      const errMsg = data.message || data.name || `HTTP ${res.status}`
+      return { ok: false, error: errMsg }
+    }
+  } catch(e: any) {
+    return { ok: false, error: e.message || 'network error' }
   }
 }
 

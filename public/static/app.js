@@ -719,53 +719,90 @@ rfpTabs.vendors = async function(rfpId, rfp) {
   const vendors = await apiCall('GET', '/rfps/' + rfpId + '/vendors').catch(function(){ return []; });
   appState.rfpVendors = vendors;
 
-  const shortlisted = vendors.filter(function(v){ return v.shortlisted; }).length;
+  const shortlistedVendors = vendors.filter(function(v){ return v.shortlisted; });
+  const otherVendors = vendors.filter(function(v){ return !v.shortlisted; });
+  const shortlistedCount = shortlistedVendors.length;
 
-  let rows = '';
-  vendors.forEach(function(v) {
+  function buildVendorRow(v, allowRemove) {
     const score = v.rfp_fit_score || v.fit_score || 0;
     const fitCls = score >= 75 ? 'perf-high' : score >= 50 ? 'perf-mid' : 'perf-low';
     const tags = (v.specializations||'').split(',').filter(Boolean).slice(0,3)
       .map(function(s){ return '<span class="tag">' + escHtml(s.trim()) + '</span>'; }).join('');
-    const isShortlisted = v.shortlisted;
-    rows += '<tr>'
+    const actionBtn = allowRemove
+      ? '<button class="btn-danger btn-sm" onclick="toggleVendorShortlist(' + rfpId + ',' + v.id + ',false)"><i class="fas fa-minus"></i>Remove</button>'
+      : '<button class="btn-secondary btn-sm" onclick="toggleVendorShortlist(' + rfpId + ',' + v.id + ',true)"><i class="fas fa-plus"></i>Add</button>';
+    return '<tr>'
       + '<td><div style="display:flex;align-items:center;gap:0.75rem">'
       + '<div style="width:34px;height:34px;border-radius:8px;background:var(--cpc-blue);display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:0.82rem;flex-shrink:0">' + escHtml(v.name.charAt(0)) + '</div>'
       + '<div><div style="font-weight:600;font-size:0.875rem">' + escHtml(v.name) + '</div>'
       + '<div style="font-size:0.72rem;color:#9ca3af">' + escHtml(v.country||'UAE') + ' &bull; ' + escHtml(v.size||'') + '</div>'
       + '</div></div></td>'
       + '<td><div>' + tags + '</div></td>'
-      + '<td><div style="display:flex;align-items:center;gap:8px;min-width:100px"><span class="perf-badge ' + fitCls + '">' + score + '/100</span></div>'
-      + (v.rfp_fit_rationale ? '<div style="font-size:0.72rem;color:#6b7280;margin-top:2px;max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="' + escHtml(v.rfp_fit_rationale||'') + '">' + escHtml((v.rfp_fit_rationale||'').substring(0,60)) + '...</div>' : '')
+      + '<td><span class="perf-badge ' + fitCls + '">' + score + '/100</span>'
+      + (v.rfp_fit_rationale ? '<div style="font-size:0.72rem;color:#6b7280;margin-top:2px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + escHtml(v.rfp_fit_rationale||'') + '">' + escHtml((v.rfp_fit_rationale||'').substring(0,60)) + '...</div>' : '')
       + '</td>'
-      + '<td style="text-align:center">'
-      + (isShortlisted
-        ? '<button class="btn-danger btn-sm" onclick="toggleVendorShortlist(' + rfpId + ',' + v.id + ',false)"><i class="fas fa-minus"></i>Remove</button>'
-        : '<button class="btn-secondary btn-sm" onclick="toggleVendorShortlist(' + rfpId + ',' + v.id + ',true)"><i class="fas fa-plus"></i>Add</button>')
-      + '</td>'
+      + '<td style="text-align:center">' + actionBtn + '</td>'
       + '<td><button class="btn-ghost btn-sm" onclick="viewVendorDetail(' + v.id + ')"><i class="fas fa-eye"></i></button></td>'
       + '</tr>';
-  });
+  }
+
+  // Shortlisted table rows
+  let shortlistedRows = '';
+  shortlistedVendors.forEach(function(v){ shortlistedRows += buildVendorRow(v, true); });
+
+  // Other vendors collapsed section
+  let otherRows = '';
+  otherVendors.forEach(function(v){ otherRows += buildVendorRow(v, false); });
+
+  const tableHead = '<thead><tr><th>Vendor</th><th>Specializations</th><th>AI Fit Score</th><th style="text-align:center">Shortlist</th><th></th></tr></thead>';
 
   setContent(
     '<div class="space-y-4">'
+
+    // Header with actions
     + '<div style="display:flex;align-items:center;justify-content:space-between">'
     + '<div>'
-    + '<h3 style="font-weight:700;font-size:0.95rem;color:#1f2937;margin:0">Vendor Selection for this RFP</h3>'
-    + '<p style="font-size:0.8rem;color:#9ca3af;margin:0">' + vendors.length + ' vendors in pool &bull; ' + shortlisted + ' shortlisted</p>'
+    + '<h3 style="font-weight:700;font-size:0.95rem;color:#1f2937;margin:0">Vendor Shortlist for this RFP</h3>'
+    + '<p style="font-size:0.8rem;color:#9ca3af;margin:0">' + shortlistedCount + ' shortlisted &bull; ' + otherVendors.length + ' not shortlisted (hidden)</p>'
     + '</div>'
     + '<div style="display:flex;gap:0.5rem">'
     + '<button class="btn-secondary" id="aiShortlistBtn" onclick="aiShortlistVendors(' + rfpId + ')"><i class="fas fa-robot"></i>AI Suggested Vendors</button>'
     + '<button class="btn-primary" onclick="sendRfpInvitations(' + rfpId + ')"><i class="fas fa-paper-plane"></i>Send Invitations</button>'
     + '</div>'
     + '</div>'
-    + '<div class="card"><div style="overflow-x:auto"><table>'
-    + '<thead><tr><th>Vendor</th><th>Specializations</th><th>AI Fit Score</th><th style="text-align:center">Shortlist</th><th></th></tr></thead>'
-    + '<tbody>' + rows + '</tbody>'
-    + '</table></div></div>'
+
+    // Shortlisted vendors table (always visible)
+    + (shortlistedCount === 0
+      ? '<div class="card" style="padding:2.5rem;text-align:center;color:#9ca3af">'
+        + '<i class="fas fa-clipboard-list" style="font-size:2rem;display:block;margin-bottom:0.75rem;color:#d1d5db"></i>'
+        + '<p style="font-weight:600;color:#6b7280;margin-bottom:0.5rem">No vendors shortlisted yet</p>'
+        + '<p style="font-size:0.85rem">Use <strong>AI Suggested Vendors</strong> to auto-shortlist, or add vendors manually from the pool below.</p>'
+        + '</div>'
+      : '<div class="card"><div style="overflow-x:auto"><table>' + tableHead + '<tbody>' + shortlistedRows + '</tbody></table></div></div>')
+
+    // Other vendors — collapsible
+    + '<div>'
+    + '<button class="btn-ghost btn-sm" style="font-size:0.82rem;color:#9ca3af" onclick="toggleOtherVendors()">'
+    + '<i class="fas fa-chevron-right" id="otherVendorsChevron" style="margin-right:4px;font-size:0.72rem"></i>'
+    + 'Show full vendor pool (' + otherVendors.length + ' not shortlisted)'
+    + '</button>'
+    + '<div id="otherVendorsPanel" style="display:none;margin-top:0.75rem">'
+    + '<div class="card"><div style="overflow-x:auto"><table>' + tableHead + '<tbody>' + otherRows + '</tbody></table></div></div>'
+    + '</div>'
+    + '</div>'
+
     + '</div>'
   );
 };
+
+function toggleOtherVendors() {
+  var panel = document.getElementById('otherVendorsPanel');
+  var chevron = document.getElementById('otherVendorsChevron');
+  if (!panel) return;
+  var showing = panel.style.display !== 'none';
+  panel.style.display = showing ? 'none' : 'block';
+  if (chevron) chevron.className = showing ? 'fas fa-chevron-right' : 'fas fa-chevron-down';
+}
 
 async function toggleVendorShortlist(rfpId, vendorId, val) {
   await apiCall('PUT', '/rfps/' + rfpId + '/vendors/' + vendorId + '/shortlist', { shortlisted: val });
