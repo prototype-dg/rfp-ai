@@ -1435,7 +1435,7 @@ async function sendRealEmail(to: string, subject: string, body: string, rfp: any
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        from: 'procurement@cpc-rfp.ai',
+        from: 'procurement@cpc-rfp.website',
         to: [to],
         subject: subject,
         text: body,
