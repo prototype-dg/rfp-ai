@@ -601,171 +601,116 @@ function downloadRfpPdf(rfpId) {
   var printWin = window.open('', '_blank', 'width=960,height=800');
   if (!printWin) { showToast('Please allow popups for PDF download', 'error'); return; }
 
+  // Self-contained print CSS matching the real CPC RFP document:
+  // - White background, Calibri font
+  // - Gold lattice header band (top of every page)
+  // - CPC falcon crest logo centered
+  // - Teal (#4BACED) and dark teal (#215868) accent colors
+  // - Left-aligned large title on cover, same as reference doc
   var css = [
-    /* ── Base & fonts ── */
-    "@import url('https://fonts.googleapis.com/css2?family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&family=Source+Sans+Pro:wght@300;400;600;700&display=swap');",
-    ":root{--cpc-navy:#0a1128;--cpc-blue:#0f3460;--cpc-blue2:#163A6A;--cpc-gold:#C8952A;--cpc-gold-light:#E5B84A;--cpc-cream:#F7F4EE;--cpc-rule:#D0C098;}",
+    "@import url('https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;600;700&family=Noto+Serif:wght@400;700&display=swap');",
     "*{box-sizing:border-box;margin:0;padding:0;}",
-    "body{font-family:'Source Sans Pro','Segoe UI',Arial,sans-serif;font-size:10.5pt;color:#1a1a1a;background:white;-webkit-print-color-adjust:exact;print-color-adjust:exact;}",
-
-    /* ── Page layout ── */
+    "body{font-family:'Calibri','Noto Sans',Arial,sans-serif;font-size:10.5pt;color:#1a1a1a;background:white;-webkit-print-color-adjust:exact;print-color-adjust:exact;}",
     "@page{size:A4;margin:0;}",
     "@page:first{margin:0;}",
 
-    /* ══════════════════════════════════════
-       COVER PAGE — matches CPC reference doc
-       ══════════════════════════════════════ */
+    /* ── Document wrapper ── */
     ".rfp-doc{max-width:100%;margin:0;}",
 
-    /* Cover wrapper — full A4 page, dark gradient */
-    ".rfp-cover{",
-      "display:flex;flex-direction:column;align-items:center;",
-      "min-height:297mm;width:210mm;",
-      "background:linear-gradient(160deg,#05091a 0%,#0a1a40 40%,#0f3460 70%,#122650 100%);",
-      "color:white;position:relative;overflow:hidden;page-break-after:always;",
+    /* ── Gold lattice header band ── */
+    ".rfp-header-band{height:20pt;width:100%;",
+      "background:repeating-linear-gradient(90deg,#c9a84c 0,#c9a84c 2px,transparent 2px,transparent 8px),",
+      "repeating-linear-gradient(0deg,#c9a84c 0,#c9a84c 2px,transparent 2px,transparent 8px);",
+      "background-color:#f5e6c0;",
+      "-webkit-print-color-adjust:exact;print-color-adjust:exact;",
     "}",
 
-    /* Decorative diagonal stripe overlay */
-    ".rfp-cover::before{",
-      "content:'';position:absolute;top:0;left:0;right:0;bottom:0;",
-      "background:repeating-linear-gradient(135deg,rgba(200,149,42,0.03) 0px,rgba(200,149,42,0.03) 1px,transparent 1px,transparent 60px);",
-      "pointer-events:none;",
+    /* ── Circle divider ── */
+    ".rfp-circle-divider{height:8pt;border-bottom:0.5pt solid #d1d5db;",
+      "background:radial-gradient(circle at center,transparent 2pt,#c0c0c0 2pt,#c0c0c0 3pt,transparent 3pt);",
+      "background-size:12pt 8pt;background-repeat:repeat-x;background-position:center;",
     "}",
 
-    /* Top accent bar */
-    ".rfp-cover::after{",
-      "content:'';position:absolute;top:0;left:0;right:0;height:6px;",
-      "background:linear-gradient(90deg,var(--cpc-gold),var(--cpc-gold-light),var(--cpc-gold));",
-    "}",
+    /* ── Cover page ── */
+    ".rfp-cover{background:white;page-break-after:always;min-height:267mm;}",
 
-    /* Logo row */
-    ".rfp-cover-logo{",
-      "display:flex;align-items:center;gap:18px;",
-      "width:100%;padding:42pt 36pt 22pt;",
-      "border-bottom:1px solid rgba(200,149,42,0.3);",
-      "position:relative;z-index:1;",
-    "}",
+    /* ── Logo row ── */
+    ".rfp-cover-logo{display:flex;align-items:center;justify-content:center;gap:18pt;padding:18pt 36pt 12pt;}",
+    ".rfp-logo-emblem{flex-shrink:0;}",
+    ".rfp-logo-text{display:flex;flex-direction:column;gap:2pt;}",
+    ".rfp-logo-text .rfp-org-name{font-size:12pt;font-weight:700;color:#1a1a1a;letter-spacing:0.03em;}",
+    ".rfp-logo-text .rfp-org-arabic{font-size:11pt;color:#1a1a1a;direction:rtl;}",
 
-    /* Emblem circle */
-    ".rfp-logo-emblem{",
-      "width:72pt;height:72pt;border-radius:50%;",
-      "background:rgba(200,149,42,0.12);",
-      "border:2px solid rgba(200,149,42,0.55);",
-      "display:flex;align-items:center;justify-content:center;",
-      "flex-shrink:0;",
-    "}",
-    ".rfp-logo-emblem svg{display:block;}",
+    /* ── Cover divider ── */
+    ".rfp-cover-divider{width:calc(100% - 72pt);height:0.5pt;background:#d1d5db;margin:0 36pt;}",
 
-    /* Text stack */
-    ".rfp-logo-text{display:flex;flex-direction:column;gap:3px;}",
-    ".rfp-logo-text .rfp-org-name{font-family:'Libre Baskerville',Georgia,serif;font-size:15pt;font-weight:700;color:white;letter-spacing:0.04em;}",
-    ".rfp-logo-text .rfp-org-arabic{font-size:12pt;color:var(--cpc-gold-light);direction:rtl;letter-spacing:0.02em;}",
-    ".rfp-logo-text .rfp-org-sub{font-size:8pt;color:#93c5fd;letter-spacing:0.05em;font-weight:300;}",
-
-    /* Gold divider */
-    ".rfp-cover-divider{",
-      "width:calc(100% - 72pt);height:1.5pt;",
-      "background:linear-gradient(90deg,transparent,var(--cpc-gold) 20%,var(--cpc-gold-light) 50%,var(--cpc-gold) 80%,transparent);",
-      "margin:0 36pt;flex-shrink:0;position:relative;z-index:1;",
-    "}",
-
-    /* Central body */
-    ".rfp-cover-body{",
-      "flex:1;display:flex;flex-direction:column;",
-      "align-items:center;justify-content:center;",
-      "padding:40pt 48pt;text-align:center;width:100%;",
-      "position:relative;z-index:1;",
-    "}",
-    ".rfp-cover-body .rfp-doc-type{",
-      "font-size:8pt;font-weight:700;letter-spacing:0.25em;",
-      "color:var(--cpc-gold-light);text-transform:uppercase;",
-      "border:1px solid rgba(200,149,42,0.45);",
-      "padding:5pt 18pt;border-radius:20pt;display:inline-block;margin-bottom:22pt;",
-    "}",
+    /* ── Cover body: big title, left-aligned like the real doc ── */
+    ".rfp-cover-body{padding:54pt 36pt 36pt;}",
     ".rfp-cover-body .rfp-doc-title{",
-      "font-family:'Libre Baskerville',Georgia,serif;",
-      "font-size:22pt;font-weight:700;line-height:1.3;",
-      "color:white;margin:0 0 10pt;text-shadow:0 2px 12px rgba(0,0,0,0.4);",
+      "font-size:26pt;font-weight:700;line-height:1.25;",
+      "color:#1a1a1a;margin-bottom:18pt;",
+      "font-family:'Calibri','Noto Sans',Arial,sans-serif;",
     "}",
-    ".rfp-cover-body .rfp-doc-subtitle{font-size:11pt;color:#bfdbfe;margin:0 0 8pt;}",
-    ".rfp-cover-body .rfp-doc-date{font-size:8.5pt;color:#93c5fd;letter-spacing:0.12em;}",
+    ".rfp-cover-body .rfp-doc-type{font-size:10pt;font-weight:700;letter-spacing:0.1em;color:#4BACED;text-transform:uppercase;margin-bottom:6pt;}",
+    ".rfp-cover-body .rfp-doc-date{font-size:9pt;color:#215868;font-weight:600;}",
+    ".rfp-cover-footer-bar{display:none;}",
 
-    /* Confidential footer bar */
-    ".rfp-cover-footer-bar{",
-      "width:100%;",
-      "background:rgba(0,0,0,0.5);",
-      "border-top:1px solid rgba(200,149,42,0.35);",
-      "padding:10pt 36pt;",
-      "font-size:7.5pt;color:var(--cpc-gold-light);",
-      "letter-spacing:0.14em;text-align:center;",
-      "font-weight:700;text-transform:uppercase;",
-      "position:relative;z-index:1;",
-    "}",
+    /* ── Page header (interior) ── */
+    ".rfp-page-header{display:flex;align-items:center;justify-content:space-between;padding:4pt 24pt;border-bottom:1.5pt solid #4BACED;}",
+    ".rfp-page-header-logo{font-size:8pt;font-weight:700;color:#215868;}",
+    ".rfp-page-header-ref{font-size:7.5pt;color:#9ca3af;}",
 
-    /* ══════════════════════════════════════
-       INTERIOR PAGES — running header/footer
-       ══════════════════════════════════════ */
-    ".rfp-meta-table,",
-    ".rfp-toc,",
-    ".rfp-section,",
-    ".rfp-footer{",
-      "padding-left:28pt;padding-right:28pt;",
-    "}",
+    /* ── Meta table ── */
+    ".rfp-meta-table{width:100%;border-collapse:collapse;font-size:9pt;}",
+    ".rfp-meta-table th{background:#215868;color:white;padding:6pt 10pt;font-weight:700;border:0.5pt solid #163d4e;text-transform:none;letter-spacing:0;-webkit-print-color-adjust:exact;print-color-adjust:exact;}",
+    ".rfp-meta-table td{background:white;padding:6pt 10pt;border:0.5pt solid #d1d5db;vertical-align:top;}",
 
-    /* Meta summary table */
-    ".rfp-meta-table{width:100%;border-collapse:collapse;margin:0;font-size:9pt;}",
-    ".rfp-meta-table th{background:#0f3460;color:white;padding:7pt 10pt;font-family:'Source Sans Pro',sans-serif;font-weight:700;font-size:8.5pt;border:1pt solid #1e4a80;text-transform:none;letter-spacing:0;}",
-    ".rfp-meta-table td{background:white;padding:7pt 10pt;font-size:9pt;border:1pt solid #d1d5db;vertical-align:top;}",
+    /* ── TOC ── */
+    ".rfp-toc{padding:14pt 24pt 10pt;}",
+    ".rfp-toc-title{font-size:13pt;font-weight:700;color:#4BACED;margin-bottom:8pt;}",
+    ".rfp-toc-item{display:flex;justify-content:space-between;padding:3pt 0;font-size:9pt;color:#215868;border-bottom:0.5pt dotted #d1d5db;}",
+    ".rfp-toc-item.bold{font-weight:700;}",
+    ".rfp-toc-item.indent{padding-left:14pt;color:#374151;font-weight:400;}",
 
-    /* TOC */
-    ".rfp-toc{padding-top:18pt;padding-bottom:18pt;background:var(--cpc-cream);}",
-    ".rfp-toc-item{display:flex;justify-content:space-between;padding:4pt 0;font-size:9.5pt;color:#0f3460;border-bottom:0.5pt dotted #c8952a;}",
-    ".rfp-section-title{font-family:'Libre Baskerville',Georgia,serif;font-size:10.5pt;font-weight:700;color:#0a1128;margin-bottom:8pt;}",
+    /* ── Sections ── */
+    ".rfp-section{padding:12pt 24pt;border-bottom:0.5pt solid #e5e7eb;}",
+    ".rfp-section-title{font-size:12pt;font-weight:700;color:#1a1a1a;margin-bottom:7pt;border-bottom:1.5pt solid #4BACED;padding-bottom:3pt;}",
+    ".rfp-section-num{display:inline-block;width:18pt;height:18pt;border-radius:50%;background:#4BACED;color:white;text-align:center;line-height:18pt;font-weight:700;font-size:8pt;margin-right:4pt;vertical-align:middle;-webkit-print-color-adjust:exact;print-color-adjust:exact;}",
+    ".rfp-section p{font-size:9.5pt;line-height:1.7;margin:0 0 6pt;}",
+    ".rfp-section ul{margin:3pt 0 6pt 16pt;}",
+    ".rfp-section li{font-size:9pt;line-height:1.65;margin-bottom:2pt;}",
+    ".rfp-subsection{margin:9pt 0 4pt;}",
+    ".rfp-subsection-title{font-size:10pt;font-weight:700;color:#215868;margin-bottom:4pt;}",
+    ".rfp-deliverables{background:#f0f9ff;border-left:2.5pt solid #4BACED;padding:5pt 9pt;font-size:8.5pt;color:#374151;margin-top:4pt;line-height:1.6;-webkit-print-color-adjust:exact;print-color-adjust:exact;}",
 
-    /* Section body */
-    ".rfp-section{display:flex;gap:14pt;padding-top:18pt;padding-bottom:18pt;border-bottom:0.5pt solid #e5e7eb;}",
-    ".rfp-section-num{width:32pt;height:32pt;border-radius:50%;background:var(--cpc-gold);color:#0a1128;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:11pt;flex-shrink:0;margin-top:2pt;}",
-    ".rfp-section-body{flex:1;}",
-    ".rfp-section-body .rfp-section-title{font-size:12pt;color:#0a1128;margin-bottom:7pt;}",
-    ".rfp-section p{font-size:9.5pt;line-height:1.75;margin:0 0 7pt;}",
-    ".rfp-section ul{margin:4pt 0 7pt 16pt;}",
-    ".rfp-section li{font-size:9.5pt;line-height:1.7;margin-bottom:2pt;}",
+    /* ── Spec tables ── */
+    ".rfp-spec-table{width:100%;border-collapse:collapse;margin:7pt 0;font-size:9pt;}",
+    ".rfp-spec-table th{background:#215868;color:white;padding:5pt 9pt;font-weight:700;-webkit-print-color-adjust:exact;print-color-adjust:exact;}",
+    ".rfp-spec-table td{padding:4.5pt 9pt;border:0.5pt solid #d1d5db;line-height:1.5;vertical-align:top;}",
+    ".rfp-spec-table tr:nth-child(even) td{background:#f0f9ff;-webkit-print-color-adjust:exact;print-color-adjust:exact;}",
 
-    /* Subsections */
-    ".rfp-subsection{margin:10pt 0 5pt;}",
-    ".rfp-subsection-title{font-size:9.5pt;font-weight:700;color:#0f3460;margin-bottom:5pt;padding-left:6pt;border-left:2.5pt solid var(--cpc-gold);}",
+    /* ── Footer ── */
+    ".rfp-footer{background:#215868;color:white;padding:10pt 24pt;text-align:center;font-size:8pt;line-height:1.8;-webkit-print-color-adjust:exact;print-color-adjust:exact;}",
 
-    /* Deliverables box */
-    ".rfp-deliverables{background:#fffbeb;border:0.75pt solid #fde68a;border-radius:4pt;padding:6pt 10pt;font-size:8.5pt;color:#374151;margin-top:5pt;line-height:1.65;}",
-
-    /* Spec tables */
-    ".rfp-spec-table{width:100%;border-collapse:collapse;margin:8pt 0;font-size:9pt;}",
-    ".rfp-spec-table th{background:#0a1128;color:white;padding:6pt 10pt;font-weight:700;text-transform:none;letter-spacing:0;font-size:8.5pt;}",
-    ".rfp-spec-table td{padding:5.5pt 10pt;border:0.75pt solid #e5e7eb;line-height:1.5;}",
-    ".rfp-spec-table tr:nth-child(even) td{background:#f8f6f0;}",
-
-    /* Footer */
-    ".rfp-footer{background:#0a1128;color:white;padding:14pt 28pt;text-align:center;font-size:8pt;line-height:1.9;}",
-
-    /* Print control */
+    /* ── Print rules ── */
     "@media print{",
-      ".rfp-cover{page-break-after:always;-webkit-print-color-adjust:exact;print-color-adjust:exact;}",
+      ".rfp-cover{page-break-after:always;}",
       ".rfp-section{page-break-inside:avoid;}",
-      "h2,h3,.rfp-section-title{page-break-after:avoid;}",
-      "@page{margin:12mm 15mm 16mm 15mm;}",
+      ".rfp-section-title{page-break-after:avoid;}",
+      "@page{margin:10mm 14mm 14mm 14mm;}",
       "@page:first{margin:0;}",
     "}"
   ].join('\n');
 
-  printWin.document.write('<!DOCTYPE html><html><head>');
+  printWin.document.write('<!DOCTYPE html><html lang="en"><head>');
   printWin.document.write('<meta charset="UTF-8">');
-  printWin.document.write('<title>' + (rfp.title || 'RFP') + '</title>');
+  printWin.document.write('<title>' + (rfp.title || 'RFP') + ' \u2014 Crown Prince\u2019s Court</title>');
   printWin.document.write('<style>' + css + '</style>');
   printWin.document.write('</head><body>');
   printWin.document.write(rfp.content);
   printWin.document.write('</body></html>');
   printWin.document.close();
-  setTimeout(function() { printWin.print(); }, 900);
+  setTimeout(function() { printWin.print(); }, 1000);
 }
 
 // --- TAB: VENDORS ---
@@ -870,18 +815,29 @@ function getDateOffset(days) {
 }
 
 async function confirmSendInvitations(rfpId) {
-  const btn = document.getElementById('sendInvBtn');
+  var btn = document.getElementById('sendInvBtn');
   setLoading(btn, true, 'Sending...');
   try {
-    const qDeadline = document.getElementById('invQDeadline').value;
-    const sDeadline = document.getElementById('invSDeadline').value;
-    const notes = document.getElementById('invNotes').value;
+    var qDeadline = document.getElementById('invQDeadline').value;
+    var sDeadline = document.getElementById('invSDeadline').value;
+    var notes = document.getElementById('invNotes').value;
     await apiCall('POST', '/rfps/' + rfpId + '/emails/send-invitations', {
       questions_deadline: qDeadline,
       submission_deadline: sDeadline,
       notes: notes,
     });
-    showToast('Invitations sent! Check the Invitations tab.', 'success');
+    // Auto-advance stage to qa_open after sending invitations
+    var currentStage = appState.currentRfp ? appState.currentRfp.stage : 'published';
+    if (currentStage === 'published') {
+      await apiCall('POST', '/rfps/' + rfpId + '/stage', { stage: 'qa_open' }).catch(function(){});
+    }
+    // Refresh RFP state and lifecycle bar
+    var rfp = await apiCall('GET', '/rfps/' + rfpId);
+    appState.currentRfp = rfp;
+    document.getElementById('pageSubtitle').textContent = (rfp.ref_number||'') + ' \u2022 ' + stageLabelMap(rfp.stage||'draft');
+    renderLifecycleBar(rfp);
+    renderRfpTabs('emails', rfpId, appState.unreadQA);
+    showToast('Invitations sent! Stage advanced to Q&A Open.', 'success');
     closeModal();
     switchRfpTab('emails', rfpId);
   } catch(e) {
@@ -961,8 +917,12 @@ rfpTabs.qa = async function(rfpId) {
   if (questions.length === 0) {
     qCards = '<div class="card" style="padding:2.5rem;text-align:center;color:#9ca3af">'
       + '<i class="fas fa-comments" style="font-size:2.5rem;display:block;margin-bottom:1rem;color:#d1d5db"></i>'
-      + '<p style="margin-bottom:1rem">No questions yet. Load sample questions or check inbox for vendor replies.</p>'
-      + '<button class="btn-secondary" onclick="loadSampleQs(' + rfpId + ')">Load Sample Questions</button>'
+      + '<p style="margin-bottom:0.5rem;font-weight:600;color:#374151">No vendor questions yet</p>'
+      + '<p style="margin-bottom:1rem;font-size:0.85rem">Vendors submit questions by replying to the RFP invitation email.<br>Click <strong>Check Inbox</strong> in the Invitations tab to pull new replies from the mailbox.</p>'
+      + '<div style="display:flex;gap:0.75rem;justify-content:center">'
+      + '<button class="btn-secondary" onclick="switchRfpTab(\'emails\',' + rfpId + ')"><i class="fas fa-envelope"></i>Go to Invitations</button>'
+      + '<button class="btn-ghost" onclick="loadSampleQs(' + rfpId + ')"><i class="fas fa-flask"></i>Load Demo Questions</button>'
+      + '</div>'
       + '</div>';
   } else {
     questions.forEach(function(q) {

@@ -200,97 +200,213 @@ export function getLayout(): string {
     /* Page content area */
     #pageContent { flex:1; overflow-y:auto; }
 
-    /* ===== RFP DOCUMENT STYLES ===== */
-    .rfp-doc { font-family:'Georgia',serif; color:#1a1a1a; max-width:860px; margin:0 auto; background:white; }
-    /* .rfp-cover base overridden by new structured block below */
-    .rfp-emblem { font-size:3.5rem; margin-bottom:0.5rem; }
-    .rfp-org-name { font-size:1.4rem; font-weight:700; letter-spacing:0.04em; }
-    .rfp-org-arabic { font-size:1.1rem; margin-top:0.25rem; color:var(--cpc-gold-light); }
-    .rfp-org-sub { font-size:0.85rem; color:#bfdbfe; margin-top:0.25rem; margin-bottom:2rem; }
-    .rfp-doc-type { font-size:0.95rem; font-weight:700; letter-spacing:0.15em; color:var(--cpc-gold-light); text-transform:uppercase; }
-    .rfp-doc-title { font-size:1.6rem; font-weight:700; margin:0.75rem 0; line-height:1.3; }
-    .rfp-doc-subtitle { font-size:0.95rem; color:#bfdbfe; }
-    .rfp-doc-date { font-size:0.85rem; color:#bfdbfe; margin-top:0.75rem; letter-spacing:0.08em; }
-    .rfp-meta-table { width:100%; border-collapse:collapse; margin:0; }
-    .rfp-meta-table th { background:#f0f4f8; color:var(--cpc-navy); padding:0.7rem 1rem; font-size:0.82rem; font-weight:700; border:1px solid #d1d5db; text-transform:none; letter-spacing:0; }
-    .rfp-meta-table td { background:white; padding:0.7rem 1rem; font-size:0.875rem; border:1px solid #d1d5db; font-family:'Segoe UI',sans-serif; }
-    .rfp-toc { padding:1.5rem 2rem; background:#f8f6f0; border-bottom:1px solid #e5e7eb; }
-    .rfp-toc-item { display:flex; justify-content:space-between; padding:0.35rem 0; font-size:0.9rem; color:var(--cpc-blue); border-bottom:1px dotted #d1d5db; }
-    .rfp-section { display:flex; gap:1.5rem; padding:1.75rem 2rem; border-bottom:1px solid #e5e7eb; }
-    .rfp-section-num { width:40px; height:40px; border-radius:50%; background:var(--cpc-gold); color:var(--cpc-navy); display:flex; align-items:center; justify-content:center; font-weight:700; font-size:1rem; flex-shrink:0; margin-top:2px; }
-    .rfp-section-body { flex:1; }
-    .rfp-section-title { font-size:1.05rem; font-weight:700; color:var(--cpc-navy); margin-bottom:0.75rem; font-family:'Segoe UI',sans-serif; }
-    .rfp-section p { font-size:0.9rem; line-height:1.75; margin:0 0 0.75rem; }
-    .rfp-section ul { margin:0.5rem 0 0.75rem 1.25rem; }
-    .rfp-section li { font-size:0.88rem; line-height:1.7; margin-bottom:0.25rem; }
-    .rfp-subsection { margin:1rem 0 0.5rem; }
-    .rfp-subsection-title { font-size:0.93rem; font-weight:700; color:var(--cpc-blue); margin-bottom:0.5rem; font-family:'Segoe UI',sans-serif; padding-left:0.5rem; border-left:3px solid var(--cpc-gold); }
-    .rfp-deliverables { background:#fffbeb; border:1px solid #fde68a; border-radius:6px; padding:0.6rem 0.875rem; font-size:0.82rem; color:#374151; margin-top:0.5rem; line-height:1.6; }
-    .rfp-spec-table { width:100%; border-collapse:collapse; margin:0.75rem 0; font-size:0.85rem; }
-    .rfp-spec-table th { background:var(--cpc-navy); color:white; padding:0.6rem 0.875rem; font-weight:600; text-transform:none; letter-spacing:0; font-size:0.85rem; }
-    .rfp-spec-table td { padding:0.6rem 0.875rem; border:1px solid #e5e7eb; line-height:1.5; }
-    .rfp-spec-table tr:nth-child(even) td { background:#f9fafb; }
-    .rfp-footer { background:var(--cpc-navy); color:white; padding:1.25rem 2rem; text-align:center; font-size:0.82rem; line-height:1.8; border-radius:0 0 8px 8px; }
+    /* ===== RFP DOCUMENT STYLES — matches real CPC RFP template ===== */
+    /* Real doc: white background, Calibri font, CPC logo top-center,
+       gold lattice header band, teal accent colors, clean body text */
 
-    /* ===== RFP COVER — new structured layout ===== */
-    /* Outer cover: dark gradient full-bleed */
+    /* Lattice pattern: repeating interlocking circles in gold */
+    @keyframes none {}
+    .rfp-doc {
+      font-family:'Calibri','Segoe UI',Arial,sans-serif;
+      color:#1a1a1a; max-width:860px; margin:0 auto; background:white;
+      border:1px solid #e5e7eb; border-radius:4px; overflow:hidden;
+    }
+
+    /* ── COVER PAGE ── */
     .rfp-cover {
-      display:flex; flex-direction:column; align-items:center;
-      padding:0; border-bottom:4px solid var(--cpc-gold);
-      background:linear-gradient(160deg,#0a0f1e 0%,#0f3460 55%,#1a1a2e 100%);
-      color:white; border-radius:8px 8px 0 0; overflow:hidden;
-      min-height:420px; position:relative;
+      background:white; color:#1a1a1a;
+      padding:0; border-radius:4px 4px 0 0;
+      border-bottom:1px solid #e5e7eb;
     }
-    /* Logo row: emblem + text side by side */
+
+    /* Gold lattice header band (top of every page) */
+    .rfp-header-band {
+      height:22px; width:100%;
+      background: repeating-linear-gradient(
+        90deg,
+        #c9a84c 0px, #c9a84c 2px, transparent 2px, transparent 8px
+      ),
+      repeating-linear-gradient(
+        0deg,
+        #c9a84c 0px, #c9a84c 2px, transparent 2px, transparent 8px
+      );
+      background-color: #f5e6c0;
+    }
+
+    /* Thin separator line of hollow circles below gold band */
+    .rfp-circle-divider {
+      height:8px; width:100%;
+      background: radial-gradient(circle at center, transparent 2px, #d1d5db 2px, #d1d5db 3px, transparent 3px);
+      background-size:12px 8px;
+      background-repeat:repeat-x;
+      background-position:center;
+      border-bottom:1px solid #e5e7eb;
+    }
+
+    /* Logo area: centered with bilingual text + crest */
     .rfp-cover-logo {
-      display:flex; align-items:center; gap:1.25rem;
-      padding:2.5rem 2.5rem 1.5rem; width:100%;
-      border-bottom:1px solid rgba(201,168,76,0.25);
-    }
-    /* SVG emblem circle container */
-    .rfp-logo-emblem {
-      width:80px; height:80px; border-radius:50%;
-      background:rgba(201,168,76,0.1);
-      border:2px solid rgba(201,168,76,0.5);
       display:flex; align-items:center; justify-content:center;
+      gap:1.5rem; padding:1.25rem 2.5rem 1rem; width:100%;
+    }
+    .rfp-logo-emblem {
       flex-shrink:0;
     }
-    /* Text stack next to emblem */
-    .rfp-logo-text { display:flex; flex-direction:column; gap:2px; }
-    .rfp-logo-text .rfp-org-name { font-size:1.25rem; font-weight:700; letter-spacing:0.04em; color:white; margin:0; }
-    .rfp-logo-text .rfp-org-arabic { font-size:1rem; color:var(--cpc-gold-light); margin:0; direction:rtl; }
-    .rfp-logo-text .rfp-org-sub { font-size:0.78rem; color:#bfdbfe; margin:0; letter-spacing:0.03em; }
-    /* Gold divider rule */
-    .rfp-cover-divider {
-      width:calc(100% - 5rem); height:2px;
-      background:linear-gradient(90deg,transparent,var(--cpc-gold),transparent);
-      margin:0 2.5rem; flex-shrink:0;
+    .rfp-logo-text {
+      display:flex; flex-direction:column; gap:1px; align-items:flex-start;
     }
-    /* Central body: type + title + date */
+    .rfp-logo-text .rfp-org-name {
+      font-size:1.05rem; font-weight:700; color:#1a1a1a;
+      letter-spacing:0.03em; font-family:'Calibri','Segoe UI',sans-serif;
+    }
+    .rfp-logo-text .rfp-org-arabic {
+      font-size:0.95rem; color:#1a1a1a; direction:rtl;
+      font-family:'Calibri',Arial,sans-serif;
+    }
+    .rfp-cover-divider {
+      width:calc(100% - 5rem); height:1px;
+      background:#d1d5db; margin:0 2.5rem;
+    }
+
+    /* Cover body: title left-aligned, lower-left as in real doc */
     .rfp-cover-body {
-      flex:1; display:flex; flex-direction:column;
-      align-items:center; justify-content:center;
-      padding:2rem 2.5rem; text-align:center; width:100%;
+      padding:3rem 2.5rem 2rem;
     }
     .rfp-cover-body .rfp-doc-type {
-      font-size:0.82rem; font-weight:800; letter-spacing:0.22em;
-      color:var(--cpc-gold-light); text-transform:uppercase;
-      border:1px solid rgba(201,168,76,0.4);
-      padding:0.3rem 1.1rem; border-radius:20px; display:inline-block; margin-bottom:1rem;
+      font-size:0.82rem; font-weight:700; letter-spacing:0.12em;
+      color:#4BACED; text-transform:uppercase;
+      font-family:'Calibri','Segoe UI',sans-serif;
+      margin-bottom:0.3rem;
     }
     .rfp-cover-body .rfp-doc-title {
-      font-size:1.65rem; font-weight:700; line-height:1.3;
-      color:white; margin:0 0 0.6rem; text-shadow:0 2px 8px rgba(0,0,0,0.3);
+      font-size:2rem; font-weight:700; line-height:1.25;
+      color:#1a1a1a; margin:0 0 1rem;
+      font-family:'Calibri','Segoe UI',sans-serif;
     }
-    .rfp-cover-body .rfp-doc-subtitle { font-size:0.9rem; color:#bfdbfe; margin:0 0 0.75rem; }
-    .rfp-cover-body .rfp-doc-date { font-size:0.8rem; color:#93c5fd; letter-spacing:0.1em; margin:0; }
-    /* Footer bar across full width */
+    .rfp-cover-body .rfp-doc-subtitle {
+      font-size:0.88rem; color:#4BACED; margin:0 0 0.25rem;
+      font-style:italic; font-family:'Calibri',sans-serif;
+    }
+    .rfp-cover-body .rfp-doc-date {
+      font-size:0.85rem; color:#215868; margin:0;
+      font-weight:600; font-family:'Calibri',sans-serif;
+    }
     .rfp-cover-footer-bar {
-      width:100%; background:rgba(0,0,0,0.45);
-      border-top:1px solid rgba(201,168,76,0.3);
-      padding:0.65rem 2.5rem; font-size:0.74rem;
-      color:var(--cpc-gold-light); letter-spacing:0.1em;
-      text-align:center; font-weight:600; text-transform:uppercase;
+      display:none; /* not in real doc, removed */
+    }
+
+    /* ── META / INFO TABLE ── */
+    .rfp-meta-table { width:100%; border-collapse:collapse; margin:0; }
+    .rfp-meta-table th {
+      background:#215868; color:white; padding:0.6rem 1rem;
+      font-size:0.82rem; font-weight:700; border:1px solid #1a4455;
+      text-transform:none; letter-spacing:0;
+      font-family:'Calibri','Segoe UI',sans-serif;
+    }
+    .rfp-meta-table td {
+      background:white; padding:0.6rem 1rem; font-size:0.875rem;
+      border:1px solid #d1d5db;
+      font-family:'Calibri','Segoe UI',sans-serif;
+    }
+
+    /* ── PAGE HEADER (interior pages) ── */
+    .rfp-page-header {
+      display:flex; align-items:center; justify-content:space-between;
+      padding:0.6rem 2rem; border-bottom:2px solid #4BACED;
+    }
+    .rfp-page-header-logo {
+      font-size:0.78rem; font-weight:700; color:#215868;
+    }
+    .rfp-page-header-ref {
+      font-size:0.75rem; color:#9ca3af;
+    }
+
+    /* ── TOC ── */
+    .rfp-toc {
+      padding:1.5rem 2rem 1rem; background:white;
+      border-bottom:1px solid #e5e7eb;
+    }
+    .rfp-toc-title {
+      font-size:1.1rem; font-weight:700; color:#4BACED;
+      margin-bottom:0.75rem;
+      font-family:'Calibri','Segoe UI',sans-serif;
+    }
+    .rfp-toc-item {
+      display:flex; justify-content:space-between;
+      padding:0.28rem 0; font-size:0.88rem; color:#215868;
+      border-bottom:1px dotted #d1d5db;
+      font-family:'Calibri','Segoe UI',sans-serif;
+    }
+    .rfp-toc-item.bold { font-weight:700; }
+    .rfp-toc-item.indent { padding-left:1.25rem; color:#374151; font-weight:400; }
+
+    /* ── SECTIONS ── */
+    .rfp-section {
+      padding:1.5rem 2rem; border-bottom:1px solid #e5e7eb;
+    }
+    .rfp-section-body { flex:1; }
+    .rfp-section-title {
+      font-size:1.1rem; font-weight:700; color:#1a1a1a;
+      margin-bottom:0.75rem;
+      font-family:'Calibri','Segoe UI',sans-serif;
+      border-bottom:2px solid #4BACED;
+      padding-bottom:0.35rem;
+    }
+    .rfp-section p {
+      font-size:0.9rem; line-height:1.75; margin:0 0 0.65rem;
+      font-family:'Calibri','Segoe UI',sans-serif;
+    }
+    .rfp-section ul { margin:0.4rem 0 0.65rem 1.5rem; }
+    .rfp-section li {
+      font-size:0.875rem; line-height:1.7; margin-bottom:0.2rem;
+      font-family:'Calibri','Segoe UI',sans-serif;
+    }
+    .rfp-subsection { margin:1rem 0 0.4rem; }
+    .rfp-subsection-title {
+      font-size:0.95rem; font-weight:700; color:#215868;
+      margin-bottom:0.4rem;
+      font-family:'Calibri','Segoe UI',sans-serif;
+    }
+    .rfp-deliverables {
+      background:#f0f9ff; border-left:3px solid #4BACED;
+      padding:0.55rem 0.875rem; font-size:0.82rem;
+      color:#374151; margin-top:0.4rem; line-height:1.6;
+      font-family:'Calibri','Segoe UI',sans-serif;
+    }
+    .rfp-deliverables strong { color:#215868; }
+
+    /* ── SPEC / DATA TABLES ── */
+    .rfp-spec-table {
+      width:100%; border-collapse:collapse; margin:0.65rem 0;
+      font-size:0.85rem; font-family:'Calibri','Segoe UI',sans-serif;
+    }
+    .rfp-spec-table th {
+      background:#215868; color:white; padding:0.55rem 0.875rem;
+      font-weight:700; text-transform:none; letter-spacing:0;
+      font-size:0.85rem;
+    }
+    .rfp-spec-table td {
+      padding:0.5rem 0.875rem; border:1px solid #d1d5db;
+      line-height:1.5; vertical-align:top;
+    }
+    .rfp-spec-table tr:nth-child(even) td { background:#f0f9ff; }
+
+    /* ── FOOTER ── */
+    .rfp-footer {
+      background:#215868; color:white; padding:1rem 2rem;
+      text-align:center; font-size:0.8rem; line-height:1.8;
+      border-radius:0 0 4px 4px;
+      font-family:'Calibri','Segoe UI',sans-serif;
+    }
+
+    /* Section num badge — now inline before title */
+    .rfp-section-num {
+      display:inline-block;
+      width:26px; height:26px; border-radius:50%;
+      background:#4BACED; color:white;
+      line-height:26px; text-align:center;
+      font-weight:700; font-size:0.8rem;
+      margin-right:0.5rem; vertical-align:middle;
+      flex-shrink:0;
     }
 
     /* Chart placeholder */

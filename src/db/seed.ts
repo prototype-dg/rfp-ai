@@ -178,7 +178,7 @@ export async function seedVendors(db: D1Database) {
       category: 'IT Consulting',
       country: 'UAE',
       size: 'Medium',
-      contact_name: 'David Gibert',
+      contact_name: 'Dmitry Gibert',
       contact_email: 'd.gibert@andersenlab.com',
       specializations: 'ERP,Custom Development,Integration,Government,Oracle EBS,Data Warehouse,Tableau',
       certifications: 'ISO 9001,CMMI Level 3',

@@ -323,7 +323,8 @@ apiRouter.post('/rfps/:id/emails/send-invitations', async (c) => {
           v.contact_email,
           `Invitation to Tender – ${rfp?.title || 'CPC RFP'} (Ref: ${rfp?.ref_number || ''})`,
           emailBody,
-          rfp
+          rfp,
+          c.env
         )
         status = sent ? 'sent' : 'simulated'
       } catch(e) {
@@ -352,18 +353,16 @@ apiRouter.post('/rfps/:id/emails/check-inbox', async (c) => {
   const rfpId = c.req.param('id')
   const rfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(rfpId).first<any>()
   
-  // Try to read real emails from Andersen's mailbox
+  // Try to read real emails from Andersen's mailbox (IMAP/API integration)
+  // NOTE: Simulation removed — questions only appear when vendors actually submit them
+  // or when user clicks "Load Sample Questions" button in the Q&A tab
   let realQuestions: string[] = []
   try {
     realQuestions = await readVendorEmailReplies(rfp)
   } catch(e) {
-    // fall through to simulated
+    // no real email integration configured — return 0 new questions
   }
-
-  // If no real emails, simulate with sample questions from Andersen
-  if (realQuestions.length === 0) {
-    realQuestions = getAndersenSampleQuestions()
-  }
+  // Do NOT fall back to simulation here
 
   // Find Andersen vendor
   const andersen = await c.env.DB.prepare(`SELECT * FROM vendors WHERE contact_email LIKE '%andersenlab.com%' LIMIT 1`).first<any>()
@@ -598,28 +597,40 @@ function buildRFPContent(data: any): string {
 
   return `<div class="rfp-doc">
 <div class="rfp-cover">
+  <!-- Gold lattice header band (matches real CPC RFP) -->
+  <div class="rfp-header-band"></div>
+  <div class="rfp-circle-divider"></div>
+
+  <!-- Logo: CPC crest + bilingual name, centered -->
   <div class="rfp-cover-logo">
     <div class="rfp-logo-emblem">
-      <svg viewBox="0 0 80 80" width="64" height="64" xmlns="http://www.w3.org/2000/svg">
-        <polygon points="40,4 47,28 72,28 52,44 60,68 40,54 20,68 28,44 8,28 33,28" fill="#c9a84c" opacity="0.95"/>
-        <circle cx="40" cy="40" r="14" fill="none" stroke="#c9a84c" stroke-width="2" opacity="0.6"/>
-        <circle cx="40" cy="40" r="4" fill="#c9a84c"/>
+      <!-- CPC Falcon Crest (simplified SVG matching real logo) -->
+      <svg width="60" height="60" viewBox="0 0 60 60" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="30" cy="30" r="28" fill="none" stroke="#cc0000" stroke-width="2"/>
+        <circle cx="30" cy="30" r="24" fill="white"/>
+        <!-- Shield -->
+        <path d="M30 12 L42 18 L42 34 Q42 44 30 50 Q18 44 18 34 L18 18 Z" fill="#cc0000" stroke="white" stroke-width="0.5"/>
+        <path d="M30 12 L36 18 L36 34 Q36 44 30 50 Q24 44 24 34 L24 18 Z" fill="white"/>
+        <!-- Falcon body simplified -->
+        <path d="M30 14 Q34 10 38 12 Q40 16 36 20 L30 22 L24 20 Q20 16 22 12 Q26 10 30 14Z" fill="#c9a84c"/>
+        <!-- Crown/stars -->
+        <text x="30" y="42" text-anchor="middle" font-size="6" fill="#cc0000" font-family="Arial">✦ ✦ ✦</text>
       </svg>
     </div>
     <div class="rfp-logo-text">
-      <div class="rfp-org-name">Crown Prince's Court</div>
+      <div class="rfp-org-name">CROWN PRINCE COURT</div>
       <div class="rfp-org-arabic">ديوان ولي العهد</div>
-      <div class="rfp-org-sub">Abu Dhabi, United Arab Emirates</div>
     </div>
   </div>
+
   <div class="rfp-cover-divider"></div>
+
+  <!-- Cover body: title block, left-aligned lower section -->
   <div class="rfp-cover-body">
-    <div class="rfp-doc-type">REQUEST FOR PROPOSAL</div>
     <div class="rfp-doc-title">${escXml(title)}</div>
-    <div class="rfp-doc-subtitle">${escXml(category)}</div>
-    <div class="rfp-doc-date">ISSUED: ${todayUpper}</div>
+    <div class="rfp-doc-type">REQUEST FOR PROPOSAL</div>
+    <div class="rfp-doc-date">${todayUpper.replace(/\s\d{4}$/, (m) => m)}</div>
   </div>
-  <div class="rfp-cover-footer-bar">CONFIDENTIAL &nbsp;|&nbsp; FOR INVITED VENDORS ONLY &nbsp;|&nbsp; ${escXml(refNum)}</div>
 </div>
 
 <table class="rfp-meta-table">
@@ -641,23 +652,31 @@ function buildRFPContent(data: any): string {
   </tr>
 </table>
 
+<!-- Interior page header band -->
+<div class="rfp-header-band"></div>
+<div class="rfp-circle-divider"></div>
+<div class="rfp-page-header">
+  <span class="rfp-page-header-logo">CROWN PRINCE COURT &nbsp;|&nbsp; ديوان ولي العهد</span>
+  <span class="rfp-page-header-ref">${escXml(refNum)} &bull; ${todayUpper}</span>
+</div>
+
 <div class="rfp-toc">
-  <div class="rfp-section-title" style="font-size:0.95rem;margin-bottom:0.75rem">Table of Contents</div>
-  <div class="rfp-toc-item"><span>1. Project Background &amp; Context</span><span>2</span></div>
-  <div class="rfp-toc-item"><span>2. Objectives</span><span>3</span></div>
-  <div class="rfp-toc-item"><span>3. Scope of Work</span><span>4</span></div>
-  <div class="rfp-toc-item"><span>4. Technical Requirements &amp; Architecture</span><span>8</span></div>
-  <div class="rfp-toc-item"><span>5. Key Assumptions &amp; Constraints</span><span>10</span></div>
-  <div class="rfp-toc-item"><span>6. Vendor Qualification Requirements</span><span>11</span></div>
-  <div class="rfp-toc-item"><span>7. Evaluation Criteria &amp; Scoring Model</span><span>12</span></div>
-  <div class="rfp-toc-item"><span>8. Proposal Submission Requirements</span><span>13</span></div>
-  <div class="rfp-toc-item"><span>Appendix A: Definition of Done</span><span>14</span></div>
+  <div class="rfp-toc-title">Contents</div>
+  <div class="rfp-toc-item bold"><span>Scope of Work</span><span>2</span></div>
+  <div class="rfp-toc-item indent"><span>1. Project Background &amp; Context</span><span>2</span></div>
+  <div class="rfp-toc-item indent"><span>2. Objectives</span><span>3</span></div>
+  <div class="rfp-toc-item indent"><span>3. Scope of Work</span><span>4</span></div>
+  <div class="rfp-toc-item indent"><span>4. Technical Requirements &amp; Architecture</span><span>8</span></div>
+  <div class="rfp-toc-item indent"><span>5. Key Assumptions &amp; Constraints</span><span>10</span></div>
+  <div class="rfp-toc-item indent"><span>6. Vendor Qualification Requirements</span><span>11</span></div>
+  <div class="rfp-toc-item indent"><span>7. Evaluation Criteria &amp; Scoring Model</span><span>12</span></div>
+  <div class="rfp-toc-item indent"><span>8. Proposal Submission Requirements</span><span>13</span></div>
+  <div class="rfp-toc-item indent"><span>Appendix A: Definition of Done</span><span>14</span></div>
 </div>
 
 <div class="rfp-section">
-  <div class="rfp-section-num">1</div>
   <div class="rfp-section-body">
-    <div class="rfp-section-title">Project Background &amp; Context</div>
+    <div class="rfp-section-title"><span class="rfp-section-num">1</span> Project Background &amp; Context</div>
     ${formatParagraphs(background)}
     <p>This Request for Proposal (RFP) invites qualified vendors to submit comprehensive proposals for the implementation of <strong>${escXml(title)}</strong>. The selected vendor must demonstrate deep expertise in enterprise-grade solutions for government entities, with proven track record in UAE public sector deployments meeting the highest standards of security, performance, and regulatory compliance.</p>
     <div class="rfp-deliverables">
@@ -667,33 +686,29 @@ function buildRFPContent(data: any): string {
 </div>
 
 <div class="rfp-section">
-  <div class="rfp-section-num">2</div>
   <div class="rfp-section-body">
-    <div class="rfp-section-title">Objectives</div>
+    <div class="rfp-section-title"><span class="rfp-section-num">2</span> Objectives</div>
     ${objectivesHtml}
   </div>
 </div>
 
 <div class="rfp-section">
-  <div class="rfp-section-num">3</div>
   <div class="rfp-section-body">
-    <div class="rfp-section-title">Scope of Work</div>
+    <div class="rfp-section-title"><span class="rfp-section-num">3</span> Scope of Work</div>
     ${scopeHtml}
   </div>
 </div>
 
 <div class="rfp-section">
-  <div class="rfp-section-num">4</div>
   <div class="rfp-section-body">
-    <div class="rfp-section-title">Technical Requirements &amp; Architecture</div>
+    <div class="rfp-section-title"><span class="rfp-section-num">4</span> Technical Requirements &amp; Architecture</div>
     ${techHtml}
   </div>
 </div>
 
 <div class="rfp-section">
-  <div class="rfp-section-num">5</div>
   <div class="rfp-section-body">
-    <div class="rfp-section-title">Key Assumptions &amp; Constraints</div>
+    <div class="rfp-section-title"><span class="rfp-section-num">5</span> Key Assumptions &amp; Constraints</div>
     <ul>
       <li>The implementation will operate within CPC's existing infrastructure where applicable; the vendor must assess fit and propose augmentation as needed</li>
       <li>CPC's central IT team will provide infrastructure and DBA-level support throughout the project lifecycle</li>
@@ -708,27 +723,25 @@ function buildRFPContent(data: any): string {
 </div>
 
 <div class="rfp-section">
-  <div class="rfp-section-num">6</div>
   <div class="rfp-section-body">
-    <div class="rfp-section-title">Vendor Qualification Requirements</div>
+    <div class="rfp-section-title"><span class="rfp-section-num">6</span> Vendor Requirements</div>
     <p>Vendors must satisfy <strong>all mandatory criteria</strong> to be considered for shortlisting:</p>
     <table class="rfp-spec-table">
       <tr><th>Category</th><th>Mandatory Requirement</th></tr>
       <tr><td><strong>Legal Standing</strong></td><td>Valid UAE Trade License (or authorized representation agreement with a UAE-registered entity)</td></tr>
       <tr><td><strong>Financial Stability</strong></td><td>Audited financial statements for the last 3 years demonstrating viability</td></tr>
       <tr><td><strong>Relevant Experience</strong></td><td>Minimum 3 successfully completed similar implementations in UAE government or quasi-government entities within the last 5 years</td></tr>
-      <tr><td><strong>Team Certification</strong></td><td>Dedicated certified professionals for each functional module (${escXml(platformLabel)} certified / authorised partner)</td></tr>
+      <tr><td><strong>Platform Capability</strong></td><td>Proven capability in ${escXml(platformLabel)}, Data Warehouse design, and BI integration</td></tr>
       <tr><td><strong>Security Compliance</strong></td><td>ISO 27001 certification or equivalent; must commit to UAE IA Standards compliance</td></tr>
-      <tr><td><strong>Arabic Language</strong></td><td>Demonstrated capability to deliver full Arabic UI/UX and RTL support</td></tr>
+      <tr><td><strong>Documentation</strong></td><td>Strong documentation and capacity-building track record</td></tr>
       <tr><td><strong>Local Presence</strong></td><td>Physical office in the UAE with dedicated support team for post-go-live warranty</td></tr>
     </table>
   </div>
 </div>
 
 <div class="rfp-section">
-  <div class="rfp-section-num">7</div>
   <div class="rfp-section-body">
-    <div class="rfp-section-title">Evaluation Criteria &amp; Scoring Model</div>
+    <div class="rfp-section-title"><span class="rfp-section-num">7</span> Evaluation Criteria &amp; Scoring Model</div>
     <p>Proposals will be evaluated using a weighted scoring model across three dimensions. The scoring will be performed by an AI-assisted evaluation system supported by a designated CPC evaluation panel.</p>
     <table class="rfp-spec-table">
       <tr><th>Dimension</th><th>Criterion</th><th width="12%">Weight</th><th>Evaluation Approach</th></tr>
@@ -751,9 +764,8 @@ function buildRFPContent(data: any): string {
 </div>
 
 <div class="rfp-section">
-  <div class="rfp-section-num">8</div>
   <div class="rfp-section-body">
-    <div class="rfp-section-title">Proposal Submission Requirements</div>
+    <div class="rfp-section-title"><span class="rfp-section-num">8</span> Proposal Submission Requirements</div>
     <p>The proposal must be submitted as a single, comprehensive package delivered to the CPC Procurement Department by the stated deadline. Submissions must include the following sections in the exact order specified:</p>
     <table class="rfp-spec-table">
       <tr><th>#</th><th>Document</th><th>Format</th><th>Required</th></tr>
@@ -776,9 +788,8 @@ function buildRFPContent(data: any): string {
 </div>
 
 <div class="rfp-section">
-  <div class="rfp-section-num" style="background:#e5e7eb;color:#374151;font-size:0.75rem">A</div>
   <div class="rfp-section-body">
-    <div class="rfp-section-title">Appendix A: Definition of Done — Required Approvals</div>
+    <div class="rfp-section-title"><span class="rfp-section-num" style="font-size:0.7rem">A</span> Appendix A: Definition of Done — Required Approvals</div>
     <p>The project is considered complete only upon formal delivery and written approval of all the following artefacts by the CPC Project Sponsor and IT governance team:</p>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem">
       ${['Business Requirements Document (BRD)', 'Solution Architecture Document (SAD)', 'UX/UI Design Artifacts (wireframes, mockups, storyboards)', 'Information Architecture Diagrams (flow charts, system interaction maps)', 'Test Strategy & Test Cases (validation plan, traceability matrix)', 'Security & Compliance Checklist (aligned with CPC IT standards)', 'Deployment & Release Plan (environment transitions, rollback logic)', 'Operations & Support Guide (user support, SLAs, escalation matrix)', 'Training Materials & Completion Certificates', 'Data Migration Reconciliation Report', 'User Acceptance Testing (UAT) Sign-Off Document', 'Knowledge Transfer Completion Sign-Off'].map(item => `<div class="rfp-deliverables" style="margin:0">${escXml(item)}</div>`).join('')}
@@ -1410,10 +1421,10 @@ Abu Dhabi, United Arab Emirates
 procurement@cpc.gov.ae`
 }
 
-async function sendRealEmail(to: string, subject: string, body: string, rfp: any): Promise<boolean> {
+async function sendRealEmail(to: string, subject: string, body: string, rfp: any, env?: any): Promise<boolean> {
   // Use Resend API for real email delivery
-  // The API key needs to be configured as a secret
-  const RESEND_API_KEY = (globalThis as any).__ENV__?.RESEND_API_KEY || ''
+  // Read key from Cloudflare Worker secret binding (env.RESEND_API_KEY)
+  const RESEND_API_KEY = env?.RESEND_API_KEY || (globalThis as any).RESEND_API_KEY || ''
   if (!RESEND_API_KEY) return false
 
   try {
