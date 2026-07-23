@@ -824,4 +824,8 @@ function viewProposal(id) {
 // ============================================================
 // START
 // ============================================================
-init();
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', init);
+} else {
+  init();
+}

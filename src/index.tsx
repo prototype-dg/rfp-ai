@@ -8,6 +8,12 @@ const app = new Hono<{ Bindings: Bindings }>()
 
 app.use('*', cors())
 
+// Global error handler to surface actual error messages
+app.onError((err, c) => {
+  console.error('Unhandled error:', err.message, err.stack)
+  return c.json({ error: err.message || 'Internal Server Error' }, 500)
+})
+
 // API routes
 app.route('/api', apiRouter)
 

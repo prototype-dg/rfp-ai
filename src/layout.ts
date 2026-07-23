@@ -5,7 +5,7 @@ export function getLayout(): string {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>CPC AI-Powered RFP Tool</title>
-  <script src="https://cdn.tailwindcss.com"><\/script>
+  <script src="https://cdn.tailwindcss.com" defer><\/script>
   <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
   <link href="/static/style.css" rel="stylesheet">
   <style>
@@ -132,7 +132,7 @@ export function getLayout(): string {
   <div class="modal" id="modalContent"></div>
 </div>
 
-<script src="/static/app.js"><\/script>
+<script src="/static/app.js" defer><\/script>
 </body>
 </html>`;
 }
