@@ -2352,36 +2352,40 @@ function showCreateRfpModal() {
 
 function renderCreateRfpStep1() {
   showModal(
-    '<div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:1.25rem">'
-    + '<div style="width:36px;height:36px;border-radius:50%;background:var(--cpc-gold);display:flex;align-items:center;justify-content:center;color:white;font-weight:700">1</div>'
-    + '<div><h3 style="font-size:1rem;font-weight:700;margin:0"><i class="fas fa-file-circle-plus cpc-gold" style="margin-right:6px"></i>Create New RFP</h3>'
-    + '<div style="font-size:0.75rem;color:#9ca3af">Step 1 of 2 \u2014 Project basics &amp; supporting documents</div>'
+    // Header — compact
+    '<div style="display:flex;align-items:center;gap:0.625rem;margin-bottom:0.875rem">'
+    + '<div style="width:32px;height:32px;border-radius:50%;background:var(--cpc-gold);display:flex;align-items:center;justify-content:center;color:white;font-weight:700;flex-shrink:0">1</div>'
+    + '<div><h3 style="font-size:0.95rem;font-weight:700;margin:0"><i class="fas fa-file-circle-plus cpc-gold" style="margin-right:6px"></i>Create New RFP</h3>'
+    + '<div style="font-size:0.72rem;color:#9ca3af">Step 1 of 2 \u2014 Project basics &amp; supporting documents</div>'
     + '</div></div>'
 
-    // Step indicator
-    + '<div style="display:flex;align-items:center;gap:0;margin-bottom:1.25rem">'
-    + '<div style="flex:1;height:4px;border-radius:4px 0 0 4px;background:var(--cpc-gold)"></div>'
-    + '<div style="flex:1;height:4px;border-radius:0 4px 4px 0;background:#e5e7eb"></div>'
+    // Step indicator — slim
+    + '<div style="display:flex;gap:0;margin-bottom:1rem">'
+    + '<div style="flex:1;height:3px;border-radius:3px 0 0 3px;background:var(--cpc-gold)"></div>'
+    + '<div style="flex:1;height:3px;border-radius:0 3px 3px 0;background:#e5e7eb"></div>'
     + '</div>'
 
-    + '<div class="form-group"><label>Project Title *</label>'
-    + '<input id="newRfpTitle" placeholder="e.g. New Oracle ERP Setup, Data Warehouse and Data Visualization"></div>'
-    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem">'
-    + '<div class="form-group"><label>Category</label><select id="newRfpCat">'
+    // Title + Category/Budget/Deadline in a compact 3-column row
+    + '<div class="form-group" style="margin-bottom:0.625rem"><label style="font-size:0.78rem">Project Title *</label>'
+    + '<input id="newRfpTitle" style="font-size:0.85rem;padding:0.45rem 0.625rem" placeholder="e.g. CRM Implementation, Fraud Control Solution, Data Warehouse..."></div>'
+    + '<div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:0.625rem;margin-bottom:0.625rem">'
+    + '<div class="form-group" style="margin:0"><label style="font-size:0.78rem">Category</label><select id="newRfpCat" style="font-size:0.82rem;padding:0.4rem 0.5rem">'
     + ['IT & Digital Transformation','Consulting Services','Infrastructure','Professional Services','Data & Analytics'].map(function(c){ return '<option>' + c + '</option>'; }).join('')
     + '</select></div>'
-    + '<div class="form-group"><label>Budget (AED)</label><input id="newRfpBudget" placeholder="e.g. 5,000,000"></div>'
+    + '<div class="form-group" style="margin:0"><label style="font-size:0.78rem">Budget (AED)</label><input id="newRfpBudget" style="font-size:0.82rem;padding:0.4rem 0.5rem" placeholder="5,000,000"></div>'
+    + '<div class="form-group" style="margin:0"><label style="font-size:0.78rem">Deadline</label><input type="date" id="newRfpDeadline" style="font-size:0.82rem;padding:0.4rem 0.5rem" value="' + getDateOffset(30) + '"></div>'
     + '</div>'
-    + '<div class="form-group"><label>Submission Deadline</label><input type="date" id="newRfpDeadline" value="' + getDateOffset(30) + '"></div>'
 
-    // Supporting documents upload — two named slots
-    + '<div class="form-group">'
-    + '<label style="display:flex;align-items:center;gap:6px"><i class="fas fa-file-pdf" style="color:#dc2626"></i>Supporting Documents <span style="font-weight:400;color:#9ca3af;font-size:0.75rem">— Optional. AI will extract context from each PDF.</span></label>'
+    // Supporting documents — two named upload slots, always visible
+    + '<div style="margin-bottom:0.875rem">'
+    + '<label style="display:flex;align-items:center;gap:6px;font-size:0.78rem;font-weight:600;color:#374151;margin-bottom:0.5rem">'
+    + '<i class="fas fa-file-pdf" style="color:#dc2626"></i>Supporting Documents'
+    + '<span style="font-weight:400;color:#9ca3af;font-size:0.72rem">— Optional. AI reads both PDFs during generation.</span></label>'
     + buildDocUploadSlot('doc0', 'Conceptual Solution Architecture', 'fa-sitemap', '#7c3aed')
     + buildDocUploadSlot('doc1', 'Business Requirements Document', 'fa-clipboard-list', '#0f3460')
     + '</div>'
 
-    + '<div style="display:flex;gap:0.5rem;margin-top:0.5rem">'
+    + '<div style="display:flex;gap:0.5rem">'
     + '<button class="btn-primary" style="flex:1" onclick="goToCreateRfpStep2()"><i class="fas fa-arrow-right"></i>Next: RFP Details</button>'
     + '<button class="btn-ghost" onclick="closeModal()">Cancel</button>'
     + '</div>'
@@ -2390,15 +2394,15 @@ function renderCreateRfpStep1() {
 
 function buildDocUploadSlot(slotId, docLabel, icon, color) {
   return '<div id="slot-wrap-' + slotId + '" onclick="document.getElementById(\'file-' + slotId + '\').click()" '
-    + 'style="border:2px dashed #d1d5db;border-radius:8px;padding:0.875rem 1rem;display:flex;align-items:center;gap:0.875rem;cursor:pointer;transition:border-color 0.2s;background:#fafafa;margin-bottom:0.5rem" '
+    + 'style="border:2px dashed #d1d5db;border-radius:8px;padding:0.625rem 0.875rem;display:flex;align-items:center;gap:0.75rem;cursor:pointer;transition:border-color 0.2s;background:#fafafa;margin-bottom:0.5rem" '
     + 'onmouseover="this.style.borderColor=\'' + color + '\'" onmouseout="if(!document.getElementById(\'file-' + slotId + '\').files.length){this.style.borderColor=\'#d1d5db\'}">'
-    + '<div style="width:36px;height:36px;border-radius:8px;background:' + color + '18;display:flex;align-items:center;justify-content:center;flex-shrink:0">'
-    + '<i class="fas ' + icon + '" style="color:' + color + ';font-size:0.9rem"></i></div>'
+    + '<div style="width:30px;height:30px;border-radius:7px;background:' + color + '18;display:flex;align-items:center;justify-content:center;flex-shrink:0">'
+    + '<i class="fas ' + icon + '" style="color:' + color + ';font-size:0.82rem"></i></div>'
     + '<div style="flex:1;min-width:0">'
-    + '<div style="font-size:0.8rem;font-weight:600;color:#374151">' + docLabel + '</div>'
-    + '<div id="slot-label-' + slotId + '" style="font-size:0.72rem;color:#9ca3af">Click to upload PDF</div>'
+    + '<div style="font-size:0.78rem;font-weight:600;color:#374151">' + docLabel + '</div>'
+    + '<div id="slot-label-' + slotId + '" style="font-size:0.7rem;color:#9ca3af">Click to upload PDF (optional)</div>'
     + '</div>'
-    + '<i class="fas fa-cloud-upload-alt" id="slot-icon-' + slotId + '" style="color:#d1d5db;font-size:1.1rem"></i>'
+    + '<i class="fas fa-cloud-upload-alt" id="slot-icon-' + slotId + '" style="color:#d1d5db;font-size:1rem"></i>'
     + '</div>'
     + '<input type="file" id="file-' + slotId + '" accept=".pdf" style="display:none" onchange="handleDocSlotSelect(\'' + slotId + '\',\'' + docLabel + '\',event)">';
 }
@@ -2466,10 +2470,10 @@ function goToCreateRfpStep2() {
 
 async function createRfp() {
   const btn = document.getElementById('createRfpBtn');
-  setLoading(btn, true, 'Creating...');
+  setLoading(btn, true, 'Creating RFP...');
   try {
     const s1 = window._rfpStep1 || {};
-    const rfp = await apiCall('POST', '/rfps', {
+    const rfpBody = {
       title: s1.title || '',
       category: s1.category || 'IT & Digital Transformation',
       budget: s1.budget || '',
@@ -2478,11 +2482,12 @@ async function createRfp() {
       background: document.getElementById('newRfpBg') ? document.getElementById('newRfpBg').value : '',
       objectives: document.getElementById('newRfpObj') ? document.getElementById('newRfpObj').value : '',
       tech_requirements: document.getElementById('newRfpTech') ? document.getElementById('newRfpTech').value : '',
-    });
+    };
+    const rfp = await apiCall('POST', '/rfps', rfpBody);
 
     // Upload each supporting document in sequence
     if (_createRfpDocFiles.length > 0) {
-      setLoading(btn, true, 'Uploading Documents...');
+      setLoading(btn, true, 'Uploading Docs (' + _createRfpDocFiles.length + ')...');
       let uploadedCount = 0;
       for (var di = 0; di < _createRfpDocFiles.length; di++) {
         var docEntry = _createRfpDocFiles[di];
@@ -2499,12 +2504,18 @@ async function createRfp() {
           showToast('Could not upload "' + docEntry.label + '": ' + uploadErr.message, 'info', 4000);
         }
       }
-      if (uploadedCount > 0) {
-        showToast(uploadedCount + ' document(s) uploaded — AI will use them during RFP generation.', 'success', 5000);
-      }
     }
 
-    showToast('RFP created! Go to Generate tab to produce the AI document.', 'success');
+    // Auto-generate the RFP document with AI immediately — no need for user to click Generate
+    setLoading(btn, true, 'AI Generating...');
+    try {
+      await apiCall('POST', '/rfps/' + rfp.id + '/generate', rfpBody);
+      showToast('RFP created and document generated!', 'success', 5000);
+    } catch(genErr) {
+      // Generation failed — navigate anyway, user can retry from Generate tab
+      showToast('RFP created. Document generation failed — use Generate tab to retry.', 'info', 6000);
+    }
+
     closeModal();
     _createRfpDocFiles = [];
     window._rfpStep1 = null;
