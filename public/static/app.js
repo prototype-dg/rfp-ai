@@ -704,26 +704,24 @@ rfpTabs.generate = function(rfpId, rfp) {
     + '<div class="form-group"><label>Budget (AED)</label><input id="rfpBudget" placeholder="e.g. 5,000,000" value="' + escHtml(budgetVal) + '"></div>'
     + '</div>'
     + '<div class="form-group"><label>Submission Deadline</label><input type="date" id="rfpDeadline" value="' + escHtml(deadlineVal) + '"></div>'
-    + '<div class="form-group"><label>Project Background</label><textarea id="rfpBackground" rows="3" placeholder="Describe the current situation and drivers...">' + escHtml(bgVal) + '</textarea></div>'
-    + '<div class="form-group"><label>Objectives</label><textarea id="rfpObjectives" rows="3" placeholder="List the key objectives by phase...">' + escHtml(objVal) + '</textarea></div>'
-    + '<div class="form-group"><label>Scope of Work</label><textarea id="rfpScope" rows="4" placeholder="Detail the work to be performed...">' + escHtml(scopeVal) + '</textarea></div>'
-    + '<div class="form-group"><label>Technical Requirements</label><textarea id="rfpTech" rows="3" placeholder="Infrastructure, security, compliance specs...">' + escHtml(techVal) + '</textarea></div>'
+    + '<div class="form-group"><label>Project Background <span style="color:#ef4444">*</span></label><textarea id="rfpBackground" rows="3" placeholder="Describe the current situation, business problem, and strategic drivers...">' + escHtml(bgVal) + '</textarea></div>'
+    + '<div class="form-group"><label>Objectives <span style="color:#ef4444">*</span></label><textarea id="rfpObjectives" rows="3" placeholder="List 4-6 measurable objectives for this project...">' + escHtml(objVal) + '</textarea></div>'
+    + '<div class="form-group"><label>Scope of Work <span style="color:#ef4444">*</span></label><textarea id="rfpScope" rows="4" placeholder="Detail the work phases, deliverables, and what is in/out of scope...">' + escHtml(scopeVal) + '</textarea></div>'
+    + '<div class="form-group"><label>Technical Requirements</label><textarea id="rfpTech" rows="3" placeholder="Infrastructure, hosting, security, compliance, integration specs...">' + escHtml(techVal) + '</textarea></div>'
     + '<div style="display:flex;gap:0.5rem;padding-top:0.25rem">'
     + '<button class="btn-primary" id="genBtn" style="flex:1" onclick="generateRfpDoc(' + rfpId + ')"><i class="fas fa-robot"></i>Generate with AI</button>'
     + '<button class="btn-secondary" onclick="saveRfpFields(' + rfpId + ')"><i class="fas fa-save"></i>Save</button>'
     + '</div>'
-    + (hasContent
-      ? '<div style="display:flex;gap:0.5rem">'
-        + '<button class="btn-ghost" style="flex:1" onclick="downloadRfpPdf(' + rfpId + ')"><i class="fas fa-file-pdf"></i>Download PDF</button>'
-        + advanceStageButton(rfp)
-        + '</div>'
-      : '')
+    + '<div id="genActionButtons" style="' + (hasContent ? 'display:flex' : 'display:none') + ';gap:0.5rem">'
+      + '<button class="btn-ghost" style="flex:1" onclick="downloadRfpPdf(' + rfpId + ')"><i class="fas fa-file-pdf"></i>Download PDF</button>'
+      + advanceStageButton(rfp)
+      + '</div>'
     + '</div>'
     // RIGHT: preview
     + '<div class="card" style="overflow-y:auto;padding:0">'
     + '<div style="padding:0.875rem 1.25rem;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between;background:#f9fafb">'
     + '<span style="font-weight:600;color:#374151;font-size:0.88rem"><i class="fas fa-eye cpc-gold" style="margin-right:6px"></i>RFP Preview</span>'
-    + (hasContent ? '<button class="btn-ghost btn-sm" onclick="downloadRfpPdf(' + rfpId + ')"><i class="fas fa-download"></i>PDF</button>' : '')
+    + '<button id="genPreviewPdfBtn" class="btn-ghost btn-sm" onclick="downloadRfpPdf(' + rfpId + ')" style="' + (hasContent ? '' : 'display:none') + '"><i class="fas fa-download"></i>PDF</button>'
     + '</div>'
     + '<div id="rfpPreviewArea" style="padding:0">' + previewHtml + '</div>'
     + '</div>'
@@ -739,31 +737,55 @@ function advanceStageButton(rfp) {
 }
 
 async function generateRfpDoc(rfpId) {
-  const btn = document.getElementById('genBtn');
+  // Validate mandatory fields before calling the API
+  var background = document.getElementById('rfpBackground').value.trim();
+  var objectives = document.getElementById('rfpObjectives').value.trim();
+  var scope      = document.getElementById('rfpScope').value.trim();
+  var title      = document.getElementById('rfpTitle').value.trim();
+  if (!background || !objectives || !scope) {
+    var missing = [];
+    if (!background) missing.push('Project Background');
+    if (!objectives)  missing.push('Objectives');
+    if (!scope)       missing.push('Scope of Work');
+    showToast('Please fill in: ' + missing.join(', ') + ' before generating.', 'error');
+    return;
+  }
+
+  var btn = document.getElementById('genBtn');
   setLoading(btn, true, 'Generating...');
   try {
-    const data = {
-      title: document.getElementById('rfpTitle').value,
-      category: document.getElementById('rfpCategory').value,
-      budget: document.getElementById('rfpBudget').value,
-      deadline: document.getElementById('rfpDeadline').value,
-      scope: document.getElementById('rfpScope').value,
-      tech_requirements: document.getElementById('rfpTech').value,
-      objectives: document.getElementById('rfpObjectives').value,
-      background: document.getElementById('rfpBackground').value,
+    var data = {
+      title:            title,
+      category:         document.getElementById('rfpCategory').value,
+      budget:           document.getElementById('rfpBudget').value,
+      deadline:         document.getElementById('rfpDeadline').value,
+      scope:            scope,
+      tech_requirements:document.getElementById('rfpTech').value,
+      objectives:       objectives,
+      background:       background,
     };
-    const result = await apiCall('POST', '/rfps/' + rfpId + '/generate', data);
+    var result = await apiCall('POST', '/rfps/' + rfpId + '/generate', data);
     appState.currentRfp = result;
     showToast('RFP document generated!', 'success');
-    // Re-render the whole generate tab so hasContent=true — this makes
-    // Download PDF + Publish RFP buttons appear immediately without a tab switch.
+    // 1. Update the preview area immediately (fast path)
+    var previewEl = document.getElementById('rfpPreviewArea');
+    if (previewEl) previewEl.innerHTML = result.content || '';
+    // 2. Show the action buttons (may already exist in DOM from initial render)
+    var actionDiv = document.getElementById('genActionButtons');
+    if (actionDiv) {
+      actionDiv.style.display = 'flex';
+    }
+    var pdfBtn = document.getElementById('genPreviewPdfBtn');
+    if (pdfBtn) pdfBtn.style.display = '';
+    // 3. Full re-render as reliable fallback (rebuilds entire left panel with hasContent=true)
     renderRfpTabs('generate', rfpId, appState.unreadQA);
     rfpTabs.generate(rfpId, result);
   } catch(e) {
     // error shown by apiCall
-  } finally {
     setLoading(btn, false);
   }
+  // Note: do NOT call setLoading in finally — rfpTabs.generate() recreates the DOM
+  // so the original btn reference is stale. The new genBtn is enabled by default.
 }
 
 async function saveRfpFields(rfpId) {

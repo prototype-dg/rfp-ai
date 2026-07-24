@@ -1858,23 +1858,46 @@ function buildRFPContent(data: any): string {
   const scope = data.scope || ''
   const techReqs = data.tech_requirements || ''
 
-  // ---- Technology detection from ALL input fields ----
-  const allText = (title + ' ' + category + ' ' + objectives + ' ' + scope + ' ' + techReqs + ' ' + background).toLowerCase()
+  // ---- Technology detection — PRIMARY signals only (title + category drive the topic) ----
+  // We use a "primary" text (title + category) for strong signals and "full" text for supporting context.
+  // This prevents a CRM project that MENTIONS "ERP integration" from being classified as an ERP project.
+  const primaryText = (title + ' ' + category).toLowerCase()
+  const allText     = (title + ' ' + category + ' ' + objectives + ' ' + scope + ' ' + techReqs + ' ' + background).toLowerCase()
+
+  // ERP: must be explicitly in the title or have specific ERP product keywords anywhere
   const isOracleEBS = allText.includes('oracle ebs') || allText.includes('oracle e-business') || allText.includes('ebs r12') || allText.includes('r12.2')
-  const isERP       = isOracleEBS || allText.includes('erp') || allText.includes('enterprise resource planning')
-  const isSAP       = allText.includes('sap s/4') || allText.includes('sap hana') || allText.includes('s4hana') || (allText.includes('sap') && !isOracleEBS)
-  const isDynamics  = allText.includes('dynamics 365') || allText.includes('dynamics crm') || (allText.includes('dynamics') && !isOracleEBS)
-  const isCRM       = allText.includes('crm') || allText.includes('customer relationship') || allText.includes('salesforce') || isDynamics
-  const isDWH       = allText.includes('data warehouse') || allText.includes('dwh') || allText.includes('data platform') || allText.includes('medallion') || allText.includes('data lake') || allText.includes('analytics platform')
-  const isBI        = allText.includes('tableau') || allText.includes('power bi') || allText.includes('bi platform') || allText.includes('dashboard') || allText.includes('business intelligence') || isDWH
-  const isTableau   = allText.includes('tableau')
-  const isPowerBI   = allText.includes('power bi')
-  const isAI        = allText.includes('ai platform') || allText.includes('machine learning') || allText.includes(' ai ') || allText.includes('artificial intelligence') || allText.includes('llm') || allText.includes('generative ai')
-  const isCloud     = allText.includes('cloud migration') || allText.includes('cloud platform') || allText.includes('azure') || allText.includes('aws') || allText.includes('google cloud')
-  const isCyber     = allText.includes('cybersecurity') || allText.includes('soc ') || allText.includes('siem') || allText.includes('security operations')
-  const isHRMS      = isOracleEBS || allText.includes('hrms') || allText.includes('hr system') || allText.includes('human capital') || allText.includes('payroll system')
-  const isMobile    = allText.includes('mobile app') || allText.includes('mobile application') || allText.includes('ios') || allText.includes('android')
-  const isInfra     = allText.includes('infrastructure') || allText.includes('data center') || allText.includes('network') || allText.includes('server')
+  const isSAP       = allText.includes('sap s/4') || allText.includes('sap hana') || allText.includes('s4hana') || (primaryText.includes('sap') && !isOracleEBS)
+  const isDynamics  = allText.includes('dynamics 365') || (primaryText.includes('dynamics') && !isOracleEBS)
+  // isERP: only fire when ERP/Oracle is the PRIMARY topic (title/category), or explicit ERP product keyword
+  const isERP       = isOracleEBS || isSAP || isDynamics
+                    || primaryText.includes('erp')
+                    || primaryText.includes('enterprise resource planning')
+
+  // CRM: title/category explicitly about CRM, or well-known CRM product
+  const isCRM       = primaryText.includes('crm') || primaryText.includes('customer relationship')
+                    || allText.includes('salesforce') || isDynamics
+                    || (allText.includes('crm') && !isERP)
+
+  // DWH/BI/AI/Cloud: only trigger when PRIMARY topic, not incidental mentions in scope/background
+  const isDWH    = primaryText.includes('data warehouse') || primaryText.includes('dwh')
+                 || primaryText.includes('data platform') || primaryText.includes('medallion')
+                 || primaryText.includes('data lake') || primaryText.includes('analytics platform')
+  const isTableau  = allText.includes('tableau')
+  const isPowerBI  = allText.includes('power bi')
+  const isBI       = isTableau || isPowerBI
+                   || primaryText.includes('bi platform') || primaryText.includes('business intelligence')
+                   || isDWH
+  const isAI       = primaryText.includes('ai platform') || primaryText.includes('machine learning')
+                   || primaryText.includes('artificial intelligence') || primaryText.includes('generative ai')
+                   || primaryText.includes('ai-native') || primaryText.includes('ai native')
+  const isCloud    = primaryText.includes('cloud migration') || primaryText.includes('cloud platform')
+                   || (primaryText.includes('azure') && !isCRM) || (primaryText.includes('aws') && !isCRM)
+  const isCyber    = primaryText.includes('cybersecurity') || primaryText.includes('soc ')
+                   || primaryText.includes('siem') || primaryText.includes('security operations')
+  const isHRMS     = isOracleEBS || primaryText.includes('hrms') || primaryText.includes('hr system')
+                   || primaryText.includes('human capital') || primaryText.includes('payroll system')
+  const isMobile   = primaryText.includes('mobile app') || primaryText.includes('mobile application')
+  const isInfra    = primaryText.includes('infrastructure') || primaryText.includes('data center')
 
   // Determine the primary platform label for use in qualification requirements
   let platformLabel = 'enterprise software'
