@@ -4,6 +4,8 @@ export type Bindings = {
   RESEND_API_KEY?: string
   OPENAI_API_KEY?: string
   OPENAI_BASE_URL?: string
+  GSK_API_KEY?: string
+  GSK_PROJECT_ID?: string
 }
 
 // Payload for async large-file processing jobs (passed to ctx.waitUntil / internal endpoint)

@@ -4138,14 +4138,120 @@ export async function extractPdfTextSmart(
     return { text: textLayerResult, method: 'text', chars: textLayerResult.length }
   }
 
-  // Step 2: Text layer failed or produced garbage
-  // Note: The Genspark LLM proxy does not forward PDF bytes to Claude (prompt_tokens=3 confirmed).
-  // Vision extraction is not available via this proxy. We return the garbage text as rawGarbage
-  // so callers can still run filename-based wrong-document detection.
+  // Step 2: Text layer failed or produced PostScript garbage.
+  // Try Genspark Crawler fallback: upload PDF → get public URL → crawler extracts text.
   const reason = !textLayerResult ? 'empty' : isGarbage ? 'PostScript-garbage' : 'too-short'
-  console.warn(`[smart-extract] ${filename}: text-layer ${reason} (${textLayerResult.length} chars). Vision not available via proxy.`)
+  console.warn(`[smart-extract] ${filename}: text-layer ${reason} (${textLayerResult?.length ?? 0} chars). Trying Genspark crawler fallback...`)
 
+  try {
+    const crawlerText = await extractPdfViaGenskarkCrawler(bytes, filename, env)
+    if (crawlerText && crawlerText.length >= 200 && !isPostScriptGarbage(crawlerText)) {
+      console.log(`[smart-extract] ${filename}: Genspark crawler OK (${crawlerText.length} chars)`)
+      return { text: crawlerText, method: 'vision', chars: crawlerText.length, rawGarbage: textLayerResult }
+    }
+    console.warn(`[smart-extract] ${filename}: Genspark crawler returned insufficient text (${crawlerText?.length ?? 0} chars)`)
+  } catch (crawlerErr: any) {
+    console.error(`[smart-extract] ${filename}: Genspark crawler failed: ${crawlerErr?.message}`)
+  }
+
+  // All extraction methods failed — return rawGarbage for filename-based detection
   return { text: '', method: 'failed', chars: 0, rawGarbage: textLayerResult }
+}
+
+/**
+ * Upload a PDF to Genspark file storage, then use the Genspark Crawler API
+ * to extract text from it. This bypasses the LLM proxy's PDF stripping limitation.
+ *
+ * Flow:
+ *   1. POST /api/tool_cli/file/upload_url → get Azure blob upload URL + file wrapper URL
+ *   2. PUT bytes to blob URL
+ *   3. POST /api/tool_cli/crawler with the file wrapper URL → get extracted text
+ */
+async function extractPdfViaGenskarkCrawler(
+  bytes: Uint8Array,
+  filename: string,
+  env: any
+): Promise<string> {
+  const gskApiKey = (env as any).GSK_API_KEY
+  const gskProjectId = (env as any).GSK_PROJECT_ID || ''
+  if (!gskApiKey) {
+    throw new Error('GSK_API_KEY secret not configured')
+  }
+
+  const baseUrl = 'https://www.genspark.ai'
+
+  // Step 1: Get upload URL from Genspark
+  console.log(`[gsk-crawler] Requesting upload URL for ${filename} (${bytes.length} bytes)`)
+  const uploadUrlRes = await fetch(`${baseUrl}/api/tool_cli/file/upload_url`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${gskApiKey}`,
+      'Content-Type': 'application/json',
+      ...(gskProjectId ? { 'X-Project-Id': gskProjectId } : {}),
+    },
+    body: JSON.stringify({
+      content_type: 'application/pdf',
+      name: filename,
+      ...(gskProjectId ? { project_id: gskProjectId } : {}),
+    }),
+  })
+
+  if (!uploadUrlRes.ok) {
+    const errText = await uploadUrlRes.text()
+    throw new Error(`Upload URL request failed ${uploadUrlRes.status}: ${errText.slice(0, 200)}`)
+  }
+
+  const uploadUrlData = await uploadUrlRes.json() as any
+  const blobUploadUrl: string = uploadUrlData?.data?.upload_url || uploadUrlData?.upload_url
+  const fileWrapperUrl: string = uploadUrlData?.data?.file_wrapper_url || uploadUrlData?.file_wrapper_url
+
+  if (!blobUploadUrl || !fileWrapperUrl) {
+    throw new Error(`Invalid upload URL response: ${JSON.stringify(uploadUrlData).slice(0, 300)}`)
+  }
+
+  console.log(`[gsk-crawler] Got file wrapper URL: ${fileWrapperUrl}`)
+
+  // Step 2: Upload PDF bytes to blob storage
+  const putRes = await fetch(blobUploadUrl, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/pdf',
+      'x-ms-blob-type': 'BlockBlob',  // Required for Azure Blob Storage
+    },
+    body: bytes,
+  })
+
+  if (!putRes.ok) {
+    const errText = await putRes.text()
+    throw new Error(`Blob upload failed ${putRes.status}: ${errText.slice(0, 200)}`)
+  }
+
+  console.log(`[gsk-crawler] PDF uploaded successfully. Now calling crawler...`)
+
+  // Step 3: Call Genspark Crawler API with the file wrapper URL
+  const crawlerRes = await fetch(`${baseUrl}/api/tool_cli/crawler`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${gskApiKey}`,
+      'Content-Type': 'application/json',
+      ...(gskProjectId ? { 'X-Project-Id': gskProjectId } : {}),
+    },
+    body: JSON.stringify({
+      url: fileWrapperUrl,
+      ...(gskProjectId ? { project_id: gskProjectId } : {}),
+    }),
+  })
+
+  if (!crawlerRes.ok) {
+    const errText = await crawlerRes.text()
+    throw new Error(`Crawler API failed ${crawlerRes.status}: ${errText.slice(0, 200)}`)
+  }
+
+  const crawlerData = await crawlerRes.json() as any
+  const extractedText: string = crawlerData?.data?.result || crawlerData?.result || ''
+
+  console.log(`[gsk-crawler] Extracted ${extractedText.length} chars from ${filename}`)
+  return extractedText
 }
 
 // ============================================================
