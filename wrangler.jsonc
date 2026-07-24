@@ -18,7 +18,5 @@
       "binding": "PROPOSALS_BUCKET",
       "bucket_name": "webapp-proposals"
     }
-  ],
-  // Cloudflare Queues removed — async large-file processing uses ctx.waitUntil()
-  // instead, which continues after the HTTP response without needing a Queue resource.
+  ]
 }
