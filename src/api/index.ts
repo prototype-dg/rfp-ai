@@ -1692,6 +1692,149 @@ apiRouter.post('/rfps/:rfpId/proposals/:proposalId/reprocess-from-text', async (
   })
 })
 
+// ── Re-process from R2: fetch all stored attachments from R2, re-extract with vision, re-evaluate ──
+// POST /api/rfps/:rfpId/proposals/:proposalId/reprocess-from-r2
+// Used when proposal_attachments JSON already has r2_key entries but text_chars=0 (vision needed).
+apiRouter.post('/rfps/:rfpId/proposals/:proposalId/reprocess-from-r2', async (c) => {
+  const rfpId = Number(c.req.param('rfpId'))
+  const proposalId = Number(c.req.param('proposalId'))
+  const db = c.env.DB as D1Database
+  const bucket: R2Bucket | undefined = (c.env as any).PROPOSALS_BUCKET
+
+  const proposal = await db.prepare(
+    `SELECT p.*, v.name as vendor_name, v.contact_email FROM proposals p LEFT JOIN vendors v ON p.vendor_id=v.id WHERE p.id=? AND p.rfp_id=?`
+  ).bind(proposalId, rfpId).first<any>()
+  if (!proposal) return c.json({ error: 'Proposal not found' }, 404)
+
+  const rfp = await db.prepare(`SELECT * FROM rfps WHERE id=?`).bind(rfpId).first<any>()
+  if (!rfp) return c.json({ error: 'RFP not found' }, 404)
+
+  if (!bucket) return c.json({ error: 'PROPOSALS_BUCKET binding missing' }, 500)
+
+  const attachments: any[] = JSON.parse(proposal.proposal_attachments || '[]')
+  if (attachments.length === 0) return c.json({ error: 'No attachments stored for this proposal' }, 404)
+
+  // Process each attachment with vision extraction
+  const allExtractedTexts: string[] = []
+  const updatedAttachments: any[] = []
+
+  for (const att of attachments) {
+    if (!att.r2_key) {
+      updatedAttachments.push(att)
+      continue
+    }
+    try {
+      const obj = await bucket.get(att.r2_key)
+      if (!obj) {
+        console.warn(`[reprocess-r2] R2 object not found: ${att.r2_key}`)
+        updatedAttachments.push({ ...att, error: 'R2 object not found' })
+        continue
+      }
+      const rawBytes = new Uint8Array(await obj.arrayBuffer())
+      console.log(`[reprocess-r2] Fetched ${rawBytes.length} bytes for ${att.filename}`)
+
+      const { text: extracted, method: exMethod } = await extractPdfTextSmart(rawBytes, att.filename, c.env)
+      console.log(`[reprocess-r2] Extracted ${extracted.length} chars from ${att.filename} via ${exMethod}`)
+
+      // Wrong-document detection
+      let effectiveText = extracted
+      let wrongDocReason = ''
+      if (extracted.length >= 100) {
+        const wrongDoc = await detectWrongDocument(extracted, att.filename, proposal.vendor_name || 'Vendor', rfp.ref_number || '', rfp.title || '', c.env)
+        if (wrongDoc.isWrong) {
+          wrongDocReason = wrongDoc.reason
+          effectiveText = `[WRONG DOCUMENT DETECTED]\nFile: ${att.filename}\nDetected type: ${wrongDoc.detectedDocType}\n\n${wrongDoc.reason}\n\n[EXTRACTED CONTENT FOR REFERENCE]\n${extracted}`
+          console.warn(`[reprocess-r2] Wrong document detected for ${att.filename}: ${wrongDoc.reason}`)
+        } else {
+          allExtractedTexts.push(`[${(att.label || 'TECHNICAL').toUpperCase()} DOCUMENT: ${att.filename}]\n${extracted}`)
+        }
+      }
+
+      updatedAttachments.push({
+        ...att,
+        text_chars: extracted.length,
+        extract_method: exMethod,
+        ...(wrongDocReason ? { wrong_document: wrongDocReason } : {}),
+      })
+    } catch (e: any) {
+      console.error(`[reprocess-r2] Error processing ${att.filename}: ${e?.message}`)
+      updatedAttachments.push({ ...att, error: e?.message })
+    }
+  }
+
+  // Check for wrong-doc scenario
+  const wrongDocAtts = updatedAttachments.filter((a: any) => a.wrong_document)
+  const allWrong = wrongDocAtts.length > 0 && allExtractedTexts.length === 0
+
+  let technicalProposalText = allExtractedTexts.join('\n\n')
+  let executiveSummary: string | null = null
+  let keyStrengths: string | null = null
+  let budgetAmount: number | null = null
+  let budgetCurrency = 'AED'
+  let timelineMonths: number | null = null
+  let proposedDuration: string | null = null
+
+  if (allWrong) {
+    const wrongReasons = wrongDocAtts.map((a: any) => `File: ${a.filename}\nReason: ${a.wrong_document}`).join('\n\n')
+    technicalProposalText = `[WRONG DOCUMENT DETECTED]\n${wrongReasons}\n\n[NO VALID PROPOSAL CONTENT EXTRACTED]`
+    executiveSummary = `Wrong document submitted. ${wrongDocAtts[0]?.wrong_document?.split('.')[0] || 'No valid proposal was submitted.'}`
+    keyStrengths = `⚠ Wrong document detected. This vendor did not submit a valid proposal for this RFP.`
+  } else if (technicalProposalText.length > 100) {
+    try {
+      const fields = await extractProposalFieldsWithLLM(technicalProposalText, '', proposal.vendor_name || 'Vendor', rfp.title || 'RFP', c.env)
+      executiveSummary = fields.executive_summary || null
+      keyStrengths = fields.key_strengths || null
+      budgetAmount = fields.budget_amount || null
+      budgetCurrency = fields.budget_currency || 'AED'
+      timelineMonths = fields.timeline_months || null
+      proposedDuration = fields.proposed_duration || extractProposedDuration(technicalProposalText) || null
+    } catch (e: any) {
+      console.error(`[reprocess-r2] Field extraction failed: ${e?.message}`)
+    }
+  }
+
+  // Update proposal record
+  await db.prepare(`
+    UPDATE proposals SET
+      technical_proposal=?, executive_summary=?, key_strengths=?,
+      budget_amount=?, budget_currency=?, timeline_months=?, proposed_duration=?,
+      proposal_attachments=?, updated_at=datetime('now')
+    WHERE id=?
+  `).bind(
+    technicalProposalText || null, executiveSummary, keyStrengths,
+    budgetAmount, budgetCurrency, timelineMonths, proposedDuration,
+    JSON.stringify(updatedAttachments),
+    proposalId
+  ).run()
+
+  // Re-run evaluation
+  const latestProposal = await db.prepare(`
+    SELECT p.*, v.name as vendor_name, v.contact_email, v.erp_experience, v.certifications, v.specializations, v.size
+    FROM proposals p LEFT JOIN vendors v ON p.vendor_id=v.id WHERE p.id=?
+  `).bind(proposalId).first<any>()
+
+  let evalResult: any = null
+  if (latestProposal) {
+    try {
+      await runSingleEvaluation(latestProposal, rfp, String(rfpId), c.env)
+      const ev = await db.prepare('SELECT total_score, ai_summary FROM evaluations WHERE proposal_id=? ORDER BY id DESC LIMIT 1').bind(proposalId).first<any>()
+      evalResult = ev ? { total_score: ev.total_score, summary_preview: (ev.ai_summary || '').slice(0, 200) } : null
+    } catch (e: any) {
+      console.error(`[reprocess-r2] Evaluation failed: ${e?.message}`)
+    }
+  }
+
+  return c.json({
+    ok: true,
+    proposal_id: proposalId,
+    attachments_processed: updatedAttachments.length,
+    wrong_docs: wrongDocAtts.length,
+    valid_docs: allExtractedTexts.length,
+    text_chars: technicalProposalText.length,
+    evaluation: evalResult,
+  })
+})
+
 // ── Re-process a proposal PDF: re-fetch from Resend, upload to R2, re-extract + re-evaluate ──
 // POST /api/rfps/:rfpId/proposals/:proposalId/reprocess
 // Looks up resend_email_id from email_log, re-downloads the PDF attachment, stores it in R2,
