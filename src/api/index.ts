@@ -847,8 +847,11 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
           const attachsToProcess = docAttachments.length > 0 ? docAttachments : allAttachData.slice(0, 5)
 
           const bucket: R2Bucket | undefined = (c.env as any).PROPOSALS_BUCKET
+          const proposalQueue: any = (c.env as any).PROPOSAL_QUEUE
           const safeVendorName = (vendorDisplayName || 'vendor').replace(/[^a-zA-Z0-9_-]/g,'_').slice(0,40)
-          const SMALL_PDF_THRESHOLD = 8_000_000
+          // Files above this threshold are streamed to R2 without buffering, then queued for async text extraction.
+          // Files below are buffered in memory so we can extract text inline during the webhook request.
+          const INLINE_EXTRACT_THRESHOLD = 5_000_000  // 5 MB
           const allExtractedTexts: string[] = []
 
           for (let attachIdx = 0; attachIdx < attachsToProcess.length; attachIdx++) {
@@ -856,60 +859,108 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
             if (!attachData?.download_url) {
               // No download URL — record filename only
               const fn = attachData.filename || `document_${attachIdx + 1}.pdf`
-              allProposalAttachments.push({ r2_key: '', filename: fn, size_bytes: 0, content_type: attachData.content_type || 'application/pdf', label: detectAttachmentLabel(fn), text_chars: 0 })
+              allProposalAttachments.push({ r2_key: '', filename: fn, size_bytes: 0, content_type: attachData.content_type || 'application/pdf', label: detectAttachmentLabel(fn), text_chars: 0, queued: false })
               continue
             }
 
             try {
+              const fn = attachData.filename || `document_${attachIdx + 1}.pdf`
+              const ct = attachData.content_type || 'application/pdf'
+              const label = detectAttachmentLabel(fn)
+              const ts = Date.now() + attachIdx  // ensure unique key per attachment
+              const r2Key = `proposals/${rfpId}/${vendorId}_${safeVendorName}_${ts}_${attachIdx}.pdf`
+
+              // HEAD request: read Content-Length before downloading any bytes.
+              // Lets us choose large-file vs small-file path without buffering anything.
+              let declaredSize = 0
+              try {
+                const headRes = await fetch(attachData.download_url, { method: 'HEAD' })
+                declaredSize = parseInt(headRes.headers.get('Content-Length') || '0', 10)
+              } catch(_) { /* HEAD may not be supported — proceed with unknown size */ }
+
+              console.log(`[webhook] Attachment ${attachIdx} (${label}): ${fn}, declared size=${declaredSize} bytes`)
+
               const controller = new AbortController()
-              // 25s per file — generous for large PDFs; later attachments also need time
-              const timeoutId = setTimeout(() => controller.abort(), 25000)
+              const timeoutId = setTimeout(() => controller.abort(), 20000)
               const fileRes = await fetch(attachData.download_url, { signal: controller.signal })
               clearTimeout(timeoutId)
 
               if (!fileRes.ok) {
                 console.error(`[webhook] Attachment ${attachIdx} download failed: HTTP ${fileRes.status}`)
-                const fn = attachData.filename || `document_${attachIdx + 1}.pdf`
-                allProposalAttachments.push({ r2_key: '', filename: fn, size_bytes: 0, content_type: attachData.content_type || 'application/pdf', label: detectAttachmentLabel(fn), text_chars: 0 })
+                allProposalAttachments.push({ r2_key: '', filename: fn, size_bytes: 0, content_type: ct, label: detectAttachmentLabel(fn), text_chars: 0, queued: false })
                 continue
               }
 
-              const fileBuffer = await fileRes.arrayBuffer()
-              const rawBytes = new Uint8Array(fileBuffer)
-              const fn = attachData.filename || `document_${attachIdx + 1}.pdf`
-              const ct = attachData.content_type || 'application/pdf'
-              const label = detectAttachmentLabel(fn)
+              // Actual size from Content-Length on the GET response (may differ from HEAD)
+              const getSize = parseInt(fileRes.headers.get('Content-Length') || '0', 10)
+              const estimatedSize = getSize || declaredSize
 
-              // ── Store in R2 ──────────────────────────────────────────────────
-              const ts = Date.now() + attachIdx  // ensure unique key per attachment
-              const r2Key = `proposals/${rfpId}/${vendorId}_${safeVendorName}_${ts}_${attachIdx}.pdf`
               let storedR2Key = ''
-              if (bucket) {
+
+              if (estimatedSize > INLINE_EXTRACT_THRESHOLD && bucket && fileRes.body) {
+                // LARGE FILE PATH: stream directly to R2 without loading into Worker memory.
+                // R2.put() accepts a ReadableStream natively — no 128MB wall, no timeout from buffering.
+                // Text extraction happens asynchronously in the Queue consumer (no CPU time limit).
+                console.log(`[webhook] Large file (${estimatedSize} bytes) — streaming to R2 without buffering`)
                 try {
-                  await bucket.put(r2Key, rawBytes, {
+                  await bucket.put(r2Key, fileRes.body, {
                     httpMetadata: { contentType: ct },
-                    customMetadata: { rfpId: String(rfpId), vendorId: String(vendorId), filename: fn, label },
+                    customMetadata: { rfpId: String(rfpId), vendorId: String(vendorId), filename: fn, label, needs_extraction: '1' },
                   })
                   storedR2Key = r2Key
-                  console.log(`[webhook] Attachment ${attachIdx} (${label}) stored in R2: ${r2Key} (${rawBytes.length} bytes)`)
+                  console.log(`[webhook] Large file streamed to R2: ${r2Key}`)
+                  // Queue async extraction + evaluation job (proposalId patched after proposal insert)
+                  if (proposalQueue) {
+                    await proposalQueue.send({
+                      type: 'process_attachment', rfpId: Number(rfpId), vendorId: Number(vendorId),
+                      proposalId: 0, r2Key, filename: fn, contentType: ct,
+                      attachmentIndex: attachIdx, label,
+                    })
+                    console.log(`[webhook] Queued async extraction job for ${fn}`)
+                  }
                 } catch(r2Err: any) {
-                  console.error(`[webhook] R2 put failed for attachment ${attachIdx}: ${r2Err?.message}`)
+                  console.error(`[webhook] R2 stream put failed for ${fn}: ${r2Err?.message}`)
                 }
+                allProposalAttachments.push({ r2_key: storedR2Key, filename: fn, size_bytes: estimatedSize, content_type: ct, label, text_chars: 0, queued: true })
+
+              } else {
+                // SMALL FILE PATH: buffer, extract text inline during webhook, then store in R2.
+                const fileBuffer = await new Response(fileRes.body).arrayBuffer()
+                const rawBytes = new Uint8Array(fileBuffer)
+
+                if (bucket) {
+                  try {
+                    await bucket.put(r2Key, rawBytes, {
+                      httpMetadata: { contentType: ct },
+                      customMetadata: { rfpId: String(rfpId), vendorId: String(vendorId), filename: fn, label },
+                    })
+                    storedR2Key = r2Key
+                    console.log(`[webhook] Attachment ${attachIdx} (${label}) stored in R2: ${r2Key} (${rawBytes.length} bytes)`)
+                  } catch(r2Err: any) {
+                    console.error(`[webhook] R2 put failed for attachment ${attachIdx}: ${r2Err?.message}`)
+                  }
+                }
+
+                // Text extraction — guard against PostScript garbage from complex embedded-font PDFs
+                const extracted = await extractPdfText(rawBytes)
+                const textChars = extracted.length
+                console.log(`[webhook] Attachment ${attachIdx} (${label}): ${textChars} chars extracted from ${fn}`)
+
+                if (extracted && !isPostScriptGarbage(extracted)) {
+                  allExtractedTexts.push(`=== ${label.toUpperCase()} PROPOSAL (${fn}) ===\n${extracted}`)
+                } else if (extracted && isPostScriptGarbage(extracted)) {
+                  console.warn(`[webhook] PostScript garbage detected in ${fn} — skipping text, queuing re-extraction`)
+                  if (proposalQueue && storedR2Key) {
+                    await proposalQueue.send({
+                      type: 'process_attachment', rfpId: Number(rfpId), vendorId: Number(vendorId),
+                      proposalId: 0, r2Key: storedR2Key, filename: fn, contentType: ct,
+                      attachmentIndex: attachIdx, label,
+                    })
+                  }
+                }
+
+                allProposalAttachments.push({ r2_key: storedR2Key, filename: fn, size_bytes: rawBytes.length, content_type: ct, label, text_chars: textChars, queued: false })
               }
-
-              // D1 base64 fallback for PRIMARY attachment only (backward compat), small PDFs only
-              if (attachIdx === 0 && !storedR2Key && rawBytes.length <= SMALL_PDF_THRESHOLD) {
-                pdfBase64 = uint8ToBase64(rawBytes)
-                console.log(`[webhook] Primary PDF stored as D1 base64: ${rawBytes.length} bytes`)
-              }
-
-              // ── Text extraction ─────────────────────────────────────────────
-              const extracted = await extractPdfText(rawBytes)
-              const textChars = extracted.length
-              console.log(`[webhook] Attachment ${attachIdx} (${label}): ${textChars} chars extracted from ${fn}`)
-              if (extracted) allExtractedTexts.push(`=== ${label.toUpperCase()} PROPOSAL (${fn}) ===\n${extracted}`)
-
-              allProposalAttachments.push({ r2_key: storedR2Key, filename: fn, size_bytes: rawBytes.length, content_type: ct, label, text_chars: textChars })
 
               // Track primary attachment (first one, or first explicitly labelled 'technical')
               if (attachIdx === 0 || (label === 'technical' && !pdfR2Key)) {
@@ -919,13 +970,13 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
             } catch(downloadErr: any) {
               console.error(`[webhook] Attachment ${attachIdx} download error: ${downloadErr?.message}`)
               const fn = attachData.filename || `document_${attachIdx + 1}.pdf`
-              allProposalAttachments.push({ r2_key: '', filename: fn, size_bytes: 0, content_type: attachData.content_type || 'application/pdf', label: detectAttachmentLabel(fn), text_chars: 0 })
+              allProposalAttachments.push({ r2_key: '', filename: fn, size_bytes: 0, content_type: attachData.content_type || 'application/pdf', label: detectAttachmentLabel(fn), text_chars: 0, queued: false })
             }
           }
 
-          // Concatenate all extracted texts (total capped at 60k chars for LLM)
-          pdfExtractedTextFromDownload = allExtractedTexts.join('\n\n').slice(0, 60000)
-          console.log(`[webhook] Total text from ${allProposalAttachments.length} attachment(s): ${pdfExtractedTextFromDownload.length} chars`)
+          // Concatenate all inline-extracted texts (no artificial cap — full text goes to LLM)
+          pdfExtractedTextFromDownload = allExtractedTexts.join('\n\n')
+          console.log(`[webhook] Total inline text from ${allProposalAttachments.length} attachment(s): ${pdfExtractedTextFromDownload.length} chars`)
 
           // If no attachments had download URLs, record filenames from metadata
           if (allProposalAttachments.length === 0 && attachments.length > 0) {
@@ -2130,7 +2181,7 @@ ${'='.repeat(60)}
 // ============================================================
 // PROPOSAL FIELD EXTRACTION — LLM parses PDF text for structured data
 // ============================================================
-async function extractProposalFieldsWithLLM(
+export async function extractProposalFieldsWithLLM(
   pdfText: string,
   emailBody: string,
   vendorName: string,
@@ -2332,8 +2383,10 @@ async function runSingleEvaluation(p: any, rfp: any, rfpId: any, env: any): Prom
   let usedRealLLM = 0
 
   // All real submissions (has PDF/attachment text) get real LLM evaluation.
+  // Guard: reject PostScript garbage (complex embedded-font PDFs) — length >200 is not enough.
   // Only pre-seeded/manual vendor entries without actual proposal text fall back to simulation.
-  const hasMeaningfulProposal = p.technical_proposal && p.technical_proposal.length > 200
+  const proposalCandidate = p.technical_proposal || ''
+  const hasMeaningfulProposal = proposalCandidate.length > 200 && !isPostScriptGarbage(proposalCandidate)
   if (hasMeaningfulProposal) {
     try {
       const evalResult = await evaluateAndersenWithLLM(p, rfp, env)
@@ -2391,23 +2444,63 @@ async function runSingleEvaluation(p: any, rfp: any, rfpId: any, env: any): Prom
   await db.prepare(`UPDATE proposals SET status='submitted' WHERE id=?`).bind(p.id).run()
 }
 
-async function evaluateAndersenWithLLM(p: any, rfp: any, env: any): Promise<{
+export async function evaluateProposalWithLLM(p: any, rfp: any, env: any): Promise<{
   scores: { business: number, technical: number, financial: number, experience: number },
   scoringDetails: any[],
   summary: string
 }> {
-  const rfpContext = [
-    rfp?.content ? `RFP DOCUMENT (text, first 2000 chars):\n${rfp.content.replace(/<[^>]+>/g,'').slice(0,2000)}` : '',
-    rfp?.arch_doc_text ? `SOLUTION ARCHITECTURE:\n${rfp.arch_doc_text.slice(0,1500)}` : '',
-    rfp?.objectives ? `OBJECTIVES: ${rfp.objectives}` : '',
-    rfp?.scope ? `SCOPE: ${rfp.scope}` : '',
-  ].filter(Boolean).join('\n\n')
+  // ── Build full evaluation context (no character caps on reference documents) ──────────────────
+  // 1. Full RFP document (HTML stripped)
+  const rfpFullText = rfp?.content
+    ? rfp.content.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+    : ''
+  // 2. Full Business Requirements Document
+  const brdFullText = rfp?.brd_doc_text || ''
+  // 3. Full Conceptual Architecture document
+  const archFullText = rfp?.arch_doc_text || ''
+  // 4. Vendor questions submitted for this RFP (vendor-specific + all published Q&A)
+  let vendorQuestionsText = ''
+  try {
+    const db = env.DB as D1Database
+    // Fetch this vendor's questions AND all published Q&A (published=1 means answered+visible to all)
+    const { results: allQs } = await db.prepare(`
+      SELECT q.question, q.answer, q.source, v.name as vendor_name
+      FROM questions q
+      LEFT JOIN vendors v ON q.vendor_id = v.id
+      WHERE q.rfp_id = ?
+        AND (q.vendor_id = ? OR q.published = 1)
+        AND q.answer IS NOT NULL AND q.answer != ''
+      ORDER BY q.id ASC
+    `).bind(rfp.id, p.vendor_id).all<any>()
+    if (allQs.length > 0) {
+      vendorQuestionsText = allQs.map((q: any) =>
+        `Q (${q.vendor_name || 'Vendor'}): ${q.question}\nA: ${q.answer}`
+      ).join('\n\n')
+    }
+  } catch(_) { /* questions are optional context — evaluation proceeds without them */ }
 
-  const proposalText = p.technical_proposal || 'No technical proposal text available'
+  // 5. All submitted proposal files (technical_proposal already contains combined text from all attachments)
+  const proposalText = p.technical_proposal || ''
 
-  const systemPrompt = `You are a senior evaluation committee member at the Crown Prince's Court (CPC), Abu Dhabi. Evaluate this vendor's proposal strictly based on what is written in the RFP context and the vendor's submission. Do NOT assume or infer any technology expertise not mentioned in the proposal text.
+  // Verify proposal text is real content, not PostScript garbage
+  if (isPostScriptGarbage(proposalText)) {
+    console.warn(`[evaluateProposal] PostScript garbage detected for ${p.vendor_name} — cannot evaluate, returning zero scores`)
+    throw new Error('Proposal text is PostScript rendering bytecode, not readable content. PDF needs re-extraction.')
+  }
 
-Return a JSON object with this exact structure:
+  // ── Assemble system prompt ────────────────────────────────────────────────────────────────────
+  const systemPrompt = `You are a senior evaluation committee member at the Crown Prince's Court (CPC), Abu Dhabi.
+You have been given the complete RFP document, the Business Requirements Document (BRD), the Conceptual Architecture document, vendor clarification questions and their answers, and the vendor's full proposal submission.
+
+EVALUATION PRINCIPLES:
+- Evaluate STRICTLY based on what is actually written in the submitted documents. Do NOT assume or infer expertise not mentioned.
+- COMPLETENESS is a scored dimension: if the vendor's proposal does not address a requirement from the RFP, BRD, or Architecture document, this MUST reduce the relevant criterion score and be explicitly noted in the justification.
+- Cross-reference the proposal against the RFP scope, BRD requirements, and CPC Architecture vision. Flag gaps clearly.
+- The vendor's Q&A responses are part of their submission and contribute to the overall assessment.
+- Financial scores must reflect actual disclosed pricing. If no financial data is provided, score TCO and Commercial Terms as 0 and state this explicitly.
+- Scores must be internally consistent: if a criterion justification says "not addressed", the score must be low (0–30), not mid-range.
+
+Return a JSON object with EXACTLY this structure — no extra fields, no markdown:
 {
   "scores": {
     "business": <integer 0-100>,
@@ -2416,46 +2509,87 @@ Return a JSON object with this exact structure:
     "experience": <integer 0-100>
   },
   "criteria": [
-    {"name": "Solution Architecture & Methodology", "dimension": "Technical", "weight": 15, "score": <int 0-100>, "justification": "<2 sentences based on the actual proposal>", "weighted": <float>},
-    {"name": "Implementation Approach & Timeline", "dimension": "Technical", "weight": 15, "score": <int 0-100>, "justification": "<2 sentences based on the actual proposal>", "weighted": <float>},
-    {"name": "Technical Team Qualifications", "dimension": "Technical", "weight": 10, "score": <int 0-100>, "justification": "<2 sentences based on the actual proposal>", "weighted": <float>},
-    {"name": "Government Sector Experience", "dimension": "Business", "weight": 20, "score": <int 0-100>, "justification": "<2 sentences based on the actual proposal>", "weighted": <float>},
-    {"name": "Training & Knowledge Transfer", "dimension": "Business", "weight": 10, "score": <int 0-100>, "justification": "<2 sentences based on the actual proposal>", "weighted": <float>},
-    {"name": "Total Cost of Ownership (TCO)", "dimension": "Commercial", "weight": 20, "score": <int 0-100>, "justification": "<2 sentences based on the actual proposal>", "weighted": <float>},
-    {"name": "Commercial Terms & Payment Structure", "dimension": "Commercial", "weight": 10, "score": <int 0-100>, "justification": "<2 sentences based on the actual proposal>", "weighted": <float>}
+    {"name": "Solution Architecture & Methodology", "dimension": "Technical", "weight": 15, "score": <int 0-100>, "justification": "<2-3 sentences: what was proposed vs what RFP/BRD/Arch required; note any gaps>", "weighted": <weight*score/100 as float>},
+    {"name": "Implementation Approach & Timeline", "dimension": "Technical", "weight": 15, "score": <int 0-100>, "justification": "<2-3 sentences: milestone plan, phasing, risk mitigation; note missing elements>", "weighted": <float>},
+    {"name": "Technical Team Qualifications", "dimension": "Technical", "weight": 10, "score": <int 0-100>, "justification": "<2-3 sentences: named roles, certifications, UAE gov experience evidenced in proposal>", "weighted": <float>},
+    {"name": "Government Sector Experience", "dimension": "Business", "weight": 20, "score": <int 0-100>, "justification": "<2-3 sentences: UAE/Abu Dhabi government references stated in proposal; lack of evidence = low score>", "weighted": <float>},
+    {"name": "Training & Knowledge Transfer", "dimension": "Business", "weight": 10, "score": <int 0-100>, "justification": "<2-3 sentences: training plan, KT methodology, Arabic-language materials; note if absent>", "weighted": <float>},
+    {"name": "Total Cost of Ownership (TCO)", "dimension": "Commercial", "weight": 20, "score": <int 0-100>, "justification": "<2-3 sentences: stated price, breakdown, multi-year support cost; score 0 if no financial data submitted>", "weighted": <float>},
+    {"name": "Commercial Terms & Payment Structure", "dimension": "Commercial", "weight": 10, "score": <int 0-100>, "justification": "<2-3 sentences: payment milestones, warranty, liability; score 0 if not disclosed>", "weighted": <float>}
   ],
-  "summary": "<3-4 sentence evaluation narrative referencing the actual RFP topic and vendor proposal>"
+  "summary": "<4-5 sentence evaluation: reference the actual RFP topic, the vendor's key strengths, identified gaps vs RFP/BRD requirements, financial position, and a clear recommendation>"
 }
-Base scores purely on the proposal content provided. Return ONLY the JSON, no other text.`
+Return ONLY the JSON. No markdown code blocks, no commentary outside the JSON.`
 
-  // Send up to 60k chars of proposal text to the evaluation LLM — covers full proposals including
-  // commercials that appear at the end of large documents.
-  const userPrompt = `RFP CONTEXT:\n${rfpContext}\n\nVENDOR: ${p.vendor_name}\nPROPOSAL:\n${proposalText.slice(0,60000)}\n\nFinancial: AED ${p.financial_proposal ? Number(p.financial_proposal).toLocaleString() : 'Not disclosed'}\nBudget (LLM extracted): AED ${p.budget_amount ? Number(p.budget_amount).toLocaleString() : 'Not disclosed'}\nDuration: ${p.proposed_duration || p.timeline_months ? (p.proposed_duration || p.timeline_months + ' months') : 'Not specified'}`
+  // ── Assemble user prompt with ALL reference documents (no caps) ───────────────────────────────
+  const sections: string[] = []
+
+  if (rfpFullText) {
+    sections.push(`=== RFP DOCUMENT (full text) ===\n${rfpFullText}`)
+  } else {
+    // Fallback: use structured fields
+    const structured = [
+      rfp?.title ? `TITLE: ${rfp.title}` : '',
+      rfp?.objectives ? `OBJECTIVES:\n${rfp.objectives}` : '',
+      rfp?.scope ? `SCOPE:\n${rfp.scope}` : '',
+      rfp?.tech_requirements ? `TECHNICAL REQUIREMENTS:\n${rfp.tech_requirements}` : '',
+    ].filter(Boolean).join('\n\n')
+    if (structured) sections.push(`=== RFP DETAILS ===\n${structured}`)
+  }
+
+  if (brdFullText) {
+    sections.push(`=== BUSINESS REQUIREMENTS DOCUMENT (BRD, full text) ===\n${brdFullText}`)
+  }
+
+  if (archFullText) {
+    sections.push(`=== CONCEPTUAL ARCHITECTURE DOCUMENT (full text) ===\n${archFullText}`)
+  }
+
+  if (vendorQuestionsText) {
+    sections.push(`=== VENDOR CLARIFICATION Q&A ===\n${vendorQuestionsText}`)
+  }
+
+  sections.push(`=== VENDOR PROPOSAL SUBMISSION ===
+VENDOR: ${p.vendor_name}
+Stated Financial Offer: AED ${p.financial_proposal ? Number(p.financial_proposal).toLocaleString() : 'Not disclosed'}
+Extracted Budget: AED ${p.budget_amount ? Number(p.budget_amount).toLocaleString() : 'Not extracted'}
+Proposed Duration: ${p.proposed_duration || (p.timeline_months ? p.timeline_months + ' months' : 'Not specified')}
+
+FULL PROPOSAL TEXT (all submitted documents combined):
+${proposalText}`)
+
+  const userPrompt = sections.join('\n\n---\n\n')
+
+  console.log(`[evaluateProposal] Context size for ${p.vendor_name}: ${userPrompt.length} chars (rfp=${rfpFullText.length}, brd=${brdFullText.length}, arch=${archFullText.length}, questions=${vendorQuestionsText.length}, proposal=${proposalText.length})`)
 
   try {
-    // Larger token budget to match the larger input context
-    const result = await callLLM(systemPrompt, userPrompt, env, 'gpt-5-mini', 2500)
+    // gpt-4.1 has 1M context window — large enough for full documents with no truncation needed
+    // Use 4000 output tokens to allow thorough justifications across 7 criteria
+    const result = await callLLM(systemPrompt, userPrompt, env, 'gpt-4.1', 4000)
     const jsonMatch = result.match(/\{[\s\S]*\}/)
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0])
+      // Use ?? 0 (nullish coalescing) not || so LLM-returned 0 is preserved, not replaced by fallback
       return {
         scores: {
-          business: Math.min(100, Math.max(0, Math.round(parsed.scores?.business || 88))),
-          technical: Math.min(100, Math.max(0, Math.round(parsed.scores?.technical || 92))),
-          financial: Math.min(100, Math.max(0, Math.round(parsed.scores?.financial || 74))),
-          experience: Math.min(100, Math.max(0, Math.round(parsed.scores?.experience || 89))),
+          business:   Math.min(100, Math.max(0, Math.round(parsed.scores?.business   ?? 0))),
+          technical:  Math.min(100, Math.max(0, Math.round(parsed.scores?.technical  ?? 0))),
+          financial:  Math.min(100, Math.max(0, Math.round(parsed.scores?.financial  ?? 0))),
+          experience: Math.min(100, Math.max(0, Math.round(parsed.scores?.experience ?? 0))),
         },
         scoringDetails: parsed.criteria || [],
-        summary: parsed.summary || buildEvalSummary(p, parsed.scores || {business:88,technical:92,financial:74}, 0, true, false),
+        summary: parsed.summary || `${p.vendor_name} evaluation complete. See criteria breakdown for details.`,
       }
     }
+    throw new Error('LLM response did not contain valid JSON')
   } catch(llmErr: any) {
-    console.error('[evaluateAndersen] LLM failed:', llmErr?.message || llmErr)
+    console.error('[evaluateProposal] LLM failed:', llmErr?.message || llmErr)
+    throw llmErr  // propagate — caller falls back to simulation
   }
-
-  // Generic fallback — uses vendor name and financial data from the actual proposal
-  return simulateAndersenEvaluation(p)
 }
+
+// Keep old name as alias for backward compatibility with existing call sites
+const evaluateAndersenWithLLM = evaluateProposalWithLLM
 
 function simulateAndersenEvaluation(p: any): { scores: any, scoringDetails: any[], summary: string } {
   const vendorName = p.vendor_name || 'Andersen Lab'
@@ -2582,6 +2716,32 @@ async function inflatePdfStream(compressed: Uint8Array): Promise<Uint8Array> {
 
 /** Extract printable text from a decompressed PDF stream buffer.
  *  Handles both Latin-1 (legacy) and UTF-16BE (FEFF BOM) encodings. */
+/**
+ * Detect whether extracted text is PostScript rendering bytecode rather than readable content.
+ * Complex embedded-font PDFs produce output like "dup truncate sub 0 le pop .7882 .6588 .298"
+ * which passes the length check but is garbage. This guards both the webhook extraction path
+ * and the evaluation gate.
+ *
+ * Returns true if the text looks like PS garbage (should be discarded / queued for re-extraction).
+ */
+export function isPostScriptGarbage(text: string): boolean {
+  if (!text || text.length < 100) return false
+  const tokens = text.split(/\s+/).slice(0, 500)  // sample first 500 tokens
+  let psOpCount = 0
+  let numCount = 0
+  let wordCount = 0
+  for (const t of tokens) {
+    if (!t) continue
+    if (/^-?[0-9]+\.?[0-9]*$/.test(t)) { numCount++; continue }
+    if (/^(dup|pop|exch|sub|add|mul|div|neg|abs|truncate|round|ceiling|floor|ifelse|if|loop|for|def|put|get|exec|load|store|begin|end|true|false|null|NonStruct|setgray|setrgbcolor|moveto|lineto|curveto|closepath|fill|stroke|clip|newpath|translate|scale|rotate|concat|setfont|findfont|scalefont|show|showpage|gsave|grestore|rg|RG|re|cm|Tj|TJ|BT|ET|Tf|Td|TD|Tm|Tc|Tw|Tz)$/.test(t)) { psOpCount++; continue }
+    if (/^[A-Za-z]{3,}/.test(t)) wordCount++
+  }
+  const total = tokens.length || 1
+  const psRatio = (psOpCount + numCount) / total
+  // Garbage heuristic: >40% of tokens are PS operators/numbers AND <20% are real words
+  return psRatio > 0.40 && wordCount / total < 0.20
+}
+
 // PostScript operators that appear in content streams but are NOT readable text.
 // These come from complex font encodings (Type3, embedded PostScript programs, colour ops, etc.)
 const PS_OPERATOR_RE = /^(?:dup|pop|exch|sub|add|mul|div|mod|neg|abs|truncate|round|ceiling|floor|sqrt|exp|ln|log|sin|cos|atan|idiv|copy|roll|index|mark|cleartomark|counttomark|and|or|not|xor|bitshift|eq|ne|gt|ge|lt|le|ifelse|if|loop|repeat|for|forall|exit|stop|exec|load|store|def|put|get|known|where|currentfile|filter|closefile|flush|flushfile|print|pstack|stack|type|cvn|cvs|cvi|cvr|string|array|dict|begin|end|gsave|grestore|setgray|setrgbcolor|setcmykcolor|setlinewidth|setlinecap|setlinejoin|moveto|lineto|curveto|closepath|fill|stroke|clip|newpath|currentpoint|translate|scale|rotate|concat|setfont|findfont|scalefont|makefont|show|showpage|copypage|erasepage|initgraphics|rg|RG|re|w|W|W\*|n|h|f|F|f\*|b|b\*|B|B\*|q|Q|cm|m|l|c|v|y|k|K|g|G|d|ri|i|cs|CS|scn|SCN|sc|SC|sh|Do|BI|ID|EI|BMC|BDC|EMC|MP|DP|BT|ET|Tc|Tw|Tz|TL|Tf|Tr|Ts|Td|TD|Tm|T\*|Tj|TJ|\')\s*$/.test
@@ -2643,7 +2803,7 @@ function extractTextFromStreamBytes(buf: Uint8Array): string {
   return lines.join(' ').replace(/\s+/g,' ').replace(/[^\x20-\x7E\n]/g,' ').trim()
 }
 
-async function extractPdfText(bytes: Uint8Array): Promise<string> {
+export async function extractPdfText(bytes: Uint8Array): Promise<string> {
   try {
     const latin = new TextDecoder('latin1').decode(bytes)
     const collectedText: string[] = []
@@ -2734,7 +2894,7 @@ function detectAttachmentLabel(filename: string): 'technical' | 'commercial' | '
   return 'other'
 }
 
-function extractProposedDuration(text: string): string {
+export function extractProposedDuration(text: string): string {
   if (!text) return ''
   // Look for duration patterns
   const patterns = [
