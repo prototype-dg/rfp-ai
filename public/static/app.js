@@ -231,6 +231,24 @@ function scoreBar(val) {
   return '<div class="score-bar"><div class="score-fill" style="width:' + val + '%"></div></div>';
 }
 
+// Returns short label text for an attachment label value
+function attachmentLabelText(label) {
+  if (label === 'technical') return 'Technical';
+  if (label === 'commercial') return 'Commercial';
+  return 'Document';
+}
+
+// Returns colour-coded pill HTML for an attachment label
+function attachmentLabelPill(label) {
+  var colors = {
+    technical:  'background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe',
+    commercial: 'background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0',
+    other:      'background:#f9fafb;color:#6b7280;border:1px solid #e5e7eb',
+  };
+  var style = colors[label] || colors.other;
+  return '<span style="' + style + ';font-size:0.65rem;font-weight:700;padding:1px 6px;border-radius:4px;text-transform:uppercase;letter-spacing:0.04em">' + attachmentLabelText(label) + '</span>';
+}
+
 function stageBadgeClass(stage) {
   const map = {
     draft: 'stage-draft',
@@ -1943,8 +1961,22 @@ rfpTabs.proposals = async function(rfpId) {
     // PDF button: R2 URL → open in new tab (inline browser viewer) + download link
     //             data: URI → programmatic Blob download (browser won't open data: in new tab)
     //             no URL but filename known → show placeholder
+    //             multi-attachment: show count badge + primary link
+    var attachments = [];
+    try { if (p.proposal_attachments) attachments = JSON.parse(p.proposal_attachments); } catch(e) {}
+    var attachCount = attachments.length;
+
     var pdfDownloadBtn = '';
-    if (p.pdf_attachment_url) {
+    if (attachCount > 1) {
+      // Multiple documents — show primary link + badge count
+      var primaryAttach = attachments.find(function(a){ return a.label === 'technical' && a.url; }) || attachments.find(function(a){ return a.url; });
+      var primaryLink = primaryAttach
+        ? '<a href="' + escHtml(primaryAttach.url) + '" target="_blank" class="btn-ghost btn-sm" style="text-decoration:none" title="' + escHtml(primaryAttach.filename) + '"><i class="fas fa-file-pdf" style="color:#dc2626"></i>' + escHtml(attachmentLabelText(primaryAttach.label)) + '</a>'
+        : '';
+      pdfDownloadBtn = primaryLink
+        + '<span class="btn-ghost btn-sm" style="cursor:pointer;background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8;font-size:0.7rem;font-weight:700;padding:2px 7px" onclick="viewProposalDetail(' + p.id + ')" title="' + attachCount + ' documents submitted">'
+        + attachCount + ' docs</span>';
+    } else if (p.pdf_attachment_url) {
       if (p.pdf_attachment_url.startsWith('data:')) {
         // Small legacy PDF stored as base64 — must use Blob download
         pdfDownloadBtn = '<button class="btn-ghost btn-sm" onclick="downloadProposalPdf(' + p.id + ')" title="Download ' + escHtml(p.pdf_filename || 'proposal.pdf') + '"><i class="fas fa-file-pdf" style="color:#dc2626"></i>PDF</button>';
@@ -1956,6 +1988,8 @@ rfpTabs.proposals = async function(rfpId) {
       // PDF was received but could not be stored (too large, R2 unavailable) — show filename only
       pdfDownloadBtn = '<span class="btn-ghost btn-sm" style="opacity:0.5;cursor:default" title="' + escHtml(p.pdf_filename) + ' — PDF too large to display inline"><i class="fas fa-file-pdf" style="color:#9ca3af"></i>' + escHtml(p.pdf_filename.slice(0,20)) + '</span>';
     }
+
+
 
     rows += '<tr style="' + rowBg + '">'
       + '<td><div style="display:flex;align-items:center;gap:8px">'
@@ -2260,8 +2294,46 @@ function viewProposalDetail(id) {
     // Scoring table
     + scoringTable
 
-    // PDF action buttons — only show when URL is available
+    // ── Proposal Documents panel ───────────────────────────────────────────────
+    // Shows all submitted attachments (technical + commercial + other)
+    // Falls back to single-PDF display for legacy/simple submissions
     + (function() {
+        var attachments = [];
+        try { if (p.proposal_attachments) attachments = JSON.parse(p.proposal_attachments); } catch(e) {}
+
+        // ── Multi-document layout ────────────────────────────────────────────
+        if (attachments.length > 0) {
+          var docRows = attachments.map(function(a) {
+            var sizeStr = a.size_bytes > 0 ? (Math.round(a.size_bytes / 1024 / 1024 * 10) / 10) + ' MB' : '';
+            var textStr = a.text_chars > 0 ? a.text_chars.toLocaleString() + ' chars extracted' : 'not extracted';
+            var openBtn = a.url
+              ? '<a href="' + escHtml(a.url) + '" target="_blank" style="text-decoration:none;display:inline-flex;align-items:center;gap:0.3rem;font-size:0.78rem;font-weight:600;color:#1d4ed8;padding:4px 10px;border:1px solid #bfdbfe;border-radius:6px;background:#eff6ff"><i class="fas fa-external-link-alt" style="font-size:0.65rem"></i>Open</a>'
+              : '<span style="font-size:0.75rem;color:#9ca3af;font-style:italic">Not stored</span>';
+            var dlBtn = a.url
+              ? '<a href="' + escHtml(a.url) + '" download="' + escHtml(a.filename) + '" style="text-decoration:none;display:inline-flex;align-items:center;gap:0.3rem;font-size:0.78rem;color:#6b7280;padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;background:#f9fafb"><i class="fas fa-download" style="font-size:0.65rem"></i></a>'
+              : '';
+            return '<div style="display:flex;align-items:center;gap:0.75rem;padding:0.6rem 0.75rem;border-bottom:1px solid #f3f4f6;flex-wrap:wrap">'
+              + '<i class="fas fa-file-pdf" style="color:#dc2626;font-size:1.1rem;flex-shrink:0"></i>'
+              + '<div style="flex:1;min-width:0">'
+              + '<div style="font-size:0.82rem;font-weight:600;color:#1f2937;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="' + escHtml(a.filename) + '">' + escHtml(a.filename) + '</div>'
+              + '<div style="font-size:0.72rem;color:#9ca3af;margin-top:1px">'
+              + (sizeStr ? sizeStr + ' &bull; ' : '') + textStr
+              + '</div>'
+              + '</div>'
+              + attachmentLabelPill(a.label)
+              + '<div style="display:flex;gap:0.3rem;flex-shrink:0">' + openBtn + dlBtn + '</div>'
+              + '</div>';
+          }).join('');
+
+          return '<div style="margin-bottom:1rem">'
+            + '<div style="font-weight:700;font-size:0.875rem;color:#1f2937;margin-bottom:0.5rem"><i class="fas fa-paperclip mr-2" style="color:#6b7280"></i>Submitted Documents (' + attachments.length + ')</div>'
+            + '<div style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;background:#fff">'
+            + docRows
+            + '</div>'
+            + '</div>';
+        }
+
+        // ── Single-document / legacy layout ──────────────────────────────────
         if (!p.pdf_attachment_url) {
           if (p.pdf_filename) {
             var reprocessBtn = p.is_real_submission
@@ -2279,11 +2351,17 @@ function viewProposalDetail(id) {
         if (p.pdf_attachment_url.startsWith('data:')) {
           return '<div style="margin-bottom:1rem"><button class="btn-secondary" onclick="downloadProposalPdf(' + p.id + ')"><i class="fas fa-download mr-1"></i>Download Proposal PDF</button></div>';
         }
-        // R2 URL — offer both inline view and download
-        return '<div style="margin-bottom:1rem;display:flex;gap:0.5rem;flex-wrap:wrap">'
-          + '<a href="' + escHtml(p.pdf_attachment_url) + '" target="_blank" class="btn-primary" style="text-decoration:none;display:inline-flex;align-items:center;gap:0.35rem"><i class="fas fa-file-pdf"></i>Open Full Proposal PDF</a>'
-          + '<a href="' + escHtml(p.pdf_attachment_url) + '" download="' + escHtml(p.pdf_filename || 'proposal.pdf') + '" class="btn-ghost" style="text-decoration:none;display:inline-flex;align-items:center;gap:0.35rem"><i class="fas fa-download"></i>Download</a>'
-          + '</div>';
+        // Single R2 URL — offer both inline view and download
+        return '<div style="margin-bottom:1rem">'
+          + '<div style="font-weight:700;font-size:0.875rem;color:#1f2937;margin-bottom:0.5rem"><i class="fas fa-paperclip mr-2" style="color:#6b7280"></i>Submitted Document</div>'
+          + '<div style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;background:#fff">'
+          + '<div style="display:flex;align-items:center;gap:0.75rem;padding:0.6rem 0.75rem;flex-wrap:wrap">'
+          + '<i class="fas fa-file-pdf" style="color:#dc2626;font-size:1.1rem;flex-shrink:0"></i>'
+          + '<div style="flex:1;font-size:0.82rem;font-weight:600;color:#1f2937;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + escHtml(p.pdf_filename || 'proposal.pdf') + '</div>'
+          + '<div style="display:flex;gap:0.4rem;flex-shrink:0">'
+          + '<a href="' + escHtml(p.pdf_attachment_url) + '" target="_blank" style="text-decoration:none;display:inline-flex;align-items:center;gap:0.3rem;font-size:0.78rem;font-weight:600;color:#1d4ed8;padding:4px 10px;border:1px solid #bfdbfe;border-radius:6px;background:#eff6ff"><i class="fas fa-external-link-alt" style="font-size:0.65rem"></i>Open</a>'
+          + '<a href="' + escHtml(p.pdf_attachment_url) + '" download="' + escHtml(p.pdf_filename || 'proposal.pdf') + '" style="text-decoration:none;display:inline-flex;align-items:center;gap:0.3rem;font-size:0.78rem;color:#6b7280;padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;background:#f9fafb"><i class="fas fa-download" style="font-size:0.65rem"></i>Download</a>'
+          + '</div></div></div></div>';
       })()
 
     + '<div style="display:flex;gap:0.5rem;margin-top:1.25rem">'

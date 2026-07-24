@@ -789,11 +789,22 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
     // Download attachments based on category
     let excelQuestions: string[] = []
     let pdfBase64 = ''          // kept for small PDFs only (<=8MB) — legacy path, rarely used now
-    let pdfR2Key = ''           // R2 object key for large PDF storage
+    let pdfR2Key = ''           // R2 object key for PRIMARY attachment
     let pdfPublicUrl = ''       // public URL if R2 bucket is public-read
     let pdfFilename = ''
     let proposedDuration = ''
-    let pdfExtractedTextFromDownload = '' // Full extracted text (up to 60k chars), reused in LLM calls
+    let pdfExtractedTextFromDownload = '' // Concatenated text from ALL attachments (up to 60k chars)
+    // Multi-attachment support: stores metadata for ALL proposal documents (technical + commercial + others)
+    // Structure: Array<{ r2_key, filename, size_bytes, content_type, label, text_chars }>
+    // label: 'technical' | 'commercial' | 'other' — auto-detected from filename/content
+    let allProposalAttachments: Array<{
+      r2_key: string
+      filename: string
+      size_bytes: number
+      content_type: string
+      label: string
+      text_chars: number
+    }> = []
 
     try {
       const attachListRes = await fetch(`https://api.resend.com/emails/receiving/${emailId}/attachments`, {
@@ -821,76 +832,113 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
         }
 
         if (emailCategory === 'proposal') {
-          // For proposals: download ANY attachment — prefer PDF, fall back to first attachment
-          const proposalAttach = pdfAttachment || attachments[0]
-          const attachData = proposalAttach
-            ? (allAttachData.find((a: any) => a.id === proposalAttach.id) || allAttachData[0])
-            : allAttachData[0]
-          if (attachData?.download_url) {
+          // ── Multi-attachment support ───────────────────────────────────────────
+          // Download ALL document attachments (PDF/Word/etc.) — vendors often submit
+          // a technical proposal + a separate commercial proposal as two files.
+          // Order: PDFs first (prefer technical, then commercial), then other docs.
+          const docAttachments = allAttachData.filter((a: any) =>
+            a.filename?.match(/\.(pdf|doc|docx)$/i) ||
+            a.content_type?.includes('pdf') ||
+            a.content_type?.includes('word') ||
+            a.content_type?.includes('msword') ||
+            a.content_type?.includes('officedocument')
+          )
+          // If no doc attachments found, fall back to ALL attachments
+          const attachsToProcess = docAttachments.length > 0 ? docAttachments : allAttachData.slice(0, 5)
+
+          const bucket: R2Bucket | undefined = (c.env as any).PROPOSALS_BUCKET
+          const safeVendorName = (vendorDisplayName || 'vendor').replace(/[^a-zA-Z0-9_-]/g,'_').slice(0,40)
+          const SMALL_PDF_THRESHOLD = 8_000_000
+          const allExtractedTexts: string[] = []
+
+          for (let attachIdx = 0; attachIdx < attachsToProcess.length; attachIdx++) {
+            const attachData = attachsToProcess[attachIdx]
+            if (!attachData?.download_url) {
+              // No download URL — record filename only
+              const fn = attachData.filename || `document_${attachIdx + 1}.pdf`
+              allProposalAttachments.push({ r2_key: '', filename: fn, size_bytes: 0, content_type: attachData.content_type || 'application/pdf', label: detectAttachmentLabel(fn), text_chars: 0 })
+              continue
+            }
+
             try {
-              // Use AbortController to enforce a 25s timeout on large PDF downloads
               const controller = new AbortController()
+              // 25s per file — generous for large PDFs; later attachments also need time
               const timeoutId = setTimeout(() => controller.abort(), 25000)
               const fileRes = await fetch(attachData.download_url, { signal: controller.signal })
               clearTimeout(timeoutId)
-              if (fileRes.ok) {
-                const fileBuffer = await fileRes.arrayBuffer()
-                pdfFilename = (proposalAttach?.filename) || attachData.filename || 'proposal.pdf'
-                // Ensure .pdf extension for display purposes if it's a generic name
-                if (!pdfFilename.match(/\.(pdf|doc|docx)$/i)) pdfFilename += '.pdf'
-                const rawBytes = new Uint8Array(fileBuffer)
-                const SMALL_PDF_THRESHOLD = 8_000_000 // 8MB — fits in D1 TEXT as base64 (~10.7MB b64)
 
-                // ── Storage: R2 (preferred) or D1 base64 fallback ──────────────────
-                const bucket: R2Bucket | undefined = (c.env as any).PROPOSALS_BUCKET
-                if (bucket) {
-                  // Store full PDF in R2 regardless of size
-                  const safeVendorName = (vendorDisplayName || 'vendor').replace(/[^a-zA-Z0-9_-]/g,'_').slice(0,40)
-                  pdfR2Key = `proposals/${rfpId}/${vendorId}_${safeVendorName}_${Date.now()}.pdf`
-                  try {
-                    await bucket.put(pdfR2Key, rawBytes, {
-                      httpMetadata: { contentType: 'application/pdf' },
-                      customMetadata: { rfpId: String(rfpId), vendorId: String(vendorId), filename: pdfFilename },
-                    })
-                    console.log(`[webhook] PDF stored in R2: ${pdfR2Key} (${rawBytes.length} bytes)`)
-                  } catch(r2Err: any) {
-                    console.error(`[webhook] R2 put failed: ${r2Err?.message} — falling back to base64`)
-                    pdfR2Key = ''
-                  }
+              if (!fileRes.ok) {
+                console.error(`[webhook] Attachment ${attachIdx} download failed: HTTP ${fileRes.status}`)
+                const fn = attachData.filename || `document_${attachIdx + 1}.pdf`
+                allProposalAttachments.push({ r2_key: '', filename: fn, size_bytes: 0, content_type: attachData.content_type || 'application/pdf', label: detectAttachmentLabel(fn), text_chars: 0 })
+                continue
+              }
+
+              const fileBuffer = await fileRes.arrayBuffer()
+              const rawBytes = new Uint8Array(fileBuffer)
+              const fn = attachData.filename || `document_${attachIdx + 1}.pdf`
+              const ct = attachData.content_type || 'application/pdf'
+              const label = detectAttachmentLabel(fn)
+
+              // ── Store in R2 ──────────────────────────────────────────────────
+              const ts = Date.now() + attachIdx  // ensure unique key per attachment
+              const r2Key = `proposals/${rfpId}/${vendorId}_${safeVendorName}_${ts}_${attachIdx}.pdf`
+              let storedR2Key = ''
+              if (bucket) {
+                try {
+                  await bucket.put(r2Key, rawBytes, {
+                    httpMetadata: { contentType: ct },
+                    customMetadata: { rfpId: String(rfpId), vendorId: String(vendorId), filename: fn, label },
+                  })
+                  storedR2Key = r2Key
+                  console.log(`[webhook] Attachment ${attachIdx} (${label}) stored in R2: ${r2Key} (${rawBytes.length} bytes)`)
+                } catch(r2Err: any) {
+                  console.error(`[webhook] R2 put failed for attachment ${attachIdx}: ${r2Err?.message}`)
                 }
+              }
 
-                // D1 base64 fallback: only for small PDFs when R2 is not available
-                if (!pdfR2Key && rawBytes.length <= SMALL_PDF_THRESHOLD) {
-                  pdfBase64 = uint8ToBase64(rawBytes)
-                  console.log(`[webhook] PDF stored as D1 base64: ${rawBytes.length} bytes`)
-                } else if (!pdfR2Key) {
-                  console.log(`[webhook] PDF too large for D1 (${rawBytes.length} bytes) and R2 unavailable — filename only`)
-                }
+              // D1 base64 fallback for PRIMARY attachment only (backward compat), small PDFs only
+              if (attachIdx === 0 && !storedR2Key && rawBytes.length <= SMALL_PDF_THRESHOLD) {
+                pdfBase64 = uint8ToBase64(rawBytes)
+                console.log(`[webhook] Primary PDF stored as D1 base64: ${rawBytes.length} bytes`)
+              }
 
-                // ── Text extraction: always use the FULL file ──────────────────────
-                pdfExtractedTextFromDownload = await extractPdfText(rawBytes)
-                console.log(`[webhook] PDF extracted: ${pdfExtractedTextFromDownload.length} chars from ${pdfFilename} (${rawBytes.length} bytes)`)
-                // Parse proposed duration from PDF text or email body
-                proposedDuration = extractProposedDuration(pdfExtractedTextFromDownload + '\n' + bodyText)
-              } else {
-                console.error(`[webhook] PDF download failed: HTTP ${fileRes.status} for ${attachData.download_url}`)
-                // Still record the filename from the attachment metadata so we know a PDF was submitted
-                pdfFilename = (proposalAttach?.filename) || attachData.filename || 'proposal.pdf'
-                if (!pdfFilename.match(/\.(pdf|doc|docx)$/i)) pdfFilename += '.pdf'
+              // ── Text extraction ─────────────────────────────────────────────
+              const extracted = await extractPdfText(rawBytes)
+              const textChars = extracted.length
+              console.log(`[webhook] Attachment ${attachIdx} (${label}): ${textChars} chars extracted from ${fn}`)
+              if (extracted) allExtractedTexts.push(`=== ${label.toUpperCase()} PROPOSAL (${fn}) ===\n${extracted}`)
+
+              allProposalAttachments.push({ r2_key: storedR2Key, filename: fn, size_bytes: rawBytes.length, content_type: ct, label, text_chars: textChars })
+
+              // Track primary attachment (first one, or first explicitly labelled 'technical')
+              if (attachIdx === 0 || (label === 'technical' && !pdfR2Key)) {
+                pdfR2Key = storedR2Key
+                pdfFilename = fn
               }
             } catch(downloadErr: any) {
-              console.error(`[webhook] PDF download error: ${downloadErr?.message} for ${attachData.download_url}`)
-              // Still record the filename — proposal will be created with empty text
-              pdfFilename = (proposalAttach?.filename) || attachData.filename || 'proposal.pdf'
-              if (!pdfFilename.match(/\.(pdf|doc|docx)$/i)) pdfFilename += '.pdf'
-            }
-          } else {
-            // No download URL available — use filename from attachment metadata if present
-            if (proposalAttach?.filename) {
-              pdfFilename = proposalAttach.filename
-              console.log(`[webhook] No download_url for attachment ${pdfFilename} — proposal will be created without PDF text`)
+              console.error(`[webhook] Attachment ${attachIdx} download error: ${downloadErr?.message}`)
+              const fn = attachData.filename || `document_${attachIdx + 1}.pdf`
+              allProposalAttachments.push({ r2_key: '', filename: fn, size_bytes: 0, content_type: attachData.content_type || 'application/pdf', label: detectAttachmentLabel(fn), text_chars: 0 })
             }
           }
+
+          // Concatenate all extracted texts (total capped at 60k chars for LLM)
+          pdfExtractedTextFromDownload = allExtractedTexts.join('\n\n').slice(0, 60000)
+          console.log(`[webhook] Total text from ${allProposalAttachments.length} attachment(s): ${pdfExtractedTextFromDownload.length} chars`)
+
+          // If no attachments had download URLs, record filenames from metadata
+          if (allProposalAttachments.length === 0 && attachments.length > 0) {
+            const proposalAttach = pdfAttachment || attachments[0]
+            if (proposalAttach?.filename) {
+              pdfFilename = proposalAttach.filename
+              console.log(`[webhook] No download_url for any attachment — filename only: ${pdfFilename}`)
+            }
+          } else if (!pdfFilename && attachments.length > 0) {
+            pdfFilename = (pdfAttachment || attachments[0])?.filename || ''
+          }
+
+          proposedDuration = extractProposedDuration(pdfExtractedTextFromDownload + '\n' + bodyText)
         }
       }
     } catch(_e) {}
@@ -1090,19 +1138,24 @@ procurement@cpc-rfp.website`
           ? `r2://${pdfR2Key}`
           : (pdfBase64 ? 'data:application/pdf;base64,' + pdfBase64 : null)
 
+        // Serialize multi-attachment metadata to JSON for D1 storage
+        const proposalAttachmentsJson = allProposalAttachments.length > 0
+          ? JSON.stringify(allProposalAttachments)
+          : null
+
         const existing = await db.prepare('SELECT id FROM proposals WHERE vendor_id=? AND rfp_id=?').bind(vendorId, rfpId).first<any>()
 
         if (existing) {
           await db.prepare(`
             UPDATE proposals SET
-              pdf_attachment_url=?, pdf_filename=?,
+              pdf_attachment_url=?, pdf_filename=?, proposal_attachments=?,
               technical_proposal=?, proposed_duration=?,
               financial_proposal=?, status='submitted', is_real_submission=?,
               executive_summary=?, key_strengths=?,
               budget_amount=?, budget_currency=?, timeline_months=?
             WHERE id=?
           `).bind(
-            pdfUrl, pdfFilename || null,
+            pdfUrl, pdfFilename || null, proposalAttachmentsJson,
             proposalFields.technical_proposal, proposedDuration || null,
             financialValue, isAndersen,
             proposalFields.executive_summary || null,
@@ -1116,16 +1169,17 @@ procurement@cpc-rfp.website`
             INSERT INTO proposals (
               rfp_id, vendor_id, technical_proposal, financial_proposal,
               status, is_real_submission, pdf_attachment_url, pdf_filename,
-              proposed_duration, executive_summary, key_strengths,
+              proposal_attachments, proposed_duration, executive_summary, key_strengths,
               budget_amount, budget_currency, timeline_months, created_at
             )
-            VALUES (?,?,?,?,'submitted',?,?,?,?,?,?,?,?,?,datetime('now'))
+            VALUES (?,?,?,?,'submitted',?,?,?,?,?,?,?,?,?,?,datetime('now'))
           `).bind(
             rfpId, vendorId,
             proposalFields.technical_proposal,
             financialValue,
             isAndersen,
             pdfUrl, pdfFilename || null,
+            proposalAttachmentsJson,
             proposedDuration || null,
             proposalFields.executive_summary || null,
             proposalFields.key_strengths || null,
@@ -1383,11 +1437,28 @@ apiRouter.get('/rfps/:id/proposals', async (c) => {
   // Resolve r2:// URIs to Worker-served PDF URLs so the frontend gets a usable link
   const base = new URL(c.req.url).origin
   const resolved = results.map((p: any) => {
+    let updated = { ...p }
+
+    // Resolve primary PDF r2:// URI
     if (p.pdf_attachment_url?.startsWith('r2://')) {
-      const r2Key = p.pdf_attachment_url.slice(5)  // strip r2://
-      return { ...p, pdf_attachment_url: `${base}/api/proposals/pdf/${encodeURIComponent(r2Key)}` }
+      const r2Key = p.pdf_attachment_url.slice(5)
+      updated.pdf_attachment_url = `${base}/api/proposals/pdf/${encodeURIComponent(r2Key)}`
     }
-    return p
+
+    // Resolve r2:// URIs inside proposal_attachments JSON array
+    if (p.proposal_attachments) {
+      try {
+        const attachArr = JSON.parse(p.proposal_attachments) as any[]
+        updated.proposal_attachments = JSON.stringify(
+          attachArr.map((a: any) => ({
+            ...a,
+            url: a.r2_key ? `${base}/api/proposals/pdf/${encodeURIComponent(a.r2_key)}` : null,
+          }))
+        )
+      } catch(_) { /* malformed JSON — leave as-is */ }
+    }
+
+    return updated
   })
   return c.json(resolved)
 })
@@ -2638,6 +2709,16 @@ async function extractPdfText(bytes: Uint8Array): Promise<string> {
     console.error('[extractPdfText] error:', err)
     return ''
   }
+}
+
+// ── Detect whether an attachment is a technical, commercial, or other proposal ──
+// Uses filename keywords; the label is stored in proposal_attachments JSON and
+// shown in the UI to help evaluators quickly identify each document's role.
+function detectAttachmentLabel(filename: string): 'technical' | 'commercial' | 'other' {
+  const lower = (filename || '').toLowerCase()
+  if (lower.match(/commerc|financ|pricing|cost|budget|price|bill|quotat|commercial/)) return 'commercial'
+  if (lower.match(/tech|solution|architect|scope|approach|method|delivery|proposal|rfp|response|sow/)) return 'technical'
+  return 'other'
 }
 
 function extractProposedDuration(text: string): string {

@@ -167,6 +167,10 @@ export async function initDb(db: D1Database) {
     `ALTER TABLE proposals ADD COLUMN executive_summary TEXT`,
     // proposals.key_strengths — LLM-extracted bullet list of vendor strengths from proposal
     `ALTER TABLE proposals ADD COLUMN key_strengths TEXT`,
+    // proposals.proposal_attachments — JSON array of all submitted documents
+    // Each entry: { r2_key, filename, size_bytes, content_type, label, text_chars }
+    // label is auto-detected: 'technical', 'commercial', 'other'
+    `ALTER TABLE proposals ADD COLUMN proposal_attachments TEXT`,
     // proposals.questions_responded — 1 if vendor already responded to Q&A
     `ALTER TABLE rfp_vendors ADD COLUMN questions_responded INTEGER DEFAULT 0`,
   ]
