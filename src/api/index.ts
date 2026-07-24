@@ -1782,12 +1782,16 @@ apiRouter.get('/rfps/:rfpId/proposals/:proposalId/reprocess-from-r2/status', asy
 // ── Synchronous reprocess endpoint ───────────────────────────────────────────────────────────────
 // POST /api/rfps/:rfpId/proposals/:proposalId/reprocess-sync
 //
-// Unlike /reprocess-from-r2 (which uses ctx.waitUntil() and hits a ~30s wall-clock limit),
-// this endpoint runs the ENTIRE pipeline synchronously and returns the final result.
-// Cloudflare Workers for Platform allows up to 900s (15 min) for synchronous requests,
-// so even large PDFs and LLM calls have time to complete.
+// Orchestrator mode (no ?attachment param, default):
+//   Iterates over attachments sequentially by self-fetching ?attachment=N for each one.
+//   Each sub-request gets its own CPU budget — safe for large files (13MB, 25MB etc.).
+//   After all files are processed, runs LLM field extraction + AI evaluation once.
+//   Returns the final evaluation result. Client makes a single call.
 //
-// Call this with a long HTTP timeout from the client (e.g. curl --max-time 300).
+// Single-file worker mode (?attachment=N):
+//   Processes only attachment N: extract text via Genspark crawler, run wrong-doc detection,
+//   persist updated proposal_attachments to D1. No LLM field extraction, no evaluation.
+//   Used internally by the orchestrator; can also be called directly for debugging.
 apiRouter.post('/rfps/:rfpId/proposals/:proposalId/reprocess-sync', async (c) => {
   const rfpId = Number(c.req.param('rfpId'))
   const proposalId = Number(c.req.param('proposalId'))
@@ -1807,64 +1811,131 @@ apiRouter.post('/rfps/:rfpId/proposals/:proposalId/reprocess-sync', async (c) =>
   const attachments: any[] = JSON.parse(proposal.proposal_attachments || '[]')
   if (attachments.length === 0) return c.json({ error: 'No attachments stored for this proposal' }, 404)
 
-  // Derive Worker base URL from the request for Genspark crawler Strategy A
+  // Derive Worker base URL from the request (used for Genspark crawler Strategy A)
   const requestUrl = new URL(c.req.url)
   const workerBaseUrl = `${requestUrl.protocol}//${requestUrl.host}`
-  console.log(`[reprocess-sync] Starting SYNC reprocess for proposal #${proposalId} (${proposal.vendor_name}), workerBaseUrl=${workerBaseUrl}`)
 
-  // Mark as processing (in case client polls the status endpoint concurrently)
-  await db.prepare(`UPDATE proposals SET key_strengths='⏳ Vision extraction in progress…', updated_at=datetime('now') WHERE id=?`)
-    .bind(proposalId).run().catch(() => {})
+  // ── SINGLE-FILE WORKER MODE (?attachment=N) ───────────────────────────────
+  // Processes exactly one attachment. No field extraction, no evaluation.
+  // Saves updated proposal_attachments back to D1 and returns extraction result.
+  const attachmentParam = requestUrl.searchParams.get('attachment')
+  if (attachmentParam !== null) {
+    const attIdx = Number(attachmentParam)
+    const att = attachments[attIdx]
+    if (!att) return c.json({ error: `Attachment index ${attIdx} not found` }, 404)
+    if (!att.r2_key) return c.json({ ok: true, skipped: true, reason: 'no r2_key', filename: att.filename })
 
-  // Run the full pipeline synchronously — same logic as doReprocessFromR2 but inline
-  const allExtractedTexts: string[] = []
-  const updatedAttachments: any[] = []
-
-  for (const att of attachments) {
-    if (!att.r2_key) { updatedAttachments.push(att); continue }
+    console.log(`[reprocess-sync-single] Processing attachment ${attIdx}: ${att.filename}`)
+    let resultAtt: any = { ...att }
     try {
       const obj = await bucket.get(att.r2_key)
       if (!obj) {
-        console.warn(`[reprocess-sync] R2 object not found: ${att.r2_key}`)
-        updatedAttachments.push({ ...att, error: 'R2 object not found' }); continue
+        resultAtt = { ...att, error: 'R2 object not found' }
+      } else {
+        const rawBytes = new Uint8Array(await obj.arrayBuffer())
+        console.log(`[reprocess-sync-single] Fetched ${rawBytes.length} bytes for ${att.filename}`)
+
+        const { text: extracted, method: exMethod, rawGarbage } = await extractPdfTextSmart(
+          rawBytes, att.filename, c.env, { r2Key: att.r2_key, workerBaseUrl }
+        )
+        console.log(`[reprocess-sync-single] Extracted ${extracted.length} chars via ${exMethod}`)
+
+        const textForDetection = extracted.length >= 100 ? extracted : (rawGarbage || '')
+        const wrongDoc = await detectWrongDocument(
+          textForDetection, att.filename, proposal.vendor_name || 'Vendor',
+          rfp.ref_number || '', rfp.title || '', c.env
+        )
+        console.log(`[reprocess-sync-single] Wrong doc: ${wrongDoc.isWrong}, type: ${wrongDoc.detectedDocType}`)
+
+        if (wrongDoc.isWrong) {
+          resultAtt = {
+            ...att,
+            text_chars: extracted.length,
+            extract_method: exMethod,
+            wrong_document: wrongDoc.reason,
+            _marked_text: `[WRONG DOCUMENT DETECTED]\nFile: ${att.filename}\nDetected type: ${wrongDoc.detectedDocType}\n\n${wrongDoc.reason}\n\n[EXTRACTED CONTENT FOR REFERENCE]\n${extracted || '(no readable text extracted)'}`,
+          }
+        } else {
+          resultAtt = { ...att, text_chars: extracted.length, extract_method: exMethod, extracted_text: extracted }
+        }
       }
-      const rawBytes = new Uint8Array(await obj.arrayBuffer())
-      console.log(`[reprocess-sync] Fetched ${rawBytes.length} bytes for ${att.filename}`)
-
-      // Use Strategy A (Worker URL) — avoids re-uploading large bytes, crawler fetches directly
-      const { text: extracted, method: exMethod, rawGarbage } = await extractPdfTextSmart(
-        rawBytes, att.filename, c.env, { r2Key: att.r2_key, workerBaseUrl }
-      )
-      console.log(`[reprocess-sync] Extracted ${extracted.length} chars via ${exMethod} from ${att.filename}`)
-
-      // Run wrong-doc detection using extracted text OR rawGarbage OR just filename
-      // detectWrongDocument has a filename-overlap check that works even with empty text
-      const textForDetection = extracted.length >= 100 ? extracted : (rawGarbage || '')
-      console.log(`[reprocess-sync] Running detectWrongDocument: filename="${att.filename}", textLen=${textForDetection.length}, rfpTitle="${rfp.title}"`)
-      const wrongDoc = await detectWrongDocument(
-        textForDetection, att.filename, proposal.vendor_name || 'Vendor',
-        rfp.ref_number || '', rfp.title || '', c.env
-      )
-      console.log(`[reprocess-sync] detectWrongDocument result: isWrong=${wrongDoc.isWrong}, detectedDocType="${wrongDoc.detectedDocType}", reason="${wrongDoc.reason.slice(0,100)}"`)
-
-      if (wrongDoc.isWrong) {
-        const markedText = `[WRONG DOCUMENT DETECTED]\nFile: ${att.filename}\nDetected type: ${wrongDoc.detectedDocType}\n\n${wrongDoc.reason}\n\n[EXTRACTED CONTENT FOR REFERENCE]\n${extracted || '(no readable text extracted)'}`
-        console.warn(`[reprocess-sync] Wrong document: ${att.filename} — ${wrongDoc.reason.slice(0, 120)}`)
-        updatedAttachments.push({ ...att, text_chars: extracted.length, extract_method: exMethod, wrong_document: wrongDoc.reason, _marked_text: markedText })
-        continue
-      }
-
-      if (extracted.length >= 100) {
-        allExtractedTexts.push(`[${(att.label || 'TECHNICAL').toUpperCase()} DOCUMENT: ${att.filename}]\n${extracted}`)
-      }
-      updatedAttachments.push({ ...att, text_chars: extracted.length, extract_method: exMethod })
     } catch (e: any) {
-      console.error(`[reprocess-sync] Error processing ${att.filename}: ${e?.message}`)
-      updatedAttachments.push({ ...att, error: e?.message })
+      console.error(`[reprocess-sync-single] Error: ${e?.message}`)
+      resultAtt = { ...att, error: e?.message }
+    }
+
+    // Persist the updated attachment entry back to D1 (merge with siblings)
+    const freshProposal = await db.prepare(`SELECT proposal_attachments FROM proposals WHERE id=?`).bind(proposalId).first<any>()
+    const currentAtts: any[] = JSON.parse(freshProposal?.proposal_attachments || '[]')
+    currentAtts[attIdx] = resultAtt
+    await db.prepare(`UPDATE proposals SET proposal_attachments=?, updated_at=datetime('now') WHERE id=?`)
+      .bind(JSON.stringify(currentAtts), proposalId).run()
+
+    return c.json({
+      ok: true,
+      attachment_index: attIdx,
+      filename: att.filename,
+      method: resultAtt.extract_method ?? null,
+      chars: resultAtt.text_chars ?? 0,
+      wrong_document: resultAtt.wrong_document ?? null,
+      error: resultAtt.error ?? null,
+    })
+  }
+
+  // ── ORCHESTRATOR MODE (no ?attachment param) ──────────────────────────────
+  // Calls ?attachment=N for each attachment sequentially, then runs field extraction + evaluation.
+  console.log(`[reprocess-sync] ORCHESTRATOR starting for proposal #${proposalId} (${proposal.vendor_name}), ${attachments.length} attachment(s)`)
+
+  // Mark as processing
+  await db.prepare(`UPDATE proposals SET key_strengths='⏳ Re-extracting proposal text…', updated_at=datetime('now') WHERE id=?`)
+    .bind(proposalId).run().catch(() => {})
+
+  // Sequential self-fetch for each attachment that has an r2_key
+  const singleFileResults: any[] = []
+  for (let i = 0; i < attachments.length; i++) {
+    const att = attachments[i]
+    if (!att.r2_key) {
+      console.log(`[reprocess-sync] Attachment ${i} (${att.filename}) has no r2_key — skipping`)
+      singleFileResults.push({ attachment_index: i, skipped: true, filename: att.filename })
+      continue
+    }
+    console.log(`[reprocess-sync] Self-fetching attachment ${i}: ${att.filename}`)
+    try {
+      const subRes = await fetch(
+        `${workerBaseUrl}/api/rfps/${rfpId}/proposals/${proposalId}/reprocess-sync?attachment=${i}`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' } }
+      )
+      const subData = await subRes.json() as any
+      console.log(`[reprocess-sync] Attachment ${i} done: method=${subData.method}, chars=${subData.chars}, wrong=${subData.wrong_document ? 'yes' : 'no'}`)
+      singleFileResults.push(subData)
+    } catch (e: any) {
+      console.error(`[reprocess-sync] Self-fetch for attachment ${i} failed: ${e?.message}`)
+      singleFileResults.push({ attachment_index: i, error: e?.message, filename: att.filename })
     }
   }
 
-  const wrongDocAtts = updatedAttachments.filter((a: any) => a.wrong_document)
+  // Re-read updated attachments from DB (each sub-request saved its slice)
+  const refreshedProposal = await db.prepare(
+    `SELECT p.*, v.name as vendor_name FROM proposals p LEFT JOIN vendors v ON p.vendor_id=v.id WHERE p.id=?`
+  ).bind(proposalId).first<any>()
+  const updatedAttachments: any[] = JSON.parse(refreshedProposal?.proposal_attachments || '[]')
+
+  // Build combined text from all successful, non-wrong-document attachments
+  const allExtractedTexts: string[] = []
+  const wrongDocAtts: any[] = []
+
+  for (const att of updatedAttachments) {
+    if (att.wrong_document) {
+      wrongDocAtts.push(att)
+    } else if (att.extracted_text && att.extracted_text.length >= 100) {
+      allExtractedTexts.push(`[${(att.label || 'TECHNICAL').toUpperCase()} DOCUMENT: ${att.filename}]\n${att.extracted_text}`)
+    } else if (att.text_chars && att.text_chars >= 100 && !att.wrong_document && !att.error) {
+      // text_chars set but extracted_text not in attachment (old format) — re-read from attachment
+      // This shouldn't happen with new code but handle gracefully
+      console.warn(`[reprocess-sync] Attachment ${att.filename} has text_chars=${att.text_chars} but no extracted_text field`)
+    }
+  }
+
   const allWrong = wrongDocAtts.length > 0 && allExtractedTexts.length === 0
 
   let technicalProposalText = ''
@@ -1901,13 +1972,13 @@ apiRouter.post('/rfps/:rfpId/proposals/:proposalId/reprocess-sync', async (c) =>
     }
   } else {
     technicalProposalText = ''
-    keyStrengths = '⚠ Vision extraction could not read any text from the submitted files. Please re-upload a clearer PDF.'
+    keyStrengths = '⚠ Could not read any text from the submitted files. The PDFs may use unsupported fonts or be image-only.'
   }
 
-  // Strip temp _marked_text before saving
-  const cleanAttachments = updatedAttachments.map(({ _marked_text, ...rest }: any) => rest)
+  // Strip temporary fields (extracted_text, _marked_text) before final save
+  const cleanAttachments = updatedAttachments.map(({ extracted_text, _marked_text, ...rest }: any) => rest)
 
-  // Save to D1
+  // Final DB save — technical_proposal + all fields
   await db.prepare(`
     UPDATE proposals SET
       technical_proposal=?, executive_summary=?, key_strengths=?,
@@ -1925,14 +1996,13 @@ apiRouter.post('/rfps/:rfpId/proposals/:proposalId/reprocess-sync', async (c) =>
   console.log(`[reprocess-sync] DB updated. Running evaluation for proposal #${proposalId}`)
 
   // Re-fetch the updated proposal row (with new technical_proposal) for evaluation
-  const updatedProposal = await db.prepare(
+  const proposalForEval = await db.prepare(
     `SELECT p.*, v.name as vendor_name FROM proposals p LEFT JOIN vendors v ON p.vendor_id=v.id WHERE p.id=?`
   ).bind(proposalId).first<any>()
 
-  // Run evaluation using the same function used everywhere else
   let evalRow: any = null
   try {
-    await runSingleEvaluation(updatedProposal, rfp, rfpId, c.env)
+    await runSingleEvaluation(proposalForEval, rfp, rfpId, c.env)
     evalRow = await db.prepare(
       `SELECT total_score, is_real, ai_summary FROM evaluations WHERE proposal_id=? ORDER BY id DESC LIMIT 1`
     ).bind(proposalId).first<any>()
@@ -1949,7 +2019,13 @@ apiRouter.post('/rfps/:rfpId/proposals/:proposalId/reprocess-sync', async (c) =>
       attachments_processed: cleanAttachments.length,
       total_chars: technicalProposalText.length,
       is_wrong_document: allWrong,
-      methods: cleanAttachments.map((a: any) => ({ filename: a.filename, method: a.extract_method, chars: a.text_chars ?? 0, wrong: !!a.wrong_document, error: a.error ?? null })),
+      methods: singleFileResults.map((r: any) => ({
+        filename: r.filename,
+        method: r.method ?? null,
+        chars: r.chars ?? 0,
+        wrong: !!(r.wrong_document),
+        error: r.error ?? null,
+      })),
       text_preview: technicalProposalText.slice(0, 300),
     },
     evaluation: evalRow ? {
