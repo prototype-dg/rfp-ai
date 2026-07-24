@@ -136,15 +136,16 @@ apiRouter.post('/rfps/:id/generate', async (c) => {
   try {
     const id = c.req.param('id')
     const body = await c.req.json()
-    // Fetch existing RFP to get arch_doc_text if not in body
+    // Fetch existing RFP to get uploaded document texts
     const existingRfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(id).first<any>()
     const archDocText = body.arch_doc_text || existingRfp?.arch_doc_text || ''
+    const brdDocText  = body.brd_doc_text  || existingRfp?.brd_doc_text  || ''
     // LLM-only generation — no deterministic fallback. If it fails the user sees a clear error.
-    const content = await generateRFPWithLLM(body, archDocText, c.env)
+    const content = await generateRFPWithLLM(body, archDocText, brdDocText, c.env)
     await c.env.DB.prepare(`
-      UPDATE rfps SET title=?, category=?, budget=?, deadline=?, scope=?, tech_requirements=?, objectives=?, background=?, content=?, arch_doc_text=?, updated_at=datetime('now')
+      UPDATE rfps SET title=?, category=?, budget=?, deadline=?, scope=?, tech_requirements=?, objectives=?, background=?, content=?, arch_doc_text=?, brd_doc_text=?, updated_at=datetime('now')
       WHERE id=?
-    `).bind(body.title, body.category, body.budget, body.deadline, body.scope, body.tech_requirements||'', body.objectives||'', body.background||'', content, archDocText, id).run()
+    `).bind(body.title, body.category, body.budget, body.deadline, body.scope, body.tech_requirements||'', body.objectives||'', body.background||'', content, archDocText, brdDocText, id).run()
     const rfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(id).first()
     return c.json(rfp)
   } catch (e: any) {
@@ -152,9 +153,13 @@ apiRouter.post('/rfps/:id/generate', async (c) => {
   }
 })
 
-// POST /rfps/:id/upload-arch-doc — upload Conceptual Solution Architecture PDF
-// Accepts multipart/form-data with 'file' field (PDF)
-// Extracts text and stores in rfps.arch_doc_text
+// POST /rfps/:id/upload-arch-doc — upload a supporting document PDF
+// Accepts multipart/form-data with:
+//   'file'      — the PDF file
+//   'doc_label' — document type label (used to route to correct column)
+// Routing:
+//   label contains "Business Requirements" → rfps.brd_doc_text
+//   anything else (Solution Architecture, default) → rfps.arch_doc_text
 apiRouter.post('/rfps/:id/upload-arch-doc', async (c) => {
   try {
     const id = c.req.param('id')
@@ -162,18 +167,27 @@ apiRouter.post('/rfps/:id/upload-arch-doc', async (c) => {
     const file = formData.get('file') as File | null
     if (!file) return c.json({ error: 'No file uploaded' }, 400)
 
+    const docLabel = (formData.get('doc_label') as string || '').toLowerCase()
+    const isBRD = docLabel.includes('business requirement') || docLabel.includes('brd')
+
     const arrayBuffer = await file.arrayBuffer()
     const bytes = new Uint8Array(arrayBuffer)
 
     // Extract text from PDF bytes (handles both compressed and uncompressed PDFs)
     const pdfText = await extractPdfText(bytes)
 
-    // Store the extracted text (and base64 of file for later viewing)
-    await c.env.DB.prepare(`
-      UPDATE rfps SET arch_doc_text=?, updated_at=datetime('now') WHERE id=?
-    `).bind(pdfText, id).run()
+    // Route to correct column based on document type
+    if (isBRD) {
+      await c.env.DB.prepare(`
+        UPDATE rfps SET brd_doc_text=?, updated_at=datetime('now') WHERE id=?
+      `).bind(pdfText, id).run()
+    } else {
+      await c.env.DB.prepare(`
+        UPDATE rfps SET arch_doc_text=?, updated_at=datetime('now') WHERE id=?
+      `).bind(pdfText, id).run()
+    }
 
-    return c.json({ ok: true, textLength: pdfText.length, preview: pdfText.slice(0, 300) })
+    return c.json({ ok: true, column: isBRD ? 'brd_doc_text' : 'arch_doc_text', textLength: pdfText.length, preview: pdfText.slice(0, 300) })
   } catch (e: any) {
     return c.json({ error: e.message }, 500)
   }
@@ -1147,7 +1161,7 @@ async function callLLM(systemPrompt: string, userPrompt: string, env: any, model
   return data.choices?.[0]?.message?.content || ''
 }
 
-async function generateRFPWithLLM(data: any, archDocText: string, env: any): Promise<string> {
+async function generateRFPWithLLM(data: any, archDocText: string, brdDocText: string, env: any): Promise<string> {
   const systemPrompt = `You are a senior government procurement specialist at the Crown Prince's Court (CPC) of Abu Dhabi, UAE. You are producing a formal, publication-ready Request for Proposal (RFP) document that will be issued to external vendors.
 
 IDENTITY & TONE
@@ -1172,8 +1186,19 @@ HTML FORMATTING RULES
 - Use <ul> / <ol> for lists. Use <p> for narrative paragraphs.
 - Do NOT use inline styles. Do NOT use markdown. Do NOT use code fences.`
 
-  const archSection = archDocText
-    ? `\n${'='.repeat(60)}\nSUPPORTING DOCUMENTS PROVIDED BY CPC TEAM\n(Treat this as the primary technical reference — extract requirements, scope phases, and constraints directly from this text where relevant)\n${'='.repeat(60)}\n${archDocText.slice(0, 12000)}\n${'='.repeat(60)}\n`
+  const docSections: string[] = []
+  if (archDocText) {
+    docSections.push(
+      `${'='.repeat(60)}\nCONCEPTUAL SOLUTION ARCHITECTURE DOCUMENT\n(Use as primary technical reference — extract scope phases, architecture decisions, and constraints directly)\n${'='.repeat(60)}\n${archDocText.slice(0, 12000)}\n${'='.repeat(60)}`
+    )
+  }
+  if (brdDocText) {
+    docSections.push(
+      `${'='.repeat(60)}\nBUSINESS REQUIREMENTS DOCUMENT\n(Use as primary functional reference — extract business needs, process flows, and acceptance criteria directly)\n${'='.repeat(60)}\n${brdDocText.slice(0, 12000)}\n${'='.repeat(60)}`
+    )
+  }
+  const archSection = docSections.length
+    ? `\nSUPPORTING DOCUMENTS PROVIDED BY CPC TEAM:\n${docSections.join('\n\n')}\n`
     : ''
 
   const userPrompt = `Generate a complete, formal RFP HTML document for the Crown Prince's Court (CPC), Abu Dhabi.
@@ -1277,28 +1302,69 @@ Category:`
 }
 
 async function draftAnswerLLM(question: string, rfp: any, env: any): Promise<{ answer: string, needsManual: boolean }> {
+  // Build rich context — strip HTML tags from generated RFP content for cleaner LLM input
+  const rfpText = rfp?.content ? rfp.content.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() : ''
+
   const context = [
-    rfp?.content ? `RFP DOCUMENT (HTML, first 3000 chars):\n${rfp.content.replace(/<[^>]+>/g,'').slice(0,3000)}` : '',
-    rfp?.arch_doc_text ? `SOLUTION ARCHITECTURE DOCUMENT:\n${rfp.arch_doc_text.slice(0,2000)}` : '',
-    rfp?.objectives ? `OBJECTIVES: ${rfp.objectives}` : '',
-    rfp?.scope ? `SCOPE: ${rfp.scope}` : '',
-    rfp?.tech_requirements ? `TECHNICAL REQUIREMENTS: ${rfp.tech_requirements}` : '',
-    rfp?.background ? `BACKGROUND: ${rfp.background}` : '',
-  ].filter(Boolean).join('\n\n')
+    rfpText
+      ? `RFP DOCUMENT (full generated text):\n${rfpText.slice(0, 20000)}`
+      : '',
+    rfp?.arch_doc_text
+      ? `SOLUTION ARCHITECTURE DOCUMENT:\n${rfp.arch_doc_text.slice(0, 12000)}`
+      : '',
+    rfp?.brd_doc_text
+      ? `BUSINESS REQUIREMENTS DOCUMENT:\n${rfp.brd_doc_text.slice(0, 12000)}`
+      : '',
+    rfp?.background
+      ? `PROJECT BACKGROUND:\n${rfp.background}`
+      : '',
+    rfp?.objectives
+      ? `PROJECT OBJECTIVES:\n${rfp.objectives}`
+      : '',
+    rfp?.scope
+      ? `SCOPE OF WORK:\n${rfp.scope}`
+      : '',
+    rfp?.tech_requirements
+      ? `TECHNICAL REQUIREMENTS:\n${rfp.tech_requirements}`
+      : '',
+  ].filter(Boolean).join('\n\n---\n\n')
 
-  const systemPrompt = `You are the procurement officer at the Crown Prince's Court (CPC) Abu Dhabi, UAE. You are answering clarification questions from vendors about an RFP. Use ONLY the context provided — the RFP document, solution architecture, and field values. If the answer cannot be determined from the available context, respond with exactly: "NEEDS_MANUAL_REVIEW" followed by a brief explanation of what information is needed. Otherwise, provide a clear, professional, authoritative answer (2-5 sentences).`
+  const systemPrompt = `You are the procurement officer at the Crown Prince's Court (CPC), Abu Dhabi, UAE. Your role is to answer vendor clarification questions about an RFP professionally and authoritatively.
 
-  const userPrompt = `CONTEXT:\n${context || 'No context available'}\n\nVENDOR QUESTION:\n${question}`
+ANSWERING RULES — apply in order, stopping at the first rule that fits:
+
+1. CONTEXT-GROUNDED ANSWER (preferred): If the answer is explicitly stated in, or directly inferable from, the provided RFP document, Architecture Document, BRD, or project fields — answer clearly and directly in 2–5 sentences. Cite the section or document when helpful (e.g. "As stated in Section 3.2 of the RFP...").
+
+2. REASONED ANSWER (use liberally — this is the expected path for most questions): If the answer is NOT explicitly in the documents but you can derive it with ≥ 90% confidence from any of the following, answer and briefly state your reasoning:
+   - Standard UAE government / Abu Dhabi ADGM / GCC public-sector procurement practices
+   - Professional norms for the technology or industry domain described in the RFP (e.g., software delivery, cybersecurity, ERP, CRM, cloud infrastructure)
+   - Industry-standard contract terms, SLA expectations, or evaluation criteria common for this type of engagement
+   - Logical inference from the project scope, budget range, timeline, or category stated in the RFP
+   Example reasoning prefix: "While not explicitly stated in the RFP, standard practice for projects of this type requires..." or "Based on the scope and budget described, it would be expected that..."
+   Set a LOW bar for confidence — if a knowledgeable procurement professional would consider the answer obvious or standard, answer it.
+
+3. ESCALATE TO MANUAL REVIEW (last resort only): Use ONLY when the answer genuinely requires an internal CPC decision not derivable from any public norm, standard practice, or the documents provided — such as an undisclosed budget figure, a specific internal policy not mentioned anywhere, or a highly project-specific decision that no reasonable inference can cover. Respond with exactly: "NEEDS_MANUAL_REVIEW: " followed by a one-sentence explanation of what specific information is needed.
+
+BIAS STRONGLY toward rules 1 and 2. Rule 3 should be rare (< 10% of questions). Never say "I don't know" — either answer with appropriate reasoning or escalate cleanly. Tone: formal, authoritative, concise — you speak on behalf of CPC.`
+
+  const userPrompt = `${context ? `CONTEXT DOCUMENTS:\n${context}\n\n---\n\n` : ''}VENDOR QUESTION:\n${question}`
 
   try {
-    const answer = await callLLM(systemPrompt, userPrompt, env, 'gpt-5-mini', 400)
-    if (answer.includes('NEEDS_MANUAL_REVIEW') || answer.length < 30) {
-      return { answer: answer.replace('NEEDS_MANUAL_REVIEW', '').trim() || 'This question requires manual review by the procurement team.', needsManual: true }
+    const answer = await callLLM(systemPrompt, userPrompt, env, 'gpt-5-mini', 1500)
+    const trimmed = answer.trim()
+    if (trimmed.startsWith('NEEDS_MANUAL_REVIEW')) {
+      const explanation = trimmed.replace(/^NEEDS_MANUAL_REVIEW[:\s]*/i, '').trim()
+      return {
+        answer: explanation || 'This question requires a decision or clarification from the CPC procurement team.',
+        needsManual: true
+      }
     }
-    return { answer: answer.trim(), needsManual: false }
+    if (trimmed.length < 20) {
+      return { answer: 'This question requires manual review by the procurement team.', needsManual: true }
+    }
+    return { answer: trimmed, needsManual: false }
   } catch(llmErr: any) {
     console.error('[draftAnswer] LLM failed:', llmErr?.message || llmErr)
-    // Mark as needs_manual so the UI surfaces the error rather than hiding it
     return { answer: 'LLM unavailable — please provide a manual answer for this question.', needsManual: true }
   }
 }
