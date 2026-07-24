@@ -554,7 +554,8 @@ apiRouter.post('/rfps/:id/emails/send-invitations', async (c) => {
     }
 
     const isAndersen = v.contact_email?.includes('andersenlab.com')
-    const emailBody = buildInvitationEmailText(v, rfp, qDeadline, sDeadline, notes)
+    const baseUrl = new URL(c.req.url).origin
+    const emailBody = buildInvitationEmailText(v, rfp, qDeadline, sDeadline, notes, baseUrl)
     let status = 'simulated'
     let sendError = ''
 
@@ -2037,6 +2038,308 @@ apiRouter.post('/rfps/:id/recommendation/generate', async (c) => {
 
 // ============================================================
 // VENDOR PERFORMANCE
+// ============================================================
+// VENDOR PROPOSAL SUBMISSION (public web portal)
+// ============================================================
+
+// GET /submit/:rfpId — public RFP summary for the submission page
+apiRouter.get('/submit/:rfpId', async (c) => {
+  const rfpId = c.req.param('rfpId')
+  const rfp = await c.env.DB.prepare(
+    `SELECT id, ref_number, title, category, deadline, scope, objectives, tech_requirements, background, stage FROM rfps WHERE id=?`
+  ).bind(rfpId).first<any>()
+  if (!rfp) return c.json({ error: 'RFP not found' }, 404)
+  // Allow submission only if stage allows it
+  const closedStages = ['awarded', 'archived']
+  if (closedStages.includes(rfp.stage)) return c.json({ error: 'This RFP is no longer accepting submissions.' }, 403)
+  return c.json(rfp)
+})
+
+// POST /submit/:rfpId/categorize — AI categorize a single uploaded file
+// Accepts multipart: file (PDF binary) → returns { label, confidence, summary }
+apiRouter.post('/submit/:rfpId/categorize', async (c) => {
+  const rfpId = c.req.param('rfpId')
+  const rfp = await c.env.DB.prepare('SELECT id, title FROM rfps WHERE id=?').bind(rfpId).first<any>()
+  if (!rfp) return c.json({ error: 'RFP not found' }, 404)
+
+  try {
+    const formData = await c.req.formData()
+    const file = formData.get('file') as File | null
+    if (!file) return c.json({ error: 'No file provided' }, 400)
+
+    const bytes = new Uint8Array(await file.arrayBuffer())
+    const rawText = await extractPdfText(bytes)
+
+    if (!rawText || isPostScriptGarbage(rawText)) {
+      return c.json({
+        label: 'other',
+        confidence: 'low',
+        summary: 'Could not extract readable text from this PDF (complex font encoding). The file will be stored as a supporting document.',
+        filename: file.name,
+        size_bytes: bytes.length,
+      })
+    }
+
+    // Ask LLM to categorize
+    const apiKey = (c.env as any).OPENAI_API_KEY || ''
+    const baseUrl = (c.env as any).OPENAI_BASE_URL || 'https://api.openai.com/v1'
+    if (!apiKey) {
+      // Fallback heuristic categorization
+      const name = file.name.toLowerCase()
+      const label = name.includes('commercial') || name.includes('financial') || name.includes('cost') ? 'commercial'
+        : name.includes('technical') || name.includes('tech') || name.includes('architecture') ? 'technical'
+        : 'supporting'
+      return c.json({ label, confidence: 'medium', summary: 'Categorized by filename.', filename: file.name, size_bytes: bytes.length })
+    }
+
+    const snippet = rawText.slice(0, 3000)
+    const catRes = await fetch(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'gpt-4.1-mini',
+        max_tokens: 400,
+        messages: [
+          { role: 'system', content: `You are a procurement document classifier for a government RFP system. Analyze the document excerpt and return JSON with:
+- label: one of "technical" (technical proposal, methodology, architecture, approach), "commercial" (pricing, cost, financial proposal, budget), "supporting" (company profile, certifications, CVs, references, compliance), or "other"
+- confidence: "high", "medium", or "low"
+- summary: one sentence (max 150 chars) describing what this document contains` },
+          { role: 'user', content: `RFP: ${rfp.title}\n\nDocument excerpt:\n${snippet}\n\nRespond with JSON only.` }
+        ],
+        response_format: { type: 'json_object' }
+      })
+    })
+    const catData: any = await catRes.json()
+    let result: any = {}
+    try { result = JSON.parse(catData.choices?.[0]?.message?.content || '{}') } catch(_) {}
+
+    return c.json({
+      label: result.label || 'other',
+      confidence: result.confidence || 'medium',
+      summary: result.summary || '',
+      filename: file.name,
+      size_bytes: bytes.length,
+      text_preview: rawText.slice(0, 200),
+    })
+  } catch(err: any) {
+    console.error('[categorize]', err)
+    return c.json({ error: err.message || 'Failed to categorize file' }, 500)
+  }
+})
+
+// POST /submit/:rfpId — submit a full vendor proposal (multipart form)
+// Fields: vendor_code (participant ref), cover_letter, files[] (PDFs)
+apiRouter.post('/submit/:rfpId', async (c) => {
+  const rfpId = c.req.param('rfpId')
+  const rfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(rfpId).first<any>()
+  if (!rfp) return c.json({ error: 'RFP not found' }, 404)
+  const closedStages = ['awarded', 'archived']
+  if (closedStages.includes(rfp.stage)) return c.json({ error: 'This RFP is no longer accepting submissions.' }, 403)
+
+  try {
+    const formData = await c.req.formData()
+    const vendorCode = (formData.get('vendor_code') as string || '').trim().toUpperCase()
+    const coverLetter = (formData.get('cover_letter') as string || '').trim()
+    const fileLabels: Record<string, string> = {}
+    try {
+      const labelsJson = formData.get('file_labels') as string
+      if (labelsJson) Object.assign(fileLabels, JSON.parse(labelsJson))
+    } catch(_) {}
+
+    // Resolve vendor from participant code RFP-{rfpId}-V{vendorId}
+    let vendorId: number | null = null
+    let vendorName = 'Unknown Vendor'
+    if (vendorCode) {
+      const codeMatch = vendorCode.match(/^RFP-(\d+)-V(\d+)$/)
+      if (codeMatch && Number(codeMatch[1]) === Number(rfpId)) {
+        vendorId = Number(codeMatch[2])
+        const v = await c.env.DB.prepare('SELECT id, name FROM vendors WHERE id=?').bind(vendorId).first<any>()
+        if (v) { vendorId = v.id; vendorName = v.name }
+        else vendorId = null
+      }
+    }
+
+    if (!vendorId) {
+      // Try to find by rfp_vendors shortlisted — if only 1 vendor with no code just accept
+      return c.json({ error: 'Invalid participant code. Please use the code from your invitation email.' }, 400)
+    }
+
+    // Collect all uploaded files
+    const files: File[] = []
+    let i = 0
+    while (true) {
+      const f = formData.get(`file_${i}`) as File | null
+      if (!f) break
+      files.push(f)
+      i++
+    }
+    // Also try generic 'files' key
+    const genericFiles = formData.getAll('files') as File[]
+    for (const gf of genericFiles) {
+      if (gf instanceof File) files.push(gf)
+    }
+
+    if (files.length === 0) return c.json({ error: 'Please attach at least one proposal document.' }, 400)
+
+    const bucket: R2Bucket | undefined = (c.env as any).PROPOSALS_BUCKET
+    const INLINE_EXTRACT_THRESHOLD = 5_000_000
+    const allExtractedTexts: string[] = []
+    const storedAttachments: any[] = []
+    const pendingExtractionJobs: any[] = []
+
+    for (let idx = 0; idx < files.length; idx++) {
+      const file = files[idx]
+      const fn = file.name || `document_${idx + 1}.pdf`
+      const ct = file.type || 'application/pdf'
+      const label = fileLabels[fn] || fileLabels[String(idx)] || 'other'
+      const ts = Date.now() + idx
+      const safeVendorName = vendorName.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 20)
+      const r2Key = `proposals/${rfpId}/${vendorId}_${safeVendorName}_${ts}.pdf`
+
+      const bytes = new Uint8Array(await file.arrayBuffer())
+
+      // Store in R2
+      if (bucket) {
+        const httpMetadata = { contentType: ct }
+        const customMetadata = { rfpId: String(rfpId), vendorId: String(vendorId), filename: fn }
+        await bucket.put(r2Key, bytes, { httpMetadata, customMetadata })
+      }
+
+      const storedSize = bytes.length
+      let extractedText = ''
+      let textChars = 0
+
+      if (storedSize > INLINE_EXTRACT_THRESHOLD) {
+        // Large file — schedule async extraction
+        pendingExtractionJobs.push({ r2Key, filename: fn, contentType: ct, label })
+      } else {
+        // Small file — extract inline
+        const raw = await extractPdfText(bytes)
+        if (raw && !isPostScriptGarbage(raw)) {
+          extractedText = raw
+          textChars = raw.length
+          if (label === 'technical' || label === 'commercial' || label === 'other') {
+            allExtractedTexts.push(`[${label.toUpperCase()} DOCUMENT: ${fn}]\n${raw}`)
+          }
+        } else if (raw && isPostScriptGarbage(raw)) {
+          pendingExtractionJobs.push({ r2Key, filename: fn, contentType: ct, label })
+        }
+      }
+
+      storedAttachments.push({
+        r2_key: bucket ? r2Key : null,
+        filename: fn,
+        content_type: ct,
+        label,
+        size_bytes: storedSize,
+        text_chars: textChars,
+        url: null, // resolved later
+      })
+    }
+
+    // Combine cover letter + extracted texts
+    const combinedText = [
+      coverLetter ? `[COVER LETTER]\n${coverLetter}` : '',
+      ...allExtractedTexts,
+    ].filter(Boolean).join('\n\n')
+
+    // LLM field extraction
+    let budgetAmount: number | null = null
+    let budgetCurrency = 'AED'
+    let timelineMonths: number | null = null
+    let executiveSummary: string | null = null
+    let keyStrengths: string | null = null
+    let proposedDuration: string | null = null
+
+    if (combinedText.length > 100) {
+      try {
+        const fields = await extractProposalFieldsWithLLM(combinedText, rfp, (c.env as any))
+        budgetAmount = fields.budget_amount || null
+        budgetCurrency = fields.budget_currency || 'AED'
+        timelineMonths = fields.timeline_months || null
+        executiveSummary = fields.executive_summary || null
+        keyStrengths = fields.key_strengths || null
+        proposedDuration = fields.proposed_duration || extractProposedDuration(combinedText) || null
+      } catch(e) { console.error('[submit] field extraction failed:', e) }
+    }
+
+    // Check if proposal already exists for this vendor+RFP
+    const existing = await c.env.DB.prepare(
+      `SELECT id FROM proposals WHERE rfp_id=? AND vendor_id=? ORDER BY id DESC LIMIT 1`
+    ).bind(rfpId, vendorId).first<any>()
+
+    const proposalAttachmentsJson = JSON.stringify(storedAttachments)
+
+    let proposalId: number
+    if (existing) {
+      // Update existing proposal
+      await c.env.DB.prepare(`
+        UPDATE proposals SET
+          technical_proposal=?, executive_summary=?, key_strengths=?,
+          budget_amount=?, budget_currency=?, timeline_months=?, proposed_duration=?,
+          proposal_attachments=?,
+          status='submitted', is_real_submission=1,
+          updated_at=datetime('now')
+        WHERE id=?
+      `).bind(
+        combinedText || null, executiveSummary, keyStrengths,
+        budgetAmount, budgetCurrency, timelineMonths, proposedDuration,
+        proposalAttachmentsJson, existing.id
+      ).run()
+      proposalId = existing.id
+    } else {
+      const ins = await c.env.DB.prepare(`
+        INSERT INTO proposals
+          (rfp_id, vendor_id, technical_proposal, executive_summary, key_strengths,
+           budget_amount, budget_currency, timeline_months, proposed_duration,
+           proposal_attachments, status, is_real_submission, created_at, updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,'submitted',1,datetime('now'),datetime('now'))
+      `).bind(
+        rfpId, vendorId, combinedText || null, executiveSummary, keyStrengths,
+        budgetAmount, budgetCurrency, timelineMonths, proposedDuration,
+        proposalAttachmentsJson
+      ).run()
+      proposalId = ins.meta.last_row_id as number
+    }
+
+    // Auto-evaluate in background after response
+    const executionCtx = (c as any).executionCtx
+    if (executionCtx?.waitUntil) {
+      executionCtx.waitUntil(
+        (async () => {
+          try {
+            // Handle any pending large-file extraction jobs first
+            for (const job of pendingExtractionJobs) {
+              await processLargeAttachmentAsync(
+                Number(rfpId), vendorId as number, proposalId, job, c.env
+              ).catch((e: any) => console.error('[submit] async extraction failed:', e))
+            }
+            // Then run evaluation
+            const latestProposal = await (c.env as any).DB.prepare(`
+              SELECT p.*, v.name as vendor_name, v.contact_email, v.erp_experience, v.certifications, v.specializations, v.size
+              FROM proposals p LEFT JOIN vendors v ON p.vendor_id = v.id WHERE p.id=?
+            `).bind(proposalId).first<any>()
+            if (latestProposal) {
+              await runSingleEvaluation(latestProposal, rfp, String(rfpId), c.env)
+            }
+          } catch(e) { console.error('[submit] auto-eval failed:', e) }
+        })()
+      )
+    }
+
+    return c.json({
+      ok: true,
+      proposal_id: proposalId,
+      vendor_name: vendorName,
+      files_stored: storedAttachments.length,
+      message: 'Proposal submitted successfully.'
+    })
+  } catch(err: any) {
+    console.error('[submit]', err)
+    return c.json({ error: err.message || 'Submission failed' }, 500)
+  }
+})
+
 // ============================================================
 apiRouter.get('/vendor-performance', async (c) => {
   const { results } = await c.env.DB.prepare(`
@@ -3698,8 +4001,11 @@ function buildParticipantCode(rfpId: number | string, vendorId: number | string)
   return `RFP-${rfpId}-V${vendorId}`
 }
 
-function buildInvitationEmailText(v: any, rfp: any, qDeadline: string, sDeadline: string, notes: string): string {
+function buildInvitationEmailText(v: any, rfp: any, qDeadline: string, sDeadline: string, notes: string, baseUrl?: string): string {
   const participantCode = buildParticipantCode(rfp?.id || 0, v.id)
+  const submissionUrl = baseUrl
+    ? `${baseUrl}/submit/${rfp?.id || 0}?code=${participantCode}`
+    : `https://a7b32759-e743-4139-9bb0-4bae44886667.vip.gensparksite.com/submit/${rfp?.id || 0}?code=${participantCode}`
   return `Dear ${v.name},
 
 We are pleased to invite ${v.name} to participate in the competitive tendering process for the following procurement:
@@ -3714,12 +4020,19 @@ IMPORTANT DATES:
 - Proposal Submission Deadline:  ${sDeadline}
 - Evaluation Period:             Following submission deadline
 
-SUBMISSION RULES:
-1. REPLY TO THIS EMAIL to submit questions or your proposal – include the Reference Number in the subject.
-   Preferred subject format: "RE: Invitation to Tender – ${rfp?.title || 'CPC RFP'} (Ref: ${rfp?.ref_number || ''})"
-2. Submit your questions as a spreadsheet attachment (xlsx or csv) with columns: Ref | Section | Question
-3. Technical and Commercial proposals must be submitted as separate sealed documents
-4. Late submissions will not be accepted under any circumstances
+HOW TO SUBMIT YOUR PROPOSAL:
+Use the dedicated secure submission portal below to upload your proposal documents:
+
+  ${submissionUrl}
+
+Your unique Participant Reference Code (pre-filled in the link above):
+  ${participantCode}
+
+SUBMISSION GUIDELINES:
+1. Access the submission portal using the link above — your Participant Reference is pre-filled.
+2. Submit your questions by email, replying to this message with a spreadsheet (xlsx/csv): Ref | Section | Question
+3. Upload Technical and Commercial proposals as separate PDF documents via the portal.
+4. Late submissions will not be accepted under any circumstances.
 
 Please find the full RFP document attached to this email for your review.
 
@@ -3733,8 +4046,7 @@ procurement@cpc-rfp.website
 
 ──────────────────────────────────────────────
 PARTICIPANT REFERENCE: ${participantCode}
-Please include this reference code in ALL correspondence regarding this RFP.
-This code uniquely identifies your organisation for this tender.
+SUBMISSION PORTAL:     ${submissionUrl}
 ──────────────────────────────────────────────`
 }
 

@@ -1958,36 +1958,15 @@ rfpTabs.proposals = async function(rfpId) {
       ? '<button class="award-btn" onclick="awardProposal(' + rfpId + ',' + p.id + ')" title="Award contract to this vendor"><i class="fas fa-award"></i>Award Contract</button>'
       : '<span style="font-size:0.75rem;color:#92400e;font-weight:700;background:#fef3c7;padding:4px 10px;border-radius:6px;display:inline-flex;align-items:center;gap:4px"><i class="fas fa-trophy"></i>Winner</span>';
 
-    // PDF button: R2 URL → open in new tab (inline browser viewer) + download link
-    //             data: URI → programmatic Blob download (browser won't open data: in new tab)
-    //             no URL but filename known → show placeholder
-    //             multi-attachment: show count badge + primary link
+    // File count badge — clickable to open side panel with download links
     var attachments = [];
     try { if (p.proposal_attachments) attachments = JSON.parse(p.proposal_attachments); } catch(e) {}
-    var attachCount = attachments.length;
+    var attachCount = attachments.length || (p.pdf_attachment_url ? 1 : 0);
 
-    var pdfDownloadBtn = '';
-    if (attachCount > 1) {
-      // Multiple documents — show primary link + badge count
-      var primaryAttach = attachments.find(function(a){ return a.label === 'technical' && a.url; }) || attachments.find(function(a){ return a.url; });
-      var primaryLink = primaryAttach
-        ? '<a href="' + escHtml(primaryAttach.url) + '" target="_blank" class="btn-ghost btn-sm" style="text-decoration:none" title="' + escHtml(primaryAttach.filename) + '"><i class="fas fa-file-pdf" style="color:#dc2626"></i>' + escHtml(attachmentLabelText(primaryAttach.label)) + '</a>'
-        : '';
-      pdfDownloadBtn = primaryLink
-        + '<span class="btn-ghost btn-sm" style="cursor:pointer;background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8;font-size:0.7rem;font-weight:700;padding:2px 7px" onclick="viewProposalDetail(' + p.id + ')" title="' + attachCount + ' documents submitted">'
-        + attachCount + ' docs</span>';
-    } else if (p.pdf_attachment_url) {
-      if (p.pdf_attachment_url.startsWith('data:')) {
-        // Small legacy PDF stored as base64 — must use Blob download
-        pdfDownloadBtn = '<button class="btn-ghost btn-sm" onclick="downloadProposalPdf(' + p.id + ')" title="Download ' + escHtml(p.pdf_filename || 'proposal.pdf') + '"><i class="fas fa-file-pdf" style="color:#dc2626"></i>PDF</button>';
-      } else {
-        // R2 URL — open in browser (PDF viewer) AND offer download
-        pdfDownloadBtn = '<a href="' + escHtml(p.pdf_attachment_url) + '" target="_blank" class="btn-ghost btn-sm" style="text-decoration:none" title="View PDF: ' + escHtml(p.pdf_filename || 'proposal.pdf') + '"><i class="fas fa-file-pdf" style="color:#dc2626"></i>View PDF</a>';
-      }
-    } else if (p.pdf_filename) {
-      // PDF was received but could not be stored (too large, R2 unavailable) — show filename only
-      pdfDownloadBtn = '<span class="btn-ghost btn-sm" style="opacity:0.5;cursor:default" title="' + escHtml(p.pdf_filename) + ' — PDF too large to display inline"><i class="fas fa-file-pdf" style="color:#9ca3af"></i>' + escHtml(p.pdf_filename.slice(0,20)) + '</span>';
-    }
+    var filesCell = attachCount > 0
+      ? '<span class="file-count-badge" onclick="viewProposalDetail(' + p.id + ')" title="Click to view &amp; download ' + attachCount + ' file(s)">'
+        + '<i class="fas fa-paperclip"></i>' + attachCount + ' file' + (attachCount !== 1 ? 's' : '') + '</span>'
+      : '<span style="color:#9ca3af;font-size:0.8rem">—</span>';
 
 
 
@@ -2000,12 +1979,11 @@ rfpTabs.proposals = async function(rfpId) {
       + '<td style="font-weight:600">' + fin + '</td>'
       + '<td style="font-size:0.82rem;color:#6b7280">' + escHtml(dur) + '</td>'
       + '<td>' + scoreCell + '</td>'
+      + '<td>' + filesCell + '</td>'
       + '<td>' + statusBadge(p) + '</td>'
       + '<td>'
       + '<div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">'
       + '<button class="btn-ghost btn-sm" onclick="viewProposalDetail(' + p.id + ')"><i class="fas fa-eye"></i>View</button>'
-      + pdfDownloadBtn
-      + (isReal && !p.pdf_attachment_url ? '<button class="btn-ghost btn-sm" style="color:#7c3aed;border-color:#c4b5fd" onclick="reprocessProposalPdf(' + rfpId + ',' + p.id + ')" title="Re-fetch PDF from email and re-extract proposal fields"><i class="fas fa-sync"></i>Re-process</button>' : '')
       + awardBtn
       + '</div>'
       + '</td>'
@@ -2028,11 +2006,12 @@ rfpTabs.proposals = async function(rfpId) {
     + '<div class="card" style="overflow:hidden">'
     + (proposals.length === 0
       ? '<div style="padding:3rem;text-align:center;color:#9ca3af"><i class="fas fa-inbox" style="font-size:2.5rem;display:block;margin-bottom:1rem;color:#d1d5db"></i>'
-        + '<p style="margin-bottom:0">No proposals yet. Vendors submit proposals by replying to their invitation email with their proposal PDF attached.</p></div>'
+        + '<p style="margin-bottom:0.5rem">No proposals received yet.</p>'
+        + '<p style="font-size:0.8rem;color:#c4b5fd;margin:0"><i class="fas fa-link" style="margin-right:4px"></i>Vendors submit proposals via the secure submission portal link included in their invitation email.</p></div>'
       : '<div style="overflow-x:auto"><table>'
         + '<thead><tr>'
         + '<th>Vendor</th><th>Date</th><th>Financial</th><th>Duration</th>'
-        + '<th>AI Score</th><th>Status</th>'
+        + '<th>AI Score</th><th>Files</th><th>Status</th>'
         + '<th style="text-align:right">Actions</th>'
         + '</tr></thead>'
         + '<tbody>' + rows + '</tbody>'
@@ -2149,6 +2128,13 @@ function downloadProposalPdf(id) {
   }
 }
 
+function closeProposalPanel() {
+  var overlay = document.getElementById('proposalPanelOverlay');
+  var panel = document.getElementById('proposalSidePanel');
+  if (overlay) { overlay.style.opacity = '0'; setTimeout(function(){ overlay.remove(); }, 250); }
+  if (panel) { panel.style.transform = 'translateX(100%)'; setTimeout(function(){ panel.remove(); }, 300); }
+}
+
 function viewProposalDetail(id) {
   const p = appState.proposals.find(function(p){ return p.id === id; });
   if (!p) return;
@@ -2156,50 +2142,7 @@ function viewProposalDetail(id) {
   // Get matching evaluation
   const ev = (appState.evaluations || []).find(function(e){ return e.proposal_id === id || e.vendor_id === p.vendor_id; });
 
-  // Parse scoring details
-  let scoringTable = '';
-  if (ev && ev.scoring_details_json) {
-    let criteria = [];
-    try { criteria = JSON.parse(ev.scoring_details_json); } catch(e) {}
-    if (criteria.length > 0) {
-      let rows = '';
-      criteria.forEach(function(c) {
-        const ws = c.weighted !== undefined ? Number(c.weighted) : (Number(c.weight||0) * Number(c.score||0) / 100);
-        const scoreColor = c.score >= 80 ? '#065f46' : c.score >= 60 ? '#92400e' : '#dc2626';
-        rows += '<tr>'
-          + '<td style="font-weight:500;font-size:0.82rem">' + escHtml(c.name||'') + '</td>'
-          + '<td style="text-align:center"><span style="background:#e0f2fe;color:#0369a1;border-radius:4px;padding:2px 6px;font-size:0.72rem">' + escHtml(c.dimension||'') + '</span></td>'
-          + '<td style="text-align:center;font-weight:600">' + (c.weight||0) + '%</td>'
-          + '<td style="text-align:center"><span style="font-weight:700;font-size:1rem;color:' + scoreColor + '">' + (c.score||0) + '</span></td>'
-          + '<td style="font-size:0.78rem;color:#4b5563;max-width:220px">' + escHtml((c.justification||'').slice(0,180)) + '</td>'
-          + '<td style="text-align:center;font-weight:700;color:var(--cpc-blue)">' + ws.toFixed(1) + '</td>'
-          + '</tr>';
-      });
-      // Use ev.total_score as the authoritative grand total — it matches the header and list view
-      const displayTotal = ev.total_score || 0;
-      scoringTable = '<div style="margin-top:1.25rem">'
-        + '<div style="font-weight:700;font-size:0.875rem;color:#1f2937;margin-bottom:0.5rem"><i class="fas fa-table mr-2" style="color:var(--cpc-gold)"></i>Detailed Scoring Breakdown</div>'
-        + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:0.82rem">'
-        + '<thead><tr style="background:#f1f5f9">'
-        + '<th style="padding:8px 10px;text-align:left;font-weight:700;color:#374151">Criterion</th>'
-        + '<th style="padding:8px 10px;text-align:center;font-weight:700;color:#374151">Dimension</th>'
-        + '<th style="padding:8px 10px;text-align:center;font-weight:700;color:#374151">Weight</th>'
-        + '<th style="padding:8px 10px;text-align:center;font-weight:700;color:#374151">Score</th>'
-        + '<th style="padding:8px 10px;text-align:left;font-weight:700;color:#374151">Justification</th>'
-        + '<th style="padding:8px 10px;text-align:center;font-weight:700;color:#374151">Weighted</th>'
-        + '</tr></thead>'
-        + '<tbody>' + rows + '</tbody>'
-        + '<tfoot><tr style="background:#fef3c7;border-top:2px solid #fde68a">'
-        + '<td colspan="5" style="padding:8px 10px;font-weight:700;color:#92400e;text-align:right">GRAND TOTAL SCORE</td>'
-        + '<td style="padding:8px 10px;text-align:center;font-size:1.1rem;font-weight:800;color:var(--cpc-blue)">' + displayTotal + '</td>'
-        + '</tr></tfoot>'
-        + '</table></div>'
-        + '</div>';
-    }
-  }
-
-  // Vendor card + summary section
-  // Use budget_amount/currency if available, fallback to financial_proposal
+  // ── Budget & Timeline ────────────────────────────────────────────────────
   let fin = '-';
   if (p.budget_amount && p.budget_amount > 0) {
     const currency = p.budget_currency || 'AED';
@@ -2207,7 +2150,6 @@ function viewProposalDetail(id) {
   } else if (p.financial_proposal) {
     fin = 'AED ' + Number(p.financial_proposal).toLocaleString();
   }
-  // Use timeline_months if available, fallback to proposed_duration
   let dur = '-';
   if (p.timeline_months && p.timeline_months > 0) {
     dur = p.timeline_months + ' month' + (p.timeline_months === 1 ? '' : 's');
@@ -2216,159 +2158,250 @@ function viewProposalDetail(id) {
   }
   const dateStr = p.created_at ? new Date(p.created_at).toLocaleString('en-AE') : '-';
 
-  let evalHighlights = '';
-  if (ev) {
-    const sc = ev.total_score || 0;
-    const scoreColor = sc >= 80 ? '#065f46' : sc >= 65 ? '#92400e' : '#dc2626';
-    evalHighlights = '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:0.5rem;margin-bottom:1rem">'
-      + '<div style="background:#f9fafb;border-radius:8px;padding:0.75rem;text-align:center">'
-      + '<div style="font-size:1.5rem;font-weight:800;color:' + scoreColor + '">' + sc + '</div>'
-      + '<div style="font-size:0.7rem;color:#9ca3af">Total Score</div></div>'
-      + '<div style="background:#f9fafb;border-radius:8px;padding:0.75rem;text-align:center">'
-      + '<div style="font-size:1.1rem;font-weight:700;color:#0f3460">' + (ev.technical_score||'-') + '</div>'
-      + '<div style="font-size:0.7rem;color:#9ca3af">Technical</div></div>'
-      + '<div style="background:#f9fafb;border-radius:8px;padding:0.75rem;text-align:center">'
-      + '<div style="font-size:1.1rem;font-weight:700;color:#7c3aed">' + (ev.business_score||'-') + '</div>'
-      + '<div style="font-size:0.7rem;color:#9ca3af">Business</div></div>'
-      + '<div style="background:#f9fafb;border-radius:8px;padding:0.75rem;text-align:center">'
-      + '<div style="font-size:1.1rem;font-weight:700;color:#c9a84c">' + (ev.financial_score||'-') + '</div>'
-      + '<div style="font-size:0.7rem;color:#9ca3af">Commercial</div></div>'
+  // ── Score header ────────────────────────────────────────────────────────
+  let scoreHeader = '';
+  if (ev && ev.total_score) {
+    const sc = ev.total_score;
+    const scoreColor = sc >= 80 ? '#065f46' : sc >= 65 ? '#b45309' : '#dc2626';
+    const scoreBg    = sc >= 80 ? '#d1fae5' : sc >= 65 ? '#fef3c7' : '#fee2e2';
+    scoreHeader = '<div style="display:inline-flex;align-items:baseline;gap:4px;background:' + scoreBg + ';padding:4px 12px;border-radius:20px">'
+      + '<span style="font-size:1.5rem;font-weight:800;color:' + scoreColor + '">' + sc + '</span>'
+      + '<span style="font-size:0.78rem;color:' + scoreColor + ';font-weight:600">/100</span>'
       + '</div>';
   }
 
-  // PDF section removed from modal per UX request — download button is on the proposals list row instead
+  // ── Score breakdown tiles ───────────────────────────────────────────────
+  let scoreTiles = '';
+  if (ev) {
+    const tiles = [
+      { label: 'Technical',   val: ev.technical_score,  color: '#0f3460', bg: '#eff6ff' },
+      { label: 'Business',    val: ev.business_score,   color: '#7c3aed', bg: '#f5f3ff' },
+      { label: 'Commercial',  val: ev.financial_score,  color: '#b45309', bg: '#fffbeb' },
+    ];
+    scoreTiles = '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0.5rem;margin-bottom:1rem">';
+    tiles.forEach(function(t) {
+      scoreTiles += '<div style="background:' + t.bg + ';border-radius:8px;padding:0.75rem;text-align:center">'
+        + '<div style="font-size:1.15rem;font-weight:800;color:' + t.color + '">' + (t.val !== undefined && t.val !== null ? t.val : '–') + '</div>'
+        + '<div style="font-size:0.7rem;color:#6b7280;margin-top:2px">' + t.label + '</div>'
+        + '</div>';
+    });
+    scoreTiles += '</div>';
+  }
 
-  showModal(
-    '<div style="max-width:700px">'
-    // Header
-    + '<div style="display:flex;align-items:center;gap:0.875rem;margin-bottom:1.25rem">'
-    + '<div style="width:44px;height:44px;border-radius:10px;background:var(--cpc-blue);display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:1.1rem">' + escHtml((p.vendor_name||'?').charAt(0)) + '</div>'
-    + '<div><h3 style="font-size:1rem;font-weight:700;margin:0">' + escHtml(p.vendor_name||'Unknown') + '</h3>'
-    + '<div style="font-size:0.78rem;color:#9ca3af">' + dateStr + '</div>'
-    + '</div></div>'
+  // ── AI summary ──────────────────────────────────────────────────────────
+  const aiSummaryHtml = (ev && ev.ai_summary)
+    ? '<div style="margin-bottom:1.25rem">'
+      + '<div class="panel-section-title"><i class="fas fa-robot" style="color:#7c3aed"></i>AI Evaluation Summary</div>'
+      + '<div style="background:#faf5ff;border:1px solid #e9d5ff;border-radius:8px;padding:0.875rem;font-size:0.82rem;line-height:1.7;color:#374151">' + escHtml(ev.ai_summary) + '</div>'
+      + '</div>'
+    : '';
 
-    // Vendor data card — 4 columns: Budget, Timeline, Status, Submission type
-    + '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:0.625rem;background:#f8fafc;border-radius:10px;padding:1rem;margin-bottom:1rem">'
-    + '<div><div style="font-size:0.68rem;color:#9ca3af;font-weight:600;text-transform:uppercase;letter-spacing:0.05em">Budget</div><div style="font-size:0.95rem;font-weight:700;color:#0f3460">' + escHtml(fin) + '</div></div>'
-    + '<div><div style="font-size:0.68rem;color:#9ca3af;font-weight:600;text-transform:uppercase;letter-spacing:0.05em">Timeline</div><div style="font-size:0.95rem;font-weight:700;color:#0f3460">' + escHtml(dur) + '</div></div>'
-    + '<div><div style="font-size:0.68rem;color:#9ca3af;font-weight:600;text-transform:uppercase;letter-spacing:0.05em">Status</div><div style="margin-top:2px">' + (p.status === 'awarded' ? '<span style="font-size:0.8rem;font-weight:700;color:#065f46"><i class="fas fa-trophy mr-1"></i>Awarded</span>' : '<span style="font-size:0.8rem;font-weight:600;color:#374151">' + escHtml(p.status||'submitted') + '</span>') + '</div></div>'
-    + '<div><div style="font-size:0.68rem;color:#9ca3af;font-weight:600;text-transform:uppercase;letter-spacing:0.05em">Submission</div><div style="margin-top:2px">' + (p.is_real_submission ? '<span style="font-size:0.75rem;font-weight:700;color:#92400e"><i class="fas fa-envelope-open mr-1"></i>Email</span>' : '<span style="font-size:0.75rem;color:#9ca3af">Manual</span>') + '</div></div>'
-    + '</div>'
+  // ── Technical approach ──────────────────────────────────────────────────
+  let techHtml = '';
+  if (p.executive_summary) {
+    techHtml = '<div style="margin-bottom:1.25rem">'
+      + '<div class="panel-section-title"><i class="fas fa-file-alt" style="color:var(--cpc-blue)"></i>Technical Approach</div>'
+      + '<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:0.875rem;font-size:0.82rem;line-height:1.7;color:#1e3a5f">' + escHtml(p.executive_summary) + '</div>'
+      + '</div>';
+  } else if (p.technical_proposal) {
+    var tp = p.technical_proposal;
+    var psOpCount = (tp.match(/\b(dup|pop|exch|sub|add|truncate|ifelse|RG|rg|Tf|Td|Tm|BT|ET|NonStruct|F\d+)\b/g) || []).length;
+    var totalWords = (tp.match(/\S+/g) || []).length;
+    var isGarbage = totalWords > 10 && (psOpCount / totalWords) > 0.15;
+    if (isGarbage) {
+      techHtml = '<div style="margin-bottom:1.25rem"><div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:0.875rem;font-size:0.82rem;color:#92400e"><i class="fas fa-exclamation-triangle mr-2"></i>PDF uses complex font encoding — text could not be extracted. Download the file to read it.</div></div>';
+    } else {
+      techHtml = '<div style="margin-bottom:1.25rem">'
+        + '<div class="panel-section-title"><i class="fas fa-lightbulb" style="color:var(--cpc-gold)"></i>Technical Approach</div>'
+        + '<div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:0.875rem;font-size:0.82rem;max-height:160px;overflow-y:auto;white-space:pre-wrap;line-height:1.6;color:#374151">' + escHtml(tp.slice(0, 1200)) + (tp.length > 1200 ? '…' : '') + '</div>'
+        + '</div>';
+    }
+  }
 
-    // Eval scores
-    + evalHighlights
+  // ── Key Strengths ───────────────────────────────────────────────────────
+  let strengthsHtml = '';
+  if (p.key_strengths) {
+    const lines = p.key_strengths.split('\n').map(function(l){ return l.trim().replace(/^[•\-\*]\s*/, ''); }).filter(Boolean);
+    if (lines.length > 0) {
+      strengthsHtml = '<div style="margin-bottom:1.25rem">'
+        + '<div class="panel-section-title"><i class="fas fa-star" style="color:var(--cpc-gold)"></i>Key Strengths</div>'
+        + '<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:0.875rem">'
+        + '<ul style="margin:0;padding-left:1.25rem;font-size:0.82rem;line-height:1.7;color:#374151">'
+        + lines.map(function(l){ return '<li>' + escHtml(l) + '</li>'; }).join('')
+        + '</ul></div></div>';
+    }
+  }
 
-    // Executive Summary (LLM-extracted)
-    + (p.executive_summary ? '<div style="margin-bottom:1rem"><div style="font-weight:700;font-size:0.875rem;color:#1f2937;margin-bottom:0.5rem"><i class="fas fa-file-alt mr-2" style="color:var(--cpc-blue)"></i>Executive Summary</div><div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:0.875rem;font-size:0.82rem;line-height:1.7;color:#1e3a5f">' + escHtml(p.executive_summary) + '</div></div>' : '')
-
-    // Key Strengths (LLM-extracted bullet list)
-    + (p.key_strengths ? (function() {
-        const lines = p.key_strengths.split('\n').map(function(l){ return l.trim(); }).filter(function(l){ return l.length > 0; });
-        const bullets = lines.map(function(l) {
-          const text = l.replace(/^[•\-\*]\s*/, '');
-          return '<li style="margin-bottom:0.3rem;color:#374151">' + escHtml(text) + '</li>';
-        }).join('');
-        return '<div style="margin-bottom:1rem"><div style="font-weight:700;font-size:0.875rem;color:#1f2937;margin-bottom:0.5rem"><i class="fas fa-star mr-2" style="color:var(--cpc-gold)"></i>Key Strengths</div>'
-          + '<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:0.875rem">'
-          + '<ul style="margin:0;padding-left:1.25rem;font-size:0.82rem;line-height:1.6">' + bullets + '</ul>'
-          + '</div></div>';
-      })() : '')
-
-    // Technical summary (raw extracted text — shown only if no executive_summary AND text is not PostScript garbage)
-    + (function() {
-        if (p.executive_summary || !p.technical_proposal) return '';
-        // Detect PostScript garbage: high density of known PS operators/short tokens
-        var tp = p.technical_proposal;
-        var psOpCount = (tp.match(/\b(dup|pop|exch|sub|add|truncate|ifelse|RG|rg|Tf|Td|Tm|BT|ET|NonStruct|F\d+)\b/g) || []).length;
-        var totalWords = (tp.match(/\S+/g) || []).length;
-        var isGarbage = totalWords > 10 && (psOpCount / totalWords) > 0.15;
-        if (isGarbage) {
-          return '<div style="margin-bottom:1rem"><div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:0.875rem;font-size:0.82rem;color:#92400e"><i class="fas fa-exclamation-triangle mr-2"></i>The PDF for this proposal uses a complex font encoding that could not be extracted as readable text. Please download the PDF directly to view the full proposal content.</div></div>';
-        }
-        return '<div style="margin-bottom:1rem"><div style="font-weight:700;font-size:0.875rem;color:#1f2937;margin-bottom:0.5rem"><i class="fas fa-lightbulb mr-2" style="color:var(--cpc-gold)"></i>Technical Proposal</div><div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:0.875rem;font-size:0.82rem;max-height:180px;overflow-y:auto;white-space:pre-wrap;line-height:1.6;color:#374151">' + escHtml(tp) + '</div></div>';
-      })()
-
-    // AI summary
-    + (ev && ev.ai_summary ? '<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:0.875rem;margin-bottom:1rem"><div style="font-size:0.72rem;font-weight:700;color:#92400e;margin-bottom:4px"><i class="fas fa-robot mr-1"></i>AI Evaluation Summary</div><div style="font-size:0.82rem;color:#374151;line-height:1.6">' + escHtml(ev.ai_summary) + '</div></div>' : '')
-
-    // Scoring table
-    + scoringTable
-
-    // ── Proposal Documents panel ───────────────────────────────────────────────
-    // Shows all submitted attachments (technical + commercial + other)
-    // Falls back to single-PDF display for legacy/simple submissions
-    + (function() {
-        var attachments = [];
-        try { if (p.proposal_attachments) attachments = JSON.parse(p.proposal_attachments); } catch(e) {}
-
-        // ── Multi-document layout ────────────────────────────────────────────
-        if (attachments.length > 0) {
-          var docRows = attachments.map(function(a) {
-            var sizeStr = a.size_bytes > 0 ? (Math.round(a.size_bytes / 1024 / 1024 * 10) / 10) + ' MB' : '';
-            var textStr = a.text_chars > 0 ? a.text_chars.toLocaleString() + ' chars extracted' : 'not extracted';
-            var openBtn = a.url
-              ? '<a href="' + escHtml(a.url) + '" target="_blank" style="text-decoration:none;display:inline-flex;align-items:center;gap:0.3rem;font-size:0.78rem;font-weight:600;color:#1d4ed8;padding:4px 10px;border:1px solid #bfdbfe;border-radius:6px;background:#eff6ff"><i class="fas fa-external-link-alt" style="font-size:0.65rem"></i>Open</a>'
-              : '<span style="font-size:0.75rem;color:#9ca3af;font-style:italic">Not stored</span>';
-            var dlBtn = a.url
-              ? '<a href="' + escHtml(a.url) + '" download="' + escHtml(a.filename) + '" style="text-decoration:none;display:inline-flex;align-items:center;gap:0.3rem;font-size:0.78rem;color:#6b7280;padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;background:#f9fafb"><i class="fas fa-download" style="font-size:0.65rem"></i></a>'
-              : '';
-            return '<div style="display:flex;align-items:center;gap:0.75rem;padding:0.6rem 0.75rem;border-bottom:1px solid #f3f4f6;flex-wrap:wrap">'
-              + '<i class="fas fa-file-pdf" style="color:#dc2626;font-size:1.1rem;flex-shrink:0"></i>'
-              + '<div style="flex:1;min-width:0">'
-              + '<div style="font-size:0.82rem;font-weight:600;color:#1f2937;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="' + escHtml(a.filename) + '">' + escHtml(a.filename) + '</div>'
-              + '<div style="font-size:0.72rem;color:#9ca3af;margin-top:1px">'
-              + (sizeStr ? sizeStr + ' &bull; ' : '') + textStr
-              + '</div>'
-              + '</div>'
-              + attachmentLabelPill(a.label)
-              + '<div style="display:flex;gap:0.3rem;flex-shrink:0">' + openBtn + dlBtn + '</div>'
-              + '</div>';
-          }).join('');
-
-          return '<div style="margin-bottom:1rem">'
-            + '<div style="font-weight:700;font-size:0.875rem;color:#1f2937;margin-bottom:0.5rem"><i class="fas fa-paperclip mr-2" style="color:#6b7280"></i>Submitted Documents (' + attachments.length + ')</div>'
-            + '<div style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;background:#fff">'
-            + docRows
-            + '</div>'
+  // ── Team Composition ────────────────────────────────────────────────────
+  // Rendered only if scoring criteria contain a team-related dimension with justification
+  let teamHtml = '';
+  if (ev && ev.scoring_details_json) {
+    try {
+      var crit = JSON.parse(ev.scoring_details_json);
+      var teamCrit = crit.filter(function(c){ return /team|resource|staff|personnel|key personnel/i.test(c.name||''); });
+      if (teamCrit.length > 0) {
+        var teamRows = teamCrit.map(function(c){
+          return '<div style="padding:0.5rem 0;border-bottom:1px solid #f3f4f6">'
+            + '<div style="font-size:0.8rem;font-weight:600;color:#1f2937">' + escHtml(c.name||'') + '</div>'
+            + (c.justification ? '<div style="font-size:0.77rem;color:#6b7280;margin-top:2px">' + escHtml(c.justification) + '</div>' : '')
             + '</div>';
-        }
+        }).join('');
+        teamHtml = '<div style="margin-bottom:1.25rem">'
+          + '<div class="panel-section-title"><i class="fas fa-users" style="color:#0369a1"></i>Team Composition</div>'
+          + '<div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:0.75rem 0.875rem">' + teamRows + '</div>'
+          + '</div>';
+      }
+    } catch(e) {}
+  }
 
-        // ── Single-document / legacy layout ──────────────────────────────────
-        if (!p.pdf_attachment_url) {
-          if (p.pdf_filename) {
-            var reprocessBtn = p.is_real_submission
-              ? '<button class="btn-secondary" style="margin-top:0.5rem;background:#7c3aed;border-color:#7c3aed;color:white" onclick="closeModal();reprocessProposalPdf(' + p.rfp_id + ',' + p.id + ')"><i class="fas fa-sync mr-1"></i>Re-process PDF from Email</button>'
-              : '';
-            return '<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:0.875rem;margin-bottom:1rem">'
-              + '<div style="display:flex;align-items:center;gap:0.5rem;font-size:0.82rem;color:#92400e;margin-bottom:0.35rem"><i class="fas fa-exclamation-circle" style="color:#f97316"></i><strong>PDF not stored</strong></div>'
-              + '<div style="font-size:0.8rem;color:#78350f">File: <strong>' + escHtml(p.pdf_filename) + '</strong><br>This proposal was received before cloud storage was configured. '
-              + 'The summary and scores are based on the email body only — not the actual PDF content.</div>'
-              + reprocessBtn
-              + '</div>';
-          }
-          return '';
-        }
-        if (p.pdf_attachment_url.startsWith('data:')) {
-          return '<div style="margin-bottom:1rem"><button class="btn-secondary" onclick="downloadProposalPdf(' + p.id + ')"><i class="fas fa-download mr-1"></i>Download Proposal PDF</button></div>';
-        }
-        // Single R2 URL — offer both inline view and download
-        return '<div style="margin-bottom:1rem">'
-          + '<div style="font-weight:700;font-size:0.875rem;color:#1f2937;margin-bottom:0.5rem"><i class="fas fa-paperclip mr-2" style="color:#6b7280"></i>Submitted Document</div>'
-          + '<div style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;background:#fff">'
-          + '<div style="display:flex;align-items:center;gap:0.75rem;padding:0.6rem 0.75rem;flex-wrap:wrap">'
-          + '<i class="fas fa-file-pdf" style="color:#dc2626;font-size:1.1rem;flex-shrink:0"></i>'
-          + '<div style="flex:1;font-size:0.82rem;font-weight:600;color:#1f2937;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + escHtml(p.pdf_filename || 'proposal.pdf') + '</div>'
-          + '<div style="display:flex;gap:0.4rem;flex-shrink:0">'
-          + '<a href="' + escHtml(p.pdf_attachment_url) + '" target="_blank" style="text-decoration:none;display:inline-flex;align-items:center;gap:0.3rem;font-size:0.78rem;font-weight:600;color:#1d4ed8;padding:4px 10px;border:1px solid #bfdbfe;border-radius:6px;background:#eff6ff"><i class="fas fa-external-link-alt" style="font-size:0.65rem"></i>Open</a>'
-          + '<a href="' + escHtml(p.pdf_attachment_url) + '" download="' + escHtml(p.pdf_filename || 'proposal.pdf') + '" style="text-decoration:none;display:inline-flex;align-items:center;gap:0.3rem;font-size:0.78rem;color:#6b7280;padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;background:#f9fafb"><i class="fas fa-download" style="font-size:0.65rem"></i>Download</a>'
-          + '</div></div></div></div>';
-      })()
+  // ── Scoring table ───────────────────────────────────────────────────────
+  let scoringTableHtml = '';
+  if (ev && ev.scoring_details_json) {
+    try {
+      var criteria = JSON.parse(ev.scoring_details_json);
+      if (criteria.length > 0) {
+        const displayTotal = ev.total_score || 0;
+        var tableRows = criteria.map(function(c) {
+          const ws = c.weighted !== undefined ? Number(c.weighted) : (Number(c.weight||0) * Number(c.score||0) / 100);
+          const scoreColor = c.score >= 80 ? '#065f46' : c.score >= 60 ? '#92400e' : '#dc2626';
+          return '<tr>'
+            + '<td style="padding:7px 8px;font-weight:500;font-size:0.8rem;color:#1f2937">' + escHtml(c.name||'') + '</td>'
+            + '<td style="padding:7px 8px;text-align:center"><span style="background:#e0f2fe;color:#0369a1;border-radius:4px;padding:2px 5px;font-size:0.7rem">' + escHtml(c.dimension||'') + '</span></td>'
+            + '<td style="padding:7px 8px;text-align:center;font-size:0.8rem;color:#6b7280">' + (c.weight||0) + '%</td>'
+            + '<td style="padding:7px 8px;text-align:center"><span style="font-weight:700;color:' + scoreColor + '">' + (c.score||0) + '</span></td>'
+            + '<td style="padding:7px 8px;font-size:0.75rem;color:#4b5563;max-width:180px">' + escHtml((c.justification||'').slice(0,160)) + '</td>'
+            + '<td style="padding:7px 8px;text-align:center;font-weight:700;color:var(--cpc-blue)">' + ws.toFixed(1) + '</td>'
+            + '</tr>';
+        }).join('');
+        scoringTableHtml = '<div style="margin-bottom:1.25rem">'
+          + '<div class="panel-section-title"><i class="fas fa-table" style="color:var(--cpc-gold)"></i>Scoring Breakdown</div>'
+          + '<div style="overflow-x:auto;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden">'
+          + '<table style="width:100%;border-collapse:collapse;font-size:0.8rem">'
+          + '<thead><tr style="background:#f1f5f9">'
+          + '<th style="padding:8px;text-align:left;font-weight:700;color:#374151;font-size:0.78rem">Criterion</th>'
+          + '<th style="padding:8px;text-align:center;font-weight:700;color:#374151;font-size:0.78rem">Dim.</th>'
+          + '<th style="padding:8px;text-align:center;font-weight:700;color:#374151;font-size:0.78rem">Wt%</th>'
+          + '<th style="padding:8px;text-align:center;font-weight:700;color:#374151;font-size:0.78rem">Score</th>'
+          + '<th style="padding:8px;text-align:left;font-weight:700;color:#374151;font-size:0.78rem">Justification</th>'
+          + '<th style="padding:8px;text-align:center;font-weight:700;color:#374151;font-size:0.78rem">Wtd</th>'
+          + '</tr></thead>'
+          + '<tbody>' + tableRows + '</tbody>'
+          + '<tfoot><tr style="background:#fef3c7;border-top:2px solid #fde68a">'
+          + '<td colspan="5" style="padding:8px;font-weight:700;color:#92400e;text-align:right;font-size:0.8rem">TOTAL SCORE</td>'
+          + '<td style="padding:8px;text-align:center;font-size:1rem;font-weight:800;color:var(--cpc-blue)">' + displayTotal + '</td>'
+          + '</tr></tfoot>'
+          + '</table></div></div>';
+      }
+    } catch(e) {}
+  }
 
-    + '<div style="display:flex;gap:0.5rem;margin-top:1.25rem">'
-    + '<button class="btn-ghost" style="flex:1" onclick="closeModal()">Close</button>'
+  // ── Documents list ──────────────────────────────────────────────────────
+  let docsHtml = '';
+  var attachments = [];
+  try { if (p.proposal_attachments) attachments = JSON.parse(p.proposal_attachments); } catch(e) {}
+
+  if (attachments.length > 0) {
+    var docItems = attachments.map(function(a) {
+      var sizeStr = a.size_bytes > 0 ? (Math.round(a.size_bytes / 1024 / 1024 * 10) / 10) + ' MB' : '';
+      var openBtn = a.url
+        ? '<a href="' + escHtml(a.url) + '" target="_blank" style="text-decoration:none;font-size:0.75rem;font-weight:600;color:#1d4ed8;padding:3px 8px;border:1px solid #bfdbfe;border-radius:5px;background:#eff6ff;display:inline-flex;align-items:center;gap:3px"><i class="fas fa-external-link-alt" style="font-size:0.6rem"></i>Open</a>' : '';
+      var dlBtn = a.url
+        ? '<a href="' + escHtml(a.url) + '" download="' + escHtml(a.filename) + '" style="text-decoration:none;font-size:0.75rem;color:#6b7280;padding:3px 7px;border:1px solid #e5e7eb;border-radius:5px;background:#f9fafb;display:inline-flex;align-items:center;gap:3px"><i class="fas fa-download" style="font-size:0.6rem"></i>Save</a>' : '';
+      return '<div style="display:flex;align-items:center;gap:0.625rem;padding:0.55rem 0.75rem;border-bottom:1px solid #f3f4f6">'
+        + '<i class="fas fa-file-pdf" style="color:#dc2626;font-size:1rem;flex-shrink:0"></i>'
+        + '<div style="flex:1;min-width:0">'
+        + '<div style="font-size:0.8rem;font-weight:600;color:#1f2937;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + escHtml(a.filename) + '</div>'
+        + '<div style="font-size:0.7rem;color:#9ca3af">' + (sizeStr || '') + (sizeStr && a.label ? ' · ' : '') + (a.label ? attachmentLabelText(a.label) : '') + '</div>'
+        + '</div>'
+        + attachmentLabelPill(a.label)
+        + '<div style="display:flex;gap:0.3rem;flex-shrink:0">' + openBtn + dlBtn + '</div>'
+        + '</div>';
+    }).join('');
+    docsHtml = '<div style="margin-bottom:1.25rem">'
+      + '<div class="panel-section-title"><i class="fas fa-paperclip" style="color:#6b7280"></i>Submitted Documents (' + attachments.length + ')</div>'
+      + '<div style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;background:#fff">' + docItems + '</div>'
+      + '</div>';
+  } else if (p.pdf_attachment_url) {
+    var singleOpen = p.pdf_attachment_url.startsWith('data:')
+      ? '<button class="btn-secondary" onclick="downloadProposalPdf(' + p.id + ')"><i class="fas fa-download mr-1"></i>Download PDF</button>'
+      : '<a href="' + escHtml(p.pdf_attachment_url) + '" target="_blank" style="text-decoration:none;font-size:0.78rem;font-weight:600;color:#1d4ed8;padding:5px 12px;border:1px solid #bfdbfe;border-radius:6px;background:#eff6ff;display:inline-flex;align-items:center;gap:4px"><i class="fas fa-external-link-alt" style="font-size:0.65rem"></i>Open PDF</a>'
+        + ' <a href="' + escHtml(p.pdf_attachment_url) + '" download="' + escHtml(p.pdf_filename||'proposal.pdf') + '" style="text-decoration:none;font-size:0.78rem;color:#6b7280;padding:5px 10px;border:1px solid #e5e7eb;border-radius:6px;background:#f9fafb;display:inline-flex;align-items:center;gap:4px;margin-left:4px"><i class="fas fa-download" style="font-size:0.65rem"></i>Save</a>';
+    docsHtml = '<div style="margin-bottom:1.25rem">'
+      + '<div class="panel-section-title"><i class="fas fa-paperclip" style="color:#6b7280"></i>Submitted Document</div>'
+      + '<div style="padding:0.75rem;border:1px solid #e5e7eb;border-radius:8px;display:flex;align-items:center;gap:0.75rem">'
+      + '<i class="fas fa-file-pdf" style="color:#dc2626;font-size:1.1rem"></i>'
+      + '<div style="flex:1;font-size:0.82rem;font-weight:600;color:#1f2937">' + escHtml(p.pdf_filename||'proposal.pdf') + '</div>'
+      + '<div>' + singleOpen + '</div>'
+      + '</div></div>';
+  }
+
+  // ── Build side panel ────────────────────────────────────────────────────
+  // Remove any existing panel
+  closeProposalPanel();
+
+  var overlay = document.createElement('div');
+  overlay.id = 'proposalPanelOverlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.35);z-index:900;transition:opacity 0.25s';
+  overlay.addEventListener('click', closeProposalPanel);
+
+  var panel = document.createElement('div');
+  panel.id = 'proposalSidePanel';
+  panel.style.cssText = 'position:fixed;top:0;right:0;bottom:0;width:min(680px,100vw);background:#fff;z-index:901;overflow-y:auto;box-shadow:-4px 0 32px rgba(0,0,0,0.15);transform:translateX(100%);transition:transform 0.3s cubic-bezier(0.16,1,0.3,1);display:flex;flex-direction:column';
+
+  panel.innerHTML =
+    // ── Panel header ──────────────────────────────────────────────────────
+    '<div style="position:sticky;top:0;z-index:10;background:#fff;border-bottom:1px solid #e5e7eb;padding:1rem 1.25rem;display:flex;align-items:center;gap:0.875rem">'
+    + '<div style="width:40px;height:40px;border-radius:10px;background:var(--cpc-blue);display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:1rem;flex-shrink:0">' + escHtml((p.vendor_name||'?').charAt(0)) + '</div>'
+    + '<div style="flex:1;min-width:0">'
+    + '<div style="font-weight:700;font-size:0.97rem;color:#1f2937;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + escHtml(p.vendor_name||'Unknown Vendor') + '</div>'
+    + '<div style="font-size:0.75rem;color:#9ca3af">' + dateStr + '</div>'
+    + '</div>'
+    + (scoreHeader ? '<div style="flex-shrink:0">' + scoreHeader + '</div>' : '')
+    + '<button onclick="closeProposalPanel()" style="flex-shrink:0;width:32px;height:32px;border-radius:8px;border:1px solid #e5e7eb;background:#f9fafb;color:#6b7280;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:1rem;transition:background 0.15s" title="Close panel"><i class="fas fa-times"></i></button>'
+    + '</div>'
+
+    // ── Key metrics bar ───────────────────────────────────────────────────
+    + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0;border-bottom:1px solid #e5e7eb">'
+    + '<div style="padding:0.875rem 1.25rem;border-right:1px solid #e5e7eb">'
+    + '<div style="font-size:0.68rem;color:#9ca3af;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:3px">Budget</div>'
+    + '<div style="font-size:1rem;font-weight:700;color:#0f3460">' + escHtml(fin) + '</div>'
+    + '</div>'
+    + '<div style="padding:0.875rem 1.25rem;border-right:1px solid #e5e7eb">'
+    + '<div style="font-size:0.68rem;color:#9ca3af;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:3px">Delivery Timeline</div>'
+    + '<div style="font-size:1rem;font-weight:700;color:#0f3460">' + escHtml(dur) + '</div>'
+    + '</div>'
+    + '<div style="padding:0.875rem 1.25rem">'
+    + '<div style="font-size:0.68rem;color:#9ca3af;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:3px">Status</div>'
+    + '<div style="margin-top:1px">' + (p.status === 'awarded' ? '<span style="font-size:0.82rem;font-weight:700;color:#065f46"><i class="fas fa-trophy mr-1"></i>Awarded</span>' : '<span style="font-size:0.82rem;font-weight:600;color:#374151">' + escHtml((p.status||'submitted').replace(/_/g,' ')) + '</span>') + '</div>'
     + '</div>'
     + '</div>'
-  );
+
+    // ── Score tiles (if evaluated) ────────────────────────────────────────
+    + (scoreTiles ? '<div style="padding:1rem 1.25rem;border-bottom:1px solid #e5e7eb;background:#fafafa">' + scoreTiles + '</div>' : '')
+
+    // ── Scrollable body ───────────────────────────────────────────────────
+    + '<div style="padding:1.25rem;flex:1">'
+    + aiSummaryHtml
+    + techHtml
+    + strengthsHtml
+    + teamHtml
+    + scoringTableHtml
+    + docsHtml
+    + '</div>'
+
+    // ── Footer ─────────────────────────────────────────────────────────────
+    + '<div style="position:sticky;bottom:0;background:#fff;border-top:1px solid #e5e7eb;padding:0.875rem 1.25rem;display:flex;gap:0.5rem;justify-content:flex-end">'
+    + '<button class="btn-ghost" onclick="closeProposalPanel()" style="padding:0.5rem 1.25rem">Close</button>'
+    + '</div>';
+
+  document.body.appendChild(overlay);
+  document.body.appendChild(panel);
+
+  // Trigger animations
+  requestAnimationFrame(function() {
+    overlay.style.opacity = '1';
+    requestAnimationFrame(function() { panel.style.transform = 'translateX(0)'; });
+  });
 }
 
 // --- TAB: SCORING MODEL ---

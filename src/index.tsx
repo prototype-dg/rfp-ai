@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { apiRouter } from './api/index'
 import { getLayout } from './layout'
+import { getSubmitPage } from './submit-page'
 import type { Bindings } from './types'
 // Import static assets as raw strings at build time (Vite ?raw)
 import appJs from '../public/static/app.js?raw'
@@ -34,6 +35,13 @@ app.get('/static/style.css', (c) => {
 
 // API routes
 app.route('/api', apiRouter)
+
+// Public vendor proposal submission page
+app.get('/submit/:rfpId', (c) => {
+  const rfpId = c.req.param('rfpId')
+  const code = c.req.query('code') || ''
+  return c.html(getSubmitPage(rfpId, code))
+})
 
 // SPA - serve for all non-API routes
 app.get('*', (c) => {

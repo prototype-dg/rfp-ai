@@ -1,1 +1,36 @@
 h1 { font-family: Arial, Helvetica, sans-serif; }
+
+/* Proposals page — file count badge (clickable cell) */
+.file-count-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #1d4ed8;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 20px;
+  padding: 3px 10px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  user-select: none;
+  white-space: nowrap;
+}
+.file-count-badge:hover {
+  background: #dbeafe;
+  border-color: #93c5fd;
+}
+.file-count-badge i { font-size: 0.72rem; }
+
+/* Proposal side panel — section headings */
+.panel-section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+  font-size: 0.84rem;
+  color: #1f2937;
+  margin-bottom: 0.5rem;
+}
+.panel-section-title i { font-size: 0.82rem; }
