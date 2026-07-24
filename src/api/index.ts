@@ -1778,6 +1778,87 @@ apiRouter.get('/rfps/:rfpId/proposals/:proposalId/reprocess-from-r2/status', asy
   })
 })
 
+// ── Diagnostic: vision-test endpoint ─────────────────────────────────────────────────────────────
+// GET /api/rfps/:rfpId/proposals/:proposalId/vision-test
+// Fetches the first R2 attachment, calls the vision API, and returns the FULL HTTP status + body
+// so we can see exactly what error (if any) the Worker gets when calling the LLM proxy.
+apiRouter.get('/rfps/:rfpId/proposals/:proposalId/vision-test', async (c) => {
+  const proposalId = Number(c.req.param('proposalId'))
+  const db = c.env.DB as D1Database
+  const bucket: R2Bucket | undefined = (c.env as any).PROPOSALS_BUCKET
+  const apiKey = (c.env as any).OPENAI_API_KEY || ''
+  const baseUrl = (c.env as any).OPENAI_BASE_URL || 'https://www.genspark.ai/api/llm_proxy/v1'
+
+  const proposal = await db.prepare(
+    `SELECT p.proposal_attachments, v.name as vendor_name FROM proposals p LEFT JOIN vendors v ON p.vendor_id=v.id WHERE p.id=?`
+  ).bind(proposalId).first<any>()
+  if (!proposal) return c.json({ error: 'Proposal not found' }, 404)
+
+  const atts: any[] = JSON.parse(proposal.proposal_attachments || '[]')
+  const firstAtt = atts.find((a: any) => a.r2_key)
+  if (!firstAtt || !bucket) return c.json({ error: 'No R2 attachment or no bucket', atts }, 404)
+
+  const obj = await bucket.get(firstAtt.r2_key)
+  if (!obj) return c.json({ error: 'R2 object not found', r2_key: firstAtt.r2_key }, 404)
+  const rawBytes = new Uint8Array(await obj.arrayBuffer())
+  const base64Pdf = uint8ToBase64(rawBytes)
+
+  // --- Test 1: Claude document content type (primary approach) ---
+  const reqBody1 = {
+    model: 'claude-sonnet-4-5', max_tokens: 200, temperature: 0.1,
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64Pdf }, title: firstAtt.filename, context: 'Extract text.' },
+        { type: 'text', text: 'What is the first sentence of this document?' }
+      ]
+    }]
+  }
+  const res1 = await fetch(`${baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(reqBody1)
+  })
+  const status1 = res1.status
+  const body1 = await res1.text().catch(() => 'unreadable')
+
+  // --- Test 2: plain text message (connectivity + model check) ---
+  const reqBody2 = {
+    model: 'claude-sonnet-4-5', max_tokens: 20, temperature: 0,
+    messages: [{ role: 'user', content: 'Say HELLO in one word.' }]
+  }
+  const res2 = await fetch(`${baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(reqBody2)
+  })
+  const status2 = res2.status
+  const body2 = await res2.text().catch(() => 'unreadable')
+
+  return c.json({
+    vendor_name: proposal.vendor_name,
+    attachment: {
+      filename: firstAtt.filename,
+      r2_key: firstAtt.r2_key,
+      size_bytes: rawBytes.length,
+      b64_chars: base64Pdf.length,
+    },
+    api_key_present: !!apiKey,
+    api_key_prefix: apiKey ? (apiKey.slice(0, 8) + '...') : 'MISSING',
+    base_url: baseUrl,
+    test1_claude_document: {
+      description: 'claude-sonnet-4-5 with Anthropic document content type',
+      http_status: status1,
+      response_body: body1.slice(0, 800),
+    },
+    test2_claude_plain: {
+      description: 'claude-sonnet-4-5 plain text (connectivity check)',
+      http_status: status2,
+      response_body: body2.slice(0, 400),
+    },
+  })
+})
+
 // ── Background worker: all vision/LLM processing for reprocess-from-r2 ──────────────────────────
 // Runs inside ctx.waitUntil() — no 30ms CPU limit, runs to completion after response is sent.
 async function doReprocessFromR2(
@@ -2353,7 +2434,7 @@ apiRouter.post('/submit/:rfpId/categorize', async (c) => {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'gpt-4.1-mini',
+        model: 'gpt-5-mini',
         max_tokens: 400,
         messages: [
           { role: 'system', content: `You are a procurement document classifier for a government RFP system. Analyze the document excerpt and return JSON with:
@@ -3415,9 +3496,9 @@ ${proposalText}`)
   console.log(`[evaluateProposal] Context size for ${p.vendor_name}: ${userPrompt.length} chars (rfp=${rfpFullText.length}, brd=${brdFullText.length}, arch=${archFullText.length}, questions=${vendorQuestionsText.length}, proposal=${proposalText.length})`)
 
   try {
-    // gpt-4.1 has 1M context window — large enough for full documents with no truncation needed
+    // gpt-5 has a large context window — sufficient for full documents with no truncation needed
     // Use 4000 output tokens to allow thorough justifications across 7 criteria
-    const result = await callLLM(systemPrompt, userPrompt, env, 'gpt-4.1', 4000)
+    const result = await callLLM(systemPrompt, userPrompt, env, 'gpt-5', 4000)
     const jsonMatch = result.match(/\{[\s\S]*\}/)
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0])
@@ -3742,13 +3823,9 @@ export async function extractPdfText(bytes: Uint8Array): Promise<string> {
 // Called when extractPdfText() returns 0 useful chars (Type3 fonts,
 // vector-graphics-only PDFs, FlateDecode-only with no readable BT blocks).
 //
-// Strategy: render each PDF page to a PNG (via PDF.js-style stream parsing
-// is not available in Workers, so we use the Cloudflare-compatible approach
-// of base64-encoding the raw PDF bytes and asking the vision LLM to read it).
-//
-// For the vision call we send the raw PDF as a base64 data-URI directly.
-// gpt-4.1 (and gpt-4o) accept PDF files as base64 file attachments in the
-// messages array via the content array format.
+// Strategy: Use Claude Sonnet (claude-sonnet-4-5) with Anthropic's native
+// PDF document support via the `document` content type. This is the
+// recommended approach for the Genspark LLM proxy which supports Claude models.
 //
 // Returns extracted text (may be empty string if vision also fails).
 // ============================================================
@@ -3765,23 +3842,7 @@ async function extractPdfTextWithVision(bytes: Uint8Array, filename: string, env
   const base64Pdf = uint8ToBase64(bytes)
   const fileSizeMb = (bytes.length / 1_048_576).toFixed(1)
 
-  console.log(`[vision] Sending ${filename} (${fileSizeMb} MB) to vision LLM for text extraction`)
-
-  try {
-    const res = await fetch(`${baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'gpt-4.1',
-        max_tokens: 16000,
-        temperature: 0.1,
-        messages: [
-          {
-            role: 'system',
-            content: `You are a document text extractor. Extract ALL readable text from this PDF document completely and verbatim. 
+  const extractionSystemPrompt = `You are a document text extractor. Extract ALL readable text from this PDF document completely and verbatim.
 Rules:
 - Extract every word, number, table cell, heading, and sentence visible on every page.
 - For tables: preserve rows and columns clearly (use | as column separator).
@@ -3791,20 +3852,40 @@ Rules:
 - Do NOT summarize — extract verbatim content.
 - If a page has no text (decorative/blank), write "--- [Page N: no text content] ---".
 - Output plain text only, no markdown formatting.`
-          },
+
+  console.log(`[vision] Sending ${filename} (${fileSizeMb} MB, ${base64Pdf.length} b64 chars) to Claude for PDF text extraction`)
+
+  // --- Attempt 1: Claude with Anthropic-style document content block ---
+  // claude-sonnet-4-5 natively supports PDF documents via the `document` content type.
+  // Many LLM proxies (including Genspark) support this format for Claude models.
+  try {
+    const res = await fetch(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-5',
+        max_tokens: 16000,
+        temperature: 0.1,
+        messages: [
           {
             role: 'user',
             content: [
               {
-                type: 'text',
-                text: `Please extract all text from this PDF document (${filename}):`
+                type: 'document',
+                source: {
+                  type: 'base64',
+                  media_type: 'application/pdf',
+                  data: base64Pdf
+                },
+                title: filename,
+                context: extractionSystemPrompt,
               },
               {
-                type: 'file',
-                file: {
-                  filename: filename.endsWith('.pdf') ? filename : filename + '.pdf',
-                  file_data: `data:application/pdf;base64,${base64Pdf}`
-                }
+                type: 'text',
+                text: `Please extract all text from this PDF document (${filename}). Follow the extraction rules above. Output plain text only.`
               }
             ]
           }
@@ -3812,34 +3893,41 @@ Rules:
       })
     })
 
-    if (!res.ok) {
+    if (res.ok) {
+      const data = await res.json() as any
+      // Claude returns content as array [{type:'text', text:'...'}] or choices[0].message.content
+      const content = data.choices?.[0]?.message?.content || data.content?.[0]?.text || ''
+      const extracted = typeof content === 'string' ? content : (Array.isArray(content) ? content.map((b: any) => b.text || '').join('') : '')
+      if (extracted.length >= 100) {
+        console.log(`[vision] Claude document extraction OK: ${extracted.length} chars from ${filename}`)
+        return extracted
+      }
+      console.warn(`[vision] Claude document extraction returned too little: ${extracted.length} chars`)
+    } else {
       const errText = await res.text().catch(() => 'unknown')
-      console.error(`[vision] API error ${res.status}: ${errText.slice(0, 300)}`)
-      // If the vision endpoint doesn't support file input, fall back to image approach
-      return await extractPdfTextWithVisionImages(bytes, filename, env)
+      console.error(`[vision] Claude document attempt failed ${res.status}: ${errText.slice(0, 400)}`)
     }
-
-    const data = await res.json() as any
-    const extracted = data.choices?.[0]?.message?.content || ''
-    console.log(`[vision] Extracted ${extracted.length} chars from ${filename}`)
-    return extracted
   } catch (err: any) {
-    console.error(`[vision] extraction failed for ${filename}:`, err?.message)
-    return ''
+    console.error(`[vision] Claude document attempt threw: ${err?.message}`)
   }
+
+  // --- Attempt 2: Claude with plain text (base64 inline) ---
+  // Fallback: send the base64 PDF as a plain text block.
+  // Claude can sometimes parse PDF content from raw base64 in text messages.
+  return await extractPdfTextWithVisionImages(bytes, filename, env)
 }
 
-// Fallback: sample first few pages as PNG images and send to vision LLM.
-// Used when the PDF file-attachment approach is not supported.
+// Fallback: send PDF as base64 in a plain text message to Claude.
+// Used when the `document` content block approach is not supported.
 async function extractPdfTextWithVisionImages(bytes: Uint8Array, filename: string, env: any): Promise<string> {
   const apiKey = env?.OPENAI_API_KEY || (globalThis as any).OPENAI_API_KEY || ''
   const baseUrl = env?.OPENAI_BASE_URL || 'https://www.genspark.ai/api/llm_proxy/v1'
   if (!apiKey) return ''
 
-  // We can't render PDFs to images natively in a Worker — instead send a
-  // targeted prompt describing the document as base64 raw PDF for the LLM
-  // to interpret via its built-in PDF understanding capability.
+  // Truncate to 400KB base64 chars (~300KB PDF) to stay within context limits
   const base64Pdf = uint8ToBase64(bytes)
+  const truncatedB64 = base64Pdf.slice(0, 400000)
+  const wasTruncated = base64Pdf.length > 400000
 
   try {
     const res = await fetch(`${baseUrl}/chat/completions`, {
@@ -3849,35 +3937,30 @@ async function extractPdfTextWithVisionImages(bytes: Uint8Array, filename: strin
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'gpt-4.1',
-        max_tokens: 16000,
+        model: 'claude-sonnet-4-5',
+        max_tokens: 8000,
         temperature: 0.1,
         messages: [
           {
             role: 'user',
-            content: [
-              {
-                type: 'text',
-                text: `This is a PDF document encoded as base64. Extract ALL text content from it verbatim, including all tables (use | for columns), all numbers/prices/AED amounts, all phase names, timelines, team roles, and headings. Output plain text only.\n\nFilename: ${filename}\nPDF data:`
-              },
-              {
-                type: 'text',
-                text: `data:application/pdf;base64,${base64Pdf.slice(0, 500000)}`
-              }
-            ]
+            content: `This is a PDF document encoded as base64${wasTruncated ? ' (first portion only)' : ''}. Extract ALL text content from it verbatim, including all tables (use | for columns), all numbers/prices/AED amounts, all phase names, timelines, team roles, and headings. Output plain text only.\n\nFilename: ${filename}\nPDF base64 data:\n${truncatedB64}`
           }
         ]
       })
     })
 
     if (!res.ok) {
-      console.error(`[vision-images] fallback also failed: ${res.status}`)
+      const errText = await res.text().catch(() => 'unknown')
+      console.error(`[vision-fallback] Claude plain-text also failed: ${res.status}: ${errText.slice(0, 300)}`)
       return ''
     }
     const data = await res.json() as any
-    return data.choices?.[0]?.message?.content || ''
+    const content = data.choices?.[0]?.message?.content || data.content?.[0]?.text || ''
+    const text = typeof content === 'string' ? content : (Array.isArray(content) ? content.map((b: any) => b.text || '').join('') : '')
+    console.log(`[vision-fallback] plain-text result: ${text.length} chars from ${filename}`)
+    return text
   } catch (err: any) {
-    console.error('[vision-images] error:', err?.message)
+    console.error('[vision-fallback] error:', err?.message)
     return ''
   }
 }
