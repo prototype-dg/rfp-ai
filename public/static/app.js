@@ -2163,10 +2163,8 @@ function viewProposalDetail(id) {
     try { criteria = JSON.parse(ev.scoring_details_json); } catch(e) {}
     if (criteria.length > 0) {
       let rows = '';
-      let grandTotal = 0;
       criteria.forEach(function(c) {
-        const ws = c.weighted !== undefined ? c.weighted : (c.weight * c.score / 100);
-        grandTotal += ws;
+        const ws = c.weighted !== undefined ? Number(c.weighted) : (Number(c.weight||0) * Number(c.score||0) / 100);
         const scoreColor = c.score >= 80 ? '#065f46' : c.score >= 60 ? '#92400e' : '#dc2626';
         rows += '<tr>'
           + '<td style="font-weight:500;font-size:0.82rem">' + escHtml(c.name||'') + '</td>'
@@ -2177,6 +2175,8 @@ function viewProposalDetail(id) {
           + '<td style="text-align:center;font-weight:700;color:var(--cpc-blue)">' + ws.toFixed(1) + '</td>'
           + '</tr>';
       });
+      // Use ev.total_score as the authoritative grand total — it matches the header and list view
+      const displayTotal = ev.total_score || 0;
       scoringTable = '<div style="margin-top:1.25rem">'
         + '<div style="font-weight:700;font-size:0.875rem;color:#1f2937;margin-bottom:0.5rem"><i class="fas fa-table mr-2" style="color:var(--cpc-gold)"></i>Detailed Scoring Breakdown</div>'
         + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:0.82rem">'
@@ -2191,7 +2191,7 @@ function viewProposalDetail(id) {
         + '<tbody>' + rows + '</tbody>'
         + '<tfoot><tr style="background:#fef3c7;border-top:2px solid #fde68a">'
         + '<td colspan="5" style="padding:8px 10px;font-weight:700;color:#92400e;text-align:right">GRAND TOTAL SCORE</td>'
-        + '<td style="padding:8px 10px;text-align:center;font-size:1.1rem;font-weight:800;color:var(--cpc-blue)">' + grandTotal.toFixed(1) + '</td>'
+        + '<td style="padding:8px 10px;text-align:center;font-size:1.1rem;font-weight:800;color:var(--cpc-blue)">' + displayTotal + '</td>'
         + '</tr></tfoot>'
         + '</table></div>'
         + '</div>';

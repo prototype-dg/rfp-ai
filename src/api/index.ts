@@ -1571,10 +1571,11 @@ apiRouter.post('/rfps/:rfpId/proposals/:proposalId/reprocess-from-text', async (
     proposalId
   ).run()
 
-  // Re-run AI evaluation for real submissions (Andersen)
+  // Re-run AI evaluation for all real submissions (any vendor with actual proposal text)
   let evaluation: any = null
   const isAndersen = proposal.contact_email?.includes('andersenlab.com') || proposal.vendor_name?.toLowerCase().includes('andersen')
-  if (isAndersen) {
+  const isEPAM2 = proposal.vendor_name?.includes('EPAM')
+  if (fields.technical_proposal && fields.technical_proposal.length > 200) {
     try {
       const updatedProposal = {
         ...proposal,
@@ -1584,11 +1585,10 @@ apiRouter.post('/rfps/:rfpId/proposals/:proposalId/reprocess-from-text', async (
         proposed_duration: proposedDuration || proposal.proposed_duration,
       }
       const evalResult = await evaluateAndersenWithLLM(updatedProposal, rfp, c.env)
-      const total = Math.round(
-        evalResult.scores.business * 0.30 +
-        evalResult.scores.technical * 0.40 +
-        evalResult.scores.financial * 0.30
-      )
+      // Derive total from criteria weighted sum for display consistency
+      const total = evalResult.scoringDetails && evalResult.scoringDetails.length > 0
+        ? Math.round(evalResult.scoringDetails.reduce((s: number, c: any) => s + (c.weighted !== undefined ? Number(c.weighted) : Number(c.weight || 0) * Number(c.score || 0) / 100), 0))
+        : Math.round(evalResult.scores.business * 0.30 + evalResult.scores.technical * 0.40 + evalResult.scores.financial * 0.30)
       await c.env.DB.prepare('DELETE FROM evaluations WHERE proposal_id=?').bind(proposalId).run()
       await c.env.DB.prepare(`
         INSERT INTO evaluations (rfp_id, proposal_id, vendor_id, business_score, technical_score, financial_score, experience_score, total_score, ai_summary, scoring_details_json, is_real, created_at)
@@ -1748,10 +1748,10 @@ apiRouter.post('/rfps/:rfpId/proposals/:proposalId/reprocess', async (c) => {
     proposalId
   ).run()
 
-  // 11. Re-run AI evaluation if this is a real submission (Andersen)
+  // 11. Re-run AI evaluation for all real submissions with meaningful proposal text
   let evaluation: any = null
   const isAndersen = proposal.contact_email?.includes('andersenlab.com') || proposal.vendor_name?.toLowerCase().includes('andersen')
-  if (isAndersen) {
+  if (fields.technical_proposal && fields.technical_proposal.length > 200) {
     try {
       // Build updated proposal object for evaluation
       const updatedProposal = {
@@ -1763,11 +1763,10 @@ apiRouter.post('/rfps/:rfpId/proposals/:proposalId/reprocess', async (c) => {
       }
       const evalResult = await evaluateAndersenWithLLM(updatedProposal, rfp, c.env)
 
-      const total = Math.round(
-        evalResult.scores.business * 0.30 +
-        evalResult.scores.technical * 0.40 +
-        evalResult.scores.financial * 0.30
-      )
+      // Derive total from criteria weighted sum for display consistency
+      const total = evalResult.scoringDetails && evalResult.scoringDetails.length > 0
+        ? Math.round(evalResult.scoringDetails.reduce((s: number, c: any) => s + (c.weighted !== undefined ? Number(c.weighted) : Number(c.weight || 0) * Number(c.score || 0) / 100), 0))
+        : Math.round(evalResult.scores.business * 0.30 + evalResult.scores.technical * 0.40 + evalResult.scores.financial * 0.30)
 
       // Delete existing evaluation for this proposal and re-insert
       await c.env.DB.prepare('DELETE FROM evaluations WHERE proposal_id=?').bind(proposalId).run()
@@ -1782,7 +1781,7 @@ apiRouter.post('/rfps/:rfpId/proposals/:proposalId/reprocess', async (c) => {
       ).run()
 
       evaluation = { total_score: total, summary: evalResult.summary }
-      console.log(`[reprocess] Re-evaluated Andersen: total=${total}`)
+      console.log(`[reprocess] Re-evaluated ${proposal.vendor_name}: total=${total}`)
     } catch(evalErr: any) {
       console.error(`[reprocess] Re-evaluation failed: ${evalErr?.message}`)
     }
@@ -2332,8 +2331,10 @@ async function runSingleEvaluation(p: any, rfp: any, rfpId: any, env: any): Prom
   let aiSummary: string
   let usedRealLLM = 0
 
-  // Only Andersen gets real LLM evaluation — all others are deterministically simulated
-  if (isAndersen) {
+  // All real submissions (has PDF/attachment text) get real LLM evaluation.
+  // Only pre-seeded/manual vendor entries without actual proposal text fall back to simulation.
+  const hasMeaningfulProposal = p.technical_proposal && p.technical_proposal.length > 200
+  if (hasMeaningfulProposal) {
     try {
       const evalResult = await evaluateAndersenWithLLM(p, rfp, env)
       scores = evalResult.scores
@@ -2342,26 +2343,38 @@ async function runSingleEvaluation(p: any, rfp: any, rfpId: any, env: any): Prom
       usedRealLLM = 1
     } catch(llmErr: any) {
       console.error(`[evaluation] LLM failed for ${p.vendor_name}:`, llmErr?.message || llmErr)
-      const simResult = simulateAndersenEvaluation(p)
+      // Fall back to simulation on LLM error
+      const simResult = isAndersen ? simulateAndersenEvaluation(p) : simulateVendorEvaluation(p, isEPAM)
       scores = simResult.scores
       scoringDetails = simResult.scoringDetails
       aiSummary = simResult.summary
       usedRealLLM = 0
     }
   } else {
-    // All other vendors — deterministic simulation, always lower than Andersen
-    const simResult = simulateVendorEvaluation(p, isEPAM)
+    // No meaningful proposal text — deterministic simulation (pre-seeded entries)
+    const simResult = isAndersen ? simulateAndersenEvaluation(p) : simulateVendorEvaluation(p, isEPAM)
     scores = simResult.scores
     scoringDetails = simResult.scoringDetails
     aiSummary = simResult.summary
     usedRealLLM = 0
   }
 
-  const total = Math.round(
-    scores.business * 0.30 +
-    scores.technical * 0.40 +
-    scores.financial * 0.30
-  )
+  // Derive total from the per-criterion weighted scores to keep display consistent.
+  // This ensures the header total matches the scoring table grand total.
+  let total: number
+  if (scoringDetails && scoringDetails.length > 0) {
+    const weightedSum = scoringDetails.reduce((sum: number, c: any) => {
+      const ws = c.weighted !== undefined ? Number(c.weighted) : (Number(c.weight || 0) * Number(c.score || 0) / 100)
+      return sum + ws
+    }, 0)
+    total = Math.round(weightedSum)
+  } else {
+    total = Math.round(
+      scores.business * 0.30 +
+      scores.technical * 0.40 +
+      scores.financial * 0.30
+    )
+  }
 
   await db.prepare(`
     INSERT INTO evaluations (rfp_id, proposal_id, vendor_id, business_score, technical_score, financial_score, experience_score, total_score, ai_summary, scoring_details_json, is_real, created_at)
