@@ -1005,12 +1005,17 @@ rfpTabs.vendors = async function(rfpId, rfp) {
     // Avatar background: red if declined
     const avatarBg = isDeclined ? '#dc2626' : 'var(--cpc-blue)';
 
+    // Participant code (only shown when vendor is shortlisted/invited)
+    const participantCode = allowRemove ? 'RFP-' + rfpId + '-V' + v.id : '';
+
     return '<tr' + rowStyle + '>'
       + '<td><div style="display:flex;align-items:center;gap:0.75rem">'
       + '<div style="width:34px;height:34px;border-radius:8px;background:' + avatarBg + ';display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:0.82rem;flex-shrink:0">'
       + (isDeclined ? '<i class="fas fa-times" style="font-size:0.75rem"></i>' : escHtml(v.name.charAt(0))) + '</div>'
       + '<div><div style="font-weight:600;font-size:0.875rem' + (isDeclined ? ';color:#991b1b' : '') + '">' + escHtml(v.name) + '</div>'
-      + '<div style="font-size:0.72rem;color:#9ca3af">' + escHtml(v.country||'UAE') + ' &bull; ' + escHtml(v.size||'') + '</div>'
+      + '<div style="font-size:0.72rem;color:#9ca3af">' + escHtml(v.country||'UAE') + ' &bull; ' + escHtml(v.size||'')
+      + (participantCode ? ' &bull; <span style="font-family:monospace;color:var(--cpc-blue);font-weight:600" title="Participant Reference">' + participantCode + '</span>' : '')
+      + '</div>'
       + '</div></div></td>'
       + '<td><div>' + tags + '</div></td>'
       + '<td><span class="perf-badge ' + fitCls + '">' + score + '/100</span></td>'
@@ -1867,7 +1872,6 @@ rfpTabs.proposals = async function(rfpId) {
     + '<div><h3 style="font-weight:700;font-size:0.95rem;color:#1f2937;margin:0">Submitted Proposals &amp; Evaluation</h3>'
     + '<p style="font-size:0.8rem;color:#9ca3af;margin:0">' + proposals.length + ' proposal(s) &bull; Run AI evaluation first, then award the contract to the winning vendor.</p></div>'
     + '<div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center">'
-    + '<button class="btn-ghost btn-sm" onclick="loadSampleProposals(' + rfpId + ')"><i class="fas fa-plus"></i>Add Samples</button>'
     + '<button class="btn-secondary" id="evalAllBtn" onclick="evaluateAllProposals(' + rfpId + ')"><i class="fas fa-robot"></i>Run AI Evaluation</button>'
     + '</div>'
     + '</div>'
@@ -1878,8 +1882,7 @@ rfpTabs.proposals = async function(rfpId) {
     + '<div class="card" style="overflow:hidden">'
     + (proposals.length === 0
       ? '<div style="padding:3rem;text-align:center;color:#9ca3af"><i class="fas fa-inbox" style="font-size:2.5rem;display:block;margin-bottom:1rem;color:#d1d5db"></i>'
-        + '<p style="margin-bottom:1rem">No proposals yet. Vendors submit proposals after receiving invitations.</p>'
-        + '<button class="btn-secondary" onclick="loadSampleProposals(' + rfpId + ')"><i class="fas fa-plus"></i>Add Sample Proposals</button></div>'
+        + '<p style="margin-bottom:0">No proposals yet. Vendors submit proposals by replying to their invitation email with their proposal PDF attached.</p></div>'
       : '<div style="overflow-x:auto"><table>'
         + '<thead><tr>'
         + '<th>Vendor</th><th>Date</th><th>Financial</th><th>Duration</th>'
@@ -2342,6 +2345,7 @@ pages.vendor_comms = async function(opts) {
     + '<div>'
     + '<div style="font-weight:700;font-size:0.95rem;color:' + (vendorDeclined ? '#991b1b' : '#1f2937') + '">' + escHtml(vendorName) + '</div>'
     + '<div style="font-size:0.78rem;color:#9ca3af">' + vendorEmails.length + ' message(s) in thread'
+    + ' &bull; <span style="font-family:monospace;color:var(--cpc-blue);font-weight:600" title="Participant Reference Code">RFP-' + rfpId + '-V' + vendorId + '</span>'
     + (vendorDeclined ? ' &bull; <span style="color:#dc2626;font-weight:600">DECLINED</span>' : '') + '</div>'
     + '</div></div>'
     + '<div style="display:flex;gap:0.5rem">'

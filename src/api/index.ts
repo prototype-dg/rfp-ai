@@ -377,74 +377,122 @@ apiRouter.post('/rfps/:id/questions/publish-all', async (c) => {
   // Only publish answered, non-manual questions
   await c.env.DB.prepare(`UPDATE questions SET published=1 WHERE answer IS NOT NULL AND answer != "" AND rfp_id=? AND needs_manual=0`).bind(rfpId).run()
 
-  // Generate QA Excel and send to vendor(s) who submitted questions
+  // ── Build ONE consolidated Q&A Excel for ALL vendors ─────────────────────
+  // Questions are consolidated across all vendors; each row shows which company asked.
+  // The consolidated document is sent to ALL non-declined shortlisted vendors.
   try {
-    const { results: publishedQs } = await c.env.DB.prepare(`
-      SELECT q.*, v.name as vendor_name, v.contact_email FROM questions q
-      LEFT JOIN vendors v ON q.vendor_id = v.id
-      WHERE q.rfp_id=? AND q.published=1
-    `).bind(rfpId).all<any>()
-
     const rfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(rfpId).first<any>()
 
-    // Group by vendor
-    const vendorMap: Record<number, { email: string, name: string, questions: any[] }> = {}
-    for (const q of publishedQs) {
-      if (!q.vendor_id || !q.contact_email) continue
-      if (!vendorMap[q.vendor_id]) vendorMap[q.vendor_id] = { email: q.contact_email, name: q.vendor_name, questions: [] }
-      vendorMap[q.vendor_id].questions.push(q)
-    }
+    // Fetch ALL published questions for this RFP (with vendor name for attribution)
+    const { results: allQuestions } = await c.env.DB.prepare(`
+      SELECT q.*, COALESCE(v.name, 'Unknown Vendor') as vendor_name
+      FROM questions q
+      LEFT JOIN vendors v ON q.vendor_id = v.id
+      WHERE q.rfp_id=? AND q.published=1
+      ORDER BY q.vendor_id, q.id
+    `).bind(rfpId).all<any>()
+
+    // Build the consolidated Excel once
+    const xlsxBytes = generateQAExcel(allQuestions)
+    const xlsxBase64 = uint8ToBase64(xlsxBytes)
+    const xlsxFilename = `QA_Consolidated_${(rfp?.ref_number || 'RFP').replace(/\//g,'_')}.xlsx`
+
+    // Get ALL non-declined shortlisted vendors for this RFP
+    const { results: activeVendors } = await c.env.DB.prepare(`
+      SELECT v.*, rv.vendor_id, COALESCE(rv.status,'active') as rfp_status
+      FROM rfp_vendors rv
+      JOIN vendors v ON v.id = rv.vendor_id
+      WHERE rv.rfp_id=? AND rv.shortlisted=1 AND COALESCE(rv.status,'active') != 'declined'
+    `).bind(rfpId).all<any>()
 
     const sentTo: string[] = []
-    for (const [, info] of Object.entries(vendorMap)) {
-      const xlsxBytes = generateQAExcel(info.questions)
-      const xlsxBase64 = uint8ToBase64(xlsxBytes)
-      const emailText = `Dear ${info.name},\n\nPlease find attached the official Q&A Response document for RFP Reference: ${rfp?.ref_number || ''}.\n\nAll questions submitted have been reviewed and answered by the CPC Procurement team. Please review the attached Excel file for the complete question and answer register.\n\nFor any further queries, please reply to this email referencing the RFP number.\n\nBest regards,\nProcurement & Contracting Department\nCrown Prince's Court, Abu Dhabi\nprocurement@cpc-rfp.website`
+    const resendKey = (c.env as any).RESEND_API_KEY || ''
 
-      // HARD CONSTRAINT: only send real emails to @andersenlab.com — all others simulated
-      const recipientAddr = (info.email || '').toLowerCase().trim()
-      if (recipientAddr.endsWith('@andersenlab.com')) {
-        const resendKey = (c.env as any).RESEND_API_KEY || ''
-        if (resendKey) {
+    for (const vendor of activeVendors) {
+      const participantCode = buildParticipantCode(rfpId, vendor.id)
+      const emailText = `Dear ${vendor.name},
+
+Please find attached the official consolidated Q&A Response document for:
+
+RFP Title:        ${rfp?.title || 'CPC RFP'}
+Reference Number: ${rfp?.ref_number || ''}
+
+This document consolidates all clarification questions submitted by all participating vendors, together with CPC's official answers. The document is provided to all shortlisted vendors to ensure full transparency and equal access to information.
+
+Please review the attached Excel file carefully and incorporate the clarifications into your proposal submission.
+
+For any further queries, please reply to this email referencing your Participant Reference below.
+
+Best regards,
+Procurement & Contracting Department
+Crown Prince's Court, Abu Dhabi
+procurement@cpc-rfp.website
+
+──────────────────────────────────────────────
+PARTICIPANT REFERENCE: ${participantCode}
+Please include this reference code in ALL correspondence regarding this RFP.
+──────────────────────────────────────────────`
+
+      if (resendKey) {
+        // Send real email to all vendors via Resend (no Andersen restriction — all participants)
+        try {
           const emailPayload = {
             from: 'CPC Procurement <procurement@cpc-rfp.website>',
-            to: [info.email],
-            subject: `Q&A Response – ${rfp?.title || 'CPC RFP'} (Ref: ${rfp?.ref_number || ''})`,
+            to: [vendor.contact_email],
+            subject: `Q&A Consolidated Response – ${rfp?.title || 'CPC RFP'} (Ref: ${rfp?.ref_number || ''})`,
             text: emailText,
-            attachments: [{ filename: `QA_Response_${(rfp?.ref_number || 'RFP').replace(/\//g,'_')}.xlsx`, content: xlsxBase64 }],
+            attachments: [{ filename: xlsxFilename, content: xlsxBase64 }],
           }
-          await fetch('https://api.resend.com/emails', {
+          const sendRes = await fetch('https://api.resend.com/emails', {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
             body: JSON.stringify(emailPayload),
           })
-          sentTo.push(info.email)
+          if (sendRes.ok) {
+            sentTo.push(vendor.contact_email)
+            // Log sent email
+            await c.env.DB.prepare(`
+              INSERT INTO email_log (rfp_id, vendor_id, recipient, subject, body, email_type, status, has_attachment, created_at)
+              VALUES (?,?,?,?,?,'qa_response','sent',1,datetime('now'))
+            `).bind(rfpId, vendor.id, vendor.contact_email,
+              `Q&A Consolidated Response – ${rfp?.title || 'CPC RFP'} (Ref: ${rfp?.ref_number || ''})`,
+              emailText).run()
+          } else {
+            console.error(`[publish-all] Resend failed for ${vendor.contact_email}:`, await sendRes.text())
+            sentTo.push(vendor.contact_email + ' (send-failed)')
+          }
+        } catch(sendErr: any) {
+          console.error(`[publish-all] send error for ${vendor.contact_email}:`, sendErr?.message)
+          sentTo.push(vendor.contact_email + ' (error)')
         }
       } else {
-        // Simulate for all non-andersenlab domains
-        console.log(`[email] SIMULATED Q&A response (non-andersenlab domain): ${info.email}`)
-        sentTo.push(info.email + ' (simulated)')
+        // No API key — log as simulated
+        console.log(`[email] SIMULATED Q&A consolidated response (no API key): ${vendor.contact_email}`)
+        sentTo.push(vendor.contact_email + ' (simulated)')
+        await c.env.DB.prepare(`
+          INSERT INTO email_log (rfp_id, vendor_id, recipient, subject, body, email_type, status, has_attachment, created_at)
+          VALUES (?,?,?,?,?,'qa_response','simulated',1,datetime('now'))
+        `).bind(rfpId, vendor.id, vendor.contact_email,
+          `Q&A Consolidated Response – ${rfp?.title || 'CPC RFP'} (Ref: ${rfp?.ref_number || ''})`,
+          emailText).run()
       }
     }
 
-    return c.json({ ok: true, sentTo })
-  } catch(e: any) {
-    console.error('[publish-all] email/excel step failed:', e?.message)
-    // Continue to stage advance even if email sending failed
-  }
-
-  // ALWAYS advance RFP stage from qa_open → submissions_closed after publish,
-  // regardless of whether email sending succeeded.
-  try {
-    const currentRfp = await c.env.DB.prepare('SELECT stage FROM rfps WHERE id=?').bind(rfpId).first<{stage:string}>()
-    if (currentRfp?.stage === 'qa_open') {
-      await c.env.DB.prepare(`UPDATE rfps SET stage='submissions_closed', updated_at=datetime('now') WHERE id=?`).bind(rfpId).run()
+    // ALWAYS advance RFP stage from qa_open → submissions_closed after publish
+    try {
+      const currentRfp = await c.env.DB.prepare('SELECT stage FROM rfps WHERE id=?').bind(rfpId).first<{stage:string}>()
+      if (currentRfp?.stage === 'qa_open') {
+        await c.env.DB.prepare(`UPDATE rfps SET stage='submissions_closed', updated_at=datetime('now') WHERE id=?`).bind(rfpId).run()
+      }
+    } catch(stageErr: any) {
+      console.error('[publish-all] stage advance failed:', stageErr?.message)
     }
-  } catch(stageErr: any) {
-    console.error('[publish-all] stage advance failed:', stageErr?.message)
-  }
 
-  return c.json({ ok: true, stageAdvanced: true })
+    return c.json({ ok: true, sentTo, totalQuestions: allQuestions.length, vendorCount: activeVendors.length })
+  } catch(e: any) {
+    console.error('[publish-all] failed:', e?.message)
+    return c.json({ ok: false, error: e?.message }, 500)
+  }
 })
 
 // ============================================================
@@ -639,14 +687,35 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
     if (!rfp) return c.json({ ok: true, note: 'no active rfp' })
     const rfpId = rfp.id
 
-    // Find the sending vendor by their exact from-address or domain match
-    // NO fallback to Andersen — if we can't identify the vendor, vendorRow stays null
+    // ── Vendor Identification — Participant Code is PRIMARY method ───────────
+    // Step 1: Scan body + subject for participant code pattern RFP-{rfpId}-V{vendorId}
+    // This is the reliable method for POC where all vendors share one physical email address.
+    // Step 2: Fall back to contact_email lookup only if no code found.
     let vendorRow: any = null
-    if (fromAddress) {
+    let codeRfpId: number | null = null
+
+    const participantCodeMatch = (bodyText + '\n' + subject).match(/RFP-(\d+)-V(\d+)/i)
+    if (participantCodeMatch) {
+      codeRfpId = parseInt(participantCodeMatch[1], 10)
+      const codeVendorId = parseInt(participantCodeMatch[2], 10)
+      // Verify vendor exists and belongs to the identified RFP
+      vendorRow = await db.prepare(`SELECT * FROM vendors WHERE id=?`).bind(codeVendorId).first<any>()
+      // If the code's rfpId differs from the one we found via subject, trust the code
+      if (codeRfpId && codeRfpId !== rfpId) {
+        const codeRfp = await db.prepare(`SELECT * FROM rfps WHERE id=?`).bind(codeRfpId).first<any>()
+        if (codeRfp) { rfp = codeRfp; }
+      }
+      console.log(`[webhook] Participant code matched: RFP-${codeRfpId}-V${codeVendorId} → vendor: ${vendorRow?.name || 'NOT FOUND'}`)
+    }
+
+    // Fallback: email address lookup (less reliable — same address for all vendors in POC)
+    if (!vendorRow && fromAddress) {
       vendorRow = await db.prepare(
         `SELECT * FROM vendors WHERE contact_email=? OR contact_email LIKE ? LIMIT 1`
       ).bind(fromAddress, `%${fromAddress.split('@')[1] || 'NOMATCH'}%`).first<any>()
+      if (vendorRow) console.log(`[webhook] Vendor identified via email fallback: ${vendorRow.name}`)
     }
+
     const vendorId = vendorRow?.id || null
 
     // ── Attachment detection ─────────────────────────────────────
@@ -663,7 +732,7 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
     )
 
     // ── AI Email Categorization ──────────────────────────────────
-    // Use LLM to classify: 'questions' | 'proposal' | 'plain_email'
+    // Use LLM to classify: 'decline' | 'proposal' | 'questions' | 'plain_email'
     let emailCategory = 'plain_email'
     try {
       emailCategory = await categorizeEmailWithLLM(subject, bodyText, attachments, c.env)
@@ -672,6 +741,23 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
       if (spreadsheetAttachment) emailCategory = 'questions'
       else if (pdfAttachment) emailCategory = 'proposal'
     }
+
+    // ── Hard safety override — LLM sometimes misses obvious cases ───────────
+    // If LLM said plain_email but there's a PDF with no spreadsheet → treat as proposal
+    if (emailCategory === 'plain_email' && pdfAttachment && !spreadsheetAttachment) {
+      const bodyLower = bodyText.toLowerCase()
+      const proposalKeywords = ['find attached', 'please find', 'proposal', 'rfp response', 'bid', 'tender response', 'submission', 'attached our', 'attaching our']
+      if (proposalKeywords.some(k => bodyLower.includes(k))) {
+        emailCategory = 'proposal'
+        console.log('[webhook] Safety override: plain_email → proposal (PDF attachment + proposal keywords)')
+      }
+    }
+    // If LLM said plain_email but there's a spreadsheet → treat as questions
+    if (emailCategory === 'plain_email' && spreadsheetAttachment) {
+      emailCategory = 'questions'
+      console.log('[webhook] Safety override: plain_email → questions (spreadsheet attachment found)')
+    }
+    console.log(`[webhook] Email category: ${emailCategory} | from: ${fromAddress} | vendor: ${vendorRow?.name || 'unknown'} | attachments: ${attachments.length}`)
 
     // Download attachments based on category
     let excelQuestions: string[] = []
@@ -1044,12 +1130,15 @@ apiRouter.post('/rfps/:id/vendors/:vendorId/reply', async (c) => {
     }
 
     const replySubject = subject || `RE: Invitation to Tender – ${rfp?.title || 'CPC RFP'} (Ref: ${rfp?.ref_number || ''})`
-    const result = await sendRealEmail(vendor.contact_email, replySubject, text || '', rfp, c.env)
+    const participantCode = buildParticipantCode(rfpId, vendorId)
+    const replyFooter = `\n\n──────────────────────────────────────────────\nPARTICIPANT REFERENCE: ${participantCode}\nPlease include this reference code in ALL correspondence regarding this RFP.\n──────────────────────────────────────────────`
+    const fullText = (text || '') + replyFooter
+    const result = await sendRealEmail(vendor.contact_email, replySubject, fullText, rfp, c.env)
 
     await c.env.DB.prepare(`
       INSERT INTO email_log (rfp_id, vendor_id, recipient, subject, body, email_type, status, created_at)
       VALUES (?,?,?,?,?,'reply',?,datetime('now'))
-    `).bind(rfpId, vendorId, vendor.contact_email, replySubject, text || '', result.ok ? 'sent' : 'simulated').run()
+    `).bind(rfpId, vendorId, vendor.contact_email, replySubject, fullText, result.ok ? 'sent' : 'simulated').run()
 
     return c.json({ ok: result.ok, error: result.error })
   } catch(e: any) {
@@ -2704,7 +2793,12 @@ function buildFitRationale(v: any, score: number): string {
 // ============================================================
 // HELPERS — EMAIL SENDING
 // ============================================================
+function buildParticipantCode(rfpId: number | string, vendorId: number | string): string {
+  return `RFP-${rfpId}-V${vendorId}`
+}
+
 function buildInvitationEmailText(v: any, rfp: any, qDeadline: string, sDeadline: string, notes: string): string {
+  const participantCode = buildParticipantCode(rfp?.id || 0, v.id)
   return `Dear ${v.name},
 
 We are pleased to invite ${v.name} to participate in the competitive tendering process for the following procurement:
@@ -2734,7 +2828,13 @@ Best regards,
 Procurement & Contracting Department
 Crown Prince's Court
 Abu Dhabi, United Arab Emirates
-procurement@cpc-rfp.website`
+procurement@cpc-rfp.website
+
+──────────────────────────────────────────────
+PARTICIPANT REFERENCE: ${participantCode}
+Please include this reference code in ALL correspondence regarding this RFP.
+This code uniquely identifies your organisation for this tender.
+──────────────────────────────────────────────`
 }
 
 async function sendRealEmail(
