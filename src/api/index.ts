@@ -1846,43 +1846,31 @@ apiRouter.post('/rfps/:rfpId/proposals/:proposalId/reprocess-sync', async (c) =>
         if (!obj) {
           resultAtt = { ...att, error: 'R2 object not found' }
         } else {
-          // Filename-based wrong-doc check (no text needed, no bytes loaded)
-          const wrongDocFilename = await detectWrongDocument(
-            '', att.filename, proposal.vendor_name || 'Vendor',
-            rfp.ref_number || '', rfp.title || '', c.env
-          )
-          if (wrongDocFilename.isWrong) {
-            console.warn(`[reprocess-sync] Attachment ${i}: filename wrong-doc: ${wrongDocFilename.reason.slice(0, 80)}`)
-            // Drain the stream so the connection doesn't hang
-            await obj.body?.cancel().catch(() => {})
-            resultAtt = {
-              ...att, text_chars: 0, extract_method: 'filename-detection',
-              wrong_document: wrongDocFilename.reason,
-              _marked_text: `[WRONG DOCUMENT DETECTED]\nFile: ${att.filename}\nDetected type: ${wrongDocFilename.detectedDocType}\n\n${wrongDocFilename.reason}\n\n[EXTRACTED CONTENT FOR REFERENCE]\n(no text extraction attempted — wrong document detected from filename)`,
-            }
-          } else {
-            // Stream R2 body to Genspark blob, then call crawler on the resulting URL
-            const extracted = await extractPdfViaGenskarkCrawlerStreaming(obj, att.filename, c.env)
-            console.log(`[reprocess-sync] Attachment ${i}: crawler returned ${extracted.length} chars`)
+          // Stream R2 body to Genspark blob, then call crawler on the resulting URL.
+          // NOTE: we do NOT run filename-based wrong-doc detection here — vendors
+          // often name files after the client/project ("Crown Prince Court - Data platform.pdf")
+          // which triggers false positives. Content-based detection runs after extraction.
+          const extracted = await extractPdfViaGenskarkCrawlerStreaming(obj, att.filename, c.env)
+          console.log(`[reprocess-sync] Attachment ${i}: crawler returned ${extracted.length} chars`)
 
-            if (extracted.length >= 100) {
-              const wrongDocContent = await detectWrongDocument(
-                extracted, att.filename, proposal.vendor_name || 'Vendor',
-                rfp.ref_number || '', rfp.title || '', c.env
-              )
-              if (wrongDocContent.isWrong) {
-                resultAtt = {
-                  ...att, text_chars: extracted.length, extract_method: 'vision',
-                  wrong_document: wrongDocContent.reason,
-                  _marked_text: `[WRONG DOCUMENT DETECTED]\nFile: ${att.filename}\nDetected type: ${wrongDocContent.detectedDocType}\n\n${wrongDocContent.reason}\n\n[EXTRACTED CONTENT FOR REFERENCE]\n${extracted}`,
-                }
-              } else {
-                resultAtt = { ...att, text_chars: extracted.length, extract_method: 'vision', extracted_text: extracted }
+          if (extracted.length >= 100) {
+            const wrongDocContent = await detectWrongDocument(
+              extracted, att.filename, proposal.vendor_name || 'Vendor',
+              rfp.ref_number || '', rfp.title || '', c.env
+            )
+            if (wrongDocContent.isWrong) {
+              resultAtt = {
+                ...att, text_chars: extracted.length, extract_method: 'vision',
+                wrong_document: wrongDocContent.reason,
+                _marked_text: `[WRONG DOCUMENT DETECTED]\nFile: ${att.filename}\nDetected type: ${wrongDocContent.detectedDocType}\n\n${wrongDocContent.reason}\n\n[EXTRACTED CONTENT FOR REFERENCE]\n${extracted}`,
               }
             } else {
-              console.warn(`[reprocess-sync] Attachment ${i}: crawler returned too little text (${extracted.length} chars)`)
               resultAtt = { ...att, text_chars: extracted.length, extract_method: 'vision', extracted_text: extracted }
             }
+          } else {
+            // Crawler returned little/no text (image-only PDF or encrypted) — store with 0 chars
+            console.warn(`[reprocess-sync] Attachment ${i}: crawler returned too little text (${extracted.length} chars) — likely image-only/scanned`)
+            resultAtt = { ...att, text_chars: extracted.length, extract_method: 'vision', extracted_text: extracted }
           }
         }
       } else {
@@ -4527,8 +4515,15 @@ async function detectWrongDocument(
   const filenameHasOrgSignal = orgNameSignals.some(s => filenameLower.includes(s))
   // Typical vendor proposal filenames contain vendor name or "proposal"/"response"/"bid"
   const filenameHasProposalSignal = ['proposal', 'response', 'bid', 'offer', 'submission', 'quotation'].some(s => filenameLower.includes(s))
+  // If the submitting vendor's own name appears in the filename, it's almost certainly
+  // their own document (vendors often name files like "VendorName - ProjectName.pdf").
+  // Never flag it as wrong based on filename alone in that case.
+  const vendorNameLower = (submittingVendorName || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ')
+  const vendorWords = vendorNameLower.split(/\s+/).filter(w => w.length > 2)
+  const filenameHasVendorName = vendorWords.length > 0 && vendorWords.some(w => filenameLower.includes(w))
   // If filename has project/org signals but NO vendor proposal signals → likely wrong document
-  if ((filenameHasRfpSignal || filenameHasOrgSignal) && !filenameHasProposalSignal) {
+  // Exception: if the vendor's own name is in the filename, it's their document
+  if ((filenameHasRfpSignal || filenameHasOrgSignal) && !filenameHasProposalSignal && !filenameHasVendorName) {
     // Determine doc type from filename
     const docType = filenameHasRfpSignal ? 'procurement document' : 'organizational document'
     return {
