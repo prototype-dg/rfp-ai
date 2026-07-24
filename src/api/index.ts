@@ -2071,12 +2071,20 @@ apiRouter.post('/submit/:rfpId/categorize', async (c) => {
     const rawText = await extractPdfText(bytes)
 
     if (!rawText || isPostScriptGarbage(rawText)) {
+      // Heuristic label from filename even when text extraction fails
+      const nameLower = file.name.toLowerCase()
+      const heuristicLabel = nameLower.includes('commercial') || nameLower.includes('financial') || nameLower.includes('cost') || nameLower.includes('price')
+        ? 'commercial'
+        : nameLower.includes('technical') || nameLower.includes('tech') || nameLower.includes('proposal')
+        ? 'technical'
+        : 'supporting'
       return c.json({
-        label: 'other',
+        label: heuristicLabel,
         confidence: 'low',
-        summary: 'Could not extract readable text from this PDF (complex font encoding). The file will be stored as a supporting document.',
+        summary: 'PDF uses complex font encoding — text could not be extracted automatically. The file will be securely stored and reviewed by our evaluation team. Please set the document type below.',
         filename: file.name,
         size_bytes: bytes.length,
+        unreadable: true,
       })
     }
 
@@ -2135,6 +2143,9 @@ apiRouter.post('/submit/:rfpId', async (c) => {
   if (!rfp) return c.json({ error: 'RFP not found' }, 404)
   const closedStages = ['awarded', 'archived']
   if (closedStages.includes(rfp.stage)) return c.json({ error: 'This RFP is no longer accepting submissions.' }, 403)
+
+  // Ensure all schema migrations are applied (idempotent — ALTER TABLE errors are swallowed)
+  try { await initDb(c.env.DB) } catch (_) {}
 
   try {
     const formData = await c.req.formData()

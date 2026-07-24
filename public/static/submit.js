@@ -8,7 +8,7 @@
   var RFP_ID      = window.RFP_ID      || 0;
   var PRESET_CODE = window.PRESET_CODE || '';
 
-  var uploadedFiles = []; // [{ file, label, summary, confidence, status }]
+  var uploadedFiles = []; // [{ file, label, summary, confidence, status, unreadable }]
   var rfpData = null;
 
   /* ── Expose globals needed by inline HTML event handlers ──── */
@@ -185,14 +185,17 @@
         entry.label      = data.label      || 'other';
         entry.summary    = data.summary    || '';
         entry.confidence = data.confidence || 'medium';
-        entry.status     = 'done';
+        entry.unreadable = !!data.unreadable;
+        // unreadable PDFs are still valid to submit — use 'ready' so submit button enables
+        entry.status = entry.unreadable ? 'ready' : 'done';
         renderFileList();
         updateSubmitBtn();
       })
       .catch(function () {
-        entry.label   = 'other';
-        entry.summary = 'Categorization failed \u2014 please set the document type manually.';
-        entry.status  = 'error';
+        entry.label      = 'other';
+        entry.summary    = 'Categorization failed \u2014 please set the document type manually.';
+        entry.status     = 'error';
+        entry.unreadable = false;
         renderFileList();
         updateSubmitBtn();
       });
@@ -225,13 +228,15 @@
       var sizeMb        = (entry.file.size / 1024 / 1024).toFixed(1);
       var isCategorizing = entry.status === 'categorizing' || entry.status === 'pending';
       var confClass     = entry.confidence === 'high' ? 'high' : entry.confidence === 'low' ? 'low' : '';
+      // unreadable = complex font PDF; 'ready' status = still submittable
+      var displayStatus = isCategorizing ? 'categorizing' : (entry.status === 'ready' ? 'done' : entry.status);
 
       var labelOptions = Object.keys(LABEL_META).map(function (k) {
         var v = LABEL_META[k];
         return '<option value="' + k + '"' + (entry.label === k ? ' selected' : '') + '>' + v.text + '</option>';
       }).join('');
 
-      var html = '<div class="file-item ' + (isCategorizing ? 'categorizing' : entry.status) + '">';
+      var html = '<div class="file-item ' + displayStatus + '">';
       html += '<div class="file-icon"><i class="fas fa-file-pdf"></i></div>';
       html += '<div class="file-info">';
       html += '<div class="file-name" title="' + esc(entry.file.name) + '">' + esc(entry.file.name) + '</div>';
@@ -239,6 +244,12 @@
 
       if (isCategorizing) {
         html += '<div class="cat-spinner"><i class="fas fa-spinner fa-spin"></i> Analysing document\u2026</div>';
+      } else if (entry.unreadable) {
+        // Complex-font PDF — show a clear amber notice instead of error styling
+        html += '<div style="font-size:0.78rem;color:#92400e;background:#fef3c7;border:1px solid #fde68a;border-radius:6px;padding:6px 10px;margin-top:4px;line-height:1.5">';
+        html += '<i class="fas fa-exclamation-triangle" style="margin-right:5px"></i>';
+        html += esc(entry.summary);
+        html += '</div>';
       } else {
         html += '<div class="file-summary">' + esc(entry.summary);
         if (entry.confidence) {
@@ -263,6 +274,8 @@
   /* ── Submit ───────────────────────────────────────────────── */
   function updateSubmitBtn() {
     var code     = getCode();
+    // 'categorizing' and 'pending' are in-progress states — block submit
+    // 'done', 'ready' (unreadable PDF), 'error' (network fail) are all terminal — allow submit
     var hasFiles = uploadedFiles.length > 0 && uploadedFiles.every(function (f) {
       return f.status !== 'categorizing' && f.status !== 'pending';
     });

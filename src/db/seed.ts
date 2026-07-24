@@ -173,6 +173,8 @@ export async function initDb(db: D1Database) {
     `ALTER TABLE proposals ADD COLUMN proposal_attachments TEXT`,
     // proposals.questions_responded — 1 if vendor already responded to Q&A
     `ALTER TABLE rfp_vendors ADD COLUMN questions_responded INTEGER DEFAULT 0`,
+    // proposals.updated_at — timestamp of last update (added later; original table only had created_at)
+    `ALTER TABLE proposals ADD COLUMN updated_at TEXT`,
   ]
   for (const sql of alterMigrations) {
     try {
