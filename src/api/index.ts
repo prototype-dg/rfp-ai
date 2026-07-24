@@ -1825,38 +1825,103 @@ apiRouter.post('/rfps/:rfpId/proposals/:proposalId/reprocess-sync', async (c) =>
     if (!att) return c.json({ error: `Attachment index ${attIdx} not found` }, 404)
     if (!att.r2_key) return c.json({ ok: true, skipped: true, reason: 'no r2_key', filename: att.filename })
 
-    console.log(`[reprocess-sync-single] Processing attachment ${attIdx}: ${att.filename}`)
+    console.log(`[reprocess-sync-single] Processing attachment ${attIdx}: ${att.filename} (${att.size_bytes ?? '?'} bytes)`)
     let resultAtt: any = { ...att }
     try {
-      const obj = await bucket.get(att.r2_key)
-      if (!obj) {
-        resultAtt = { ...att, error: 'R2 object not found' }
-      } else {
-        const rawBytes = new Uint8Array(await obj.arrayBuffer())
-        console.log(`[reprocess-sync-single] Fetched ${rawBytes.length} bytes for ${att.filename}`)
+      // Strategy: for large files avoid loading bytes into Worker memory.
+      // Use bucket.head() to verify the object exists, then go straight to the
+      // Genspark crawler via our own /api/proposals/pdf/:key serve endpoint (Strategy A).
+      // This keeps memory usage near-zero in the Worker — crawler streams from our endpoint.
+      // Only fall back to full arrayBuffer() for small files (<= 2MB) where text-layer
+      // extraction is worth attempting and won't blow the CPU budget.
+      const SIZE_THRESHOLD = 2 * 1024 * 1024  // 2 MB
+      const fileSize = att.size_bytes ?? 0
+      const useCrawlerDirect = fileSize > SIZE_THRESHOLD
 
-        const { text: extracted, method: exMethod, rawGarbage } = await extractPdfTextSmart(
-          rawBytes, att.filename, c.env, { r2Key: att.r2_key, workerBaseUrl }
-        )
-        console.log(`[reprocess-sync-single] Extracted ${extracted.length} chars via ${exMethod}`)
-
-        const textForDetection = extracted.length >= 100 ? extracted : (rawGarbage || '')
-        const wrongDoc = await detectWrongDocument(
-          textForDetection, att.filename, proposal.vendor_name || 'Vendor',
-          rfp.ref_number || '', rfp.title || '', c.env
-        )
-        console.log(`[reprocess-sync-single] Wrong doc: ${wrongDoc.isWrong}, type: ${wrongDoc.detectedDocType}`)
-
-        if (wrongDoc.isWrong) {
-          resultAtt = {
-            ...att,
-            text_chars: extracted.length,
-            extract_method: exMethod,
-            wrong_document: wrongDoc.reason,
-            _marked_text: `[WRONG DOCUMENT DETECTED]\nFile: ${att.filename}\nDetected type: ${wrongDoc.detectedDocType}\n\n${wrongDoc.reason}\n\n[EXTRACTED CONTENT FOR REFERENCE]\n${extracted || '(no readable text extracted)'}`,
-          }
+      if (useCrawlerDirect) {
+        // Large file — verify R2 object exists, then go directly to Genspark crawler
+        console.log(`[reprocess-sync-single] Large file (${fileSize} bytes) — using direct crawler strategy`)
+        const head = await bucket.head(att.r2_key)
+        if (!head) {
+          resultAtt = { ...att, error: 'R2 object not found' }
         } else {
-          resultAtt = { ...att, text_chars: extracted.length, extract_method: exMethod, extracted_text: extracted }
+          // First check filename-only wrong-doc detection (no bytes needed)
+          const wrongDocFilename = await detectWrongDocument(
+            '', att.filename, proposal.vendor_name || 'Vendor',
+            rfp.ref_number || '', rfp.title || '', c.env
+          )
+          if (wrongDocFilename.isWrong) {
+            console.warn(`[reprocess-sync-single] Filename-based wrong doc: ${wrongDocFilename.reason.slice(0, 100)}`)
+            resultAtt = {
+              ...att,
+              text_chars: 0,
+              extract_method: 'filename-detection',
+              wrong_document: wrongDocFilename.reason,
+              _marked_text: `[WRONG DOCUMENT DETECTED]\nFile: ${att.filename}\nDetected type: ${wrongDocFilename.detectedDocType}\n\n${wrongDocFilename.reason}\n\n[EXTRACTED CONTENT FOR REFERENCE]\n(no text extraction attempted — wrong document detected from filename)`,
+            }
+          } else {
+            // Not a wrong doc by filename — call Genspark crawler directly with Worker URL
+            const pdfUrl = `${workerBaseUrl}/api/proposals/pdf/${encodeURIComponent(att.r2_key)}`
+            console.log(`[reprocess-sync-single] Calling Genspark crawler with URL: ${pdfUrl}`)
+            const extracted = await extractPdfViaGenskarkCrawler(null, att.filename, c.env, pdfUrl)
+            console.log(`[reprocess-sync-single] Crawler returned ${extracted.length} chars`)
+
+            // Now run content-based wrong-doc detection on the extracted text
+            if (extracted.length >= 100) {
+              const wrongDocContent = await detectWrongDocument(
+                extracted, att.filename, proposal.vendor_name || 'Vendor',
+                rfp.ref_number || '', rfp.title || '', c.env
+              )
+              if (wrongDocContent.isWrong) {
+                console.warn(`[reprocess-sync-single] Content-based wrong doc: ${wrongDocContent.reason.slice(0, 100)}`)
+                resultAtt = {
+                  ...att,
+                  text_chars: extracted.length,
+                  extract_method: 'vision',
+                  wrong_document: wrongDocContent.reason,
+                  _marked_text: `[WRONG DOCUMENT DETECTED]\nFile: ${att.filename}\nDetected type: ${wrongDocContent.detectedDocType}\n\n${wrongDocContent.reason}\n\n[EXTRACTED CONTENT FOR REFERENCE]\n${extracted}`,
+                }
+              } else {
+                resultAtt = { ...att, text_chars: extracted.length, extract_method: 'vision', extracted_text: extracted }
+              }
+            } else {
+              // Crawler returned little/nothing — store with 0 chars, no wrong-doc flag
+              console.warn(`[reprocess-sync-single] Crawler returned too little text (${extracted.length} chars)`)
+              resultAtt = { ...att, text_chars: extracted.length, extract_method: 'vision', extracted_text: extracted }
+            }
+          }
+        }
+      } else {
+        // Small file — load bytes and run full pipeline (text-layer + crawler fallback)
+        const obj = await bucket.get(att.r2_key)
+        if (!obj) {
+          resultAtt = { ...att, error: 'R2 object not found' }
+        } else {
+          const rawBytes = new Uint8Array(await obj.arrayBuffer())
+          console.log(`[reprocess-sync-single] Small file — fetched ${rawBytes.length} bytes`)
+
+          const { text: extracted, method: exMethod, rawGarbage } = await extractPdfTextSmart(
+            rawBytes, att.filename, c.env, { r2Key: att.r2_key, workerBaseUrl }
+          )
+          console.log(`[reprocess-sync-single] Extracted ${extracted.length} chars via ${exMethod}`)
+
+          const textForDetection = extracted.length >= 100 ? extracted : (rawGarbage || '')
+          const wrongDoc = await detectWrongDocument(
+            textForDetection, att.filename, proposal.vendor_name || 'Vendor',
+            rfp.ref_number || '', rfp.title || '', c.env
+          )
+
+          if (wrongDoc.isWrong) {
+            resultAtt = {
+              ...att,
+              text_chars: extracted.length,
+              extract_method: exMethod,
+              wrong_document: wrongDoc.reason,
+              _marked_text: `[WRONG DOCUMENT DETECTED]\nFile: ${att.filename}\nDetected type: ${wrongDoc.detectedDocType}\n\n${wrongDoc.reason}\n\n[EXTRACTED CONTENT FOR REFERENCE]\n${extracted || '(no readable text extracted)'}`,
+            }
+          } else {
+            resultAtt = { ...att, text_chars: extracted.length, extract_method: exMethod, extracted_text: extracted }
+          }
         }
       }
     } catch (e: any) {
