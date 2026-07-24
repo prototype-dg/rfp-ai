@@ -248,6 +248,25 @@ apiRouter.get('/vendors', async (c) => {
   return c.json(results)
 })
 
+// PUT /vendors/:id — update vendor contact email (and optionally contact name)
+apiRouter.put('/vendors/:id', async (c) => {
+  const id = c.req.param('id')
+  try {
+    const body = await c.req.json() as any
+    const { contact_email, contact_name } = body
+    if (!contact_email || !contact_email.includes('@')) {
+      return c.json({ ok: false, error: 'Valid email address required' }, 400)
+    }
+    await c.env.DB.prepare(
+      `UPDATE vendors SET contact_email=?, contact_name=COALESCE(?,contact_name) WHERE id=?`
+    ).bind(contact_email.trim().toLowerCase(), contact_name?.trim() || null, id).run()
+    const updated = await c.env.DB.prepare('SELECT * FROM vendors WHERE id=?').bind(id).first()
+    return c.json({ ok: true, vendor: updated })
+  } catch(e: any) {
+    return c.json({ ok: false, error: e.message }, 500)
+  }
+})
+
 apiRouter.get('/rfps/:id/vendors', async (c) => {
   const rfpId = c.req.param('id')
   const { results } = await c.env.DB.prepare(`
@@ -406,19 +425,24 @@ apiRouter.post('/rfps/:id/questions/publish-all', async (c) => {
       }
     }
 
-    // After sending Q&A answers, advance RFP stage to submissions_closed (Proposal stage)
-    // Only advance if currently in qa_open stage
-    try {
-      const currentRfp = await c.env.DB.prepare('SELECT stage FROM rfps WHERE id=?').bind(rfpId).first<{stage:string}>()
-      if (currentRfp?.stage === 'qa_open') {
-        await c.env.DB.prepare(`UPDATE rfps SET stage='submissions_closed', updated_at=datetime('now') WHERE id=?`).bind(rfpId).run()
-      }
-    } catch(_) {}
-
-    return c.json({ ok: true, sentTo, stageAdvanced: true })
+    return c.json({ ok: true, sentTo })
   } catch(e: any) {
-    return c.json({ ok: true, warning: e.message })
+    console.error('[publish-all] email/excel step failed:', e?.message)
+    // Continue to stage advance even if email sending failed
   }
+
+  // ALWAYS advance RFP stage from qa_open → submissions_closed after publish,
+  // regardless of whether email sending succeeded.
+  try {
+    const currentRfp = await c.env.DB.prepare('SELECT stage FROM rfps WHERE id=?').bind(rfpId).first<{stage:string}>()
+    if (currentRfp?.stage === 'qa_open') {
+      await c.env.DB.prepare(`UPDATE rfps SET stage='submissions_closed', updated_at=datetime('now') WHERE id=?`).bind(rfpId).run()
+    }
+  } catch(stageErr: any) {
+    console.error('[publish-all] stage advance failed:', stageErr?.message)
+  }
+
+  return c.json({ ok: true, stageAdvanced: true })
 })
 
 // ============================================================
@@ -739,49 +763,70 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
         }
       }
     } else if (emailCategory === 'proposal') {
-      // Add/update proposal record with PDF data
-      const existing = await db.prepare('SELECT id FROM proposals WHERE vendor_id=? AND rfp_id=?').bind(vendorId, rfpId).first<any>()
       const isAndersen = vendorRow?.contact_email?.includes('andersenlab.com') ? 1 : 0
+      const vendorDisplayName = vendorRow?.name || fromAddress || 'Vendor'
 
-      // Extract rich text from the PDF for evaluation (Andersen real proposal)
-      let pdfExtractedText = ''
-      if (pdfBase64 && isAndersen) {
+      // If the email looks like a proposal but has NO PDF attachment,
+      // send back a reply asking the vendor to resend with their proposal attached.
+      if (!pdfBase64 && !pdfFilename) {
+        // Only send the missing-attachment reply to Andersen (real email constraint)
+        if (isAndersen && (c.env as any).RESEND_API_KEY) {
+          const missingAttachReply = `Dear ${vendorDisplayName},\n\nThank you for your email regarding RFP Reference: ${rfp?.ref_number || ''}.\n\nWe have reviewed your message and note that no proposal document was attached. To formally register your submission, please resend your email with your complete proposal document attached as a PDF file.\n\nIf you have already submitted your proposal separately, please disregard this message.\n\nBest regards,\nProcurement & Contracting Department\nCrown Prince's Court, Abu Dhabi\nprocurement@cpc-rfp.website`
+          try {
+            await fetch('https://api.resend.com/emails', {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${(c.env as any).RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                from: 'CPC Procurement <procurement@cpc-rfp.website>',
+                to: [fromAddress],
+                subject: `RE: ${subject} — Proposal Attachment Missing`,
+                text: missingAttachReply,
+              }),
+            })
+          } catch(_) {}
+        }
+        // Do NOT create a proposal record — skip to end
+      } else {
+        // We have a PDF — create/update the proposal record.
+        // This works regardless of RFP stage (submissions_closed, qa_open, evaluation, etc.)
+        const existing = await db.prepare('SELECT id FROM proposals WHERE vendor_id=? AND rfp_id=?').bind(vendorId, rfpId).first<any>()
+
+        // Extract rich text from the PDF for AI evaluation (Andersen real proposal)
+        let pdfExtractedText = ''
+        if (pdfBase64 && isAndersen) {
+          try {
+            const pdfBytes2 = Uint8Array.from(atob(pdfBase64), c2 => c2.charCodeAt(0))
+            pdfExtractedText = await extractPdfText(pdfBytes2)
+          } catch(_) {}
+        }
+
+        // For Andersen use PDF text; for others use email body as technical summary
+        const technicalSummary = isAndersen
+          ? (pdfExtractedText.slice(0, 4000) || bodyText.slice(0, 2000) || `Proposal submitted by ${vendorDisplayName} via email.`)
+          : bodyText.slice(0, 2000) || `Proposal submitted by ${vendorDisplayName} via email.`
+
+        const pdfUrl = pdfBase64 ? 'data:application/pdf;base64,' + pdfBase64 : null
+
+        if (existing) {
+          await db.prepare(`
+            UPDATE proposals SET pdf_attachment_url=?, pdf_filename=?, technical_proposal=?, proposed_duration=?, status='submitted', is_real_submission=? WHERE id=?
+          `).bind(pdfUrl, pdfFilename || null, technicalSummary, proposedDuration || null, isAndersen, existing.id).run()
+        } else {
+          await db.prepare(`
+            INSERT INTO proposals (rfp_id, vendor_id, technical_proposal, financial_proposal, status, is_real_submission, pdf_attachment_url, pdf_filename, proposed_duration, created_at)
+            VALUES (?,?,?,NULL,'submitted',?,?,?,?,datetime('now'))
+          `).bind(rfpId, vendorId, technicalSummary, isAndersen, pdfUrl, pdfFilename || null, proposedDuration || null).run()
+        }
+
+        // Auto-advance RFP stage: submissions_closed → evaluation (proposal received signals start of eval)
+        // Also handle: if RFP is still in qa_open or published, still accept the proposal but don't auto-advance
         try {
-          const pdfBytes2 = Uint8Array.from(atob(pdfBase64), c => c.charCodeAt(0))
-          pdfExtractedText = await extractPdfText(pdfBytes2)
+          const currentRfp = await db.prepare('SELECT stage FROM rfps WHERE id=?').bind(rfpId).first<{stage:string}>()
+          if (currentRfp?.stage === 'submissions_closed') {
+            await db.prepare(`UPDATE rfps SET stage='evaluation', updated_at=datetime('now') WHERE id=?`).bind(rfpId).run()
+          }
         } catch(_) {}
       }
-
-      // Build technical summary: for Andersen use PDF text; for others use email body
-      const technicalSummary = isAndersen
-        ? (pdfExtractedText.slice(0, 4000) || bodyText.slice(0, 2000) || `Proposal submitted by ${vendorRow?.name || 'Andersen'} via email.`)
-        : bodyText.slice(0, 2000) || `Proposal submitted by ${vendorRow?.name || 'Vendor'} via email.`
-
-      if (existing) {
-        await db.prepare(`
-          UPDATE proposals SET pdf_attachment_url=?, pdf_filename=?, technical_proposal=?, proposed_duration=?, status='submitted', is_real_submission=? WHERE id=?
-        `).bind(
-          pdfBase64 ? 'data:application/pdf;base64,' + pdfBase64 : null,
-          pdfFilename || null,
-          technicalSummary,
-          proposedDuration || null,
-          isAndersen,
-          existing.id
-        ).run()
-      } else {
-        await db.prepare(`
-          INSERT INTO proposals (rfp_id, vendor_id, technical_proposal, financial_proposal, status, is_real_submission, pdf_attachment_url, pdf_filename, proposed_duration, created_at)
-          VALUES (?,?,?,NULL,'submitted',?,?,?,?,datetime('now'))
-        `).bind(rfpId, vendorId, technicalSummary, isAndersen, pdfBase64 ? 'data:application/pdf;base64,' + pdfBase64 : null, pdfFilename || null, proposedDuration || null).run()
-      }
-
-      // Auto-notify: advance RFP to evaluation stage if it's currently in submissions_closed
-      try {
-        const currentRfp = await db.prepare('SELECT stage FROM rfps WHERE id=?').bind(rfpId).first<{stage:string}>()
-        if (currentRfp?.stage === 'submissions_closed') {
-          await db.prepare(`UPDATE rfps SET stage='evaluation', updated_at=datetime('now') WHERE id=?`).bind(rfpId).run()
-        }
-      } catch(_) {}
     }
 
     // For questions emails: also auto-notify via the newCount in the response
@@ -1891,6 +1936,171 @@ function uint8ToBase64(bytes: Uint8Array): string {
   return btoa(binary)
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// REAL PDF GENERATOR — produces a valid PDF 1.4 binary from plain text content
+// Works in Cloudflare Workers (no Node.js / headless browser needed).
+// Strips HTML tags from rfp.content and lays out the text as PDF text objects.
+// ─────────────────────────────────────────────────────────────────────────────
+function generateRfpPdf(rfp: any): Uint8Array {
+  const enc = new TextEncoder()
+
+  // Strip HTML, decode entities, clean up whitespace
+  const rawText = (rfp?.content || '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(?:p|div|li|h[1-6]|tr|td|th|section|article)>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+
+  // Build header lines
+  const headerLines = [
+    'Crown Prince\'s Court — Procurement & Contracting',
+    `Reference: ${rfp?.ref_number || ''}`,
+    `Title: ${rfp?.title || 'Request for Proposal'}`,
+    `Date: ${new Date().toLocaleDateString('en-GB')}`,
+    '─────────────────────────────────────────────────────────',
+    '',
+  ]
+
+  const fullText = headerLines.join('\n') + '\n' + rawText + '\n\n' +
+    '─────────────────────────────────────────────────────────\n' +
+    'Official procurement document — Crown Prince\'s Court, Abu Dhabi, UAE\n' +
+    `Reference: ${rfp?.ref_number || ''} | Generated: ${new Date().toLocaleDateString('en-GB')}`
+
+  // Split into lines, then into pages (≈ 55 lines per page)
+  const LINE_W = 95  // chars per line before wrapping
+  const LINES_PER_PAGE = 52
+  const PAGE_W = 595.28  // A4 width in pt
+  const PAGE_H = 841.89  // A4 height in pt
+  const MARGIN_L = 57    // 20mm
+  const MARGIN_T = 800   // top y (from bottom)
+  const LINE_H = 14      // pt per line
+  const FONT_SIZE = 10
+
+  // Word-wrap each source line to LINE_W chars
+  function wrapLine(line: string): string[] {
+    if (line.length <= LINE_W) return [line]
+    const words = line.split(' ')
+    const out: string[] = []
+    let cur = ''
+    for (const w of words) {
+      if ((cur + (cur ? ' ' : '') + w).length <= LINE_W) {
+        cur = cur ? cur + ' ' + w : w
+      } else {
+        if (cur) out.push(cur)
+        cur = w.length > LINE_W ? w.slice(0, LINE_W) : w
+      }
+    }
+    if (cur) out.push(cur)
+    return out
+  }
+
+  const allLines: string[] = []
+  for (const raw of fullText.split('\n')) {
+    for (const wrapped of wrapLine(raw)) {
+      allLines.push(wrapped)
+    }
+  }
+
+  // Split into pages
+  const pages: string[][] = []
+  for (let i = 0; i < allLines.length; i += LINES_PER_PAGE) {
+    pages.push(allLines.slice(i, i + LINES_PER_PAGE))
+  }
+  if (pages.length === 0) pages.push(['(No content)'])
+
+  // PDF escape: parens and backslash
+  function pdfStr(s: string): string {
+    return s.replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)').replace(/[\x80-\xff]/g, (c) => `\\${c.charCodeAt(0).toString(8).padStart(3,'0')}`)
+  }
+
+  // Build PDF objects
+  const objects: string[] = []
+  const offsets: number[] = []
+
+  function addObj(content: string): number {
+    const n = objects.length + 1
+    objects.push(content)
+    return n
+  }
+
+  // Object 1: Catalog (filled after we know page refs)
+  // Object 2: Pages (filled after page content objects created)
+  // We build content objects first, then circle back.
+
+  // Page content streams
+  const pageContentObjNums: number[] = []
+  const pageObjNums: number[] = []
+
+  // Reserve obj 1 (catalog) and obj 2 (pages) as placeholders
+  objects.push('')  // placeholder obj 1
+  objects.push('')  // placeholder obj 2
+
+  for (const pageLines of pages) {
+    // Build BT...ET text block
+    let textCmds = `BT\n/F1 ${FONT_SIZE} Tf\n`
+    let y = MARGIN_T
+    for (const line of pageLines) {
+      textCmds += `${MARGIN_L} ${y} Td\n(${pdfStr(line)}) Tj\n0 0 Td\n`
+      y -= LINE_H
+    }
+    textCmds += 'ET\n'
+
+    const stream = enc.encode(textCmds)
+    const contentObj = `<< /Length ${stream.length} >>\nstream\n` +
+      new TextDecoder('latin1').decode(stream) +
+      '\nendstream'
+    const contentNum = objects.length + 1
+    objects.push(contentObj)
+    pageContentObjNums.push(contentNum)
+
+    // Page object
+    const pageNum = objects.length + 1
+    objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PAGE_W} ${PAGE_H}] /Contents ${contentNum} 0 R /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >> >>`)
+    pageObjNums.push(pageNum)
+  }
+
+  // Fill placeholder obj 1: Catalog
+  objects[0] = `<< /Type /Catalog /Pages 2 0 R >>`
+
+  // Fill placeholder obj 2: Pages
+  const kidsRef = pageObjNums.map(n => `${n} 0 R`).join(' ')
+  objects[1] = `<< /Type /Pages /Kids [${kidsRef}] /Count ${pages.length} >>`
+
+  // Build PDF bytes
+  const header = `%PDF-1.4\n%\xE2\xE3\xCF\xD3\n`
+  let body = header
+  const bodyOffsets: number[] = []
+
+  for (let i = 0; i < objects.length; i++) {
+    bodyOffsets.push(body.length)
+    body += `${i + 1} 0 obj\n${objects[i]}\nendobj\n`
+  }
+
+  // Cross-reference table
+  const xrefOffset = body.length
+  body += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`
+  for (const off of bodyOffsets) {
+    body += String(off).padStart(10, '0') + ' 00000 n \n'
+  }
+
+  body += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`
+
+  // Encode as latin1 bytes (PDF is a binary format)
+  const result = new Uint8Array(body.length)
+  for (let i = 0; i < body.length; i++) {
+    result[i] = body.charCodeAt(i) & 0xff
+  }
+  return result
+}
+
 function buildZip(files: Record<string, Uint8Array>): Uint8Array {
   const parts: Uint8Array[] = []
   const centralDir: Uint8Array[] = []
@@ -2304,65 +2514,14 @@ async function sendRealEmail(
     </div>
   </div>`
 
-  // Build the RFP attachment as a proper PDF-like HTML document
-  // Sent as application/pdf content-type so mail clients open it as PDF
+  // Build the RFP attachment as a genuine PDF binary (valid PDF 1.4)
+  // generateRfpPdf() strips HTML tags and produces text pages readable by any viewer.
   const rfpRef = (rfp?.ref_number || 'document').replace(/\//g,'_')
   const rfpFilename = `RFP_${rfpRef}.pdf`
-
-  let attachBase64 = ''
   let attachments: any[] = []
-
   if (rfp?.content) {
-    // Build a fully self-contained HTML that renders beautifully when opened
-    // Send it with .pdf extension and PDF content-type — most mail clients
-    // will attempt to open with a viewer; if they can't, they save the file.
-    // This is the best we can do in a server-side Worker without a headless browser.
-    const rfpHtmlContent = `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>RFP – ${rfp?.ref_number || ''}: ${rfp?.title || 'CPC RFP'}</title>
-<style>
-  @page { margin: 2cm; }
-  * { box-sizing: border-box; }
-  body { font-family: 'Arial', sans-serif; font-size: 11pt; line-height: 1.65; color: #1a1a1a; max-width: 210mm; margin: 0 auto; padding: 20mm 18mm; background: #fff; }
-  h1 { font-size: 17pt; font-weight: 700; color: #1a1a2e; border-bottom: 3px solid #c9a84c; padding-bottom: 0.5rem; margin-bottom: 1.5rem; }
-  h2 { font-size: 13pt; font-weight: 700; color: #1a1a2e; margin-top: 1.8rem; margin-bottom: 0.75rem; page-break-after: avoid; }
-  h3 { font-size: 11.5pt; font-weight: 700; color: #374151; margin-top: 1.2rem; page-break-after: avoid; }
-  p { margin: 0.5rem 0 0.75rem; }
-  ul, ol { margin: 0.5rem 0 0.75rem 1.5rem; }
-  li { margin-bottom: 0.3rem; }
-  table { width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: 10pt; }
-  th { background: #1a1a2e; color: #c9a84c; padding: 8px 10px; text-align: left; font-weight: 700; }
-  td { padding: 6px 10px; border-bottom: 1px solid #e5e7eb; vertical-align: top; }
-  tr:nth-child(even) td { background: #f9fafb; }
-  .rfp-doc { max-width: 100%; }
-  .rfp-header-band { background: #1a1a2e; color: #c9a84c; padding: 1.5rem 2rem; border-radius: 6px; margin-bottom: 2rem; }
-  .rfp-header-band h1, .rfp-header-band .rfp-title { color: #c9a84c !important; border: none; margin: 0; font-size: 18pt; }
-  .rfp-header-band .rfp-ref { color: #e5c87a; font-size: 10pt; margin-top: 0.35rem; }
-  .rfp-meta-table td { padding: 5px 10px; border-bottom: 1px solid #e5e7eb; font-size: 10pt; }
-  .rfp-meta-table td:first-child { font-weight: 600; color: #374151; width: 32%; }
-  .rfp-section-card { border: 1px solid #e5e7eb; border-radius: 6px; padding: 1rem 1.25rem; margin: 1rem 0; page-break-inside: avoid; }
-  .rfp-section-title { font-weight: 700; font-size: 12pt; color: #1a1a2e; margin-bottom: 0.5rem; }
-  .rfp-spec-table th { font-size: 9.5pt; }
-  .footer { margin-top: 2.5rem; padding-top: 1rem; border-top: 2px solid #e5e7eb; font-size: 8.5pt; color: #6b7280; text-align: center; }
-  @media print { body { padding: 0; } }
-</style>
-</head>
-<body>
-${rfp.content}
-<div class="footer">
-  Official procurement document — Crown Prince's Court, Abu Dhabi, UAE &nbsp;|&nbsp;
-  Reference: ${rfp.ref_number || ''} &nbsp;|&nbsp; Generated: ${new Date().toLocaleDateString('en-GB')}
-</div>
-</body>
-</html>`
-
-    // Encode as base64 — use a robust implementation that handles Unicode
-    const enc = new TextEncoder()
-    const bytes = enc.encode(rfpHtmlContent)
-    attachBase64 = uint8ToBase64(bytes)
+    const pdfBytes = generateRfpPdf(rfp)
+    const attachBase64 = uint8ToBase64(pdfBytes)
     attachments = [{
       filename: rfpFilename,
       content: attachBase64,

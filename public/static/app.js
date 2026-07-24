@@ -665,6 +665,10 @@ pages.rfp_detail = async function(opts) {
   const tab = opts.tab || appState.currentRfpTab;
   const tabFn = rfpTabs[tab];
   if (tabFn) tabFn(rfpId, rfp);
+
+  // Always start background inbox poller when opening any RFP detail page
+  // so new emails (questions/proposals) are detected even without sending invitations first.
+  startGlobalInboxPolling(rfpId);
 };
 
 // ============================================================
@@ -1374,67 +1378,86 @@ function startGlobalInboxPolling(rfpId) {
   }, 5000);
 }
 
+// Track last seen email ID per RFP — survives tab switches (unlike length comparison)
+var _lastSeenEmailId = {};
+
 async function silentCheckInbox(rfpId) {
   try {
     const received = await apiCall('GET', '/rfps/' + rfpId + '/emails/received').catch(function(){ return []; });
-    const prev = (appState.receivedEmails || []).length;
-    if (received.length > prev) {
-      // New email(s) arrived!
-      const newCount = received.length - prev;
+    if (!received || received.length === 0) return;
+
+    // Detect new emails by comparing the newest email's id to the last seen id.
+    // This works even if the poller starts AFTER emails have already arrived.
+    var newestId = received[0] ? received[0].id : null;
+    var lastSeen = _lastSeenEmailId[rfpId] || null;
+
+    // On first poll for this rfp: initialise lastSeen to current newest so we don't
+    // retroactively trigger on already-visible emails.
+    if (lastSeen === null) {
+      _lastSeenEmailId[rfpId] = newestId;
       appState.receivedEmails = received;
-      appState.unreadEmailCount = (appState.unreadEmailCount || 0) + newCount;
-      const newest = received[0];
-      const attachBadge = newest && newest.has_attachment ? ' with Excel attachment' : '';
-      const senderName = (newest && (newest.vendor_name || newest.from_email)) || 'vendor';
-      const newestVendorId = newest ? (newest.vendor_id || null) : null;
+      return;
+    }
 
-      // Fetch updated question count
-      const questions = await apiCall('GET', '/rfps/' + rfpId + '/questions').catch(function(){ return []; });
-      const emailQs = questions.filter(function(q){ return q.source === 'email'; }).length;
+    // Find emails that arrived after lastSeen
+    var newEmails = received.filter(function(e) { return e.id > lastSeen; });
+    if (newEmails.length === 0) return;
 
-      // Auto-populate Q&A or Proposals without requiring manual button press
-      if (newest && (newest.has_attachment || newest.email_category === 'questions') && emailQs > 0) {
-        // Questions are already in DB (webhook inserted them) - notify and auto-switch
-        appState.unreadQA = true;
-        pulseQATab();
-        addNotification('questions',
-          '📋 Questions ready in Q&A tab',
-          emailQs + ' question(s) from ' + senderName + ' have been added automatically.',
-          rfpId, 'qa', null
-        );
-        addNotification('email',
-          '📨 New Email from ' + senderName,
-          (newest.subject || 'No Subject') + attachBadge,
-          rfpId, null, newestVendorId
-        );
-        // Auto-switch to Q&A tab if user is viewing this RFP
-        if (appState.currentRfpId && String(appState.currentRfpId) === String(rfpId)) {
-          renderRfpTabs('qa', rfpId, true);
-          rfpTabs.qa(rfpId);
-        }
-      } else if (newest && (newest.has_pdf || newest.email_category === 'proposal')) {
-        // Proposal PDF received - auto-switch to Proposals tab
-        addNotification('proposal',
-          '📄 Proposal Received — ready in Proposals tab',
-          senderName + ' submitted a proposal PDF. Added to evaluation queue.',
-          rfpId, 'proposals', newestVendorId
-        );
-        addNotification('email',
-          '📨 New Email from ' + senderName,
-          (newest.subject || 'No Subject') + ' (PDF proposal)',
-          rfpId, null, newestVendorId
-        );
-        // Auto-switch to proposals tab if user is viewing this RFP
-        if (appState.currentRfpId && String(appState.currentRfpId) === String(rfpId)) {
-          renderRfpTabs('proposals', rfpId, false);
-          rfpTabs.proposals(rfpId);
-        }
-      } else {
-        addNotification('email',
-          '📨 New Email from ' + senderName,
-          (newest && newest.subject ? newest.subject : 'No Subject') + attachBadge,
-          rfpId, null, newestVendorId
-        );
+    // Update state
+    _lastSeenEmailId[rfpId] = newestId;
+    appState.receivedEmails = received;
+    appState.unreadEmailCount = (appState.unreadEmailCount || 0) + newEmails.length;
+
+    var newest = newEmails[0];
+    var attachBadge = newest && newest.has_attachment ? ' with Excel attachment' : '';
+    var senderName = (newest && (newest.vendor_name || newest.from_email)) || 'vendor';
+    var newestVendorId = newest ? (newest.vendor_id || null) : null;
+
+    // Determine what kind of email arrived
+    var isQuestionsEmail = newest && (newest.has_attachment || newest.email_category === 'questions');
+    var isProposalEmail  = newest && (newest.has_pdf || newest.email_category === 'proposal');
+
+    if (isQuestionsEmail) {
+      // Fetch current question count from DB (webhook already inserted them)
+      var questions = await apiCall('GET', '/rfps/' + rfpId + '/questions').catch(function(){ return []; });
+      var emailQs = questions.filter(function(q){ return q.source === 'email'; }).length;
+
+      appState.unreadQA = true;
+      pulseQATab();
+      addNotification('questions',
+        '📋 Questions ready in Q&A tab',
+        (emailQs > 0 ? emailQs + ' question(s)' : 'Questions') + ' from ' + senderName + ' have been added automatically.',
+        rfpId, 'qa', null
+      );
+      addNotification('email', '📨 New Email from ' + senderName,
+        (newest.subject || 'No Subject') + attachBadge, rfpId, null, newestVendorId);
+
+      // Auto-switch to Q&A tab if user is currently viewing this RFP
+      if (appState.currentRfpId && String(appState.currentRfpId) === String(rfpId)) {
+        renderRfpTabs('qa', rfpId, true);
+        rfpTabs.qa(rfpId);
+      }
+
+    } else if (isProposalEmail) {
+      addNotification('proposal',
+        '📄 Proposal Received — ready in Proposals tab',
+        senderName + ' submitted a proposal. Added to evaluation queue.',
+        rfpId, 'proposals', newestVendorId
+      );
+      addNotification('email', '📨 New Email from ' + senderName,
+        (newest.subject || 'No Subject') + ' (PDF proposal)', rfpId, null, newestVendorId);
+
+      // Auto-switch to Proposals tab if user is currently viewing this RFP
+      if (appState.currentRfpId && String(appState.currentRfpId) === String(rfpId)) {
+        renderRfpTabs('proposals', rfpId, false);
+        rfpTabs.proposals(rfpId);
+      }
+
+    } else {
+      addNotification('email', '📨 New Email from ' + senderName,
+        (newest && newest.subject ? newest.subject : 'No Subject') + attachBadge,
+        rfpId, null, newestVendorId);
+      if (appState.currentRfpId && String(appState.currentRfpId) === String(rfpId)) {
         renderRfpTabs(appState.currentRfpTab, rfpId, appState.unreadQA);
       }
     }
@@ -2298,7 +2321,7 @@ pages.vendors = async function() {
 
 function viewVendorDetail(id) {
   const v = appState.vendors.find(function(v){ return v.id === id; });
-  const rv = appState.rfpVendors.find(function(v){ return v.id === id; });
+  const rv = appState.rfpVendors ? appState.rfpVendors.find(function(v){ return v.id === id; }) : null;
   const vendor = v || rv;
   if (!vendor) return;
   showModal(
@@ -2309,7 +2332,15 @@ function viewVendorDetail(id) {
     + '</div>'
     + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.875rem;font-size:0.85rem;margin-bottom:1rem">'
     + '<div><label>Contact Name</label><p style="margin:0">' + escHtml(vendor.contact_name||'-') + '</p></div>'
-    + '<div><label>Contact Email</label><p style="margin:0"><a href="mailto:' + escHtml(vendor.contact_email||'') + '" style="color:var(--cpc-blue)">' + escHtml(vendor.contact_email||'-') + '</a></p></div>'
+    + '<div><label style="display:block;margin-bottom:4px">Contact Email <span style="font-size:0.72rem;color:#6b7280">(editable)</span></label>'
+    + '<div style="display:flex;gap:6px;align-items:center">'
+    + '<input id="vendorEmailInput_' + id + '" type="email" value="' + escHtml(vendor.contact_email||'') + '" '
+    + 'style="flex:1;border:1px solid #d1d5db;border-radius:6px;padding:5px 8px;font-size:0.82rem;min-width:0" '
+    + 'placeholder="email@vendor.com">'
+    + '<button class="btn-primary" style="padding:5px 12px;font-size:0.78rem;white-space:nowrap" onclick="saveVendorEmail(' + id + ')"><i class="fas fa-save"></i>Save</button>'
+    + '</div>'
+    + '<div id="vendorEmailMsg_' + id + '" style="font-size:0.72rem;margin-top:3px"></div>'
+    + '</div>'
     + '<div><label>Country</label><p style="margin:0">' + escHtml(vendor.country||'-') + '</p></div>'
     + '<div><label>Size</label><p style="margin:0">' + escHtml(vendor.size||'-') + '</p></div>'
     + '<div><label>Certifications</label><p style="margin:0">' + escHtml(vendor.certifications||'-') + '</p></div>'
@@ -2320,6 +2351,34 @@ function viewVendorDetail(id) {
     + '</div></div>'
     + '<button class="btn-ghost" style="width:100%" onclick="closeModal()">Close</button>'
   );
+}
+
+async function saveVendorEmail(vendorId) {
+  const input = document.getElementById('vendorEmailInput_' + vendorId);
+  const msgEl = document.getElementById('vendorEmailMsg_' + vendorId);
+  if (!input) return;
+  const newEmail = (input.value || '').trim();
+  if (!newEmail || !newEmail.includes('@')) {
+    if (msgEl) { msgEl.style.color='#dc2626'; msgEl.textContent='Please enter a valid email address.'; }
+    return;
+  }
+  try {
+    if (msgEl) { msgEl.style.color='#6b7280'; msgEl.textContent='Saving...'; }
+    const result = await apiCall('PUT', '/vendors/' + vendorId, { contact_email: newEmail });
+    if (result.ok) {
+      // Update local state
+      var v = appState.vendors ? appState.vendors.find(function(v){ return v.id === vendorId; }) : null;
+      if (v) v.contact_email = newEmail;
+      var rv = appState.rfpVendors ? appState.rfpVendors.find(function(v){ return v.id === vendorId; }) : null;
+      if (rv) rv.contact_email = newEmail;
+      if (msgEl) { msgEl.style.color='#065f46'; msgEl.textContent='✓ Email updated successfully.'; }
+      showToast('Vendor email updated successfully.', 'success');
+    } else {
+      if (msgEl) { msgEl.style.color='#dc2626'; msgEl.textContent = result.error || 'Failed to save.'; }
+    }
+  } catch(e) {
+    if (msgEl) { msgEl.style.color='#dc2626'; msgEl.textContent='Error: ' + e.message; }
+  }
 }
 
 // ============================================================
