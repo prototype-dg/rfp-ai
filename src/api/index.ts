@@ -139,15 +139,8 @@ apiRouter.post('/rfps/:id/generate', async (c) => {
     // Fetch existing RFP to get arch_doc_text if not in body
     const existingRfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(id).first<any>()
     const archDocText = body.arch_doc_text || existingRfp?.arch_doc_text || ''
-    // Try real LLM generation; on failure surface the error clearly so it's not silently hidden
-    let content = ''
-    try {
-      content = await generateRFPWithLLM(body, archDocText, c.env)
-    } catch(llmErr: any) {
-      // LLM failed — use the deterministic builder as last resort so the RFP always gets content
-      console.error('[generate] LLM failed, using fallback builder:', llmErr?.message || llmErr)
-      content = buildRFPContent(body)
-    }
+    // LLM-only generation — no deterministic fallback. If it fails the user sees a clear error.
+    const content = await generateRFPWithLLM(body, archDocText, c.env)
     await c.env.DB.prepare(`
       UPDATE rfps SET title=?, category=?, budget=?, deadline=?, scope=?, tech_requirements=?, objectives=?, background=?, content=?, arch_doc_text=?, updated_at=datetime('now')
       WHERE id=?
@@ -1155,44 +1148,98 @@ async function callLLM(systemPrompt: string, userPrompt: string, env: any, model
 }
 
 async function generateRFPWithLLM(data: any, archDocText: string, env: any): Promise<string> {
-  const systemPrompt = `You are a senior government procurement specialist at the Crown Prince's Court (CPC) of Abu Dhabi, UAE. Your task is to generate a formal, comprehensive RFP document in HTML format.
+  const systemPrompt = `You are a senior government procurement specialist at the Crown Prince's Court (CPC) of Abu Dhabi, UAE. You are producing a formal, publication-ready Request for Proposal (RFP) document that will be issued to external vendors.
 
-CRITICAL RULES:
-1. Base ALL content entirely on the project details provided by the user — do NOT assume or invent any technology, platform, or vendor names not mentioned in the input.
-2. The document must be professional, structured, and compliant with UAE government procurement standards.
-3. Each section must be specific to the actual project topic described (e.g. if the project is about CRM, write CRM-specific content; if it is about fraud detection, write fraud detection content).
-4. Do NOT include references to any specific technology vendor or product unless explicitly mentioned in the input.
-5. Return ONLY the inner HTML content — no <!DOCTYPE>, no <html>/<body> wrapper tags.`
+IDENTITY & TONE
+- You write on behalf of the Crown Prince's Court (CPC), Abu Dhabi — a sovereign government institution.
+- Language must be authoritative, precise, and formal — as if it will be signed and stamped by a Director-General.
+- No filler sentences, no vague boilerplate. Every paragraph must contain actionable, verifiable requirements.
+
+CONTENT RULES — STRICTLY ENFORCED
+1. Derive ALL content exclusively from the PROJECT DETAILS and SUPPORTING DOCUMENTS provided. Do not invent, assume, or extrapolate any requirement, technology, vendor, module, or feature that is not stated or strongly implied by the input.
+2. The Scope of Work sub-sections must mirror exactly what is described in the input — structured as phases, workstreams, or functional areas exactly as the user described them. Do not add scope items that were not mentioned.
+3. Technical Requirements must reflect only the technical constraints, hosting preferences, integration points, and compliance standards that are explicitly stated. Do not add generic IT requirements unless the user mentioned them.
+4. Evaluation Criteria weights must sum to exactly 100%. Use UAE government procurement norms: Technical Approach & Methodology (30%), Functional Fit & Solution Quality (25%), Team Qualifications & Experience (20%), Financial Proposal (15%), Implementation Plan & Timeline (10%). Adjust these only if the project domain clearly warrants it (e.g. a pure consulting engagement would weight Financial differently).
+5. Vendor Qualification Requirements must be proportionate to the project described — do not demand Oracle/SAP certifications for a CRM or analytics project, and do not demand CRM certifications for an ERP project.
+
+HTML FORMATTING RULES
+- Return ONLY the inner HTML — no <!DOCTYPE>, no <html>, no <body>, no <head>.
+- Use this exact class structure for sections:
+  <div class="rfp-section"><div class="rfp-section-body"><div class="rfp-section-title"><span class="rfp-section-num">N</span> Section Title</div> ... </div></div>
+- Use <div class="rfp-subsection"><div class="rfp-subsection-title">N.M Sub-title</div> ... </div> for sub-sections.
+- Use <div class="rfp-deliverables"><strong>Key Deliverables:</strong> Item 1 &bull; Item 2</div> at the end of each scope sub-section.
+- Use <table class="rfp-spec-table"> for evaluation criteria and qualification tables.
+- Use <ul> / <ol> for lists. Use <p> for narrative paragraphs.
+- Do NOT use inline styles. Do NOT use markdown. Do NOT use code fences.`
 
   const archSection = archDocText
-    ? `\nSUPPORTING DOCUMENTS (uploaded by CPC team — use as primary context):\n${archDocText.slice(0, 4000)}\n`
+    ? `\n${'='.repeat(60)}\nSUPPORTING DOCUMENTS PROVIDED BY CPC TEAM\n(Treat this as the primary technical reference — extract requirements, scope phases, and constraints directly from this text where relevant)\n${'='.repeat(60)}\n${archDocText.slice(0, 12000)}\n${'='.repeat(60)}\n`
     : ''
 
-  const userPrompt = `Generate a complete, formal RFP HTML document for the Crown Prince's Court (CPC) Abu Dhabi based ONLY on the following inputs:
+  const userPrompt = `Generate a complete, formal RFP HTML document for the Crown Prince's Court (CPC), Abu Dhabi.
+Use ONLY the information below. Do not add anything that is not stated here.
 
-PROJECT DETAILS:
-- Title: ${data.title || 'Not specified'}
-- Category: ${data.category || 'IT & Digital Transformation'}
-- Budget: AED ${data.budget || 'To be disclosed to shortlisted vendors'}
-- Submission Deadline: ${data.deadline || '30 days from issuance'}
-- Background: ${data.background || '(not provided)'}
-- Objectives: ${data.objectives || '(not provided)'}
-- Scope of Work: ${data.scope || '(not provided)'}
-- Technical Requirements: ${data.tech_requirements || '(not provided)'}
+${'='.repeat(60)}
+PROJECT DETAILS
+${'='.repeat(60)}
+Title:                  ${data.title || 'Not specified'}
+Category:               ${data.category || 'IT & Digital Transformation'}
+Budget Envelope:        ${data.budget ? 'AED ' + data.budget + ' (indicative)' : 'To be disclosed to shortlisted vendors'}
+Proposal Deadline:      ${data.deadline || '30 days from RFP issuance'}
+
+BACKGROUND
+${data.background || '(not provided)'}
+
+OBJECTIVES
+${data.objectives || '(not provided)'}
+
+SCOPE OF WORK
+${data.scope || '(not provided)'}
+
+TECHNICAL REQUIREMENTS & CONSTRAINTS
+${data.tech_requirements || '(not provided — derive from Scope and Supporting Documents only)'}
 ${archSection}
-Include the following sections, all content derived from the inputs above:
-1. Executive Summary / Background
-2. Project Objectives (numbered list)
-3. Scope of Work (detailed, with sub-sections matching the project domain)
-4. Technical Requirements
-5. Evaluation Criteria (table with criteria name, weight %, description)
-6. Vendor Qualification Requirements
-7. Submission Requirements & Timeline
-8. Terms & Conditions (brief)
+${'='.repeat(60)}
+REQUIRED DOCUMENT SECTIONS (produce all eight, in order)
+${'='.repeat(60)}
 
-Use professional HTML formatting: headings (h2/h3), tables, ordered/unordered lists. Keep content specific to "${data.title || 'this project'}" throughout.`
+1. PROJECT BACKGROUND & CONTEXT
+   - Expand the Background field into 3–5 paragraphs covering: organisational context, current-state problem or gap, strategic mandate driving this initiative, and why an external vendor engagement is required.
+   - Close with a one-sentence statement of what this RFP is soliciting.
 
-  const llmContent = await callLLM(systemPrompt, userPrompt, env, 'gpt-5-mini', 4000)
+2. PROJECT OBJECTIVES
+   - Render as a numbered list. Each objective must be specific and measurable.
+   - Map directly to what is stated in the Objectives field. Do not add generic objectives not mentioned.
+
+3. SCOPE OF WORK
+   - Structure as numbered sub-sections (3.1, 3.2, …) that mirror the phases, workstreams, or functional areas described in the Scope of Work field.
+   - Each sub-section must have: a descriptive title, a short introductory sentence, a <ul> of specific deliverables/activities, and a <div class="rfp-deliverables"> listing the key formal deliverables.
+   - Do not create sub-sections for topics not mentioned in the Scope field or Supporting Documents.
+
+4. TECHNICAL REQUIREMENTS & ARCHITECTURE
+   - Organised under logical sub-headings (e.g. Hosting & Infrastructure, Security & Compliance, Integration, Performance, Language & Accessibility).
+   - Include only requirements that are stated in Technical Requirements field, Scope field, or Supporting Documents. Do not invent requirements.
+
+5. EVALUATION CRITERIA
+   - Render as <table class="rfp-spec-table"> with columns: Criterion | Weight % | Description.
+   - Weights must sum to 100%.
+   - Tailor criteria names to this specific project domain.
+
+6. VENDOR QUALIFICATION REQUIREMENTS
+   - Render as <table class="rfp-spec-table"> with columns: Requirement | Minimum Standard.
+   - Include: years of relevant experience, number of comparable government/enterprise projects, team certifications relevant to THIS project, financial standing.
+   - Do not require certifications irrelevant to the project domain.
+
+7. SUBMISSION REQUIREMENTS & TIMELINE
+   - Include a timeline table: Milestone | Date — using the Proposal Deadline as the anchor.
+   - List required documents in the submission package.
+   - Provide submission address: procurement@cpc-rfp.website
+
+8. TERMS & CONDITIONS
+   - Cover: confidentiality, IP ownership, right to reject, disqualification grounds, governing law (Abu Dhabi / UAE), language (English and Arabic).
+   - Keep concise — 6–10 bullet points.`
+
+  const llmContent = await callLLM(systemPrompt, userPrompt, env, 'gpt-5-mini', 16000)
   if (llmContent && llmContent.length > 400) {
     return `<div class="rfp-doc">${llmContent}</div>`
   }
@@ -1836,676 +1883,13 @@ Abu Dhabi, United Arab Emirates
 procurement@cpc-rfp.website`
 }
 
-// ============================================================
-// HELPERS — RFP CONTENT BUILDER (fully dynamic)
-// ============================================================
-function buildRFPContent(data: any): string {
-  const today = new Date().toLocaleDateString('en-AE', { year: 'numeric', month: 'long', day: 'numeric' })
-  const todayUpper = today.toUpperCase()
-  const refNum = data.ref_number || 'CPC/PROC/' + new Date().getFullYear() + '/001'
-  const deadline = data.deadline
-    ? new Date(data.deadline).toLocaleDateString('en-AE', { year:'numeric', month:'long', day:'numeric' })
-    : '30 days from issuance'
-  const qDeadline = data.deadline
-    ? new Date(new Date(data.deadline).getTime() - 14*24*60*60*1000).toLocaleDateString('en-AE', { year:'numeric', month:'long', day:'numeric' })
-    : '14 days from issuance'
-
-  const title = data.title || 'Enterprise Solution Implementation'
-  const category = data.category || 'IT & Digital Transformation'
-  const budget = data.budget || ''
-  const background = data.background || `The Crown Prince's Court (CPC) of Abu Dhabi is undertaking a strategic digital transformation initiative to modernize its operations and enhance service delivery across all affiliated entities.`
-  const objectives = data.objectives || ''
-  const scope = data.scope || ''
-  const techReqs = data.tech_requirements || ''
-
-  // ---- Technology detection — PRIMARY signals only (title + category drive the topic) ----
-  // We use a "primary" text (title + category) for strong signals and "full" text for supporting context.
-  // This prevents a CRM project that MENTIONS "ERP integration" from being classified as an ERP project.
-  const primaryText = (title + ' ' + category).toLowerCase()
-  const allText     = (title + ' ' + category + ' ' + objectives + ' ' + scope + ' ' + techReqs + ' ' + background).toLowerCase()
-
-  // ERP: must be explicitly in the title or have specific ERP product keywords anywhere
-  const isOracleEBS = allText.includes('oracle ebs') || allText.includes('oracle e-business') || allText.includes('ebs r12') || allText.includes('r12.2')
-  const isSAP       = allText.includes('sap s/4') || allText.includes('sap hana') || allText.includes('s4hana') || (primaryText.includes('sap') && !isOracleEBS)
-  const isDynamics  = allText.includes('dynamics 365') || (primaryText.includes('dynamics') && !isOracleEBS)
-  // isERP: only fire when ERP/Oracle is the PRIMARY topic (title/category), or explicit ERP product keyword
-  const isERP       = isOracleEBS || isSAP || isDynamics
-                    || primaryText.includes('erp')
-                    || primaryText.includes('enterprise resource planning')
-
-  // CRM: title/category explicitly about CRM, or well-known CRM product
-  const isCRM       = primaryText.includes('crm') || primaryText.includes('customer relationship')
-                    || allText.includes('salesforce') || isDynamics
-                    || (allText.includes('crm') && !isERP)
-
-  // DWH/BI/AI/Cloud: only trigger when PRIMARY topic, not incidental mentions in scope/background
-  const isDWH    = primaryText.includes('data warehouse') || primaryText.includes('dwh')
-                 || primaryText.includes('data platform') || primaryText.includes('medallion')
-                 || primaryText.includes('data lake') || primaryText.includes('analytics platform')
-  const isTableau  = allText.includes('tableau')
-  const isPowerBI  = allText.includes('power bi')
-  const isBI       = isTableau || isPowerBI
-                   || primaryText.includes('bi platform') || primaryText.includes('business intelligence')
-                   || isDWH
-  const isAI       = primaryText.includes('ai platform') || primaryText.includes('machine learning')
-                   || primaryText.includes('artificial intelligence') || primaryText.includes('generative ai')
-                   || primaryText.includes('ai-native') || primaryText.includes('ai native')
-  const isCloud    = primaryText.includes('cloud migration') || primaryText.includes('cloud platform')
-                   || (primaryText.includes('azure') && !isCRM) || (primaryText.includes('aws') && !isCRM)
-  const isCyber    = primaryText.includes('cybersecurity') || primaryText.includes('soc ')
-                   || primaryText.includes('siem') || primaryText.includes('security operations')
-  const isHRMS     = isOracleEBS || primaryText.includes('hrms') || primaryText.includes('hr system')
-                   || primaryText.includes('human capital') || primaryText.includes('payroll system')
-  const isMobile   = primaryText.includes('mobile app') || primaryText.includes('mobile application')
-  const isInfra    = primaryText.includes('infrastructure') || primaryText.includes('data center')
-
-  // Determine the primary platform label for use in qualification requirements
-  let platformLabel = 'enterprise software'
-  if (isOracleEBS) platformLabel = 'Oracle E-Business Suite R12.2'
-  else if (isSAP)  platformLabel = 'SAP S/4HANA'
-  else if (isDynamics) platformLabel = 'Microsoft Dynamics 365'
-  else if (isCRM && !isERP) platformLabel = 'CRM platform'
-  else if (isERP) platformLabel = 'ERP platform'
-  else if (isAI)  platformLabel = 'AI/ML platform'
-  else if (isDWH) platformLabel = 'Data Warehouse platform'
-  else if (isCloud) platformLabel = 'cloud platform'
-
-  const biTool = isTableau ? 'Tableau' : isPowerBI ? 'Power BI' : 'BI platform'
-
-  const objectivesHtml = objectives
-    ? formatObjectivesFromText(objectives)
-    : buildDefaultObjectives(isERP, isDWH, isCRM, isAI, isCloud, title)
-
-  const scopeHtml = scope
-    ? buildScopeFromText(scope, isERP, isOracleEBS, isSAP, isDynamics, isCRM, isDWH, isBI, isTableau, isPowerBI, isAI, isCloud, isCyber, isHRMS, isMobile, isInfra, title)
-    : buildDefaultScope(isERP, isOracleEBS, isSAP, isDynamics, isCRM, isDWH, isBI, isTableau, isPowerBI, isAI, isCloud, isCyber, isHRMS, isMobile, title)
-
-  const techHtml = techReqs
-    ? buildTechFromText(techReqs, isERP, isDWH, isAI, isCloud, isCyber)
-    : buildDefaultTech(isERP, isOracleEBS, isDWH, isAI, isCloud, isCyber, isMobile)
-
-  return `<div class="rfp-doc">
-<div class="rfp-cover">
-  <!-- Gold lattice header band (matches real CPC RFP) -->
-  <div class="rfp-header-band"></div>
-  <div class="rfp-circle-divider"></div>
-
-  <!-- Logo: CPC crest + bilingual name, centered -->
-  <div class="rfp-cover-logo">
-    <div class="rfp-logo-emblem">
-      <!-- CPC Falcon Crest (simplified SVG matching real logo) -->
-      <svg width="60" height="60" viewBox="0 0 60 60" xmlns="http://www.w3.org/2000/svg">
-        <circle cx="30" cy="30" r="28" fill="none" stroke="#cc0000" stroke-width="2"/>
-        <circle cx="30" cy="30" r="24" fill="white"/>
-        <!-- Shield -->
-        <path d="M30 12 L42 18 L42 34 Q42 44 30 50 Q18 44 18 34 L18 18 Z" fill="#cc0000" stroke="white" stroke-width="0.5"/>
-        <path d="M30 12 L36 18 L36 34 Q36 44 30 50 Q24 44 24 34 L24 18 Z" fill="white"/>
-        <!-- Falcon body simplified -->
-        <path d="M30 14 Q34 10 38 12 Q40 16 36 20 L30 22 L24 20 Q20 16 22 12 Q26 10 30 14Z" fill="#c9a84c"/>
-        <!-- Crown/stars -->
-        <text x="30" y="42" text-anchor="middle" font-size="6" fill="#cc0000" font-family="Arial">✦ ✦ ✦</text>
-      </svg>
-    </div>
-    <div class="rfp-logo-text">
-      <div class="rfp-org-name">CROWN PRINCE COURT</div>
-      <div class="rfp-org-arabic">ديوان ولي العهد</div>
-    </div>
-  </div>
-
-  <div class="rfp-cover-divider"></div>
-
-  <!-- Cover body: title block, left-aligned lower section -->
-  <div class="rfp-cover-body">
-    <div class="rfp-doc-title">${escXml(title)}</div>
-    <div class="rfp-doc-type">REQUEST FOR PROPOSAL</div>
-    <div class="rfp-doc-date">${todayUpper.replace(/\s\d{4}$/, (m) => m)}</div>
-  </div>
-</div>
-
-<table class="rfp-meta-table">
-  <tr>
-    <th width="20%">RFP Reference</th><td width="30%">${escXml(refNum)}</td>
-    <th width="20%">Issue Date</th><td width="30%">${today}</td>
-  </tr>
-  <tr>
-    <th>Category</th><td>${escXml(category)}</td>
-    <th>Proposal Deadline</th><td>${deadline}</td>
-  </tr>
-  <tr>
-    <th>Questions Deadline</th><td>${qDeadline}</td>
-    <th>Clarification Meeting</th><td>To be scheduled</td>
-  </tr>
-  ${budget ? `<tr><th>Budget Envelope</th><td colspan="3">AED ${escXml(budget)} (indicative)</td></tr>` : ''}
-  <tr>
-    <th>Confidentiality</th><td colspan="3">This document is CONFIDENTIAL. Unauthorized distribution is strictly prohibited.</td>
-  </tr>
-</table>
-
-<!-- Interior page header band -->
-<div class="rfp-header-band"></div>
-<div class="rfp-circle-divider"></div>
-<div class="rfp-page-header">
-  <span class="rfp-page-header-logo">CROWN PRINCE COURT &nbsp;|&nbsp; ديوان ولي العهد</span>
-  <span class="rfp-page-header-ref">${escXml(refNum)} &bull; ${todayUpper}</span>
-</div>
-
-<div class="rfp-toc">
-  <div class="rfp-toc-title">Contents</div>
-  <div class="rfp-toc-item bold"><span>Scope of Work</span><span>2</span></div>
-  <div class="rfp-toc-item indent"><span>1. Project Background &amp; Context</span><span>2</span></div>
-  <div class="rfp-toc-item indent"><span>2. Objectives</span><span>3</span></div>
-  <div class="rfp-toc-item indent"><span>3. Scope of Work</span><span>4</span></div>
-  <div class="rfp-toc-item indent"><span>4. Technical Requirements &amp; Architecture</span><span>8</span></div>
-  <div class="rfp-toc-item indent"><span>5. Key Assumptions &amp; Constraints</span><span>10</span></div>
-  <div class="rfp-toc-item indent"><span>6. Vendor Qualification Requirements</span><span>11</span></div>
-  <div class="rfp-toc-item indent"><span>7. Evaluation Criteria &amp; Scoring Model</span><span>12</span></div>
-  <div class="rfp-toc-item indent"><span>8. Proposal Submission Requirements</span><span>13</span></div>
-  <div class="rfp-toc-item indent"><span>Appendix A: Definition of Done</span><span>14</span></div>
-</div>
-
-<div class="rfp-section">
-  <div class="rfp-section-body">
-    <div class="rfp-section-title"><span class="rfp-section-num">1</span> Project Background &amp; Context</div>
-    ${formatParagraphs(background)}
-    <p>This Request for Proposal (RFP) invites qualified vendors to submit comprehensive proposals for the implementation of <strong>${escXml(title)}</strong>. The selected vendor must demonstrate deep expertise in enterprise-grade solutions for government entities, with proven track record in UAE public sector deployments meeting the highest standards of security, performance, and regulatory compliance.</p>
-    <div class="rfp-deliverables">
-      <strong>Applicable Standards:</strong> UAE Information Assurance Standards (IAS) &bull; ISO 27001 &bull; UAE Government Cloud (G-Cloud) Policy &bull; Federal Authority for Identity and Citizenship (ICA) Requirements &bull; Abu Dhabi Government Digital Transformation Strategy 2030
-    </div>
-  </div>
-</div>
-
-<div class="rfp-section">
-  <div class="rfp-section-body">
-    <div class="rfp-section-title"><span class="rfp-section-num">2</span> Objectives</div>
-    ${objectivesHtml}
-  </div>
-</div>
-
-<div class="rfp-section">
-  <div class="rfp-section-body">
-    <div class="rfp-section-title"><span class="rfp-section-num">3</span> Scope of Work</div>
-    ${scopeHtml}
-  </div>
-</div>
-
-<div class="rfp-section">
-  <div class="rfp-section-body">
-    <div class="rfp-section-title"><span class="rfp-section-num">4</span> Technical Requirements &amp; Architecture</div>
-    ${techHtml}
-  </div>
-</div>
-
-<div class="rfp-section">
-  <div class="rfp-section-body">
-    <div class="rfp-section-title"><span class="rfp-section-num">5</span> Key Assumptions &amp; Constraints</div>
-    <ul>
-      <li>The implementation will operate within CPC's existing infrastructure where applicable; the vendor must assess fit and propose augmentation as needed</li>
-      <li>CPC's central IT team will provide infrastructure and DBA-level support throughout the project lifecycle</li>
-      <li>Existing policies, templates, and security models from other CPC entities shall serve as baselines and must be respected</li>
-      <li>The vendor will coordinate closely with CPC IT, Legal, Security, and Business teams at all project stages</li>
-      <li>All configuration components from other CPC entities may be reused if formally approved by the relevant entity's representative</li>
-      <li>Data migration scope will be finalized during the discovery and BRD phase; estimates provided are indicative</li>
-      <li>Change management and user adoption is the joint responsibility of the vendor and CPC project sponsors</li>
-      <li>Vendor must comply with all CPC IT change management and release procedures</li>
-    </ul>
-  </div>
-</div>
-
-<div class="rfp-section">
-  <div class="rfp-section-body">
-    <div class="rfp-section-title"><span class="rfp-section-num">6</span> Vendor Requirements</div>
-    <p>Vendors must satisfy <strong>all mandatory criteria</strong> to be considered for shortlisting:</p>
-    <table class="rfp-spec-table">
-      <tr><th>Category</th><th>Mandatory Requirement</th></tr>
-      <tr><td><strong>Legal Standing</strong></td><td>Valid UAE Trade License (or authorized representation agreement with a UAE-registered entity)</td></tr>
-      <tr><td><strong>Financial Stability</strong></td><td>Audited financial statements for the last 3 years demonstrating viability</td></tr>
-      <tr><td><strong>Relevant Experience</strong></td><td>Minimum 3 successfully completed similar implementations in UAE government or quasi-government entities within the last 5 years</td></tr>
-      <tr><td><strong>Platform Capability</strong></td><td>Proven capability in ${escXml(platformLabel)}, Data Warehouse design, and BI integration</td></tr>
-      <tr><td><strong>Security Compliance</strong></td><td>ISO 27001 certification or equivalent; must commit to UAE IA Standards compliance</td></tr>
-      <tr><td><strong>Documentation</strong></td><td>Strong documentation and capacity-building track record</td></tr>
-      <tr><td><strong>Local Presence</strong></td><td>Physical office in the UAE with dedicated support team for post-go-live warranty</td></tr>
-    </table>
-  </div>
-</div>
-
-<div class="rfp-section">
-  <div class="rfp-section-body">
-    <div class="rfp-section-title"><span class="rfp-section-num">7</span> Evaluation Criteria &amp; Scoring Model</div>
-    <p>Proposals will be evaluated using a weighted scoring model across three dimensions. The scoring will be performed by an AI-assisted evaluation system supported by a designated CPC evaluation panel.</p>
-    <table class="rfp-spec-table">
-      <tr><th>Dimension</th><th>Criterion</th><th width="12%">Weight</th><th>Evaluation Approach</th></tr>
-      <tr><td rowspan="3"><strong>Technical</strong><br/><em style="font-size:0.78rem;color:#6b7280">40%</em></td>
-          <td>Solution Architecture &amp; Methodology</td><td>15%</td><td>Completeness, innovation, alignment to CPC standards</td></tr>
-      <tr><td>Implementation Approach &amp; Timeline</td><td>15%</td><td>Feasibility, milestone clarity, risk management</td></tr>
-      <tr><td>Technical Team Qualifications</td><td>10%</td><td>CVs, certifications, relevant UAE government experience</td></tr>
-      <tr><td rowspan="2"><strong>Business</strong><br/><em style="font-size:0.78rem;color:#6b7280">30%</em></td>
-          <td>Relevant Government Sector Experience</td><td>20%</td><td>Verified references, case studies, GCC government implementations</td></tr>
-      <tr><td>Training, KT &amp; Change Management</td><td>10%</td><td>Training plan quality, knowledge transfer completeness</td></tr>
-      <tr><td rowspan="2"><strong>Commercial</strong><br/><em style="font-size:0.78rem;color:#6b7280">30%</em></td>
-          <td>Total Cost of Ownership (TCO)</td><td>20%</td><td>Phase-wise cost breakdown, licensing, implementation, support</td></tr>
-      <tr><td>Commercial Terms &amp; Payment Structure</td><td>10%</td><td>Flexibility, payment milestones, warranty terms</td></tr>
-      <tr style="background:#f0f4f8"><td colspan="2"><strong>TOTAL</strong></td><td><strong>100%</strong></td><td>Minimum qualifying score: 60/100</td></tr>
-    </table>
-    <div class="rfp-deliverables" style="margin-top:0.75rem">
-      <strong>Note:</strong> CPC reserves the right to conduct reference checks, technical demonstrations, and oral presentations before finalizing the award decision. Vendors scoring below 60/100 overall, or below 50/100 on any single dimension, will be disqualified.
-    </div>
-  </div>
-</div>
-
-<div class="rfp-section">
-  <div class="rfp-section-body">
-    <div class="rfp-section-title"><span class="rfp-section-num">8</span> Proposal Submission Requirements</div>
-    <p>The proposal must be submitted as a single, comprehensive package delivered to the CPC Procurement Department by the stated deadline. Submissions must include the following sections in the exact order specified:</p>
-    <table class="rfp-spec-table">
-      <tr><th>#</th><th>Document</th><th>Format</th><th>Required</th></tr>
-      <tr><td>1</td><td>Executive Summary (&lt;3 pages)</td><td>PDF</td><td>Mandatory</td></tr>
-      <tr><td>2</td><td>Technical Proposal — Solution Architecture, Methodology, Timeline</td><td>PDF</td><td>Mandatory</td></tr>
-      <tr><td>3</td><td>Team CVs &amp; Certifications</td><td>PDF</td><td>Mandatory</td></tr>
-      <tr><td>4</td><td>Project References (minimum 3 UAE government)</td><td>PDF</td><td>Mandatory</td></tr>
-      <tr><td>5</td><td>Commercial Proposal — Fixed Price or T&amp;M, phase-wise breakdown</td><td>Excel + PDF</td><td>Mandatory (sealed)</td></tr>
-      <tr><td>6</td><td>Company Profile, Trade License, Certificate of Incorporation</td><td>PDF</td><td>Mandatory</td></tr>
-      <tr><td>7</td><td>Risk Register &amp; Mitigation Strategies</td><td>PDF</td><td>Mandatory</td></tr>
-      <tr><td>8</td><td>Post-Implementation Support &amp; SLA Framework</td><td>PDF</td><td>Mandatory</td></tr>
-      <tr><td>9</td><td>Implementation Timeline with Milestones &amp; RACI</td><td>PDF/PPT</td><td>Mandatory</td></tr>
-    </table>
-    <div class="rfp-deliverables" style="margin-top:0.875rem">
-      <strong>Submission Address:</strong> procurement@cpc.gov.ae with subject line: <em>"RFP Response – ${escXml(refNum)} – [Vendor Name]"</em><br/>
-      <strong>Hard Copy:</strong> 2 printed copies to Procurement Department, Crown Prince's Court, Abu Dhabi<br/>
-      <strong>Late Submissions:</strong> Will not be considered under any circumstances
-    </div>
-  </div>
-</div>
-
-<div class="rfp-section">
-  <div class="rfp-section-body">
-    <div class="rfp-section-title"><span class="rfp-section-num" style="font-size:0.7rem">A</span> Appendix A: Definition of Done — Required Approvals</div>
-    <p>The project is considered complete only upon formal delivery and written approval of all the following artefacts by the CPC Project Sponsor and IT governance team:</p>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem">
-      ${['Business Requirements Document (BRD)', 'Solution Architecture Document (SAD)', 'UX/UI Design Artifacts (wireframes, mockups, storyboards)', 'Information Architecture Diagrams (flow charts, system interaction maps)', 'Test Strategy & Test Cases (validation plan, traceability matrix)', 'Security & Compliance Checklist (aligned with CPC IT standards)', 'Deployment & Release Plan (environment transitions, rollback logic)', 'Operations & Support Guide (user support, SLAs, escalation matrix)', 'Training Materials & Completion Certificates', 'Data Migration Reconciliation Report', 'User Acceptance Testing (UAT) Sign-Off Document', 'Knowledge Transfer Completion Sign-Off'].map(item => `<div class="rfp-deliverables" style="margin:0">${escXml(item)}</div>`).join('')}
-    </div>
-  </div>
-</div>
-
-<div class="rfp-footer">
-  <div><strong>Crown Prince's Court</strong> | Procurement &amp; Contracting Department | Abu Dhabi, United Arab Emirates</div>
-  <div style="margin-top:4px">&#9993; procurement@cpc.gov.ae &nbsp;|&nbsp; &#128222; +971 2 XXX XXXX &nbsp;|&nbsp; Reference: ${escXml(refNum)}</div>
-  <div style="margin-top:0.5rem;font-size:0.72rem;color:#9ca3af">This document is CONFIDENTIAL and intended solely for invited vendors. Unauthorized distribution is strictly prohibited under UAE Federal Law.</div>
-  <div style="margin-top:4px;font-size:0.72rem;color:#9ca3af">Both Arabic and English languages are supported in all deliverables. الوثيقة متاحة باللغتين العربية والإنجليزية.</div>
-</div>
-</div>`
-}
 
 // ============================================================
-// HELPERS — CONTENT FORMATTERS
+// HELPER — XML/HTML ESCAPING
 // ============================================================
 function escXml(s: any): string {
   if (!s) return ''
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
-}
-
-function formatParagraphs(text: string): string {
-  return text.split(/\n+/).filter(Boolean).map(p => `<p>${escXml(p.trim())}</p>`).join('')
-}
-
-function formatObjectivesFromText(text: string): string {
-  const phases = text.split(/Phase\s+\d+[:\-–]/i).filter(Boolean)
-  if (phases.length <= 1) {
-    const items = text.split(/\n/).filter(s => s.trim())
-    if (items.length <= 1) return `<p>${escXml(text)}</p>`
-    return '<ul>' + items.map(i => `<li>${escXml(i.replace(/^[-•*\d.]\s*/,'').trim())}</li>`).join('') + '</ul>'
-  }
-  let html = ''
-  const phaseMatches = text.match(/Phase\s+\d+[:\-–][^\n]*/gi) || []
-  phases.forEach((phase, i) => {
-    const items = phase.trim().split(/\n/).filter(s => s.trim() && !s.match(/^Phase/i))
-    const label = phaseMatches[i] ? phaseMatches[i].replace(/[:\-–]*$/, '').trim() : 'Phase ' + (i+1)
-    html += `<div class="rfp-subsection"><div class="rfp-subsection-title">${escXml(label)}</div><ul>`
-    html += items.map(item => `<li>${escXml(item.replace(/^[-•*\d.]\s*/,'').trim())}</li>`).join('')
-    html += '</ul></div>'
-  })
-  return html
-}
-
-function buildDefaultObjectives(isERP: boolean, isDWH: boolean, isCRM: boolean, isAI: boolean, isCloud: boolean, title: string): string {
-  let html = ''
-  let phaseNum = 1
-  if (isERP) {
-    html += `<div class="rfp-subsection">
-      <div class="rfp-subsection-title">Phase ${phaseNum++} – ERP Enablement Objectives</div>
-      <ul>
-        <li>Configure and activate all required ERP modules with entity-specific setups and complete operational segregation</li>
-        <li>Ensure segregation of operational data, approval workflows, and security roles per entity</li>
-        <li>Migrate essential master data (employees, suppliers, Chart of Accounts, locations) from legacy systems with full reconciliation</li>
-        <li>Establish data ownership, naming standards, and governance practices</li>
-        <li>Implement enterprise-grade security with Role-Based Access Control (RBAC) and Segregation of Duties (SoD)</li>
-        <li>Provide comprehensive training and documentation for operational independence</li>
-      </ul>
-    </div>`
-  }
-  if (isCRM && !isERP) {
-    html += `<div class="rfp-subsection">
-      <div class="rfp-subsection-title">Phase ${phaseNum++} – CRM Platform Objectives</div>
-      <ul>
-        <li>Implement a centralized CRM platform covering customer lifecycle, opportunity management, and service workflows</li>
-        <li>Integrate CRM with existing ERP/back-office systems for a unified customer data view</li>
-        <li>Enable self-service portals, case management, and automated marketing campaign workflows</li>
-        <li>Deliver reporting dashboards with real-time pipeline visibility and customer analytics</li>
-        <li>Ensure mobile access and Arabic-language UI for all customer-facing and internal users</li>
-      </ul>
-    </div>`
-  }
-  if (isDWH) {
-    html += `<div class="rfp-subsection">
-      <div class="rfp-subsection-title">Phase ${phaseNum++} – Data Platform &amp; BI Objectives</div>
-      <ul>
-        <li>Establish a centralized, governed Data Warehouse aligned with CPC's enterprise architecture standards</li>
-        <li>Implement a layered data architecture (raw ingestion → cleansed → analytical) for scalable, governed data management</li>
-        <li>Enable advanced reporting, analytics, and self-service BI capabilities across all departments</li>
-        <li>Integrate all source systems (ERP, HR, Finance, CRM) securely via governed ETL pipelines</li>
-        <li>Institutionalize metadata management, row-level security, and complete data lineage tracking</li>
-        <li>Build the foundation for AI/ML and predictive analytics capabilities</li>
-      </ul>
-    </div>`
-  }
-  if (isAI) {
-    html += `<div class="rfp-subsection">
-      <div class="rfp-subsection-title">Phase ${phaseNum++} – AI &amp; Intelligent Automation Objectives</div>
-      <ul>
-        <li>Deploy an on-premise AI/ML platform integrated with CPC's data and application landscape</li>
-        <li>Deliver production-ready AI models for priority use cases (forecasting, anomaly detection, NLP, document processing)</li>
-        <li>Establish an MLOps framework for model versioning, monitoring, and retraining pipelines</li>
-        <li>Ensure AI models comply with UAE AI Ethics guidelines and CPC's data classification policy</li>
-        <li>Enable business units to access AI capabilities through APIs, embedded UI widgets, and reporting integrations</li>
-      </ul>
-    </div>`
-  }
-  if (isCloud) {
-    html += `<div class="rfp-subsection">
-      <div class="rfp-subsection-title">Phase ${phaseNum++} – Cloud Migration &amp; Infrastructure Objectives</div>
-      <ul>
-        <li>Assess and classify current workloads for cloud readiness (lift-and-shift, re-platform, re-architect)</li>
-        <li>Migrate target workloads to UAE-based cloud environment with zero data residency violation</li>
-        <li>Implement cloud-native security controls, IAM policies, and monitoring aligned to CPC IT standards</li>
-        <li>Establish DevSecOps pipelines and IaC (Infrastructure as Code) practices for all cloud resources</li>
-        <li>Deliver cost optimization model, FinOps governance, and ongoing cloud spend management</li>
-      </ul>
-    </div>`
-  }
-  if (!isERP && !isDWH && !isCRM && !isAI && !isCloud) {
-    html = `<ul>
-      <li>Deliver a comprehensive, enterprise-grade solution tailored to CPC's operational and compliance requirements</li>
-      <li>Ensure full data security, audit readiness, and compliance with UAE government standards</li>
-      <li>Provide scalable architecture capable of supporting CPC's future digital transformation roadmap</li>
-      <li>Enable advanced reporting and analytics for data-driven decision-making</li>
-      <li>Ensure seamless integration with existing CPC systems and future-readiness for AI/ML capabilities</li>
-    </ul>`
-  }
-  return html
-}
-
-function buildScopeFromText(scope: string, isERP: boolean, isOracleEBS: boolean, isSAP: boolean, isDynamics: boolean, isCRM: boolean, isDWH: boolean, isBI: boolean, isTableau: boolean, isPowerBI: boolean, isAI: boolean, isCloud: boolean, isCyber: boolean, isHRMS: boolean, isMobile: boolean, isInfra: boolean, title: string): string {
-  const paragraphs = scope.split(/\n+/).filter(Boolean)
-  let html = `<p>${escXml(paragraphs[0] || 'The selected vendor shall deliver a comprehensive solution covering all functional and technical requirements specified herein.')}</p>`
-  html += buildDefaultScope(isERP, isOracleEBS, isSAP, isDynamics, isCRM, isDWH, isBI, isTableau, isPowerBI, isAI, isCloud, isCyber, isHRMS, isMobile, title)
-  return html
-}
-
-function buildDefaultScope(isERP: boolean, isOracleEBS: boolean, isSAP: boolean, isDynamics: boolean, isCRM: boolean, isDWH: boolean, isBI: boolean, isTableau: boolean, isPowerBI: boolean, isAI: boolean, isCloud: boolean, isCyber: boolean, isHRMS: boolean, isMobile: boolean, title: string): string {
-  let html = ''
-  let sectionNum = 1
-
-  // ---- ERP scope sections ----
-  if (isERP) {
-    const erpPlatform = isOracleEBS ? 'Oracle EBS R12.2' : isSAP ? 'SAP S/4HANA' : isDynamics ? 'Microsoft Dynamics 365' : 'ERP platform'
-    const modules = isOracleEBS
-      ? 'HRMS (Human Capital Management), Finance (GL/AP/AR/FA/CM), Procurement &amp; iProcurement, System Administration &amp; Security'
-      : isSAP
-      ? 'FI/CO (Finance/Controlling), HCM (Human Capital Management), MM (Materials Management), SD (Sales &amp; Distribution), PM (Plant Maintenance)'
-      : isDynamics
-      ? 'Finance, Supply Chain, HR &amp; Payroll, Customer Engagement, Project Operations'
-      : 'Finance, HR, Procurement, Inventory, Reporting'
-
-    html += `<div class="rfp-subsection">
-      <div class="rfp-subsection-title">3.${sectionNum++} ${erpPlatform} — Functional Configuration &amp; Module Delivery</div>
-      <p>The vendor shall configure the following ${erpPlatform} modules with entity-specific setups and ensure complete operational segregation from other CPC entities:</p>
-      <ul>`
-    if (isOracleEBS) {
-      html += `
-        <li><strong>HRMS &amp; Human Capital Management:</strong> Legal entity configuration, position management, grading structures, leave rules and accruals, payroll elements and formulas, Employee Self-Service (SSHR) and Manager Self-Service (MSS) workflows</li>
-        <li><strong>Finance (GL/AP/AR/FA/CM):</strong> Chart of Accounts (COA) with CPC segment structure, General Ledger with journal entry controls, Accounts Payable with 3-way matching, Fixed Assets with depreciation schedules, Cash Management with bank reconciliation, intercompany transactions</li>
-        <li><strong>Procurement &amp; Contracts:</strong> Supplier structure and categorization, category sets aligned to CPC procurement policy, approval matrix by organizational hierarchy, Purchase Order workflows with delegation of authority, contract lifecycle management</li>
-        <li><strong>System Administration &amp; Security:</strong> RBAC across all modules, responsibilities definition, data access security provisioning, Segregation of Duties (SoD) assessment and remediation, Oracle GRC alignment</li>`
-    } else if (isSAP) {
-      html += `
-        <li><strong>Finance &amp; Controlling (FI/CO):</strong> Chart of Accounts setup, cost centre hierarchy, profit centre accounting, accounts payable/receivable, asset accounting, bank reconciliation, consolidated reporting</li>
-        <li><strong>Human Capital Management (HCM):</strong> Org structure, position management, time management, payroll localization for UAE, Employee Self-Service (ESS) and Manager Self-Service (MSS)</li>
-        <li><strong>Materials Management (MM):</strong> Procurement workflows, purchase order management, inventory management, goods receipt, vendor master, material master</li>
-        <li><strong>Security &amp; Authorizations:</strong> Role-based authorization concepts, SoD matrix implementation, Fiori launchpad personalization, audit log configuration</li>`
-    } else {
-      html += `
-        <li><strong>Finance &amp; Accounting:</strong> General ledger, accounts payable/receivable, fixed assets, cash management, financial reporting aligned to UAE standards</li>
-        <li><strong>HR &amp; Payroll:</strong> Employee lifecycle management, leave and attendance, WPS-compliant payroll, self-service workflows, org chart management</li>
-        <li><strong>Procurement &amp; Supply Chain:</strong> Purchase requisition to order workflows, supplier portal, approval hierarchies, inventory management</li>
-        <li><strong>Security &amp; Compliance:</strong> RBAC setup, SoD controls, audit trails, compliance reporting aligned to UAE regulations</li>`
-    }
-    html += `</ul>
-      <div class="rfp-deliverables">
-        <strong>Key Deliverables:</strong> Business Requirements Configuration Document &bull; Functional design specifications per module &bull; Configured approval hierarchies and delegation matrices &bull; RBAC matrix and SoD conflict resolution report &bull; Test scripts and UAT sign-off checklist
-      </div>
-    </div>
-
-    <div class="rfp-subsection">
-      <div class="rfp-subsection-title">3.${sectionNum++} Data Migration &amp; Master Data Management</div>
-      <ul>
-        <li>Design and execute a comprehensive data migration strategy covering all key master data entities</li>
-        <li>Define entity-specific naming standards, data governance rules, and master data stewardship roles</li>
-        <li>Conduct data profiling, cleansing, transformation, and validation prior to system load</li>
-        <li>Execute formal cutover activities per CPC-approved runbook; perform post-migration reconciliation with documented sign-off</li>
-        <li>Implement data archival and retention policies aligned to UAE regulatory requirements (minimum 7 years)</li>
-      </ul>
-      <div class="rfp-deliverables">
-        <strong>Key Deliverables:</strong> Data Migration Strategy &amp; Plan &bull; Pre-load validation reports &bull; Post-load reconciliation report &bull; Data governance model document &bull; Master data quality assessment log
-      </div>
-    </div>
-
-    <div class="rfp-subsection">
-      <div class="rfp-subsection-title">3.${sectionNum++} Security, Compliance &amp; Audit Readiness</div>
-      <ul>
-        <li>Implement RBAC policies across all modules aligned to CPC IT security policy and UAE IAS standards</li>
-        <li>Conduct formal Segregation of Duties (SoD) assessments and remediate conflicts before go-live</li>
-        <li>Ensure audit-readiness through traceable access logs, approval workflows, and change history retention</li>
-        <li>All security configurations must align to UAE Information Assurance Standards (IAS) and ISO 27001</li>
-      </ul>
-    </div>`
-  }
-
-  // ---- CRM (non-ERP) scope sections ----
-  if (isCRM && !isERP) {
-    html += `<div class="rfp-subsection">
-      <div class="rfp-subsection-title">3.${sectionNum++} CRM Platform Configuration &amp; Customization</div>
-      <ul>
-        <li><strong>Contact &amp; Account Management:</strong> Unified customer/stakeholder profiles, relationship hierarchies, interaction history, custom field configuration</li>
-        <li><strong>Opportunity &amp; Pipeline Management:</strong> Sales stages, probability tracking, weighted forecast dashboards, automated follow-up workflows</li>
-        <li><strong>Case &amp; Service Management:</strong> Case lifecycle, SLA timers, escalation rules, knowledge base integration, multi-channel intake (email, web, phone)</li>
-        <li><strong>Marketing Automation:</strong> Campaign management, email/SMS journeys, segmentation rules, lead scoring, attribution reporting</li>
-        <li><strong>Integration Layer:</strong> Bi-directional sync with ERP/Finance systems, government portal integration, identity provider (UAE Pass) connection</li>
-      </ul>
-      <div class="rfp-deliverables">
-        <strong>Key Deliverables:</strong> CRM configuration blueprint &bull; Data migration plan (contacts, accounts, history) &bull; Integration specification documents &bull; User acceptance test scenarios &bull; Admin and end-user training materials
-      </div>
-    </div>`
-  }
-
-  // ---- DWH/BI scope sections ----
-  if (isDWH) {
-    html += `<div class="rfp-subsection">
-      <div class="rfp-subsection-title">3.${sectionNum++} Data Warehouse Architecture &amp; Implementation</div>
-      <p>The vendor shall design and implement a modern enterprise Data Warehouse with a governed layered architecture:</p>
-      <table class="rfp-spec-table">
-        <tr><th>Layer</th><th>Description</th><th>Key Technology</th><th>Key Activities</th></tr>
-        <tr><td><strong>Bronze / Raw</strong></td><td>Exact copies of source data at point of extraction</td><td>Source system extracts, flat files, APIs</td><td>Schema-on-read design, full historical load, CDC pipeline setup, no transformations</td></tr>
-        <tr><td><strong>Silver / Conformed</strong></td><td>Cleansed, standardized, and enriched tables</td><td>ETL framework (PL/SQL, Python, or ADF)</td><td>Data quality rules, deduplication, business key alignment, referential integrity</td></tr>
-        <tr><td><strong>Gold / Analytical</strong></td><td>Aggregated views, star schemas, KPI tables</td><td>Dimensional modelling (Kimball/Inmon)</td><td>Fact/dimension tables, pre-aggregated KPIs, metadata registry, access-controlled views</td></tr>
-      </table>
-      <div class="rfp-deliverables">
-        <strong>Key Deliverables:</strong> DWH Architecture Blueprint &bull; ETL flowcharts and job automation scripts &bull; Metadata management schema and data dictionary &bull; Incremental load strategy &bull; Data lineage documentation end-to-end
-      </div>
-    </div>`
-  }
-
-  if (isBI) {
-    const biName = isTableau ? 'Tableau Server' : isPowerBI ? 'Power BI Premium' : 'BI Platform'
-    html += `<div class="rfp-subsection">
-      <div class="rfp-subsection-title">3.${sectionNum++} ${biName} Deployment &amp; Dashboard Development</div>
-      <ul>
-        <li>Deploy ${biName} on-premises (or UAE-hosted cloud) with Active Directory integration for SSO and MFA</li>
-        <li>Configure three environments: Development, UAT, and Production with formal promotion workflows and version control</li>
-        <li>Publish role-based dashboards for all key departments (Finance, HR, Procurement, Executive, Operations)</li>
-        <li>Develop KPI dashboards with drill-down, tooltips, bookmarks, and mobile-optimized layouts per CPC design standards</li>
-        <li>Implement row-level security (RLS) to enforce data access boundaries matching source system security model</li>
-        <li>Configure scheduled refresh jobs, incremental load, and alerting for data freshness SLAs</li>
-      </ul>
-      <div class="rfp-deliverables">
-        <strong>Key Deliverables:</strong> Dashboard catalogue with sample outputs &bull; ${biName} server configuration guide &bull; Data source connection specifications &bull; Row-level security matrix &bull; User role-to-dashboard access mapping
-      </div>
-    </div>
-
-    <div class="rfp-subsection">
-      <div class="rfp-subsection-title">3.${sectionNum++} Data Governance, Metadata &amp; Quality Management</div>
-      <ul>
-        <li>Implement metadata management framework covering all data layers and BI objects</li>
-        <li>Classify datasets by sensitivity level (Secret, Confidential, Internal, Public) and enforce data ownership model</li>
-        <li>Maintain comprehensive audit trails for data lineage, access history, and transformation records</li>
-        <li>Deliver metadata dictionary, data security matrix, and data classification policy document</li>
-        <li>Establish automated data quality monitoring rules and exception reporting dashboard</li>
-      </ul>
-    </div>`
-  }
-
-  // ---- AI scope section ----
-  if (isAI) {
-    html += `<div class="rfp-subsection">
-      <div class="rfp-subsection-title">3.${sectionNum++} AI &amp; Machine Learning Platform — On-Premise Deployment</div>
-      <p>The vendor shall deploy and configure an enterprise AI/ML platform on CPC's on-premise infrastructure (or approved UAE-hosted cloud), ensuring full compliance with CPC data classification and security policies:</p>
-      <ul>
-        <li><strong>Platform Infrastructure:</strong> GPU-enabled compute nodes, model registry, experiment tracking (MLflow or equivalent), feature store, pipeline orchestration (Airflow or equivalent)</li>
-        <li><strong>Model Development Environment:</strong> Jupyter/VS Code remote environments, pre-configured Python/R runtimes, version-controlled notebooks, collaborative workspace</li>
-        <li><strong>Production AI Models (Priority Use Cases):</strong> Demand/spend forecasting, anomaly detection in transactions, Arabic NLP for document classification and extraction, recommendation engines for procurement optimization</li>
-        <li><strong>MLOps &amp; Model Lifecycle:</strong> Automated retraining pipelines, model drift detection, A/B testing framework, model approval workflow before production promotion</li>
-        <li><strong>Integration &amp; APIs:</strong> REST API gateway for all AI models, integration with BI dashboards, ERP system hooks for real-time inference, audit logging of all AI predictions</li>
-      </ul>
-      <div class="rfp-deliverables">
-        <strong>Key Deliverables:</strong> AI platform architecture document &bull; Deployed priority use-case models with validation reports &bull; MLOps runbook &bull; API documentation &bull; AI ethics &amp; bias assessment report &bull; Model monitoring dashboard
-      </div>
-    </div>`
-  }
-
-  // ---- Cloud migration scope ----
-  if (isCloud) {
-    html += `<div class="rfp-subsection">
-      <div class="rfp-subsection-title">3.${sectionNum++} Cloud Migration &amp; Infrastructure Modernization</div>
-      <ul>
-        <li><strong>Discovery &amp; Assessment:</strong> Application portfolio assessment, cloud-readiness scoring, dependency mapping, TCO comparison (on-prem vs. cloud), migration wave planning</li>
-        <li><strong>Migration Execution:</strong> Lift-and-shift, re-platform, or re-architect per workload classification; zero-downtime migration for production systems using dual-run or blue-green strategy</li>
-        <li><strong>Cloud Architecture:</strong> UAE-region infrastructure (Azure UAE North, AWS ME South, or G-Cloud), VNet/VPC design, private connectivity to CPC on-premise, disaster recovery config</li>
-        <li><strong>Security &amp; Compliance:</strong> Cloud IAM policies, network security groups, encryption at rest and in transit, compliance with UAE IAS and NESA cloud security framework</li>
-        <li><strong>FinOps &amp; Optimization:</strong> Resource tagging strategy, cost allocation model, reserved instance recommendations, ongoing optimization cadence</li>
-      </ul>
-      <div class="rfp-deliverables">
-        <strong>Key Deliverables:</strong> Cloud readiness assessment report &bull; Migration wave plan &bull; Architecture design documents per workload &bull; Security baseline document &bull; FinOps dashboard and cost governance model
-      </div>
-    </div>`
-  }
-
-  // ---- Cybersecurity scope ----
-  if (isCyber) {
-    html += `<div class="rfp-subsection">
-      <div class="rfp-subsection-title">3.${sectionNum++} Cybersecurity &amp; Security Operations</div>
-      <ul>
-        <li>Deploy and configure SIEM platform (Microsoft Sentinel, Splunk, or equivalent) with UAE IAS-aligned detection rules</li>
-        <li>Establish a Security Operations Centre (SOC) function with 24x7 monitoring, triage, and incident response capability</li>
-        <li>Conduct vulnerability assessment and penetration testing (VAPT) across all in-scope systems before go-live</li>
-        <li>Implement privileged access management (PAM), endpoint detection &amp; response (EDR), and email security gateway</li>
-        <li>Deliver security awareness training programme for all CPC staff</li>
-      </ul>
-    </div>`
-  }
-
-  // ---- Mobile app scope ----
-  if (isMobile) {
-    html += `<div class="rfp-subsection">
-      <div class="rfp-subsection-title">3.${sectionNum++} Mobile Application Development &amp; Deployment</div>
-      <ul>
-        <li>Develop native iOS and Android applications with full Arabic RTL support and UAE Pass biometric authentication</li>
-        <li>Implement offline-first architecture with secure data synchronization and conflict resolution</li>
-        <li>Integrate with backend ERP/CRM/data platform APIs via secured mobile API gateway</li>
-        <li>Publish to Apple App Store and Google Play Store via CPC enterprise account; manage MDM enrollment</li>
-        <li>Provide 12-month post-launch support SLA with critical bug fix SLA of &lt;24 hours</li>
-      </ul>
-    </div>`
-  }
-
-  // ---- Training always at end ----
-  html += `<div class="rfp-subsection">
-    <div class="rfp-subsection-title">3.${sectionNum++} Training, Knowledge Transfer &amp; Change Management</div>
-    <ul>
-      <li>Conduct a Training Needs Assessment (TNA) covering all user roles, departments, and technical administrators</li>
-      <li>Deliver structured training programmes: End-User (role-specific), System Administrator, Management Reporting, and Technical Handover</li>
-      <li>Provide complete documentation package: SOPs, configuration guides, quick reference cards, video tutorials, and troubleshooting guides</li>
-      <li>Support organizational change management through stakeholder communication plan, champion network, and adoption KPI tracking</li>
-      <li>Provide a minimum 90-day hypercare support period post go-live with a dedicated support contact and weekly status meetings</li>
-    </ul>
-    <div class="rfp-deliverables">
-      <strong>Key Deliverables:</strong> Training Needs Assessment &bull; Role-specific training materials &bull; Training completion and attendance records &bull; System documentation package &bull; Operations &amp; Support Guide with SLA framework &bull; Hypercare support plan
-    </div>
-  </div>`
-
-  return html
-}
-
-function buildTechFromText(techReqs: string, isERP: boolean, isDWH: boolean, isAI: boolean, isCloud: boolean, isCyber: boolean): string {
-  const intro = `<p>${escXml(techReqs.split('\n')[0] || 'All technical deliverables must comply with CPC IT standards and UAE government cybersecurity frameworks.')}</p>`
-  return intro + buildDefaultTech(isERP, false, isDWH, isAI, isCloud, isCyber, false)
-}
-
-function buildDefaultTech(isERP: boolean = false, isOracleEBS: boolean = false, isDWH: boolean = false, isAI: boolean = false, isCloud: boolean = false, isCyber: boolean = false, isMobile: boolean = false): string {
-  const deployModel = isCloud
-    ? 'UAE-based cloud (Microsoft Azure UAE North / AWS Middle East UAE) with optional hybrid connectivity to CPC on-premise data center'
-    : 'On-Premises (CPC Data Center) with option for hybrid UAE-based cloud (UAE G-Cloud or Azure UAE North)'
-  const integrations = [
-    isERP && 'ERP system APIs (Finance, HR, Procurement modules)',
-    isOracleEBS && 'Oracle E-Business Suite R12.2 (HRMS, Finance, iProcurement, SysAdmin)',
-    isDWH && 'Data Warehouse ETL pipelines (Bronze/Silver/Gold layers)',
-    isAI && 'AI/ML model inference APIs and MLOps pipeline endpoints',
-    'Active Directory / LDAP for SSO',
-    'UAE Pass (Federal Identity) — mandatory for citizen/staff authentication',
-    'Ministry of Finance e-payment gateway',
-    'Abu Dhabi Government Portal',
-    'CPC SOA/ESB integration middleware',
-    'CPC SIEM/security monitoring platform',
-  ].filter(Boolean)
-
-  return `
-  <table class="rfp-spec-table">
-    <tr><th>Attribute</th><th>Requirement</th></tr>
-    <tr><td><strong>Deployment Model</strong></td><td>${deployModel}</td></tr>
-    <tr><td><strong>Data Classification</strong></td><td>Secret and Confidential — strict UAE data residency mandatory; no data may leave UAE territory</td></tr>
-    <tr><td><strong>Data Sensitivity</strong></td><td>High — includes PII, financial records, government operational data${isAI ? ', and AI model training datasets' : ''}</td></tr>
-    <tr><td><strong>Authentication</strong></td><td>UAE Pass integration mandatory for staff-facing portals; Active Directory (AD/LDAP) for internal SSO; MFA required for all privileged and administrator accounts</td></tr>
-    <tr><td><strong>Language Support</strong></td><td>Full Arabic (RTL) and English bilingual UI mandatory across all screens; Hijri and Gregorian calendar support in all date fields and reports</td></tr>
-    <tr><td><strong>Environments</strong></td><td>Minimum three fully isolated environments: Development, QA/UAT, Production; optional Pre-Production/Staging for critical changes</td></tr>
-    <tr><td><strong>Uptime SLA</strong></td><td>99.9% Production availability (excluding approved maintenance windows); &lt;4h planned maintenance windows only during CPC off-peak hours</td></tr>
-    <tr><td><strong>Security Standards</strong></td><td>ISO 27001, SOC 2 Type II, UAE Information Assurance Standards (IAS), NESA compliance — all mandatory</td></tr>
-    <tr><td><strong>Backup &amp; Disaster Recovery</strong></td><td>Daily automated backups to secondary UAE site; RPO ≤ 4 hours; RTO ≤ 8 hours; annual DR drill with documented results</td></tr>
-    <tr><td><strong>API &amp; Integration</strong></td><td>REST/SOAP API integration layer with standardized authentication (OAuth 2.0 / API key); full API documentation and sandbox required</td></tr>
-    ${isMobile ? `<tr><td><strong>Mobile Platform</strong></td><td>Native iOS (Swift) and Android (Kotlin) applications; PWA fallback supported; offline-first architecture with secure sync; MDM enrollment via Intune or Jamf</td></tr>` : `<tr><td><strong>Mobile Support</strong></td><td>Responsive web application with mobile-optimized UI; native mobile app for self-service workflows (iOS &amp; Android)</td></tr>`}
-    ${isAI ? `<tr><td><strong>AI/ML Infrastructure</strong></td><td>GPU compute nodes (minimum NVIDIA A100 or equivalent); container orchestration (Kubernetes); model registry and experiment tracking; feature store with real-time serving capability</td></tr>` : `<tr><td><strong>AI/ML Readiness</strong></td><td>Architecture must support future AI/ML integration without major re-engineering; model serving APIs and feature pipelines should be considered at design stage</td></tr>`}
-    <tr><td><strong>Audit &amp; Logging</strong></td><td>Comprehensive audit trails for all data access, changes, and approvals; centralized log management with SIEM integration; minimum 7-year retention per UAE regulatory requirements</td></tr>
-    <tr><td><strong>Performance</strong></td><td>Page load &lt;3 seconds; report generation &lt;10 seconds for standard queries; batch ETL jobs to complete within defined daily maintenance window</td></tr>
-  </table>
-  <div class="rfp-deliverables" style="margin-top:0.75rem">
-    <strong>Required Integration Points:</strong> ${integrations.join(' &bull; ')}
-  </div>`
 }
 
 // ============================================================
