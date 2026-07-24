@@ -7,6 +7,7 @@ import type { Bindings } from './types'
 // Import static assets as raw strings at build time (Vite ?raw)
 import appJs from '../public/static/app.js?raw'
 import styleCss from '../public/static/style.css?raw'
+import submitJs from '../public/static/submit.js?raw'
 
 const app = new Hono<{ Bindings: Bindings }>()
 
@@ -30,6 +31,13 @@ app.get('/static/style.css', (c) => {
   return c.body(styleCss, 200, {
     'Content-Type': 'text/css; charset=utf-8',
     'Cache-Control': 'public, max-age=3600',
+  })
+})
+
+app.get('/static/submit.js', (c) => {
+  return c.body(submitJs, 200, {
+    'Content-Type': 'application/javascript; charset=utf-8',
+    'Cache-Control': 'no-cache',
   })
 })
 
