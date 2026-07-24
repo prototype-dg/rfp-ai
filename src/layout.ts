@@ -7,7 +7,7 @@ export function getLayout(): string {
   <title>CPC AI-Powered RFP Tool</title>
   <script src="https://cdn.tailwindcss.com" defer><\/script>
   <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" defer><\/script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"><\/script>
   <link href="/static/style.css" rel="stylesheet">
   <style>
     :root {

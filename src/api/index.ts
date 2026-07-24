@@ -380,21 +380,29 @@ apiRouter.post('/rfps/:id/questions/publish-all', async (c) => {
       const xlsxBase64 = uint8ToBase64(xlsxBytes)
       const emailText = `Dear ${info.name},\n\nPlease find attached the official Q&A Response document for RFP Reference: ${rfp?.ref_number || ''}.\n\nAll questions submitted have been reviewed and answered by the CPC Procurement team. Please review the attached Excel file for the complete question and answer register.\n\nFor any further queries, please reply to this email referencing the RFP number.\n\nBest regards,\nProcurement & Contracting Department\nCrown Prince's Court, Abu Dhabi\nprocurement@cpc-rfp.website`
 
-      const resendKey = (c.env as any).RESEND_API_KEY || ''
-      if (resendKey && info.email) {
-        const emailPayload = {
-          from: 'CPC Procurement <procurement@cpc-rfp.website>',
-          to: [info.email],
-          subject: `Q&A Response – ${rfp?.title || 'CPC RFP'} (Ref: ${rfp?.ref_number || ''})`,
-          text: emailText,
-          attachments: [{ filename: `QA_Response_${(rfp?.ref_number || 'RFP').replace(/\//g,'_')}.xlsx`, content: xlsxBase64 }],
+      // HARD CONSTRAINT: only send real emails to @andersenlab.com — all others simulated
+      const recipientAddr = (info.email || '').toLowerCase().trim()
+      if (recipientAddr.endsWith('@andersenlab.com')) {
+        const resendKey = (c.env as any).RESEND_API_KEY || ''
+        if (resendKey) {
+          const emailPayload = {
+            from: 'CPC Procurement <procurement@cpc-rfp.website>',
+            to: [info.email],
+            subject: `Q&A Response – ${rfp?.title || 'CPC RFP'} (Ref: ${rfp?.ref_number || ''})`,
+            text: emailText,
+            attachments: [{ filename: `QA_Response_${(rfp?.ref_number || 'RFP').replace(/\//g,'_')}.xlsx`, content: xlsxBase64 }],
+          }
+          await fetch('https://api.resend.com/emails', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify(emailPayload),
+          })
+          sentTo.push(info.email)
         }
-        await fetch('https://api.resend.com/emails', {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify(emailPayload),
-        })
-        sentTo.push(info.email)
+      } else {
+        // Simulate for all non-andersenlab domains
+        console.log(`[email] SIMULATED Q&A response (non-andersenlab domain): ${info.email}`)
+        sentTo.push(info.email + ' (simulated)')
       }
     }
 
@@ -1041,23 +1049,18 @@ apiRouter.post('/rfps/:id/proposals/:proposalId/award', async (c) => {
   await db.prepare(`UPDATE proposals SET status='not_awarded' WHERE rfp_id=? AND id!=?`).bind(rfpId, proposalId).run()
   await db.prepare(`UPDATE rfps SET stage='awarded', updated_at=datetime('now') WHERE id=?`).bind(rfpId).run()
 
-  // Send award email via Resend
+  // Send award email — route through sendRealEmail which enforces @andersenlab.com-only constraint
   let emailSent = false
-  const resendKey = c.env.RESEND_API_KEY || ''
-  if (resendKey && winner.contact_email) {
+  if (winner.contact_email) {
     const awardBody = buildAwardEmail(winner, rfp)
-    const res = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        from: 'CPC Procurement <procurement@cpc-rfp.website>',
-        to: [winner.contact_email],
-        subject: `Contract Award Notification – ${rfp?.title || 'CPC RFP'} (Ref: ${rfp?.ref_number || ''})`,
-        text: awardBody,
-        html: `<div style="font-family:Arial,sans-serif;max-width:680px;margin:0 auto;padding:24px"><div style="background:#1a1a2e;color:#c9a84c;padding:18px 24px;border-radius:8px 8px 0 0"><div style="font-size:16px;font-weight:700">Crown Prince's Court — Procurement</div></div><div style="background:#fff;padding:28px;border:1px solid #e5e7eb;border-radius:0 0 8px 8px"><pre style="white-space:pre-wrap;font-family:Arial;font-size:14px">${awardBody.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</pre></div></div>`,
-      }),
-    })
-    emailSent = res.ok
+    const result = await sendRealEmail(
+      winner.contact_email,
+      `Contract Award Notification – ${rfp?.title || 'CPC RFP'} (Ref: ${rfp?.ref_number || ''})`,
+      awardBody,
+      rfp,
+      c.env
+    )
+    emailSent = result.ok
   }
 
   // Log the award email
@@ -2202,7 +2205,15 @@ procurement@cpc-rfp.website`
 
 async function sendRealEmail(
   to: string, subject: string, bodyText: string, rfp: any, env?: any
-): Promise<{ ok: boolean; id?: string; error?: string }> {
+): Promise<{ ok: boolean; id?: string; error?: string; simulated?: boolean }> {
+  // HARD CONSTRAINT: Only send real emails to @andersenlab.com addresses.
+  // All other domains must be simulated — never reach Resend API.
+  const toAddr = (to || '').toLowerCase().trim()
+  if (!toAddr.endsWith('@andersenlab.com')) {
+    console.log(`[email] SIMULATED (non-andersenlab domain): ${to}`)
+    return { ok: true, id: 'simulated-' + Date.now(), simulated: true }
+  }
+
   const RESEND_API_KEY = env?.RESEND_API_KEY || (globalThis as any).RESEND_API_KEY || ''
   if (!RESEND_API_KEY) {
     return { ok: false, error: 'RESEND_API_KEY not configured' }

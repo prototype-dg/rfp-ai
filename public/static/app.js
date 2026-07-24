@@ -821,119 +821,110 @@ function downloadRfpPdf(rfpId) {
     showToast('Please generate the RFP document first', 'error');
     return;
   }
-  var printWin = window.open('', '_blank', 'width=960,height=800');
-  if (!printWin) { showToast('Please allow popups for PDF download', 'error'); return; }
 
-  // Self-contained print CSS matching the real CPC RFP document:
-  // - White background, Calibri font
-  // - Gold lattice header band (top of every page)
-  // - CPC falcon crest logo centered
-  // - Teal (#4BACED) and dark teal (#215868) accent colors
-  // - Left-aligned large title on cover, same as reference doc
-  var css = [
-    "@import url('https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;600;700&family=Noto+Serif:wght@400;700&display=swap');",
-    "*{box-sizing:border-box;margin:0;padding:0;}",
-    "body{font-family:'Calibri','Noto Sans',Arial,sans-serif;font-size:10.5pt;color:#1a1a1a;background:white;-webkit-print-color-adjust:exact;print-color-adjust:exact;}",
-    "@page{size:A4;margin:0;}",
-    "@page:first{margin:0;}",
+  if (typeof html2pdf === 'undefined') {
+    showToast('PDF library not loaded yet — please wait a moment and try again.', 'error');
+    return;
+  }
 
-    /* ── Document wrapper ── */
-    ".rfp-doc{max-width:100%;margin:0;}",
+  showToast('Generating PDF — please wait…', 'info');
 
-    /* ── Gold lattice header band ── */
-    ".rfp-header-band{height:20pt;width:100%;",
-      "background:repeating-linear-gradient(90deg,#c9a84c 0,#c9a84c 2px,transparent 2px,transparent 8px),",
-      "repeating-linear-gradient(0deg,#c9a84c 0,#c9a84c 2px,transparent 2px,transparent 8px);",
-      "background-color:#f5e6c0;",
-      "-webkit-print-color-adjust:exact;print-color-adjust:exact;",
-    "}",
+  // Build a fully self-contained wrapper div for html2pdf to render.
+  // All RFP classes are already defined in the global style.css; we add
+  // only the additional page-layout overrides needed for A4 PDF output.
+  var wrapper = document.createElement('div');
+  wrapper.style.cssText = [
+    'position:absolute',
+    'left:-9999px',
+    'top:0',
+    'width:794px',           // A4 at 96 dpi
+    'background:white',
+    'font-family:Arial,sans-serif',
+    'font-size:10.5pt',
+    'color:#1a1a1a',
+  ].join(';');
 
-    /* ── Circle divider ── */
-    ".rfp-circle-divider{height:8pt;border-bottom:0.5pt solid #d1d5db;",
-      "background:radial-gradient(circle at center,transparent 2pt,#c0c0c0 2pt,#c0c0c0 3pt,transparent 3pt);",
-      "background-size:12pt 8pt;background-repeat:repeat-x;background-position:center;",
-    "}",
+  // Inline minimal CSS for elements that depend on print-color-adjust
+  var style = document.createElement('style');
+  style.textContent = [
+    '.rfp-doc{max-width:100%;margin:0;}',
+    '.rfp-header-band{height:20pt;width:100%;',
+      'background:repeating-linear-gradient(90deg,#c9a84c 0,#c9a84c 2px,transparent 2px,transparent 8px),',
+      'repeating-linear-gradient(0deg,#c9a84c 0,#c9a84c 2px,transparent 2px,transparent 8px);',
+      'background-color:#f5e6c0;}',
+    '.rfp-circle-divider{height:8pt;border-bottom:0.5pt solid #d1d5db;',
+      'background:radial-gradient(circle at center,transparent 2pt,#c0c0c0 2pt,#c0c0c0 3pt,transparent 3pt);',
+      'background-size:12pt 8pt;background-repeat:repeat-x;background-position:center;}',
+    '.rfp-cover{background:white;page-break-after:always;min-height:267mm;}',
+    '.rfp-cover-logo{display:flex;align-items:center;justify-content:center;gap:18pt;padding:18pt 36pt 12pt;}',
+    '.rfp-logo-emblem{flex-shrink:0;}',
+    '.rfp-logo-text{display:flex;flex-direction:column;gap:2pt;}',
+    '.rfp-logo-text .rfp-org-name{font-size:12pt;font-weight:700;color:#1a1a1a;letter-spacing:0.03em;}',
+    '.rfp-logo-text .rfp-org-arabic{font-size:11pt;color:#1a1a1a;direction:rtl;}',
+    '.rfp-cover-divider{width:calc(100% - 72pt);height:0.5pt;background:#d1d5db;margin:0 36pt;}',
+    '.rfp-cover-body{padding:54pt 36pt 36pt;}',
+    '.rfp-cover-body .rfp-doc-title{font-size:26pt;font-weight:700;line-height:1.25;color:#1a1a1a;margin-bottom:18pt;}',
+    '.rfp-cover-body .rfp-doc-type{font-size:10pt;font-weight:700;letter-spacing:0.1em;color:#4BACED;text-transform:uppercase;margin-bottom:6pt;}',
+    '.rfp-cover-body .rfp-doc-date{font-size:9pt;color:#215868;font-weight:600;}',
+    '.rfp-cover-footer-bar{display:none;}',
+    '.rfp-page-header{display:flex;align-items:center;justify-content:space-between;padding:4pt 24pt;border-bottom:1.5pt solid #4BACED;}',
+    '.rfp-page-header-logo{font-size:8pt;font-weight:700;color:#215868;}',
+    '.rfp-page-header-ref{font-size:7.5pt;color:#9ca3af;}',
+    '.rfp-meta-table{width:100%;border-collapse:collapse;font-size:9pt;}',
+    '.rfp-meta-table th{background:#215868;color:white;padding:6pt 10pt;font-weight:700;border:0.5pt solid #163d4e;}',
+    '.rfp-meta-table td{background:white;padding:6pt 10pt;border:0.5pt solid #d1d5db;vertical-align:top;}',
+    '.rfp-toc{padding:14pt 24pt 10pt;}',
+    '.rfp-toc-title{font-size:13pt;font-weight:700;color:#4BACED;margin-bottom:8pt;}',
+    '.rfp-toc-item{display:flex;justify-content:space-between;padding:3pt 0;font-size:9pt;color:#215868;border-bottom:0.5pt dotted #d1d5db;}',
+    '.rfp-toc-item.bold{font-weight:700;}',
+    '.rfp-toc-item.indent{padding-left:14pt;color:#374151;font-weight:400;}',
+    '.rfp-section{padding:12pt 24pt;border-bottom:0.5pt solid #e5e7eb;}',
+    '.rfp-section-title{font-size:12pt;font-weight:700;color:#1a1a1a;margin-bottom:7pt;border-bottom:1.5pt solid #4BACED;padding-bottom:3pt;}',
+    '.rfp-section-num{display:inline-block;width:18pt;height:18pt;border-radius:50%;background:#4BACED;color:white;text-align:center;line-height:18pt;font-weight:700;font-size:8pt;margin-right:4pt;vertical-align:middle;}',
+    '.rfp-section p{font-size:9.5pt;line-height:1.7;margin:0 0 6pt;}',
+    '.rfp-section ul{margin:3pt 0 6pt 16pt;}',
+    '.rfp-section li{font-size:9pt;line-height:1.65;margin-bottom:2pt;}',
+    '.rfp-subsection{margin:9pt 0 4pt;}',
+    '.rfp-subsection-title{font-size:10pt;font-weight:700;color:#215868;margin-bottom:4pt;}',
+    '.rfp-deliverables{background:#f0f9ff;border-left:2.5pt solid #4BACED;padding:5pt 9pt;font-size:8.5pt;color:#374151;margin-top:4pt;line-height:1.6;}',
+    '.rfp-spec-table{width:100%;border-collapse:collapse;margin:7pt 0;font-size:9pt;}',
+    '.rfp-spec-table th{background:#215868;color:white;padding:5pt 9pt;font-weight:700;}',
+    '.rfp-spec-table td{padding:4.5pt 9pt;border:0.5pt solid #d1d5db;line-height:1.5;vertical-align:top;}',
+    '.rfp-spec-table tr:nth-child(even) td{background:#f0f9ff;}',
+    '.rfp-footer{background:#215868;color:white;padding:10pt 24pt;text-align:center;font-size:8pt;line-height:1.8;}',
+  ].join('');
 
-    /* ── Cover page ── */
-    ".rfp-cover{background:white;page-break-after:always;min-height:267mm;}",
+  wrapper.appendChild(style);
+  wrapper.innerHTML += rfp.content;
+  document.body.appendChild(wrapper);
 
-    /* ── Logo row ── */
-    ".rfp-cover-logo{display:flex;align-items:center;justify-content:center;gap:18pt;padding:18pt 36pt 12pt;}",
-    ".rfp-logo-emblem{flex-shrink:0;}",
-    ".rfp-logo-text{display:flex;flex-direction:column;gap:2pt;}",
-    ".rfp-logo-text .rfp-org-name{font-size:12pt;font-weight:700;color:#1a1a1a;letter-spacing:0.03em;}",
-    ".rfp-logo-text .rfp-org-arabic{font-size:11pt;color:#1a1a1a;direction:rtl;}",
+  var safeTitle = (rfp.ref_number || rfp.title || 'RFP').replace(/[^a-zA-Z0-9_\-]/g, '_');
+  var filename = 'CPC_RFP_' + safeTitle + '.pdf';
 
-    /* ── Cover divider ── */
-    ".rfp-cover-divider{width:calc(100% - 72pt);height:0.5pt;background:#d1d5db;margin:0 36pt;}",
+  var opt = {
+    margin:       [10, 14, 14, 14],   // top, right, bottom, left (mm)
+    filename:     filename,
+    image:        { type: 'jpeg', quality: 0.97 },
+    html2canvas:  {
+      scale: 2,
+      useCORS: true,
+      backgroundColor: '#ffffff',
+      logging: false,
+    },
+    jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' },
+    pagebreak:    { mode: ['avoid-all', 'css', 'legacy'] },
+  };
 
-    /* ── Cover body: big title, left-aligned like the real doc ── */
-    ".rfp-cover-body{padding:54pt 36pt 36pt;}",
-    ".rfp-cover-body .rfp-doc-title{",
-      "font-size:26pt;font-weight:700;line-height:1.25;",
-      "color:#1a1a1a;margin-bottom:18pt;",
-      "font-family:'Calibri','Noto Sans',Arial,sans-serif;",
-    "}",
-    ".rfp-cover-body .rfp-doc-type{font-size:10pt;font-weight:700;letter-spacing:0.1em;color:#4BACED;text-transform:uppercase;margin-bottom:6pt;}",
-    ".rfp-cover-body .rfp-doc-date{font-size:9pt;color:#215868;font-weight:600;}",
-    ".rfp-cover-footer-bar{display:none;}",
-
-    /* ── Page header (interior) ── */
-    ".rfp-page-header{display:flex;align-items:center;justify-content:space-between;padding:4pt 24pt;border-bottom:1.5pt solid #4BACED;}",
-    ".rfp-page-header-logo{font-size:8pt;font-weight:700;color:#215868;}",
-    ".rfp-page-header-ref{font-size:7.5pt;color:#9ca3af;}",
-
-    /* ── Meta table ── */
-    ".rfp-meta-table{width:100%;border-collapse:collapse;font-size:9pt;}",
-    ".rfp-meta-table th{background:#215868;color:white;padding:6pt 10pt;font-weight:700;border:0.5pt solid #163d4e;text-transform:none;letter-spacing:0;-webkit-print-color-adjust:exact;print-color-adjust:exact;}",
-    ".rfp-meta-table td{background:white;padding:6pt 10pt;border:0.5pt solid #d1d5db;vertical-align:top;}",
-
-    /* ── TOC ── */
-    ".rfp-toc{padding:14pt 24pt 10pt;}",
-    ".rfp-toc-title{font-size:13pt;font-weight:700;color:#4BACED;margin-bottom:8pt;}",
-    ".rfp-toc-item{display:flex;justify-content:space-between;padding:3pt 0;font-size:9pt;color:#215868;border-bottom:0.5pt dotted #d1d5db;}",
-    ".rfp-toc-item.bold{font-weight:700;}",
-    ".rfp-toc-item.indent{padding-left:14pt;color:#374151;font-weight:400;}",
-
-    /* ── Sections ── */
-    ".rfp-section{padding:12pt 24pt;border-bottom:0.5pt solid #e5e7eb;}",
-    ".rfp-section-title{font-size:12pt;font-weight:700;color:#1a1a1a;margin-bottom:7pt;border-bottom:1.5pt solid #4BACED;padding-bottom:3pt;}",
-    ".rfp-section-num{display:inline-block;width:18pt;height:18pt;border-radius:50%;background:#4BACED;color:white;text-align:center;line-height:18pt;font-weight:700;font-size:8pt;margin-right:4pt;vertical-align:middle;-webkit-print-color-adjust:exact;print-color-adjust:exact;}",
-    ".rfp-section p{font-size:9.5pt;line-height:1.7;margin:0 0 6pt;}",
-    ".rfp-section ul{margin:3pt 0 6pt 16pt;}",
-    ".rfp-section li{font-size:9pt;line-height:1.65;margin-bottom:2pt;}",
-    ".rfp-subsection{margin:9pt 0 4pt;}",
-    ".rfp-subsection-title{font-size:10pt;font-weight:700;color:#215868;margin-bottom:4pt;}",
-    ".rfp-deliverables{background:#f0f9ff;border-left:2.5pt solid #4BACED;padding:5pt 9pt;font-size:8.5pt;color:#374151;margin-top:4pt;line-height:1.6;-webkit-print-color-adjust:exact;print-color-adjust:exact;}",
-
-    /* ── Spec tables ── */
-    ".rfp-spec-table{width:100%;border-collapse:collapse;margin:7pt 0;font-size:9pt;}",
-    ".rfp-spec-table th{background:#215868;color:white;padding:5pt 9pt;font-weight:700;-webkit-print-color-adjust:exact;print-color-adjust:exact;}",
-    ".rfp-spec-table td{padding:4.5pt 9pt;border:0.5pt solid #d1d5db;line-height:1.5;vertical-align:top;}",
-    ".rfp-spec-table tr:nth-child(even) td{background:#f0f9ff;-webkit-print-color-adjust:exact;print-color-adjust:exact;}",
-
-    /* ── Footer ── */
-    ".rfp-footer{background:#215868;color:white;padding:10pt 24pt;text-align:center;font-size:8pt;line-height:1.8;-webkit-print-color-adjust:exact;print-color-adjust:exact;}",
-
-    /* ── Print rules ── */
-    "@media print{",
-      ".rfp-cover{page-break-after:always;}",
-      ".rfp-section{page-break-inside:avoid;}",
-      ".rfp-section-title{page-break-after:avoid;}",
-      "@page{margin:10mm 14mm 14mm 14mm;}",
-      "@page:first{margin:0;}",
-    "}"
-  ].join('\n');
-
-  printWin.document.write('<!DOCTYPE html><html lang="en"><head>');
-  printWin.document.write('<meta charset="UTF-8">');
-  printWin.document.write('<title>' + (rfp.title || 'RFP') + ' \u2014 Crown Prince\u2019s Court</title>');
-  printWin.document.write('<style>' + css + '</style>');
-  printWin.document.write('</head><body>');
-  printWin.document.write(rfp.content);
-  printWin.document.write('</body></html>');
-  printWin.document.close();
-  setTimeout(function() { printWin.print(); }, 1000);
+  html2pdf().set(opt).from(wrapper).save()
+    .then(function() {
+      document.body.removeChild(wrapper);
+      showToast('PDF downloaded successfully!', 'success');
+    })
+    .catch(function(err) {
+      document.body.removeChild(wrapper);
+      console.error('html2pdf error:', err);
+      showToast('PDF generation failed: ' + (err && err.message ? err.message : err), 'error');
+    });
 }
 
 // --- TAB: VENDORS ---
