@@ -788,10 +788,12 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
 
     // Download attachments based on category
     let excelQuestions: string[] = []
-    let pdfBase64 = ''
+    let pdfBase64 = ''          // kept for small PDFs only (<=8MB) — legacy path, rarely used now
+    let pdfR2Key = ''           // R2 object key for large PDF storage
+    let pdfPublicUrl = ''       // public URL if R2 bucket is public-read
     let pdfFilename = ''
     let proposedDuration = ''
-    let pdfExtractedTextFromDownload = '' // Cached from download, reused in proposal creation
+    let pdfExtractedTextFromDownload = '' // Full extracted text (up to 60k chars), reused in LLM calls
 
     try {
       const attachListRes = await fetch(`https://api.resend.com/emails/receiving/${emailId}/attachments`, {
@@ -837,19 +839,37 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
                 // Ensure .pdf extension for display purposes if it's a generic name
                 if (!pdfFilename.match(/\.(pdf|doc|docx)$/i)) pdfFilename += '.pdf'
                 const rawBytes = new Uint8Array(fileBuffer)
-                const MAX_PDF_BYTES = 8_000_000 // 8MB raw — safe D1 TEXT column limit
-                // For large PDFs (>8MB): skip base64 storage — D1 TEXT limit exceeded.
-                // We still extract text for LLM analysis using a capped slice.
-                if (rawBytes.length <= MAX_PDF_BYTES) {
-                  pdfBase64 = uint8ToBase64(rawBytes)
-                } else {
-                  // Too large to store in D1 — record filename only, no inline PDF viewer
-                  console.log(`[webhook] PDF too large for D1 storage (${rawBytes.length} bytes > ${MAX_PDF_BYTES}) — skipping base64, filename recorded`)
+                const SMALL_PDF_THRESHOLD = 8_000_000 // 8MB — fits in D1 TEXT as base64 (~10.7MB b64)
+
+                // ── Storage: R2 (preferred) or D1 base64 fallback ──────────────────
+                const bucket: R2Bucket | undefined = (c.env as any).PROPOSALS_BUCKET
+                if (bucket) {
+                  // Store full PDF in R2 regardless of size
+                  const safeVendorName = (vendorDisplayName || 'vendor').replace(/[^a-zA-Z0-9_-]/g,'_').slice(0,40)
+                  pdfR2Key = `proposals/${rfpId}/${vendorId}_${safeVendorName}_${Date.now()}.pdf`
+                  try {
+                    await bucket.put(pdfR2Key, rawBytes, {
+                      httpMetadata: { contentType: 'application/pdf' },
+                      customMetadata: { rfpId: String(rfpId), vendorId: String(vendorId), filename: pdfFilename },
+                    })
+                    console.log(`[webhook] PDF stored in R2: ${pdfR2Key} (${rawBytes.length} bytes)`)
+                  } catch(r2Err: any) {
+                    console.error(`[webhook] R2 put failed: ${r2Err?.message} — falling back to base64`)
+                    pdfR2Key = ''
+                  }
                 }
-                // Extract text from first 8MB only to avoid Worker CPU timeout on huge files
-                const pdfBytes = rawBytes.length > MAX_PDF_BYTES ? rawBytes.slice(0, MAX_PDF_BYTES) : rawBytes
-                pdfExtractedTextFromDownload = await extractPdfText(pdfBytes)
-                console.log(`[webhook] PDF extracted: ${pdfExtractedTextFromDownload.length} chars from ${pdfFilename} (${rawBytes.length} bytes raw, ${pdfBytes.length} bytes scanned)`)
+
+                // D1 base64 fallback: only for small PDFs when R2 is not available
+                if (!pdfR2Key && rawBytes.length <= SMALL_PDF_THRESHOLD) {
+                  pdfBase64 = uint8ToBase64(rawBytes)
+                  console.log(`[webhook] PDF stored as D1 base64: ${rawBytes.length} bytes`)
+                } else if (!pdfR2Key) {
+                  console.log(`[webhook] PDF too large for D1 (${rawBytes.length} bytes) and R2 unavailable — filename only`)
+                }
+
+                // ── Text extraction: always use the FULL file ──────────────────────
+                pdfExtractedTextFromDownload = await extractPdfText(rawBytes)
+                console.log(`[webhook] PDF extracted: ${pdfExtractedTextFromDownload.length} chars from ${pdfFilename} (${rawBytes.length} bytes)`)
                 // Parse proposed duration from PDF text or email body
                 proposedDuration = extractProposedDuration(pdfExtractedTextFromDownload + '\n' + bodyText)
               } else {
@@ -1063,7 +1083,12 @@ procurement@cpc-rfp.website`
         const financialValue = proposalFields.budget_amount
           ?? (proposedDuration ? null : null) // placeholder — extractProposedDuration already ran
 
-        const pdfUrl = pdfBase64 ? 'data:application/pdf;base64,' + pdfBase64 : null
+        // Build the URL to store in D1:
+        // - R2 key stored as r2:// URI → resolved to presigned URL at read time by /proposals/:id/pdf
+        // - base64 data: URI for small PDFs when R2 is unavailable
+        const pdfUrl = pdfR2Key
+          ? `r2://${pdfR2Key}`
+          : (pdfBase64 ? 'data:application/pdf;base64,' + pdfBase64 : null)
 
         const existing = await db.prepare('SELECT id FROM proposals WHERE vendor_id=? AND rfp_id=?').bind(vendorId, rfpId).first<any>()
 
@@ -1353,8 +1378,42 @@ apiRouter.get('/rfps/:id/proposals', async (c) => {
     SELECT p.*, v.name as vendor_name FROM proposals p
     LEFT JOIN vendors v ON p.vendor_id = v.id
     WHERE p.rfp_id=? ORDER BY p.id DESC
-  `).bind(rfpId).all()
-  return c.json(results)
+  `).bind(rfpId).all<any>()
+
+  // Resolve r2:// URIs to Worker-served PDF URLs so the frontend gets a usable link
+  const base = new URL(c.req.url).origin
+  const resolved = results.map((p: any) => {
+    if (p.pdf_attachment_url?.startsWith('r2://')) {
+      const r2Key = p.pdf_attachment_url.slice(5)  // strip r2://
+      return { ...p, pdf_attachment_url: `${base}/api/proposals/pdf/${encodeURIComponent(r2Key)}` }
+    }
+    return p
+  })
+  return c.json(resolved)
+})
+
+// ── Serve a proposal PDF directly from R2 ──────────────────────────────────
+// GET /api/proposals/pdf/:key  (key is URL-encoded R2 object key)
+// Used by frontend to display/download PDFs that are too large for D1 base64.
+apiRouter.get('/proposals/pdf/:key{.+}', async (c) => {
+  const r2Key = decodeURIComponent(c.req.param('key'))
+  const bucket: R2Bucket | undefined = (c.env as any).PROPOSALS_BUCKET
+  if (!bucket) return c.text('R2 storage not configured', 503)
+
+  const obj = await bucket.get(r2Key)
+  if (!obj) return c.text('PDF not found', 404)
+
+  const contentType = obj.httpMetadata?.contentType || 'application/pdf'
+  const filename = r2Key.split('/').pop() || 'proposal.pdf'
+
+  return new Response(obj.body, {
+    headers: {
+      'Content-Type': contentType,
+      'Content-Disposition': `inline; filename="${filename}"`,
+      'Cache-Control': 'private, max-age=3600',
+      'Access-Control-Allow-Origin': '*',
+    },
+  })
 })
 
 apiRouter.post('/rfps/:id/proposals/sample', async (c) => {
@@ -1698,8 +1757,9 @@ async function extractProposalFieldsWithLLM(
   timeline_months: number | null
   technical_proposal: string
 }> {
-  // Use first 20000 chars of PDF text for large proposals; include email body for context
-  const combinedText = (pdfText.slice(0, 18000) + '\n\n' + emailBody.slice(0, 2000)).slice(0, 20000)
+  // Use up to 58000 chars of PDF text + 2000 chars email body = 60000 char context for LLM
+  // gpt-5-mini supports ~128k token context; 60k chars ≈ 15k tokens — well within limits
+  const combinedText = (pdfText.slice(0, 58000) + '\n\n' + emailBody.slice(0, 2000)).slice(0, 60000)
 
   const systemPrompt = `You are a procurement analyst extracting structured information from a vendor proposal document.
 Extract the following fields and return them as a JSON object (no markdown, no code block, just raw JSON):
@@ -1710,7 +1770,7 @@ Extract the following fields and return them as a JSON object (no markdown, no c
   "budget_amount": <number or null — the total financial bid amount as a plain number with no commas or currency symbols>,
   "budget_currency": "<3-letter currency code, e.g. AED or USD — default AED if not specified>",
   "timeline_months": <integer or null — implementation timeline in months>,
-  "technical_proposal": "Detailed technical summary: approach, methodology, technology stack, team, milestones (max 1200 chars)"
+  "technical_proposal": "Detailed technical summary: approach, methodology, technology stack, team, milestones, commercials (max 3000 chars)"
 }
 
 Rules:
@@ -1727,8 +1787,8 @@ Proposal text:
 ${combinedText}`
 
   try {
-    // Use larger token budget (2000) to handle rich proposals; gpt-5-mini is fast enough
-    const result = await callLLM(systemPrompt, userPrompt, env, 'gpt-5-mini', 2000)
+    // Large token budget for rich proposals — 3000 output tokens, large input context
+    const result = await callLLM(systemPrompt, userPrompt, env, 'gpt-5-mini', 3000)
     const cleaned = result.trim().replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/, '').trim()
     const parsed = JSON.parse(cleaned)
     return {
@@ -1737,7 +1797,7 @@ ${combinedText}`
       budget_amount: (parsed.budget_amount && !isNaN(Number(parsed.budget_amount))) ? Number(parsed.budget_amount) : null,
       budget_currency: parsed.budget_currency || 'AED',
       timeline_months: (parsed.timeline_months && !isNaN(Number(parsed.timeline_months))) ? Number(parsed.timeline_months) : null,
-      technical_proposal: parsed.technical_proposal || pdfText.slice(0, 4000) || emailBody.slice(0, 2000),
+      technical_proposal: parsed.technical_proposal || pdfText.slice(0, 8000) || emailBody.slice(0, 2000),
     }
   } catch(_) {
     // Graceful fallback — use raw text
@@ -1747,7 +1807,7 @@ ${combinedText}`
       budget_amount: null,
       budget_currency: 'AED',
       timeline_months: null,
-      technical_proposal: pdfText.slice(0, 4000) || emailBody.slice(0, 2000) || `Proposal submitted by ${vendorName}.`,
+      technical_proposal: pdfText.slice(0, 8000) || emailBody.slice(0, 2000) || `Proposal submitted by ${vendorName}.`,
     }
   }
 }
@@ -1967,10 +2027,13 @@ Return a JSON object with this exact structure:
 }
 Base scores purely on the proposal content provided. Return ONLY the JSON, no other text.`
 
-  const userPrompt = `RFP CONTEXT:\n${rfpContext}\n\nVENDOR: ${p.vendor_name}\nPROPOSAL:\n${proposalText.slice(0,2000)}\n\nFinancial: AED ${p.financial_proposal ? Number(p.financial_proposal).toLocaleString() : 'Not disclosed'}\nDuration: ${p.proposed_duration || 'Not specified'}`
+  // Send up to 60k chars of proposal text to the evaluation LLM — covers full proposals including
+  // commercials that appear at the end of large documents.
+  const userPrompt = `RFP CONTEXT:\n${rfpContext}\n\nVENDOR: ${p.vendor_name}\nPROPOSAL:\n${proposalText.slice(0,60000)}\n\nFinancial: AED ${p.financial_proposal ? Number(p.financial_proposal).toLocaleString() : 'Not disclosed'}\nBudget (LLM extracted): AED ${p.budget_amount ? Number(p.budget_amount).toLocaleString() : 'Not disclosed'}\nDuration: ${p.proposed_duration || p.timeline_months ? (p.proposed_duration || p.timeline_months + ' months') : 'Not specified'}`
 
   try {
-    const result = await callLLM(systemPrompt, userPrompt, env, 'gpt-5-mini', 1500)
+    // Larger token budget to match the larger input context
+    const result = await callLLM(systemPrompt, userPrompt, env, 'gpt-5-mini', 2500)
     const jsonMatch = result.match(/\{[\s\S]*\}/)
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0])
@@ -2207,7 +2270,7 @@ async function extractPdfText(bytes: Uint8Array): Promise<string> {
     const streamEndMarker = 'endstream'
     let sMatch: RegExpExecArray | null
     let streamCount = 0
-    while ((sMatch = streamStartRe.exec(latin)) !== null && streamCount < 200) {
+    while ((sMatch = streamStartRe.exec(latin)) !== null && streamCount < 1000) {
       streamCount++
       const headerStart = Math.max(0, sMatch.index - 400)
       const headerSlice = latin.slice(headerStart, sMatch.index)
@@ -2222,12 +2285,12 @@ async function extractPdfText(bytes: Uint8Array): Promise<string> {
       let compressedBytes: Uint8Array
       if (lenMatch) {
         const declaredLen = parseInt(lenMatch[1], 10)
-        if (declaredLen <= 0 || declaredLen > 5_000_000) continue
+        if (declaredLen <= 0 || declaredLen > 20_000_000) continue
         compressedBytes = bytes.slice(dataStart, dataStart + declaredLen)
       } else {
         // Fallback: scan for 'endstream' marker in latin string
         const endIdx = latin.indexOf(streamEndMarker, dataStart)
-        if (endIdx < 0 || endIdx - dataStart > 5_000_000) continue
+        if (endIdx < 0 || endIdx - dataStart > 20_000_000) continue
         // Strip trailing \r\n before endstream
         let endPos = endIdx
         if (endPos > 0 && latin[endPos-1] === '\n') endPos--
@@ -2243,17 +2306,17 @@ async function extractPdfText(bytes: Uint8Array): Promise<string> {
       const streamText = extractTextFromStreamBytes(decompressed)
       if (streamText.length > 10) collectedText.push(streamText)
 
-      // Stop early if we have enough text for LLM analysis
+      // Stop early if we have enough text — 60k chars covers most full proposals
       const currentTotal = collectedText.join(' ').length
-      if (currentTotal > 15_000) break
+      if (currentTotal > 60_000) break
     }
 
     const combined = collectedText.join(' ').replace(/\s+/g,' ').replace(/[^\x20-\x7E\n]/g,' ').trim()
-    if (combined.length > 100) return combined.slice(0, 15000)
+    if (combined.length > 100) return combined.slice(0, 60000)
 
     // --- Last resort: ASCII word sequences from raw bytes ---
     const asciiWords = latin.match(/[A-Za-z][A-Za-z0-9 .,;:!?()\-']{20,}/g) || []
-    return asciiWords.slice(0, 400).join(' ').slice(0, 15000)
+    return asciiWords.slice(0, 1000).join(' ').slice(0, 60000)
   } catch(err) {
     console.error('[extractPdfText] error:', err)
     return ''

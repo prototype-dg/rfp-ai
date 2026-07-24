@@ -1904,14 +1904,21 @@ rfpTabs.proposals = async function(rfpId) {
       ? '<button class="award-btn" onclick="awardProposal(' + rfpId + ',' + p.id + ')" title="Award contract to this vendor"><i class="fas fa-award"></i>Award Contract</button>'
       : '<span style="font-size:0.75rem;color:#92400e;font-weight:700;background:#fef3c7;padding:4px 10px;border-radius:6px;display:inline-flex;align-items:center;gap:4px"><i class="fas fa-trophy"></i>Winner</span>';
 
-    // Use Blob + URL.createObjectURL for data: URIs — opening data: URIs in new tab shows blank page
+    // PDF button: R2 URL → open in new tab (inline browser viewer) + download link
+    //             data: URI → programmatic Blob download (browser won't open data: in new tab)
+    //             no URL but filename known → show placeholder
     var pdfDownloadBtn = '';
-    if (p.pdf_attachment_url && p.pdf_filename) {
+    if (p.pdf_attachment_url) {
       if (p.pdf_attachment_url.startsWith('data:')) {
-        pdfDownloadBtn = '<button class="btn-ghost btn-sm" onclick="downloadProposalPdf(' + p.id + ')" title="Download ' + escHtml(p.pdf_filename) + '"><i class="fas fa-file-pdf" style="color:#dc2626"></i>PDF</button>';
+        // Small legacy PDF stored as base64 — must use Blob download
+        pdfDownloadBtn = '<button class="btn-ghost btn-sm" onclick="downloadProposalPdf(' + p.id + ')" title="Download ' + escHtml(p.pdf_filename || 'proposal.pdf') + '"><i class="fas fa-file-pdf" style="color:#dc2626"></i>PDF</button>';
       } else {
-        pdfDownloadBtn = '<a href="' + escHtml(p.pdf_attachment_url) + '" download="' + escHtml(p.pdf_filename) + '" class="btn-ghost btn-sm" style="text-decoration:none" title="Download ' + escHtml(p.pdf_filename) + '"><i class="fas fa-file-pdf" style="color:#dc2626"></i>PDF</a>';
+        // R2 URL — open in browser (PDF viewer) AND offer download
+        pdfDownloadBtn = '<a href="' + escHtml(p.pdf_attachment_url) + '" target="_blank" class="btn-ghost btn-sm" style="text-decoration:none" title="View PDF: ' + escHtml(p.pdf_filename || 'proposal.pdf') + '"><i class="fas fa-file-pdf" style="color:#dc2626"></i>View PDF</a>';
       }
+    } else if (p.pdf_filename) {
+      // PDF was received but could not be stored (too large, R2 unavailable) — show filename only
+      pdfDownloadBtn = '<span class="btn-ghost btn-sm" style="opacity:0.5;cursor:default" title="' + escHtml(p.pdf_filename) + ' — PDF too large to display inline"><i class="fas fa-file-pdf" style="color:#9ca3af"></i>' + escHtml(p.pdf_filename.slice(0,20)) + '</span>';
     }
 
     rows += '<tr style="' + rowBg + '">'
@@ -2215,6 +2222,24 @@ function viewProposalDetail(id) {
 
     // Scoring table
     + scoringTable
+
+    // PDF action buttons — only show when URL is available
+    + (function() {
+        if (!p.pdf_attachment_url) {
+          if (p.pdf_filename) {
+            return '<div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:0.75rem;margin-bottom:1rem;display:flex;align-items:center;gap:0.5rem;font-size:0.82rem;color:#6b7280"><i class="fas fa-file-pdf" style="color:#9ca3af"></i><span><strong>' + escHtml(p.pdf_filename) + '</strong> — received but could not be stored (file may be very large). Original PDF was processed for AI extraction.</span></div>';
+          }
+          return '';
+        }
+        if (p.pdf_attachment_url.startsWith('data:')) {
+          return '<div style="margin-bottom:1rem"><button class="btn-secondary" onclick="downloadProposalPdf(' + p.id + ')"><i class="fas fa-download mr-1"></i>Download Proposal PDF</button></div>';
+        }
+        // R2 URL — offer both inline view and download
+        return '<div style="margin-bottom:1rem;display:flex;gap:0.5rem;flex-wrap:wrap">'
+          + '<a href="' + escHtml(p.pdf_attachment_url) + '" target="_blank" class="btn-primary" style="text-decoration:none;display:inline-flex;align-items:center;gap:0.35rem"><i class="fas fa-file-pdf"></i>Open Full Proposal PDF</a>'
+          + '<a href="' + escHtml(p.pdf_attachment_url) + '" download="' + escHtml(p.pdf_filename || 'proposal.pdf') + '" class="btn-ghost" style="text-decoration:none;display:inline-flex;align-items:center;gap:0.35rem"><i class="fas fa-download"></i>Download</a>'
+          + '</div>';
+      })()
 
     + '<div style="display:flex;gap:0.5rem;margin-top:1.25rem">'
     + '<button class="btn-ghost" style="flex:1" onclick="closeModal()">Close</button>'

@@ -12,5 +12,11 @@
       "database_name": "webapp-db",
       "database_id": "placeholder"
     }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "PROPOSALS_BUCKET",
+      "bucket_name": "webapp-proposals"
+    }
   ]
 }
