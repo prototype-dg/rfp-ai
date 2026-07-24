@@ -1908,11 +1908,19 @@ rfpTabs.proposals = async function(rfpId) {
     return evalByProposal[p.id] || evalByVendor[p.vendor_id] || null;
   }
 
-  function statusBadge(p) {
+  function statusBadge(p, ev) {
     const s = p.status || 'submitted';
     if (s === 'awarded') return '<span style="background:#d1fae5;color:#065f46;border-radius:20px;padding:3px 10px;font-size:0.73rem;font-weight:700"><i class="fas fa-trophy mr-1"></i>Awarded</span>';
     if (s === 'recommended') return '<span style="background:#fef3c7;color:#92400e;border-radius:20px;padding:3px 10px;font-size:0.73rem;font-weight:700"><i class="fas fa-star mr-1"></i>Recommended</span>';
     if (s === 'not_awarded') return '<span style="background:#f3f4f6;color:#6b7280;border-radius:20px;padding:3px 10px;font-size:0.73rem;font-weight:500">Not Awarded</span>';
+    // Show "Wrong Doc" if the evaluation detected a wrong document (score=0, is_real=1, wrong-doc summary)
+    if (ev && ev.total_score === 0 && ev.is_real === 1 && ev.ai_summary && ev.ai_summary.indexOf('WRONG DOCUMENT') !== -1) {
+      return '<span style="background:#fee2e2;color:#dc2626;border-radius:20px;padding:3px 10px;font-size:0.73rem;font-weight:600"><i class="fas fa-times-circle mr-1"></i>Wrong Doc</span>';
+    }
+    // Show "Evaluated" once a real scored evaluation exists
+    if (ev && ev.is_real === 1 && ev.total_score > 0) {
+      return '<span style="background:#f0fdf4;color:#16a34a;border-radius:20px;padding:3px 10px;font-size:0.73rem;font-weight:500"><i class="fas fa-check-circle mr-1"></i>Evaluated</span>';
+    }
     return '<span style="background:#e0f2fe;color:#0369a1;border-radius:20px;padding:3px 10px;font-size:0.73rem;font-weight:500">Submitted</span>';
   }
 
@@ -1940,15 +1948,30 @@ rfpTabs.proposals = async function(rfpId) {
 
     // AI Score cell
     let scoreCell = '-';
-    if (ev && ev.total_score) {
+    if (ev && ev.total_score !== undefined && ev.total_score !== null) {
       const sc = ev.total_score;
-      const scoreColor = sc >= 80 ? '#065f46' : sc >= 65 ? '#92400e' : '#6b7280';
-      scoreCell = '<div style="display:flex;align-items:center;gap:6px">'
-        + '<div style="font-size:1.1rem;font-weight:700;color:' + scoreColor + '">' + sc + '</div>'
-        + '<div style="font-size:0.7rem;color:#9ca3af">/100</div>'
-        + scoreBar(sc)
-        + '</div>';
-    } else if (ev) {
+      // Wrong document or evaluation error: score=0 with is_real=1
+      if (sc === 0 && ev.is_real === 1) {
+        const isWrongDoc = ev.ai_summary && ev.ai_summary.indexOf('WRONG DOCUMENT') !== -1;
+        const isEvalError = ev.ai_summary && ev.ai_summary.indexOf('EVALUATION ERROR') !== -1;
+        if (isWrongDoc) {
+          scoreCell = '<span style="font-size:0.75rem;color:#dc2626;font-weight:600;background:#fee2e2;padding:2px 8px;border-radius:6px">Wrong Doc</span>';
+        } else if (isEvalError) {
+          scoreCell = '<span style="font-size:0.75rem;color:#92400e;font-weight:600;background:#fef3c7;padding:2px 8px;border-radius:6px">Eval Error</span>';
+        } else {
+          scoreCell = '<div style="display:flex;align-items:center;gap:6px"><div style="font-size:1.1rem;font-weight:700;color:#6b7280">0</div><div style="font-size:0.7rem;color:#9ca3af">/100</div>' + scoreBar(sc) + '</div>';
+        }
+      } else if (sc > 0) {
+        const scoreColor = sc >= 80 ? '#065f46' : sc >= 65 ? '#92400e' : '#6b7280';
+        scoreCell = '<div style="display:flex;align-items:center;gap:6px">'
+          + '<div style="font-size:1.1rem;font-weight:700;color:' + scoreColor + '">' + sc + '</div>'
+          + '<div style="font-size:0.7rem;color:#9ca3af">/100</div>'
+          + scoreBar(sc)
+          + '</div>';
+      } else {
+        scoreCell = '<div style="display:flex;align-items:center;gap:6px"><div style="font-size:1.1rem;font-weight:700;color:#6b7280">0</div><div style="font-size:0.7rem;color:#9ca3af">/100</div>' + scoreBar(0) + '</div>';
+      }
+    } else if (ev && (ev.total_score === undefined || ev.total_score === null)) {
       scoreCell = '<span style="font-size:0.78rem;color:#9ca3af">Evaluating...</span>';
     }
 
@@ -1980,7 +2003,7 @@ rfpTabs.proposals = async function(rfpId) {
       + '<td style="font-size:0.82rem;color:#6b7280">' + escHtml(dur) + '</td>'
       + '<td>' + scoreCell + '</td>'
       + '<td>' + filesCell + '</td>'
-      + '<td>' + statusBadge(p) + '</td>'
+      + '<td>' + statusBadge(p, ev) + '</td>'
       + '<td>'
       + '<div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">'
       + '<button class="btn-ghost btn-sm" onclick="viewProposalDetail(' + p.id + ')"><i class="fas fa-eye"></i>View</button>'
@@ -2160,7 +2183,7 @@ function viewProposalDetail(id) {
 
   // ── Score header ────────────────────────────────────────────────────────
   let scoreHeader = '';
-  if (ev && ev.total_score) {
+  if (ev && ev.total_score !== undefined && ev.total_score !== null && ev.total_score > 0) {
     const sc = ev.total_score;
     const scoreColor = sc >= 80 ? '#065f46' : sc >= 65 ? '#b45309' : '#dc2626';
     const scoreBg    = sc >= 80 ? '#d1fae5' : sc >= 65 ? '#fef3c7' : '#fee2e2';

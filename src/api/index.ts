@@ -3730,6 +3730,17 @@ Return ONLY the JSON. No markdown code blocks, no commentary outside the JSON.`
     sections.push(`=== VENDOR CLARIFICATION Q&A ===\n${vendorQuestionsText}`)
   }
 
+  // Strip XML/HTML-like tags from proposal text before embedding in the LLM prompt.
+  // The Genspark crawler wraps extracted content in <document><page number='1'>...</page> tags.
+  // These tags contain single-quote attributes that can corrupt the JSON the LLM outputs
+  // (the model echoes fragments of the input in its justification strings).
+  const cleanProposalText = proposalText
+    .replace(/<[^>]{0,200}>/g, ' ')  // strip any XML/HTML tags (up to 200 chars to avoid catastrophic backtracking)
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')  // decode HTML entities
+    .replace(/[ \t]{3,}/g, '  ')     // collapse excessive whitespace
+    .replace(/\n{4,}/g, '\n\n')      // collapse excessive blank lines
+    .trim()
+
   sections.push(`=== VENDOR PROPOSAL SUBMISSION ===
 VENDOR: ${p.vendor_name}
 Stated Financial Offer: AED ${p.financial_proposal ? Number(p.financial_proposal).toLocaleString() : 'Not disclosed'}
@@ -3737,7 +3748,7 @@ Extracted Budget: AED ${p.budget_amount ? Number(p.budget_amount).toLocaleString
 Proposed Duration: ${p.proposed_duration || (p.timeline_months ? p.timeline_months + ' months' : 'Not specified')}
 
 FULL PROPOSAL TEXT (all submitted documents combined):
-${proposalText}`)
+${cleanProposalText}`)
 
   const userPrompt = sections.join('\n\n---\n\n')
 
@@ -3749,7 +3760,31 @@ ${proposalText}`)
     const result = await callLLM(systemPrompt, userPrompt, env, 'gpt-5', 4000)
     const jsonMatch = result.match(/\{[\s\S]*\}/)
     if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0])
+      let jsonStr = jsonMatch[0]
+      let parsed: any
+      // First attempt: direct parse
+      try {
+        parsed = JSON.parse(jsonStr)
+      } catch (parseErr: any) {
+        // Second attempt: truncate at last valid closing brace.
+        // LLM sometimes emits a partially-escaped string that breaks at a specific position.
+        // Walk backwards from the end to find the last '}' that produces valid JSON.
+        console.warn(`[evaluateProposal] JSON parse failed (${parseErr.message}), attempting repair...`)
+        let repaired = false
+        for (let cut = jsonStr.length - 1; cut > jsonStr.length / 2; cut--) {
+          if (jsonStr[cut] === '}') {
+            try {
+              parsed = JSON.parse(jsonStr.slice(0, cut + 1))
+              console.warn(`[evaluateProposal] JSON repaired by truncating at position ${cut}`)
+              repaired = true
+              break
+            } catch (_) { /* keep searching */ }
+          }
+        }
+        if (!repaired) {
+          throw parseErr  // propagate original error
+        }
+      }
       // Use ?? 0 (nullish coalescing) not || so LLM-returned 0 is preserved, not replaced by fallback
       return {
         scores: {
@@ -3758,7 +3793,7 @@ ${proposalText}`)
           financial:  Math.min(100, Math.max(0, Math.round(parsed.scores?.financial  ?? 0))),
           experience: Math.min(100, Math.max(0, Math.round(parsed.scores?.experience ?? 0))),
         },
-        scoringDetails: parsed.criteria || [],
+        scoringDetails: Array.isArray(parsed.criteria) ? parsed.criteria : [],
         summary: parsed.summary || `${p.vendor_name} evaluation complete. See criteria breakdown for details.`,
       }
     }
