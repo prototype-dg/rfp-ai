@@ -270,7 +270,9 @@ apiRouter.put('/vendors/:id', async (c) => {
 apiRouter.get('/rfps/:id/vendors', async (c) => {
   const rfpId = c.req.param('id')
   const { results } = await c.env.DB.prepare(`
-    SELECT v.*, COALESCE(rv.shortlisted, 0) as shortlisted, rv.fit_score as rfp_fit_score, rv.fit_rationale as rfp_fit_rationale
+    SELECT v.*, COALESCE(rv.shortlisted, 0) as shortlisted,
+      rv.fit_score as rfp_fit_score, rv.fit_rationale as rfp_fit_rationale,
+      COALESCE(rv.status,'active') as rfp_status, rv.declined_at
     FROM vendors v
     LEFT JOIN rfp_vendors rv ON v.id = rv.vendor_id AND rv.rfp_id = ?
     ORDER BY COALESCE(rv.fit_score,0) DESC, v.name ASC
@@ -463,7 +465,7 @@ apiRouter.post('/rfps/:id/emails/send-invitations', async (c) => {
   const body = await c.req.json().catch(() => ({})) as any
   const rfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(rfpId).first<any>()
   const { results: shortlisted } = await c.env.DB.prepare(`
-    SELECT v.* FROM vendors v
+    SELECT v.*, COALESCE(rv.status,'active') as rfp_status FROM vendors v
     JOIN rfp_vendors rv ON v.id = rv.vendor_id AND rv.rfp_id=? AND rv.shortlisted=1
   `).bind(rfpId).all<any>()
 
@@ -474,6 +476,12 @@ apiRouter.post('/rfps/:id/emails/send-invitations', async (c) => {
   const results: any[] = []
 
   for (const v of shortlisted) {
+    // Skip vendors who have already declined for this RFP
+    if (v.rfp_status === 'declined') {
+      results.push({ vendor: v.name, status: 'declined_skipped' })
+      continue
+    }
+
     // Only skip if a REAL (status='sent') invitation already went out.
     // If previous attempt was 'simulated' (e.g. API key missing), delete it and retry.
     const existing = await c.env.DB.prepare(
@@ -631,16 +639,13 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
     if (!rfp) return c.json({ ok: true, note: 'no active rfp' })
     const rfpId = rfp.id
 
-    // Find the sending vendor by their from-address domain
+    // Find the sending vendor by their exact from-address or domain match
+    // NO fallback to Andersen — if we can't identify the vendor, vendorRow stays null
     let vendorRow: any = null
     if (fromAddress) {
       vendorRow = await db.prepare(
         `SELECT * FROM vendors WHERE contact_email=? OR contact_email LIKE ? LIMIT 1`
       ).bind(fromAddress, `%${fromAddress.split('@')[1] || 'NOMATCH'}%`).first<any>()
-    }
-    // Fallback: look up Andersen (known real sender)
-    if (!vendorRow) {
-      vendorRow = await db.prepare(`SELECT * FROM vendors WHERE contact_email LIKE '%andersenlab.com%' LIMIT 1`).first<any>()
     }
     const vendorId = vendorRow?.id || null
 
@@ -726,6 +731,10 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
     }
 
     // Log the inbound email in email_log
+    const emailTypeForLog = emailCategory === 'questions' ? 'qa_questions'
+      : emailCategory === 'proposal' ? 'proposal'
+      : emailCategory === 'decline' ? 'decline'
+      : 'inbound'
     const insertResult = await db.prepare(`
       INSERT INTO email_log (rfp_id, vendor_id, recipient, from_email, subject, body, email_body_html, email_type, email_category, status, has_attachment, resend_email_id, created_at)
       VALUES (?,?,?,?,?,?,?,?,?,'received',?,?,datetime('now'))
@@ -737,7 +746,7 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
       subject,
       bodyText.slice(0, 4000),
       bodyHtml.slice(0, 16000),
-      emailCategory === 'questions' ? 'qa_questions' : emailCategory === 'proposal' ? 'proposal' : 'inbound',
+      emailTypeForLog,
       emailCategory,
       hasAttachment ? 1 : 0,
       emailId
@@ -748,7 +757,19 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
     // ── Route by category ────────────────────────────────────────
     let newCount = 0
 
-    if (emailCategory === 'questions') {
+    if (emailCategory === 'decline') {
+      // Vendor has declined participation — mark them as declined in rfp_vendors
+      if (vendorId) {
+        await db.prepare(`
+          INSERT INTO rfp_vendors (rfp_id, vendor_id, shortlisted, status, declined_at)
+          VALUES (?,?,0,'declined',datetime('now'))
+          ON CONFLICT(rfp_id, vendor_id) DO UPDATE SET status='declined', declined_at=datetime('now')
+        `).bind(rfpId, vendorId).run()
+        console.log(`[webhook] Vendor ${vendorId} declined RFP ${rfpId} — status set to declined`)
+      } else {
+        console.log(`[webhook] Decline email from unknown vendor (${fromAddress}) — no rfp_vendors update`)
+      }
+    } else if (emailCategory === 'questions') {
       // Insert extracted questions into questions table
       for (const question of excelQuestions) {
         const q = question.trim()
@@ -874,6 +895,14 @@ apiRouter.post('/rfps/:id/vendors/:vendorId/reply', async (c) => {
     const rfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(rfpId).first<any>()
     const vendor = await c.env.DB.prepare('SELECT * FROM vendors WHERE id=?').bind(vendorId).first<any>()
     if (!vendor) return c.json({ ok: false, error: 'Vendor not found' }, 404)
+
+    // Guard: prohibit correspondence with vendors who have declined for this RFP
+    const rfpVendorRow = await c.env.DB.prepare(
+      `SELECT status FROM rfp_vendors WHERE rfp_id=? AND vendor_id=?`
+    ).bind(rfpId, vendorId).first<any>()
+    if (rfpVendorRow?.status === 'declined') {
+      return c.json({ ok: false, error: `Cannot send email — ${vendor.name} has declined participation in this RFP.` }, 403)
+    }
 
     const replySubject = subject || `RE: Invitation to Tender – ${rfp?.title || 'CPC RFP'} (Ref: ${rfp?.ref_number || ''})`
     const result = await sendRealEmail(vendor.contact_email, replySubject, text || '', rfp, c.env)
@@ -1361,26 +1390,34 @@ async function categorizeEmailWithLLM(subject: string, body: string, attachments
   const attachInfo = attachments.map((a: any) => `${a.filename || 'unnamed'} (${a.content_type || 'unknown type'})`).join(', ')
 
   const systemPrompt = `You are an email classification assistant for a government procurement system. Classify incoming vendor emails into exactly one of these categories:
+- "decline": Email expresses that the vendor is NOT interested in participating, is declining the invitation, withdrawing, or is unable to participate in the RFP. Look for phrases like "not interested", "decline", "unable to participate", "regret to inform", "pass on this opportunity", "withdraw", "not in a position to", "not proceed", "cannot participate", "no thank you", "thank you but"
 - "questions": Email contains clarification questions about the RFP, has an Excel/spreadsheet attachment with questions, or asks specific questions about requirements
 - "proposal": Email contains a submitted proposal, has a PDF attachment with technical/commercial proposal content, or states they are submitting their proposal
 - "plain_email": General correspondence, acknowledgment, out-of-office, or any other email type
+
+IMPORTANT: Check for decline signals FIRST before other categories. A vendor declining must be classified as "decline" even if they include questions.
 
 Return ONLY the category word, nothing else.`
 
   const userPrompt = `Subject: ${subject}
 Attachments: ${attachInfo || 'none'}
-Body (first 500 chars): ${body.slice(0, 500)}
+Body (first 800 chars): ${body.slice(0, 800)}
 
 Category:`
 
   try {
     const result = await callLLM(systemPrompt, userPrompt, env, 'gpt-5-nano', 20)
     const clean = result.trim().toLowerCase().replace(/[^a-z_]/g, '')
+    if (clean.includes('decline')) return 'decline'
     if (clean.includes('question')) return 'questions'
     if (clean.includes('proposal')) return 'proposal'
     return 'plain_email'
   } catch(_) {
-    // Fallback heuristic
+    // Fallback heuristic — check body for decline keywords
+    const bodyLower = body.toLowerCase()
+    const declineKeywords = ['not interested', 'decline', 'unable to participate', 'regret to inform',
+      'pass on this', 'withdraw', 'cannot participate', 'not in a position', 'not proceed', 'no thank you']
+    if (declineKeywords.some(kw => bodyLower.includes(kw))) return 'decline'
     if (attachments.some((a: any) => a.filename?.match(/\.(xlsx|xls|csv)$/i))) return 'questions'
     if (attachments.some((a: any) => a.filename?.match(/\.pdf$/i))) return 'proposal'
     return 'plain_email'

@@ -151,8 +151,12 @@ export async function initDb(db: D1Database) {
     `ALTER TABLE evaluations ADD COLUMN scoring_details_json TEXT`,
     // evaluations.is_real — 1 if this is a real LLM evaluation (Andersen), 0 if simulated
     `ALTER TABLE evaluations ADD COLUMN is_real INTEGER DEFAULT 0`,
-    // email_log.email_category — AI-classified category: 'questions'|'proposal'|'plain_email'
+    // email_log.email_category — AI-classified category: 'questions'|'proposal'|'plain_email'|'decline'
     `ALTER TABLE email_log ADD COLUMN email_category TEXT`,
+    // rfp_vendors.status — vendor participation status per RFP: 'active' | 'declined'
+    `ALTER TABLE rfp_vendors ADD COLUMN status TEXT DEFAULT 'active'`,
+    // rfp_vendors.declined_at — timestamp when vendor declined participation
+    `ALTER TABLE rfp_vendors ADD COLUMN declined_at TEXT`,
   ]
   for (const sql of alterMigrations) {
     try {

@@ -960,23 +960,35 @@ rfpTabs.vendors = async function(rfpId, rfp) {
   });
 
   function buildVendorRow(v, allowRemove) {
+    const isDeclined = v.rfp_status === 'declined';
     const score = v.rfp_fit_score || v.fit_score || 0;
     const fitCls = score >= 75 ? 'perf-high' : score >= 50 ? 'perf-mid' : 'perf-low';
     const tags = (v.specializations||'').split(',').filter(Boolean).slice(0,3)
       .map(function(s){ return '<span class="tag">' + escHtml(s.trim()) + '</span>'; }).join('');
-    const actionBtn = allowRemove
-      ? '<button class="btn-danger btn-sm" onclick="toggleVendorShortlist(' + rfpId + ',' + v.id + ',false)"><i class="fas fa-minus"></i>Remove</button>'
-      : '<button class="btn-secondary btn-sm" onclick="toggleVendorShortlist(' + rfpId + ',' + v.id + ',true)"><i class="fas fa-plus"></i>Add</button>';
 
-    // Invitation status badge
-    const inv = invitationMap[v.id];
+    // Row background: RED tint if declined
+    const rowStyle = isDeclined ? ' style="background:#fef2f2;opacity:0.85"' : '';
+
+    const actionBtn = isDeclined
+      ? '<span style="font-size:0.72rem;color:#dc2626;font-weight:600;padding:2px 8px">Declined</span>'
+      : allowRemove
+        ? '<button class="btn-danger btn-sm" onclick="toggleVendorShortlist(' + rfpId + ',' + v.id + ',false)"><i class="fas fa-minus"></i>Remove</button>'
+        : '<button class="btn-secondary btn-sm" onclick="toggleVendorShortlist(' + rfpId + ',' + v.id + ',true)"><i class="fas fa-plus"></i>Add</button>';
+
+    // Participation status badge — declined overrides invitation badge
     let invBadge = '';
-    if (!inv) {
-      invBadge = '<span style="background:#f3f4f6;color:#6b7280;border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:500">Not Invited</span>';
-    } else if (inv.status === 'sent') {
-      invBadge = '<span style="background:#d1fae5;color:#065f46;border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:600"><i class="fas fa-check-circle mr-1"></i>Invited</span>';
+    if (isDeclined) {
+      invBadge = '<span style="background:#fee2e2;color:#991b1b;border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:700;border:1px solid #fca5a5">'
+        + '<i class="fas fa-times-circle mr-1"></i>Declined</span>';
     } else {
-      invBadge = '<span style="background:#ede9fe;color:#5b21b6;border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:500"><i class="fas fa-flask mr-1"></i>Simulated</span>';
+      const inv = invitationMap[v.id];
+      if (!inv) {
+        invBadge = '<span style="background:#f3f4f6;color:#6b7280;border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:500">Not Invited</span>';
+      } else if (inv.status === 'sent') {
+        invBadge = '<span style="background:#d1fae5;color:#065f46;border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:600"><i class="fas fa-check-circle mr-1"></i>Invited</span>';
+      } else {
+        invBadge = '<span style="background:#ede9fe;color:#5b21b6;border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:500"><i class="fas fa-flask mr-1"></i>Simulated</span>';
+      }
     }
 
     // Received emails count
@@ -985,12 +997,19 @@ rfpTabs.vendors = async function(rfpId, rfp) {
       ? '<span style="background:#ede9fe;color:#7c3aed;border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:600;margin-left:4px"><i class="fas fa-reply mr-1"></i>' + rxCount + ' replied</span>'
       : '';
 
-    const commBtn = '<button class="btn-ghost btn-sm" onclick="navigateToVendorComms(' + rfpId + ',' + v.id + ')" title="Open Communications"><i class="fas fa-comments"></i>Comms</button>';
+    // Communications button: disabled if declined
+    const commBtn = isDeclined
+      ? '<button class="btn-ghost btn-sm" disabled title="Communications prohibited — vendor declined" style="opacity:0.4;cursor:not-allowed"><i class="fas fa-ban"></i>No Comms</button>'
+      : '<button class="btn-ghost btn-sm" onclick="navigateToVendorComms(' + rfpId + ',' + v.id + ')" title="Open Communications"><i class="fas fa-comments"></i>Comms</button>';
 
-    return '<tr>'
+    // Avatar background: red if declined
+    const avatarBg = isDeclined ? '#dc2626' : 'var(--cpc-blue)';
+
+    return '<tr' + rowStyle + '>'
       + '<td><div style="display:flex;align-items:center;gap:0.75rem">'
-      + '<div style="width:34px;height:34px;border-radius:8px;background:var(--cpc-blue);display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:0.82rem;flex-shrink:0">' + escHtml(v.name.charAt(0)) + '</div>'
-      + '<div><div style="font-weight:600;font-size:0.875rem">' + escHtml(v.name) + '</div>'
+      + '<div style="width:34px;height:34px;border-radius:8px;background:' + avatarBg + ';display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:0.82rem;flex-shrink:0">'
+      + (isDeclined ? '<i class="fas fa-times" style="font-size:0.75rem"></i>' : escHtml(v.name.charAt(0))) + '</div>'
+      + '<div><div style="font-weight:600;font-size:0.875rem' + (isDeclined ? ';color:#991b1b' : '') + '">' + escHtml(v.name) + '</div>'
       + '<div style="font-size:0.72rem;color:#9ca3af">' + escHtml(v.country||'UAE') + ' &bull; ' + escHtml(v.size||'') + '</div>'
       + '</div></div></td>'
       + '<td><div>' + tags + '</div></td>'
@@ -2091,14 +2110,18 @@ pages.vendor_comms = async function(opts) {
   var backBtn = document.getElementById('backBtn');
   if (backBtn) backBtn.style.display = 'inline-flex';
 
-  // Fetch all emails + vendor info
-  let allEmails = [], received = [], rfp = appState.currentRfp;
+  // Fetch all emails + vendor info + vendor status for this RFP
+  let allEmails = [], received = [], rfp = appState.currentRfp, vendorDeclined = false;
   try {
     [allEmails, received] = await Promise.all([
       apiCall('GET', '/rfps/' + rfpId + '/emails').catch(function(){ return []; }),
       apiCall('GET', '/rfps/' + rfpId + '/emails/received').catch(function(){ return []; }),
     ]);
     if (!rfp) rfp = await apiCall('GET', '/rfps/' + rfpId).catch(function(){ return null; });
+    // Check if vendor is declined for this RFP
+    const rfpVendors = appState.rfpVendors || await apiCall('GET', '/rfps/' + rfpId + '/vendors').catch(function(){ return []; });
+    const vendorEntry = rfpVendors.find(function(v){ return String(v.id) === String(vendorId); });
+    vendorDeclined = vendorEntry ? vendorEntry.rfp_status === 'declined' : false;
   } catch(e) {}
 
   // Combine and filter by vendorId
@@ -2192,30 +2215,51 @@ pages.vendor_comms = async function(opts) {
     });
   }
 
-  // Reply form
-  const replySection = '<div class="card" style="padding:1.25rem;margin-top:1rem">'
-    + '<h4 style="font-weight:700;font-size:0.875rem;color:#1f2937;margin:0 0 0.75rem"><i class="fas fa-reply mr-2" style="color:var(--cpc-blue)"></i>Reply to ' + escHtml(vendorName) + '</h4>'
-    + '<div class="form-group" style="margin-bottom:0.5rem">'
-    + '<input id="vc-reply-subj" type="text" placeholder="Subject..." style="width:100%;padding:7px 10px;border:1px solid #e5e7eb;border-radius:6px;font-size:0.82rem;box-sizing:border-box">'
-    + '</div>'
-    + '<div class="form-group" style="margin-bottom:0.5rem">'
-    + '<textarea id="vc-reply-text" rows="4" placeholder="Type your message..." style="width:100%;padding:8px 10px;border:1px solid #e5e7eb;border-radius:6px;font-size:0.82rem;resize:vertical;box-sizing:border-box"></textarea>'
-    + '</div>'
-    + '<div style="display:flex;gap:0.5rem">'
-    + '<button class="btn-primary" onclick="sendVendorCommReply(' + rfpId + ',' + vendorId + ')"><i class="fas fa-paper-plane"></i>Send Reply</button>'
-    + '<button class="btn-ghost" onclick="navigateTo(\'rfp_detail\',{rfpId:' + rfpId + ',tab:\'vendors\'})"><i class="fas fa-arrow-left"></i>Back to RFP</button>'
-    + '</div>'
-    + '</div>';
+  // Reply form — blocked if vendor declined
+  const replySection = vendorDeclined
+    ? '<div class="card" style="padding:1.25rem;margin-top:1rem;background:#fef2f2;border:1.5px solid #fca5a5">'
+      + '<div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.5rem">'
+      + '<i class="fas fa-ban" style="color:#dc2626;font-size:1.25rem;flex-shrink:0"></i>'
+      + '<div><div style="font-weight:700;font-size:0.9rem;color:#991b1b">Correspondence Prohibited</div>'
+      + '<div style="font-size:0.8rem;color:#dc2626">' + escHtml(vendorName) + ' has declined participation in this RFP. No further correspondence is permitted.</div>'
+      + '</div></div>'
+      + '<button class="btn-ghost" onclick="navigateTo(\'rfp_detail\',{rfpId:' + rfpId + ',tab:\'vendors\'})"><i class="fas fa-arrow-left"></i>Back to RFP</button>'
+      + '</div>'
+    : '<div class="card" style="padding:1.25rem;margin-top:1rem">'
+      + '<h4 style="font-weight:700;font-size:0.875rem;color:#1f2937;margin:0 0 0.75rem"><i class="fas fa-reply mr-2" style="color:var(--cpc-blue)"></i>Reply to ' + escHtml(vendorName) + '</h4>'
+      + '<div class="form-group" style="margin-bottom:0.5rem">'
+      + '<input id="vc-reply-subj" type="text" placeholder="Subject..." style="width:100%;padding:7px 10px;border:1px solid #e5e7eb;border-radius:6px;font-size:0.82rem;box-sizing:border-box">'
+      + '</div>'
+      + '<div class="form-group" style="margin-bottom:0.5rem">'
+      + '<textarea id="vc-reply-text" rows="4" placeholder="Type your message..." style="width:100%;padding:8px 10px;border:1px solid #e5e7eb;border-radius:6px;font-size:0.82rem;resize:vertical;box-sizing:border-box"></textarea>'
+      + '</div>'
+      + '<div style="display:flex;gap:0.5rem">'
+      + '<button class="btn-primary" onclick="sendVendorCommReply(' + rfpId + ',' + vendorId + ')"><i class="fas fa-paper-plane"></i>Send Reply</button>'
+      + '<button class="btn-ghost" onclick="navigateTo(\'rfp_detail\',{rfpId:' + rfpId + ',tab:\'vendors\'})"><i class="fas fa-arrow-left"></i>Back to RFP</button>'
+      + '</div>'
+      + '</div>';
+
+  const declinedBanner = vendorDeclined
+    ? '<div style="background:#fee2e2;border:1.5px solid #fca5a5;border-radius:8px;padding:0.75rem 1rem;display:flex;align-items:center;gap:0.75rem;margin-bottom:1rem">'
+      + '<i class="fas fa-times-circle" style="color:#dc2626;font-size:1.1rem;flex-shrink:0"></i>'
+      + '<div><div style="font-weight:700;font-size:0.85rem;color:#991b1b">Vendor Declined Participation</div>'
+      + '<div style="font-size:0.78rem;color:#dc2626">This vendor replied to the RFP invitation indicating they are not interested. All correspondence is now prohibited.</div></div>'
+      + '</div>'
+    : '';
 
   setContent(
     '<div style="max-width:860px;margin:0 auto">'
+    // Declined banner (if applicable)
+    + declinedBanner
     // Header card
-    + '<div class="card" style="padding:1rem 1.25rem;margin-bottom:1rem;display:flex;align-items:center;justify-content:space-between">'
+    + '<div class="card" style="padding:1rem 1.25rem;margin-bottom:1rem;display:flex;align-items:center;justify-content:space-between' + (vendorDeclined ? ';background:#fef2f2;border:1.5px solid #fca5a5' : '') + '">'
     + '<div style="display:flex;align-items:center;gap:0.875rem">'
-    + '<div style="width:44px;height:44px;border-radius:10px;background:var(--cpc-blue);display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:1.1rem">' + escHtml((vendorName||'?').charAt(0)) + '</div>'
+    + '<div style="width:44px;height:44px;border-radius:10px;background:' + (vendorDeclined ? '#dc2626' : 'var(--cpc-blue)') + ';display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:1.1rem">'
+    + (vendorDeclined ? '<i class="fas fa-times" style="font-size:1rem"></i>' : escHtml((vendorName||'?').charAt(0))) + '</div>'
     + '<div>'
-    + '<div style="font-weight:700;font-size:0.95rem;color:#1f2937">' + escHtml(vendorName) + '</div>'
-    + '<div style="font-size:0.78rem;color:#9ca3af">' + vendorEmails.length + ' message(s) in thread</div>'
+    + '<div style="font-weight:700;font-size:0.95rem;color:' + (vendorDeclined ? '#991b1b' : '#1f2937') + '">' + escHtml(vendorName) + '</div>'
+    + '<div style="font-size:0.78rem;color:#9ca3af">' + vendorEmails.length + ' message(s) in thread'
+    + (vendorDeclined ? ' &bull; <span style="color:#dc2626;font-weight:600">DECLINED</span>' : '') + '</div>'
     + '</div></div>'
     + '<div style="display:flex;gap:0.5rem">'
     + '<button class="btn-secondary btn-sm" onclick="pages.vendor_comms({rfpId:' + rfpId + ',vendorId:' + vendorId + '})"><i class="fas fa-sync"></i>Refresh</button>'
