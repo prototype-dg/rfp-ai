@@ -1782,16 +1782,13 @@ apiRouter.get('/rfps/:rfpId/proposals/:proposalId/reprocess-from-r2/status', asy
 // ── Synchronous reprocess endpoint ───────────────────────────────────────────────────────────────
 // POST /api/rfps/:rfpId/proposals/:proposalId/reprocess-sync
 //
-// Orchestrator mode (no ?attachment param, default):
-//   Iterates over attachments sequentially by self-fetching ?attachment=N for each one.
-//   Each sub-request gets its own CPU budget — safe for large files (13MB, 25MB etc.).
-//   After all files are processed, runs LLM field extraction + AI evaluation once.
-//   Returns the final evaluation result. Client makes a single call.
-//
-// Single-file worker mode (?attachment=N):
-//   Processes only attachment N: extract text via Genspark crawler, run wrong-doc detection,
-//   persist updated proposal_attachments to D1. No LLM field extraction, no evaluation.
-//   Used internally by the orchestrator; can also be called directly for debugging.
+// Processes all attachments inline (no sub-requests, no self-fetch) to avoid Cloudflare's
+// loopback block (error 522). For each attachment:
+//   - Large files (> 2MB): stream R2 body directly to Genspark blob upload → crawler
+//     (avoids arrayBuffer() memory spike for 13MB/25MB files)
+//   - Small files (<= 2MB): text-layer extraction → Genspark crawler fallback (upload mode)
+// After all attachments are processed, runs LLM field extraction + AI evaluation once.
+// Returns the final evaluation result. Client makes a single call.
 apiRouter.post('/rfps/:rfpId/proposals/:proposalId/reprocess-sync', async (c) => {
   const rfpId = Number(c.req.param('rfpId'))
   const proposalId = Number(c.req.param('proposalId'))
@@ -1811,73 +1808,71 @@ apiRouter.post('/rfps/:rfpId/proposals/:proposalId/reprocess-sync', async (c) =>
   const attachments: any[] = JSON.parse(proposal.proposal_attachments || '[]')
   if (attachments.length === 0) return c.json({ error: 'No attachments stored for this proposal' }, 404)
 
-  // Derive Worker base URL from the request (used for Genspark crawler Strategy A)
-  const requestUrl = new URL(c.req.url)
-  const workerBaseUrl = `${requestUrl.protocol}//${requestUrl.host}`
+  console.log(`[reprocess-sync] Starting for proposal #${proposalId} (${proposal.vendor_name}), ${attachments.length} attachment(s)`)
 
-  // ── SINGLE-FILE WORKER MODE (?attachment=N) ───────────────────────────────
-  // Processes exactly one attachment. No field extraction, no evaluation.
-  // Saves updated proposal_attachments back to D1 and returns extraction result.
-  const attachmentParam = requestUrl.searchParams.get('attachment')
-  if (attachmentParam !== null) {
-    const attIdx = Number(attachmentParam)
-    const att = attachments[attIdx]
-    if (!att) return c.json({ error: `Attachment index ${attIdx} not found` }, 404)
-    if (!att.r2_key) return c.json({ ok: true, skipped: true, reason: 'no r2_key', filename: att.filename })
+  // Mark as processing
+  await db.prepare(`UPDATE proposals SET key_strengths='⏳ Re-extracting proposal text…', updated_at=datetime('now') WHERE id=?`)
+    .bind(proposalId).run().catch(() => {})
 
-    console.log(`[reprocess-sync-single] Processing attachment ${attIdx}: ${att.filename} (${att.size_bytes ?? '?'} bytes)`)
+  // ── INLINE ATTACHMENT PROCESSING ─────────────────────────────────────────
+  // Process each attachment directly — no self-fetch, no sub-requests.
+  // Large files (> 2MB) stream their R2 body to Genspark blob upload to avoid
+  // loading the entire file into Worker memory (would exceed CPU time limit).
+  const SIZE_THRESHOLD = 2 * 1024 * 1024  // 2 MB
+  const singleFileResults: any[] = []
+  const updatedAttachments: any[] = [...attachments]
+
+  for (let i = 0; i < attachments.length; i++) {
+    const att = attachments[i]
+    if (!att.r2_key) {
+      console.log(`[reprocess-sync] Attachment ${i} (${att.filename}) has no r2_key — skipping`)
+      singleFileResults.push({ attachment_index: i, skipped: true, filename: att.filename })
+      continue
+    }
+
+    console.log(`[reprocess-sync] Processing attachment ${i}: ${att.filename} (${att.size_bytes ?? '?'} bytes)`)
     let resultAtt: any = { ...att }
-    try {
-      // Strategy: for large files avoid loading bytes into Worker memory.
-      // Use bucket.head() to verify the object exists, then go straight to the
-      // Genspark crawler via our own /api/proposals/pdf/:key serve endpoint (Strategy A).
-      // This keeps memory usage near-zero in the Worker — crawler streams from our endpoint.
-      // Only fall back to full arrayBuffer() for small files (<= 2MB) where text-layer
-      // extraction is worth attempting and won't blow the CPU budget.
-      const SIZE_THRESHOLD = 2 * 1024 * 1024  // 2 MB
-      const fileSize = att.size_bytes ?? 0
-      const useCrawlerDirect = fileSize > SIZE_THRESHOLD
 
-      if (useCrawlerDirect) {
-        // Large file — verify R2 object exists, then go directly to Genspark crawler
-        console.log(`[reprocess-sync-single] Large file (${fileSize} bytes) — using direct crawler strategy`)
-        const head = await bucket.head(att.r2_key)
-        if (!head) {
+    try {
+      const fileSize = att.size_bytes ?? 0
+      const useLargeFileStrategy = fileSize > SIZE_THRESHOLD
+
+      if (useLargeFileStrategy) {
+        // Large file: stream R2 body to Genspark blob → crawler.
+        // bucket.get() returns R2ObjectBody whose .body is a ReadableStream.
+        // We pass that stream to the blob PUT — no arrayBuffer() in Worker memory.
+        console.log(`[reprocess-sync] Attachment ${i}: large file (${fileSize} bytes) — streaming to Genspark blob`)
+        const obj = await bucket.get(att.r2_key)
+        if (!obj) {
           resultAtt = { ...att, error: 'R2 object not found' }
         } else {
-          // First check filename-only wrong-doc detection (no bytes needed)
+          // Filename-based wrong-doc check (no text needed, no bytes loaded)
           const wrongDocFilename = await detectWrongDocument(
             '', att.filename, proposal.vendor_name || 'Vendor',
             rfp.ref_number || '', rfp.title || '', c.env
           )
           if (wrongDocFilename.isWrong) {
-            console.warn(`[reprocess-sync-single] Filename-based wrong doc: ${wrongDocFilename.reason.slice(0, 100)}`)
+            console.warn(`[reprocess-sync] Attachment ${i}: filename wrong-doc: ${wrongDocFilename.reason.slice(0, 80)}`)
+            // Drain the stream so the connection doesn't hang
+            await obj.body?.cancel().catch(() => {})
             resultAtt = {
-              ...att,
-              text_chars: 0,
-              extract_method: 'filename-detection',
+              ...att, text_chars: 0, extract_method: 'filename-detection',
               wrong_document: wrongDocFilename.reason,
               _marked_text: `[WRONG DOCUMENT DETECTED]\nFile: ${att.filename}\nDetected type: ${wrongDocFilename.detectedDocType}\n\n${wrongDocFilename.reason}\n\n[EXTRACTED CONTENT FOR REFERENCE]\n(no text extraction attempted — wrong document detected from filename)`,
             }
           } else {
-            // Not a wrong doc by filename — call Genspark crawler directly with Worker URL
-            const pdfUrl = `${workerBaseUrl}/api/proposals/pdf/${encodeURIComponent(att.r2_key)}`
-            console.log(`[reprocess-sync-single] Calling Genspark crawler with URL: ${pdfUrl}`)
-            const extracted = await extractPdfViaGenskarkCrawler(null, att.filename, c.env, pdfUrl)
-            console.log(`[reprocess-sync-single] Crawler returned ${extracted.length} chars`)
+            // Stream R2 body to Genspark blob, then call crawler on the resulting URL
+            const extracted = await extractPdfViaGenskarkCrawlerStreaming(obj, att.filename, c.env)
+            console.log(`[reprocess-sync] Attachment ${i}: crawler returned ${extracted.length} chars`)
 
-            // Now run content-based wrong-doc detection on the extracted text
             if (extracted.length >= 100) {
               const wrongDocContent = await detectWrongDocument(
                 extracted, att.filename, proposal.vendor_name || 'Vendor',
                 rfp.ref_number || '', rfp.title || '', c.env
               )
               if (wrongDocContent.isWrong) {
-                console.warn(`[reprocess-sync-single] Content-based wrong doc: ${wrongDocContent.reason.slice(0, 100)}`)
                 resultAtt = {
-                  ...att,
-                  text_chars: extracted.length,
-                  extract_method: 'vision',
+                  ...att, text_chars: extracted.length, extract_method: 'vision',
                   wrong_document: wrongDocContent.reason,
                   _marked_text: `[WRONG DOCUMENT DETECTED]\nFile: ${att.filename}\nDetected type: ${wrongDocContent.detectedDocType}\n\n${wrongDocContent.reason}\n\n[EXTRACTED CONTENT FOR REFERENCE]\n${extracted}`,
                 }
@@ -1885,25 +1880,24 @@ apiRouter.post('/rfps/:rfpId/proposals/:proposalId/reprocess-sync', async (c) =>
                 resultAtt = { ...att, text_chars: extracted.length, extract_method: 'vision', extracted_text: extracted }
               }
             } else {
-              // Crawler returned little/nothing — store with 0 chars, no wrong-doc flag
-              console.warn(`[reprocess-sync-single] Crawler returned too little text (${extracted.length} chars)`)
+              console.warn(`[reprocess-sync] Attachment ${i}: crawler returned too little text (${extracted.length} chars)`)
               resultAtt = { ...att, text_chars: extracted.length, extract_method: 'vision', extracted_text: extracted }
             }
           }
         }
       } else {
-        // Small file — load bytes and run full pipeline (text-layer + crawler fallback)
+        // Small file: load bytes → text-layer extraction → crawler fallback
         const obj = await bucket.get(att.r2_key)
         if (!obj) {
           resultAtt = { ...att, error: 'R2 object not found' }
         } else {
           const rawBytes = new Uint8Array(await obj.arrayBuffer())
-          console.log(`[reprocess-sync-single] Small file — fetched ${rawBytes.length} bytes`)
+          console.log(`[reprocess-sync] Attachment ${i}: small file — fetched ${rawBytes.length} bytes`)
 
           const { text: extracted, method: exMethod, rawGarbage } = await extractPdfTextSmart(
-            rawBytes, att.filename, c.env, { r2Key: att.r2_key, workerBaseUrl }
+            rawBytes, att.filename, c.env
           )
-          console.log(`[reprocess-sync-single] Extracted ${extracted.length} chars via ${exMethod}`)
+          console.log(`[reprocess-sync] Attachment ${i}: extracted ${extracted.length} chars via ${exMethod}`)
 
           const textForDetection = extracted.length >= 100 ? extracted : (rawGarbage || '')
           const wrongDoc = await detectWrongDocument(
@@ -1913,9 +1907,7 @@ apiRouter.post('/rfps/:rfpId/proposals/:proposalId/reprocess-sync', async (c) =>
 
           if (wrongDoc.isWrong) {
             resultAtt = {
-              ...att,
-              text_chars: extracted.length,
-              extract_method: exMethod,
+              ...att, text_chars: extracted.length, extract_method: exMethod,
               wrong_document: wrongDoc.reason,
               _marked_text: `[WRONG DOCUMENT DETECTED]\nFile: ${att.filename}\nDetected type: ${wrongDoc.detectedDocType}\n\n${wrongDoc.reason}\n\n[EXTRACTED CONTENT FOR REFERENCE]\n${extracted || '(no readable text extracted)'}`,
             }
@@ -1925,20 +1917,13 @@ apiRouter.post('/rfps/:rfpId/proposals/:proposalId/reprocess-sync', async (c) =>
         }
       }
     } catch (e: any) {
-      console.error(`[reprocess-sync-single] Error: ${e?.message}`)
+      console.error(`[reprocess-sync] Attachment ${i} error: ${e?.message}`)
       resultAtt = { ...att, error: e?.message }
     }
 
-    // Persist the updated attachment entry back to D1 (merge with siblings)
-    const freshProposal = await db.prepare(`SELECT proposal_attachments FROM proposals WHERE id=?`).bind(proposalId).first<any>()
-    const currentAtts: any[] = JSON.parse(freshProposal?.proposal_attachments || '[]')
-    currentAtts[attIdx] = resultAtt
-    await db.prepare(`UPDATE proposals SET proposal_attachments=?, updated_at=datetime('now') WHERE id=?`)
-      .bind(JSON.stringify(currentAtts), proposalId).run()
-
-    return c.json({
-      ok: true,
-      attachment_index: attIdx,
+    updatedAttachments[i] = resultAtt
+    singleFileResults.push({
+      attachment_index: i,
       filename: att.filename,
       method: resultAtt.extract_method ?? null,
       chars: resultAtt.text_chars ?? 0,
@@ -1947,43 +1932,6 @@ apiRouter.post('/rfps/:rfpId/proposals/:proposalId/reprocess-sync', async (c) =>
     })
   }
 
-  // ── ORCHESTRATOR MODE (no ?attachment param) ──────────────────────────────
-  // Calls ?attachment=N for each attachment sequentially, then runs field extraction + evaluation.
-  console.log(`[reprocess-sync] ORCHESTRATOR starting for proposal #${proposalId} (${proposal.vendor_name}), ${attachments.length} attachment(s)`)
-
-  // Mark as processing
-  await db.prepare(`UPDATE proposals SET key_strengths='⏳ Re-extracting proposal text…', updated_at=datetime('now') WHERE id=?`)
-    .bind(proposalId).run().catch(() => {})
-
-  // Sequential self-fetch for each attachment that has an r2_key
-  const singleFileResults: any[] = []
-  for (let i = 0; i < attachments.length; i++) {
-    const att = attachments[i]
-    if (!att.r2_key) {
-      console.log(`[reprocess-sync] Attachment ${i} (${att.filename}) has no r2_key — skipping`)
-      singleFileResults.push({ attachment_index: i, skipped: true, filename: att.filename })
-      continue
-    }
-    console.log(`[reprocess-sync] Self-fetching attachment ${i}: ${att.filename}`)
-    try {
-      const subRes = await fetch(
-        `${workerBaseUrl}/api/rfps/${rfpId}/proposals/${proposalId}/reprocess-sync?attachment=${i}`,
-        { method: 'POST', headers: { 'Content-Type': 'application/json' } }
-      )
-      const subData = await subRes.json() as any
-      console.log(`[reprocess-sync] Attachment ${i} done: method=${subData.method}, chars=${subData.chars}, wrong=${subData.wrong_document ? 'yes' : 'no'}`)
-      singleFileResults.push(subData)
-    } catch (e: any) {
-      console.error(`[reprocess-sync] Self-fetch for attachment ${i} failed: ${e?.message}`)
-      singleFileResults.push({ attachment_index: i, error: e?.message, filename: att.filename })
-    }
-  }
-
-  // Re-read updated attachments from DB (each sub-request saved its slice)
-  const refreshedProposal = await db.prepare(
-    `SELECT p.*, v.name as vendor_name FROM proposals p LEFT JOIN vendors v ON p.vendor_id=v.id WHERE p.id=?`
-  ).bind(proposalId).first<any>()
-  const updatedAttachments: any[] = JSON.parse(refreshedProposal?.proposal_attachments || '[]')
 
   // Build combined text from all successful, non-wrong-document attachments
   const allExtractedTexts: string[] = []
@@ -4436,6 +4384,98 @@ async function extractPdfViaGenskarkCrawler(
   const extractedText: string = crawlerData?.data?.result || crawlerData?.result || ''
 
   console.log(`[gsk-crawler] Extracted ${extractedText.length} chars from ${filename}`)
+  return extractedText
+}
+
+// Streaming variant — accepts an R2ObjectBody and pipes its ReadableStream body
+// directly to Genspark blob storage upload, then calls the crawler.
+// This avoids loading large files (13MB, 25MB) into Worker memory via arrayBuffer().
+async function extractPdfViaGenskarkCrawlerStreaming(
+  r2Object: R2ObjectBody,
+  filename: string,
+  env: any,
+): Promise<string> {
+  const gskApiKey = (env as any).GSK_API_KEY
+  const gskProjectId = (env as any).GSK_PROJECT_ID || ''
+  if (!gskApiKey) {
+    throw new Error('GSK_API_KEY secret not configured')
+  }
+
+  const baseUrl = 'https://www.genspark.ai'
+  console.log(`[gsk-crawler-stream] Uploading ${filename} (size: ${r2Object.size} bytes) via streaming...`)
+
+  // Step 1: Get a pre-signed upload URL from Genspark
+  const uploadUrlRes = await fetch(`${baseUrl}/api/tool_cli/file/upload_url`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${gskApiKey}`,
+      'Content-Type': 'application/json',
+      ...(gskProjectId ? { 'X-Project-Id': gskProjectId } : {}),
+    },
+    body: JSON.stringify({
+      content_type: 'application/pdf',
+      name: filename,
+      ...(gskProjectId ? { project_id: gskProjectId } : {}),
+    }),
+  })
+
+  if (!uploadUrlRes.ok) {
+    const errText = await uploadUrlRes.text()
+    throw new Error(`Upload URL request failed ${uploadUrlRes.status}: ${errText.slice(0, 200)}`)
+  }
+
+  const uploadUrlData = await uploadUrlRes.json() as any
+  const blobUploadUrl: string = uploadUrlData?.data?.upload_url || uploadUrlData?.upload_url
+  const fileWrapperUrl: string = uploadUrlData?.data?.file_wrapper_url || uploadUrlData?.file_wrapper_url
+
+  if (!blobUploadUrl || !fileWrapperUrl) {
+    throw new Error(`Invalid upload URL response: ${JSON.stringify(uploadUrlData).slice(0, 300)}`)
+  }
+
+  // Step 2: Stream R2 body directly to Azure Blob — no arrayBuffer() buffering
+  // r2Object.body is a ReadableStream<Uint8Array>
+  const putRes = await fetch(blobUploadUrl, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/pdf',
+      'x-ms-blob-type': 'BlockBlob',
+      ...(r2Object.size ? { 'Content-Length': String(r2Object.size) } : {}),
+    },
+    body: r2Object.body,
+    // @ts-ignore — duplex is required by some runtimes for streaming request bodies
+    duplex: 'half',
+  })
+
+  if (!putRes.ok) {
+    const errText = await putRes.text()
+    throw new Error(`Blob streaming upload failed ${putRes.status}: ${errText.slice(0, 200)}`)
+  }
+
+  console.log(`[gsk-crawler-stream] Streamed upload complete. File wrapper URL: ${fileWrapperUrl}`)
+
+  // Step 3: Call Genspark Crawler with the uploaded file URL
+  const crawlerRes = await fetch(`${baseUrl}/api/tool_cli/crawler`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${gskApiKey}`,
+      'Content-Type': 'application/json',
+      ...(gskProjectId ? { 'X-Project-Id': gskProjectId } : {}),
+    },
+    body: JSON.stringify({
+      url: fileWrapperUrl,
+      ...(gskProjectId ? { project_id: gskProjectId } : {}),
+    }),
+  })
+
+  if (!crawlerRes.ok) {
+    const errText = await crawlerRes.text()
+    throw new Error(`Crawler API failed ${crawlerRes.status}: ${errText.slice(0, 200)}`)
+  }
+
+  const crawlerData = await crawlerRes.json() as any
+  const extractedText: string = crawlerData?.data?.result || crawlerData?.result || ''
+
+  console.log(`[gsk-crawler-stream] Extracted ${extractedText.length} chars from ${filename}`)
   return extractedText
 }
 
