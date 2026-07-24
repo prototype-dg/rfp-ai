@@ -1722,7 +1722,8 @@ apiRouter.post('/rfps/:rfpId/proposals/:proposalId/reprocess-from-r2', async (c)
 
   // Fire all heavy work (vision LLM + evaluation) in the background — no CPU time limit
   const executionCtx = (c as any).executionCtx
-  const backgroundWork = doReprocessFromR2(rfpId, proposalId, proposal, rfp, attachments, bucket, db, c.env)
+  const bgWorkerBaseUrl = (() => { try { const u = new URL(c.req.url); return `${u.protocol}//${u.host}` } catch { return '' } })()
+  const backgroundWork = doReprocessFromR2(rfpId, proposalId, proposal, rfp, attachments, bucket, db, c.env, bgWorkerBaseUrl)
   if (executionCtx?.waitUntil) {
     executionCtx.waitUntil(backgroundWork)
   } else {
@@ -1806,7 +1807,10 @@ apiRouter.post('/rfps/:rfpId/proposals/:proposalId/reprocess-sync', async (c) =>
   const attachments: any[] = JSON.parse(proposal.proposal_attachments || '[]')
   if (attachments.length === 0) return c.json({ error: 'No attachments stored for this proposal' }, 404)
 
-  console.log(`[reprocess-sync] Starting SYNC reprocess for proposal #${proposalId} (${proposal.vendor_name})`)
+  // Derive Worker base URL from the request for Genspark crawler Strategy A
+  const requestUrl = new URL(c.req.url)
+  const workerBaseUrl = `${requestUrl.protocol}//${requestUrl.host}`
+  console.log(`[reprocess-sync] Starting SYNC reprocess for proposal #${proposalId} (${proposal.vendor_name}), workerBaseUrl=${workerBaseUrl}`)
 
   // Mark as processing (in case client polls the status endpoint concurrently)
   await db.prepare(`UPDATE proposals SET key_strengths='⏳ Vision extraction in progress…', updated_at=datetime('now') WHERE id=?`)
@@ -1827,7 +1831,10 @@ apiRouter.post('/rfps/:rfpId/proposals/:proposalId/reprocess-sync', async (c) =>
       const rawBytes = new Uint8Array(await obj.arrayBuffer())
       console.log(`[reprocess-sync] Fetched ${rawBytes.length} bytes for ${att.filename}`)
 
-      const { text: extracted, method: exMethod, rawGarbage } = await extractPdfTextSmart(rawBytes, att.filename, c.env)
+      // Use Strategy A (Worker URL) — avoids re-uploading large bytes, crawler fetches directly
+      const { text: extracted, method: exMethod, rawGarbage } = await extractPdfTextSmart(
+        rawBytes, att.filename, c.env, { r2Key: att.r2_key, workerBaseUrl }
+      )
       console.log(`[reprocess-sync] Extracted ${extracted.length} chars via ${exMethod} from ${att.filename}`)
 
       // Run wrong-doc detection using extracted text OR rawGarbage OR just filename
@@ -2005,9 +2012,10 @@ async function doReprocessFromR2(
   attachments: any[],
   bucket: R2Bucket,
   db: D1Database,
-  env: any
+  env: any,
+  workerBaseUrl?: string
 ): Promise<void> {
-  console.log(`[reprocess-r2-bg] Starting background vision extraction for proposal #${proposalId}`)
+  console.log(`[reprocess-r2-bg] Starting background vision extraction for proposal #${proposalId}, workerBaseUrl=${workerBaseUrl || 'unknown'}`)
 
   const allExtractedTexts: string[] = []
   const updatedAttachments: any[] = []
@@ -2027,8 +2035,11 @@ async function doReprocessFromR2(
       const rawBytes = new Uint8Array(await obj.arrayBuffer())
       console.log(`[reprocess-r2-bg] Fetched ${rawBytes.length} bytes for ${att.filename}`)
 
-      // Extraction (text-layer; vision proxy not available)
-      const { text: extracted, method: exMethod, rawGarbage } = await extractPdfTextSmart(rawBytes, att.filename, env)
+      // Extraction: text-layer first, then Genspark crawler fallback
+      const { text: extracted, method: exMethod, rawGarbage } = await extractPdfTextSmart(
+        rawBytes, att.filename, env,
+        workerBaseUrl ? { r2Key: att.r2_key, workerBaseUrl } : undefined
+      )
       console.log(`[reprocess-r2-bg] Extracted ${extracted.length} chars from ${att.filename} via ${exMethod}`)
 
       // Wrong-document detection — uses filename overlap even when text is empty
@@ -4126,7 +4137,8 @@ async function extractPdfTextWithVisionImages(bytes: Uint8Array, filename: strin
 export async function extractPdfTextSmart(
   bytes: Uint8Array,
   filename: string,
-  env: any
+  env: any,
+  options?: { r2Key?: string; workerBaseUrl?: string }
 ): Promise<{ text: string; method: 'text' | 'vision' | 'failed'; chars: number; rawGarbage?: string }> {
   // Step 1: Try the existing text-layer extractor
   const textLayerResult = await extractPdfText(bytes)
@@ -4139,12 +4151,26 @@ export async function extractPdfTextSmart(
   }
 
   // Step 2: Text layer failed or produced PostScript garbage.
-  // Try Genspark Crawler fallback: upload PDF → get public URL → crawler extracts text.
+  // Try Genspark Crawler fallback.
+  // Strategy A (preferred for R2 files): pass the Worker's own PDF-serve URL — no upload, just streaming.
+  // Strategy B (fallback): upload PDF bytes to Genspark blob storage, then crawl.
   const reason = !textLayerResult ? 'empty' : isGarbage ? 'PostScript-garbage' : 'too-short'
   console.warn(`[smart-extract] ${filename}: text-layer ${reason} (${textLayerResult?.length ?? 0} chars). Trying Genspark crawler fallback...`)
 
   try {
-    const crawlerText = await extractPdfViaGenskarkCrawler(bytes, filename, env)
+    let crawlerText: string
+    if (options?.r2Key && options?.workerBaseUrl) {
+      // Strategy A: Use the Worker's own /api/proposals/pdf/:key endpoint as source URL
+      // No upload needed — crawler fetches the PDF directly from our Worker
+      const pdfUrl = `${options.workerBaseUrl}/api/proposals/pdf/${encodeURIComponent(options.r2Key)}`
+      console.log(`[smart-extract] ${filename}: Using Worker PDF URL strategy: ${pdfUrl}`)
+      crawlerText = await extractPdfViaGenskarkCrawler(null, filename, env, pdfUrl)
+    } else {
+      // Strategy B: Upload bytes to Genspark blob storage (for cases without r2Key)
+      console.log(`[smart-extract] ${filename}: Using upload strategy (no r2Key provided)`)
+      crawlerText = await extractPdfViaGenskarkCrawler(bytes, filename, env, null)
+    }
+
     if (crawlerText && crawlerText.length >= 200 && !isPostScriptGarbage(crawlerText)) {
       console.log(`[smart-extract] ${filename}: Genspark crawler OK (${crawlerText.length} chars)`)
       return { text: crawlerText, method: 'vision', chars: crawlerText.length, rawGarbage: textLayerResult }
@@ -4159,18 +4185,25 @@ export async function extractPdfTextSmart(
 }
 
 /**
- * Upload a PDF to Genspark file storage, then use the Genspark Crawler API
- * to extract text from it. This bypasses the LLM proxy's PDF stripping limitation.
+ * Use the Genspark Crawler API to extract text from a PDF.
+ * Supports two modes:
+ *   - URL mode (preferred): pass a public URL for the PDF (e.g. the Worker's own /api/proposals/pdf/:key)
+ *     The crawler fetches the PDF itself — no upload needed, no CPU overhead for the Worker.
+ *   - Upload mode (fallback): pass PDF bytes to upload to Genspark blob storage first.
+ *     Only used when no public URL is available (e.g. PDFs uploaded inline without R2).
  *
- * Flow:
+ * URL mode flow: POST /api/tool_cli/crawler with the PDF URL → extracted text
+ *
+ * Upload mode flow:
  *   1. POST /api/tool_cli/file/upload_url → get Azure blob upload URL + file wrapper URL
  *   2. PUT bytes to blob URL
- *   3. POST /api/tool_cli/crawler with the file wrapper URL → get extracted text
+ *   3. POST /api/tool_cli/crawler with the file wrapper URL → extracted text
  */
 async function extractPdfViaGenskarkCrawler(
-  bytes: Uint8Array,
+  bytes: Uint8Array | null,
   filename: string,
-  env: any
+  env: any,
+  directUrl: string | null
 ): Promise<string> {
   const gskApiKey = (env as any).GSK_API_KEY
   const gskProjectId = (env as any).GSK_PROJECT_ID || ''
@@ -4179,56 +4212,67 @@ async function extractPdfViaGenskarkCrawler(
   }
 
   const baseUrl = 'https://www.genspark.ai'
+  let pdfUrl: string
 
-  // Step 1: Get upload URL from Genspark
-  console.log(`[gsk-crawler] Requesting upload URL for ${filename} (${bytes.length} bytes)`)
-  const uploadUrlRes = await fetch(`${baseUrl}/api/tool_cli/file/upload_url`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${gskApiKey}`,
-      'Content-Type': 'application/json',
-      ...(gskProjectId ? { 'X-Project-Id': gskProjectId } : {}),
-    },
-    body: JSON.stringify({
-      content_type: 'application/pdf',
-      name: filename,
-      ...(gskProjectId ? { project_id: gskProjectId } : {}),
-    }),
-  })
+  if (directUrl) {
+    // URL mode: use the provided URL directly (no upload)
+    pdfUrl = directUrl
+    console.log(`[gsk-crawler] Using direct URL for ${filename}: ${pdfUrl}`)
+  } else if (bytes) {
+    // Upload mode: upload bytes to Genspark blob storage first
+    console.log(`[gsk-crawler] Uploading ${filename} (${bytes.length} bytes) to Genspark storage...`)
 
-  if (!uploadUrlRes.ok) {
-    const errText = await uploadUrlRes.text()
-    throw new Error(`Upload URL request failed ${uploadUrlRes.status}: ${errText.slice(0, 200)}`)
+    // Step 1: Get upload URL from Genspark
+    const uploadUrlRes = await fetch(`${baseUrl}/api/tool_cli/file/upload_url`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${gskApiKey}`,
+        'Content-Type': 'application/json',
+        ...(gskProjectId ? { 'X-Project-Id': gskProjectId } : {}),
+      },
+      body: JSON.stringify({
+        content_type: 'application/pdf',
+        name: filename,
+        ...(gskProjectId ? { project_id: gskProjectId } : {}),
+      }),
+    })
+
+    if (!uploadUrlRes.ok) {
+      const errText = await uploadUrlRes.text()
+      throw new Error(`Upload URL request failed ${uploadUrlRes.status}: ${errText.slice(0, 200)}`)
+    }
+
+    const uploadUrlData = await uploadUrlRes.json() as any
+    const blobUploadUrl: string = uploadUrlData?.data?.upload_url || uploadUrlData?.upload_url
+    const fileWrapperUrl: string = uploadUrlData?.data?.file_wrapper_url || uploadUrlData?.file_wrapper_url
+
+    if (!blobUploadUrl || !fileWrapperUrl) {
+      throw new Error(`Invalid upload URL response: ${JSON.stringify(uploadUrlData).slice(0, 300)}`)
+    }
+
+    // Step 2: Upload PDF bytes to blob storage
+    const putRes = await fetch(blobUploadUrl, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/pdf',
+        'x-ms-blob-type': 'BlockBlob',  // Required for Azure Blob Storage
+      },
+      body: bytes,
+    })
+
+    if (!putRes.ok) {
+      const errText = await putRes.text()
+      throw new Error(`Blob upload failed ${putRes.status}: ${errText.slice(0, 200)}`)
+    }
+
+    pdfUrl = fileWrapperUrl
+    console.log(`[gsk-crawler] PDF uploaded. File wrapper URL: ${pdfUrl}`)
+  } else {
+    throw new Error('extractPdfViaGenskarkCrawler: either bytes or directUrl must be provided')
   }
 
-  const uploadUrlData = await uploadUrlRes.json() as any
-  const blobUploadUrl: string = uploadUrlData?.data?.upload_url || uploadUrlData?.upload_url
-  const fileWrapperUrl: string = uploadUrlData?.data?.file_wrapper_url || uploadUrlData?.file_wrapper_url
-
-  if (!blobUploadUrl || !fileWrapperUrl) {
-    throw new Error(`Invalid upload URL response: ${JSON.stringify(uploadUrlData).slice(0, 300)}`)
-  }
-
-  console.log(`[gsk-crawler] Got file wrapper URL: ${fileWrapperUrl}`)
-
-  // Step 2: Upload PDF bytes to blob storage
-  const putRes = await fetch(blobUploadUrl, {
-    method: 'PUT',
-    headers: {
-      'Content-Type': 'application/pdf',
-      'x-ms-blob-type': 'BlockBlob',  // Required for Azure Blob Storage
-    },
-    body: bytes,
-  })
-
-  if (!putRes.ok) {
-    const errText = await putRes.text()
-    throw new Error(`Blob upload failed ${putRes.status}: ${errText.slice(0, 200)}`)
-  }
-
-  console.log(`[gsk-crawler] PDF uploaded successfully. Now calling crawler...`)
-
-  // Step 3: Call Genspark Crawler API with the file wrapper URL
+  // Call Genspark Crawler API with the PDF URL
+  console.log(`[gsk-crawler] Calling crawler for ${filename}...`)
   const crawlerRes = await fetch(`${baseUrl}/api/tool_cli/crawler`, {
     method: 'POST',
     headers: {
@@ -4237,7 +4281,7 @@ async function extractPdfViaGenskarkCrawler(
       ...(gskProjectId ? { 'X-Project-Id': gskProjectId } : {}),
     },
     body: JSON.stringify({
-      url: fileWrapperUrl,
+      url: pdfUrl,
       ...(gskProjectId ? { project_id: gskProjectId } : {}),
     }),
   })
