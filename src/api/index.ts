@@ -847,12 +847,13 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
           const attachsToProcess = docAttachments.length > 0 ? docAttachments : allAttachData.slice(0, 5)
 
           const bucket: R2Bucket | undefined = (c.env as any).PROPOSALS_BUCKET
-          const proposalQueue: any = (c.env as any).PROPOSAL_QUEUE
           const safeVendorName = (vendorDisplayName || 'vendor').replace(/[^a-zA-Z0-9_-]/g,'_').slice(0,40)
-          // Files above this threshold are streamed to R2 without buffering, then queued for async text extraction.
-          // Files below are buffered in memory so we can extract text inline during the webhook request.
+          // Files above this threshold are streamed to R2 without buffering.
+          // Text extraction + evaluation runs after the webhook responds via ctx.waitUntil().
           const INLINE_EXTRACT_THRESHOLD = 5_000_000  // 5 MB
           const allExtractedTexts: string[] = []
+          // Jobs for large files / PS-garbage files — dispatched via ctx.waitUntil() after proposal insert
+          const pendingExtractionJobs: Array<{ r2Key: string, filename: string, contentType: string, attachmentIndex: number, label: string }> = []
 
           for (let attachIdx = 0; attachIdx < attachsToProcess.length; attachIdx++) {
             const attachData = attachsToProcess[attachIdx]
@@ -909,15 +910,11 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
                   })
                   storedR2Key = r2Key
                   console.log(`[webhook] Large file streamed to R2: ${r2Key}`)
-                  // Queue async extraction + evaluation job (proposalId patched after proposal insert)
-                  if (proposalQueue) {
-                    await proposalQueue.send({
-                      type: 'process_attachment', rfpId: Number(rfpId), vendorId: Number(vendorId),
-                      proposalId: 0, r2Key, filename: fn, contentType: ct,
-                      attachmentIndex: attachIdx, label,
-                    })
-                    console.log(`[webhook] Queued async extraction job for ${fn}`)
-                  }
+                  // Schedule async extraction + evaluation via ctx.waitUntil()
+                  // This runs after the webhook returns 200 — no Queue resource needed.
+                  // proposalId will be patched into the job after the proposal row is inserted.
+                  pendingExtractionJobs.push({ r2Key, filename: fn, contentType: ct, attachmentIndex: attachIdx, label })
+                  console.log(`[webhook] Scheduled async extraction job for ${fn}`)
                 } catch(r2Err: any) {
                   console.error(`[webhook] R2 stream put failed for ${fn}: ${r2Err?.message}`)
                 }
@@ -950,12 +947,8 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
                   allExtractedTexts.push(`=== ${label.toUpperCase()} PROPOSAL (${fn}) ===\n${extracted}`)
                 } else if (extracted && isPostScriptGarbage(extracted)) {
                   console.warn(`[webhook] PostScript garbage detected in ${fn} — skipping text, queuing re-extraction`)
-                  if (proposalQueue && storedR2Key) {
-                    await proposalQueue.send({
-                      type: 'process_attachment', rfpId: Number(rfpId), vendorId: Number(vendorId),
-                      proposalId: 0, r2Key: storedR2Key, filename: fn, contentType: ct,
-                      attachmentIndex: attachIdx, label,
-                    })
+                  if (storedR2Key) {
+                    pendingExtractionJobs.push({ r2Key: storedR2Key, filename: fn, contentType: ct, attachmentIndex: attachIdx, label })
                   }
                 }
 
@@ -1250,6 +1243,33 @@ procurement@cpc-rfp.website`
         }
 
         console.log(`[webhook] Proposal from ${vendorDisplayName} stored — budget: ${proposalFields.budget_amount} ${proposalFields.budget_currency}, timeline: ${proposalFields.timeline_months}mo`)
+
+        // Dispatch async extraction + evaluation for large/garbage-detected files
+        // ctx.waitUntil() lets the Worker continue running after the HTTP response is sent.
+        if (pendingExtractionJobs.length > 0) {
+          const executionCtx = (c as any).executionCtx
+          if (executionCtx?.waitUntil) {
+            // Look up the just-inserted proposal ID so the async job can update it
+            const insertedProposal = await db.prepare(
+              `SELECT id FROM proposals WHERE rfp_id=? AND vendor_id=? ORDER BY id DESC LIMIT 1`
+            ).bind(rfpId, vendorId).first<{ id: number }>()
+            const insertedProposalId = insertedProposal?.id || 0
+
+            for (const job of pendingExtractionJobs) {
+              const rfpSnap = Number(rfpId)
+              const vendorSnap = Number(vendorId)
+              const proposalSnap = insertedProposalId
+              const jobSnap = { ...job }
+              executionCtx.waitUntil(
+                processLargeAttachmentAsync(rfpSnap, vendorSnap, proposalSnap, jobSnap, c.env)
+                  .catch((err: any) => console.error(`[waitUntil] Processing failed for ${job.filename}: ${err?.message}`))
+              )
+            }
+            console.log(`[webhook] Dispatched ${pendingExtractionJobs.length} async extraction job(s) via ctx.waitUntil()`)
+          } else {
+            console.warn(`[webhook] ctx.waitUntil not available — ${pendingExtractionJobs.length} large file(s) need manual reprocess`)
+          }
+        }
 
         // Auto-advance RFP stage: submissions_closed → evaluation
         try {
@@ -2180,6 +2200,152 @@ ${'='.repeat(60)}
 
 // ============================================================
 // PROPOSAL FIELD EXTRACTION — LLM parses PDF text for structured data
+// ─────────────────────────────────────────────────────────────────────────────
+// ASYNC LARGE-FILE PROCESSOR — runs via ctx.waitUntil() after webhook returns
+// ─────────────────────────────────────────────────────────────────────────────
+// Called for:
+//   (a) files >5MB: already streamed to R2 during webhook, bytes loaded here from R2
+//   (b) small files where extractPdfText() produced PostScript garbage
+//
+// No CPU time limit applies inside ctx.waitUntil() — the 30ms limit only covers
+// the time up to Response creation. This function runs to completion in the background.
+async function processLargeAttachmentAsync(
+  rfpId: number,
+  vendorId: number,
+  proposalId: number,
+  job: { r2Key: string, filename: string, contentType: string, attachmentIndex: number, label: string },
+  env: any
+): Promise<void> {
+  const db = env.DB as D1Database
+  const bucket: R2Bucket | undefined = env.PROPOSALS_BUCKET
+
+  console.log(`[async] Starting extraction: rfp=${rfpId} vendor=${vendorId} proposal=${proposalId} file=${job.filename}`)
+
+  // 1. Fetch bytes from R2 (already stored during webhook — no Resend download needed)
+  if (!bucket) { console.error('[async] PROPOSALS_BUCKET binding missing'); return }
+  const obj = await bucket.get(job.r2Key)
+  if (!obj) { console.error(`[async] R2 object not found: ${job.r2Key}`); return }
+  const rawBytes = new Uint8Array(await obj.arrayBuffer())
+  console.log(`[async] Fetched ${rawBytes.length} bytes from R2`)
+
+  // 2. Extract text — no time limit here
+  const extracted = await extractPdfText(rawBytes)
+  console.log(`[async] Extracted ${extracted.length} chars from ${job.filename}`)
+
+  if (!extracted || extracted.length < 200) {
+    console.warn(`[async] Too little text for ${job.filename} — marking proposal`)
+    if (proposalId) {
+      await db.prepare(`UPDATE proposals SET key_strengths=? WHERE id=?`)
+        .bind('⚠ PDF text extraction yielded insufficient content. Upload a text-based or OCR-processed PDF.', proposalId)
+        .run().catch(() => {})
+    }
+    return
+  }
+
+  if (isPostScriptGarbage(extracted)) {
+    console.warn(`[async] PostScript garbage detected after extraction for ${job.filename} — marking proposal`)
+    if (proposalId) {
+      await db.prepare(`UPDATE proposals SET key_strengths=? WHERE id=?`)
+        .bind('⚠ PDF uses complex embedded fonts that could not be decoded. Upload a text-based or OCR-processed PDF for evaluation.', proposalId)
+        .run().catch(() => {})
+    }
+    return
+  }
+
+  // 3. Load proposal and RFP from DB
+  const proposal = await db.prepare(`
+    SELECT p.*, v.name as vendor_name, v.contact_email
+    FROM proposals p LEFT JOIN vendors v ON p.vendor_id=v.id
+    WHERE p.id=?
+  `).bind(proposalId).first<any>().catch(() => null)
+
+  if (!proposal) {
+    // Proposal may not exist yet (race condition) — try by vendor+rfp
+    const fallback = await db.prepare(
+      `SELECT p.*, v.name as vendor_name FROM proposals p LEFT JOIN vendors v ON p.vendor_id=v.id WHERE p.rfp_id=? AND p.vendor_id=? ORDER BY p.id DESC LIMIT 1`
+    ).bind(rfpId, vendorId).first<any>().catch(() => null)
+    if (!fallback) { console.error(`[async] Proposal not found rfpId=${rfpId} vendorId=${vendorId}`); return }
+    return processLargeAttachmentAsync(rfpId, vendorId, fallback.id, job, env)
+  }
+
+  const rfp = await db.prepare(`SELECT * FROM rfps WHERE id=?`).bind(rfpId).first<any>().catch(() => null)
+  if (!rfp) { console.error(`[async] RFP not found: ${rfpId}`); return }
+
+  // 4. LLM field extraction
+  let fields: any = {}
+  try {
+    fields = await extractProposalFieldsWithLLM(extracted, '', proposal.vendor_name || 'Vendor', rfp.title || 'RFP', env)
+    console.log(`[async] Fields: budget=${fields.budget_amount}, timeline=${fields.timeline_months}`)
+  } catch (e: any) {
+    console.error(`[async] Field extraction failed: ${e?.message}`)
+    fields = { executive_summary: '', key_strengths: '', budget_amount: null, budget_currency: 'AED', timeline_months: null, technical_proposal: extracted.slice(0, 120000) }
+  }
+
+  // Merge with existing text (other attachments already stored inline)
+  const existingText = proposal.technical_proposal || ''
+  const label = job.label || 'technical'
+  const mergedText = (existingText && !isPostScriptGarbage(existingText))
+    ? existingText + `\n\n=== ${label.toUpperCase()} PROPOSAL (${job.filename}) ===\n` + (fields.technical_proposal || extracted)
+    : `=== ${label.toUpperCase()} PROPOSAL (${job.filename}) ===\n` + (fields.technical_proposal || extracted)
+
+  const proposedDuration = extractProposedDuration(extracted)
+
+  // 5. Update proposal record
+  await db.prepare(`
+    UPDATE proposals SET
+      executive_summary=COALESCE(NULLIF(?,\'\'), executive_summary),
+      key_strengths=COALESCE(NULLIF(?,\'\'), key_strengths),
+      budget_amount=COALESCE(?,budget_amount), budget_currency=COALESCE(?,budget_currency),
+      timeline_months=COALESCE(?,timeline_months),
+      technical_proposal=?,
+      proposed_duration=COALESCE(NULLIF(?,\'\'),proposed_duration),
+      pdf_attachment_url=COALESCE(NULLIF(pdf_attachment_url,\'\'), ?)
+    WHERE id=?
+  `).bind(
+    fields.executive_summary, fields.key_strengths,
+    fields.budget_amount, fields.budget_currency, fields.timeline_months,
+    mergedText, proposedDuration,
+    `r2://${job.r2Key}`,
+    proposal.id
+  ).run()
+
+  console.log(`[async] Proposal #${proposal.id} updated — ${mergedText.length} chars of text`)
+
+  // 6. Full LLM evaluation with complete context
+  const updatedProposal = {
+    ...proposal,
+    technical_proposal: mergedText,
+    budget_amount: fields.budget_amount ?? proposal.budget_amount,
+    timeline_months: fields.timeline_months ?? proposal.timeline_months,
+    proposed_duration: proposedDuration || proposal.proposed_duration,
+  }
+
+  try {
+    const evalResult = await evaluateProposalWithLLM(updatedProposal, rfp, env)
+    const total = evalResult.scoringDetails?.length > 0
+      ? Math.round(evalResult.scoringDetails.reduce((s: number, c: any) =>
+          s + (c.weighted !== undefined ? Number(c.weighted) : Number(c.weight || 0) * Number(c.score || 0) / 100), 0))
+      : Math.round(evalResult.scores.business * 0.30 + evalResult.scores.technical * 0.40 + evalResult.scores.financial * 0.30)
+
+    await db.prepare('DELETE FROM evaluations WHERE proposal_id=?').bind(proposal.id).run()
+    await db.prepare(`
+      INSERT INTO evaluations (rfp_id, proposal_id, vendor_id, business_score, technical_score,
+        financial_score, experience_score, total_score, ai_summary, scoring_details_json, is_real, created_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,1,datetime('now'))
+    `).bind(
+      rfpId, proposal.id, vendorId,
+      evalResult.scores.business, evalResult.scores.technical,
+      evalResult.scores.financial, evalResult.scores.experience,
+      total, evalResult.summary, JSON.stringify(evalResult.scoringDetails)
+    ).run()
+
+    console.log(`[async] Evaluation complete for ${proposal.vendor_name}: total=${total}`)
+  } catch (evalErr: any) {
+    console.error(`[async] Evaluation failed for ${proposal.vendor_name}: ${evalErr?.message}`)
+    // Proposal text was updated — evaluation can be re-run manually from the UI
+  }
+}
+
 // ============================================================
 export async function extractProposalFieldsWithLLM(
   pdfText: string,

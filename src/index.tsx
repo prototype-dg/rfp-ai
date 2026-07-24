@@ -3,7 +3,6 @@ import { cors } from 'hono/cors'
 import { apiRouter } from './api/index'
 import { getLayout } from './layout'
 import type { Bindings } from './types'
-import { handleQueue } from './queue-consumer'
 // Import static assets as raw strings at build time (Vite ?raw)
 import appJs from '../public/static/app.js?raw'
 import styleCss from '../public/static/style.css?raw'
@@ -42,7 +41,3 @@ app.get('*', (c) => {
 })
 
 export default app
-
-// Cloudflare Queue consumer — handles async PDF extraction + evaluation for large files
-// Wrangler automatically routes queue messages to this exported handler.
-export { handleQueue as queue }
