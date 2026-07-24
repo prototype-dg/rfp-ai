@@ -704,16 +704,22 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
           }
         }
 
-        if (emailCategory === 'proposal' && pdfAttachment) {
-          const attachData = allAttachData.find((a: any) => a.id === pdfAttachment.id) || allAttachData[0]
+        if (emailCategory === 'proposal') {
+          // For proposals: download ANY attachment — prefer PDF, fall back to first attachment
+          const proposalAttach = pdfAttachment || attachments[0]
+          const attachData = proposalAttach
+            ? (allAttachData.find((a: any) => a.id === proposalAttach.id) || allAttachData[0])
+            : allAttachData[0]
           if (attachData?.download_url) {
             const fileRes = await fetch(attachData.download_url)
             if (fileRes.ok) {
               const fileBuffer = await fileRes.arrayBuffer()
-              pdfFilename = pdfAttachment.filename || 'proposal.pdf'
-              // Store as base64 for later display
+              pdfFilename = (proposalAttach?.filename) || attachData.filename || 'proposal.pdf'
+              // Ensure .pdf extension for display purposes if it's a generic name
+              if (!pdfFilename.match(/\.(pdf|doc|docx)$/i)) pdfFilename += '.pdf'
+              // Store as base64 for display/download
               pdfBase64 = uint8ToBase64(new Uint8Array(fileBuffer))
-              // Extract text from PDF for duration parsing
+              // Extract text from PDF for LLM analysis
               const pdfBytes = new Uint8Array(fileBuffer)
               const pdfText = await extractPdfText(pdfBytes)
               // Parse proposed duration from PDF text or email body
@@ -783,16 +789,85 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
           newCount++
         }
       }
+
+      // ── Mark this vendor as having responded with questions ──
+      if (vendorId) {
+        await db.prepare(`
+          INSERT INTO rfp_vendors (rfp_id, vendor_id, shortlisted, questions_responded)
+          VALUES (?,?,1,1)
+          ON CONFLICT(rfp_id, vendor_id) DO UPDATE SET questions_responded=1
+        `).bind(rfpId, vendorId).run()
+      }
+
+      // ── Auto-close Q&A: if ALL invited non-declined vendors have responded ──
+      // Check only when RFP is in qa_open stage
+      let qaAutoClose = false
+      try {
+        const currentRfpStage = await db.prepare('SELECT stage FROM rfps WHERE id=?').bind(rfpId).first<{stage:string}>()
+        if (currentRfpStage?.stage === 'qa_open') {
+          // Count shortlisted non-declined vendors with invitations sent
+          const { results: invitedVendors } = await db.prepare(`
+            SELECT rv.vendor_id
+            FROM rfp_vendors rv
+            WHERE rv.rfp_id=? AND rv.shortlisted=1 AND COALESCE(rv.status,'active') != 'declined'
+          `).bind(rfpId).all<{vendor_id:number}>()
+
+          if (invitedVendors.length > 0) {
+            // Check if all of them have a 'questions' type email received
+            const { results: respondedVendors } = await db.prepare(`
+              SELECT DISTINCT e.vendor_id
+              FROM email_log e
+              WHERE e.rfp_id=? AND e.status='received' AND e.email_category='questions' AND e.vendor_id IS NOT NULL
+            `).bind(rfpId).all<{vendor_id:number}>()
+
+            const invitedSet = new Set(invitedVendors.map((r: any) => r.vendor_id))
+            const respondedSet = new Set(respondedVendors.map((r: any) => r.vendor_id))
+            const allResponded = [...invitedSet].every((id: any) => respondedSet.has(id))
+
+            if (allResponded && invitedSet.size > 0) {
+              await db.prepare(`UPDATE rfps SET stage='submissions_closed', updated_at=datetime('now') WHERE id=?`).bind(rfpId).run()
+              qaAutoClose = true
+              console.log(`[webhook] All ${invitedSet.size} invited vendors submitted questions — Q&A auto-closed, stage→submissions_closed`)
+            }
+          }
+        }
+      } catch(stageErr: any) {
+        console.error('[webhook] Q&A auto-close check failed:', stageErr?.message)
+      }
+
+      // Pass qaAutoClose flag in the response so the frontend poller can redirect
+      if (qaAutoClose) {
+        return c.json({ ok: true, emailCategory, newQuestions: newCount, emailLogId, autoInserted: newCount > 0, qaAutoClose: true, rfpId })
+      }
+
     } else if (emailCategory === 'proposal') {
+      const isKnownVendor = vendorRow !== null
       const isAndersen = vendorRow?.contact_email?.includes('andersenlab.com') ? 1 : 0
       const vendorDisplayName = vendorRow?.name || fromAddress || 'Vendor'
 
-      // If the email looks like a proposal but has NO PDF attachment,
-      // send back a reply asking the vendor to resend with their proposal attached.
+      // ── Missing attachment: reply to sender asking to resubmit with PDF ──
+      // Send to any known vendor (identified by email) — not just Andersen
       if (!pdfBase64 && !pdfFilename) {
-        // Only send the missing-attachment reply to Andersen (real email constraint)
-        if (isAndersen && (c.env as any).RESEND_API_KEY) {
-          const missingAttachReply = `Dear ${vendorDisplayName},\n\nThank you for your email regarding RFP Reference: ${rfp?.ref_number || ''}.\n\nWe have reviewed your message and note that no proposal document was attached. To formally register your submission, please resend your email with your complete proposal document attached as a PDF file.\n\nIf you have already submitted your proposal separately, please disregard this message.\n\nBest regards,\nProcurement & Contracting Department\nCrown Prince's Court, Abu Dhabi\nprocurement@cpc-rfp.website`
+        const canSendReal = (isAndersen || isKnownVendor) && !!(c.env as any).RESEND_API_KEY
+        if (canSendReal) {
+          const missingAttachReply = `Dear ${vendorDisplayName},
+
+Thank you for your email regarding RFP Reference: ${rfp?.ref_number || ''} — ${rfp?.title || 'CPC RFP'}.
+
+We have reviewed your message and note that your proposal document was not attached to the email. To formally register your submission, please resend your email with your complete proposal document attached as a PDF file.
+
+Your proposal should include:
+• Technical approach and methodology
+• Project timeline and implementation plan
+• Commercial / financial offer (total cost in AED)
+• Team profile and relevant experience
+
+If you have already submitted your proposal separately, please disregard this message.
+
+Best regards,
+Procurement & Contracting Department
+Crown Prince's Court, Abu Dhabi
+procurement@cpc-rfp.website`
           try {
             await fetch('https://api.resend.com/emails', {
               method: 'POST',
@@ -800,47 +875,111 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
               body: JSON.stringify({
                 from: 'CPC Procurement <procurement@cpc-rfp.website>',
                 to: [fromAddress],
-                subject: `RE: ${subject} — Proposal Attachment Missing`,
+                subject: `RE: ${subject} — Proposal Document Missing`,
                 text: missingAttachReply,
               }),
             })
-          } catch(_) {}
+            console.log(`[webhook] Sent missing-attachment reply to ${fromAddress}`)
+          } catch(replyErr: any) {
+            console.error('[webhook] Failed to send missing-attachment reply:', replyErr?.message)
+          }
         }
-        // Do NOT create a proposal record — skip to end
+        // Do NOT create a proposal record — nothing to store
       } else {
-        // We have a PDF — create/update the proposal record.
-        // This works regardless of RFP stage (submissions_closed, qa_open, evaluation, etc.)
-        const existing = await db.prepare('SELECT id FROM proposals WHERE vendor_id=? AND rfp_id=?').bind(vendorId, rfpId).first<any>()
+        // ── We have a PDF — extract text and create/update the proposal record ──
+        // Works regardless of RFP stage (qa_open, submissions_closed, evaluation, etc.)
 
-        // Extract rich text from the PDF for AI evaluation (Andersen real proposal)
+        // Always extract PDF text for any identified vendor (not just Andersen)
         let pdfExtractedText = ''
-        if (pdfBase64 && isAndersen) {
+        if (pdfBase64) {
           try {
             const pdfBytes2 = Uint8Array.from(atob(pdfBase64), c2 => c2.charCodeAt(0))
             pdfExtractedText = await extractPdfText(pdfBytes2)
           } catch(_) {}
         }
 
-        // For Andersen use PDF text; for others use email body as technical summary
-        const technicalSummary = isAndersen
-          ? (pdfExtractedText.slice(0, 4000) || bodyText.slice(0, 2000) || `Proposal submitted by ${vendorDisplayName} via email.`)
-          : bodyText.slice(0, 2000) || `Proposal submitted by ${vendorDisplayName} via email.`
+        // Use LLM to extract structured proposal fields
+        let proposalFields = {
+          executive_summary: '',
+          key_strengths: '',
+          budget_amount: null as number | null,
+          budget_currency: 'AED',
+          timeline_months: null as number | null,
+          technical_proposal: pdfExtractedText.slice(0, 4000) || bodyText.slice(0, 2000) || `Proposal submitted by ${vendorDisplayName}.`,
+        }
+        try {
+          proposalFields = await extractProposalFieldsWithLLM(
+            pdfExtractedText,
+            bodyText,
+            vendorDisplayName,
+            rfp?.title || 'RFP',
+            c.env
+          )
+        } catch(_) {}
+
+        // financial_proposal: use LLM-extracted budget_amount, fall back to body/pdf heuristic
+        const financialValue = proposalFields.budget_amount
+          ?? (proposedDuration ? null : null) // placeholder — extractProposedDuration already ran
 
         const pdfUrl = pdfBase64 ? 'data:application/pdf;base64,' + pdfBase64 : null
 
+        const existing = await db.prepare('SELECT id FROM proposals WHERE vendor_id=? AND rfp_id=?').bind(vendorId, rfpId).first<any>()
+
         if (existing) {
           await db.prepare(`
-            UPDATE proposals SET pdf_attachment_url=?, pdf_filename=?, technical_proposal=?, proposed_duration=?, status='submitted', is_real_submission=? WHERE id=?
-          `).bind(pdfUrl, pdfFilename || null, technicalSummary, proposedDuration || null, isAndersen, existing.id).run()
+            UPDATE proposals SET
+              pdf_attachment_url=?, pdf_filename=?,
+              technical_proposal=?, proposed_duration=?,
+              financial_proposal=?, status='submitted', is_real_submission=?,
+              executive_summary=?, key_strengths=?,
+              budget_amount=?, budget_currency=?, timeline_months=?
+            WHERE id=?
+          `).bind(
+            pdfUrl, pdfFilename || null,
+            proposalFields.technical_proposal, proposedDuration || null,
+            financialValue, isAndersen,
+            proposalFields.executive_summary || null,
+            proposalFields.key_strengths || null,
+            proposalFields.budget_amount, proposalFields.budget_currency,
+            proposalFields.timeline_months,
+            existing.id
+          ).run()
         } else {
           await db.prepare(`
-            INSERT INTO proposals (rfp_id, vendor_id, technical_proposal, financial_proposal, status, is_real_submission, pdf_attachment_url, pdf_filename, proposed_duration, created_at)
-            VALUES (?,?,?,NULL,'submitted',?,?,?,?,datetime('now'))
-          `).bind(rfpId, vendorId, technicalSummary, isAndersen, pdfUrl, pdfFilename || null, proposedDuration || null).run()
+            INSERT INTO proposals (
+              rfp_id, vendor_id, technical_proposal, financial_proposal,
+              status, is_real_submission, pdf_attachment_url, pdf_filename,
+              proposed_duration, executive_summary, key_strengths,
+              budget_amount, budget_currency, timeline_months, created_at
+            )
+            VALUES (?,?,?,?,'submitted',?,?,?,?,?,?,?,?,?,datetime('now'))
+          `).bind(
+            rfpId, vendorId,
+            proposalFields.technical_proposal,
+            financialValue,
+            isAndersen,
+            pdfUrl, pdfFilename || null,
+            proposedDuration || null,
+            proposalFields.executive_summary || null,
+            proposalFields.key_strengths || null,
+            proposalFields.budget_amount,
+            proposalFields.budget_currency,
+            proposalFields.timeline_months
+          ).run()
         }
 
-        // Auto-advance RFP stage: submissions_closed → evaluation (proposal received signals start of eval)
-        // Also handle: if RFP is still in qa_open or published, still accept the proposal but don't auto-advance
+        // Mark vendor as having submitted a proposal in rfp_vendors
+        if (vendorId) {
+          await db.prepare(`
+            INSERT INTO rfp_vendors (rfp_id, vendor_id, shortlisted, status)
+            VALUES (?,?,1,'active')
+            ON CONFLICT(rfp_id, vendor_id) DO UPDATE SET shortlisted=1
+          `).bind(rfpId, vendorId).run()
+        }
+
+        console.log(`[webhook] Proposal from ${vendorDisplayName} stored — budget: ${proposalFields.budget_amount} ${proposalFields.budget_currency}, timeline: ${proposalFields.timeline_months}mo`)
+
+        // Auto-advance RFP stage: submissions_closed → evaluation
         try {
           const currentRfp = await db.prepare('SELECT stage FROM rfps WHERE id=?').bind(rfpId).first<{stage:string}>()
           if (currentRfp?.stage === 'submissions_closed') {
@@ -1386,22 +1525,98 @@ ${'='.repeat(60)}
   throw new Error(`LLM returned insufficient content (${llmContent?.length || 0} chars)`)
 }
 
+// ============================================================
+// PROPOSAL FIELD EXTRACTION — LLM parses PDF text for structured data
+// ============================================================
+async function extractProposalFieldsWithLLM(
+  pdfText: string,
+  emailBody: string,
+  vendorName: string,
+  rfpTitle: string,
+  env: any
+): Promise<{
+  executive_summary: string
+  key_strengths: string
+  budget_amount: number | null
+  budget_currency: string
+  timeline_months: number | null
+  technical_proposal: string
+}> {
+  const combinedText = (pdfText + '\n\n' + emailBody).slice(0, 12000)
+
+  const systemPrompt = `You are a procurement analyst extracting structured information from a vendor proposal document.
+Extract the following fields and return them as a JSON object (no markdown, no code block, just raw JSON):
+
+{
+  "executive_summary": "2-3 sentence summary of what the vendor is proposing and their key differentiators",
+  "key_strengths": "3-5 bullet points of the vendor's main strengths/advantages (use • as bullet prefix, one per line)",
+  "budget_amount": <number or null — the total financial bid amount as a plain number with no commas or currency symbols>,
+  "budget_currency": "<3-letter currency code, e.g. AED or USD — default AED if not specified>",
+  "timeline_months": <integer or null — implementation timeline in months>,
+  "technical_proposal": "Detailed technical summary: approach, methodology, technology stack, team, milestones (max 800 chars)"
+}
+
+Rules:
+- If a field cannot be determined from the text, use null for numbers or "" for strings.
+- budget_amount must be a plain number (e.g. 1250000, not "1,250,000 AED")
+- timeline_months must be an integer (e.g. 18 for "18 months")
+- Do not invent information not present in the document.`
+
+  const userPrompt = `Vendor: ${vendorName}
+RFP: ${rfpTitle}
+
+Proposal text:
+${combinedText}`
+
+  try {
+    const result = await callLLM(systemPrompt, userPrompt, env, 'gpt-5-mini', 1200)
+    const cleaned = result.trim().replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/, '').trim()
+    const parsed = JSON.parse(cleaned)
+    return {
+      executive_summary: parsed.executive_summary || '',
+      key_strengths: parsed.key_strengths || '',
+      budget_amount: (parsed.budget_amount && !isNaN(Number(parsed.budget_amount))) ? Number(parsed.budget_amount) : null,
+      budget_currency: parsed.budget_currency || 'AED',
+      timeline_months: (parsed.timeline_months && !isNaN(Number(parsed.timeline_months))) ? Number(parsed.timeline_months) : null,
+      technical_proposal: parsed.technical_proposal || pdfText.slice(0, 4000) || emailBody.slice(0, 2000),
+    }
+  } catch(_) {
+    // Graceful fallback — use raw text
+    return {
+      executive_summary: '',
+      key_strengths: '',
+      budget_amount: null,
+      budget_currency: 'AED',
+      timeline_months: null,
+      technical_proposal: pdfText.slice(0, 4000) || emailBody.slice(0, 2000) || `Proposal submitted by ${vendorName}.`,
+    }
+  }
+}
+
 async function categorizeEmailWithLLM(subject: string, body: string, attachments: any[], env: any): Promise<string> {
   const attachInfo = attachments.map((a: any) => `${a.filename || 'unnamed'} (${a.content_type || 'unknown type'})`).join(', ')
 
   const systemPrompt = `You are an email classification assistant for a government procurement system. Classify incoming vendor emails into exactly one of these categories:
-- "decline": Email expresses that the vendor is NOT interested in participating, is declining the invitation, withdrawing, or is unable to participate in the RFP. Look for phrases like "not interested", "decline", "unable to participate", "regret to inform", "pass on this opportunity", "withdraw", "not in a position to", "not proceed", "cannot participate", "no thank you", "thank you but"
-- "questions": Email contains clarification questions about the RFP, has an Excel/spreadsheet attachment with questions, or asks specific questions about requirements
-- "proposal": Email contains a submitted proposal, has a PDF attachment with technical/commercial proposal content, or states they are submitting their proposal
-- "plain_email": General correspondence, acknowledgment, out-of-office, or any other email type
 
-IMPORTANT: Check for decline signals FIRST before other categories. A vendor declining must be classified as "decline" even if they include questions.
+- "decline": Email expresses that the vendor is NOT interested, is declining the invitation, withdrawing, or unable to participate. Signals: "not interested", "decline", "unable to participate", "regret to inform", "pass on this opportunity", "withdraw", "not in a position to", "cannot participate", "no thank you".
 
-Return ONLY the category word, nothing else.`
+- "proposal": Email is a vendor submitting their RFP response / bid / proposal. Signals: "please find attached", "find attached our proposal", "RFP response", "our bid", "submission", "proposal document", "technical proposal", "commercial proposal", "find enclosed", "attaching our", "response to the RFP", "response to tender", has a PDF attachment, subject contains "RE:" with proposal/bid/response keywords.
+
+- "questions": Email contains clarification questions about the RFP, asks specific questions about requirements, or has an Excel/spreadsheet attachment with questions.
+
+- "plain_email": General correspondence, acknowledgment, out-of-office, or any other email type.
+
+IMPORTANT RULES:
+1. Check for "decline" signals FIRST.
+2. If email says "please find attached" / "find attached" / "please see attached" AND there is a PDF or any attachment → classify as "proposal".
+3. If the vendor is clearly submitting something (a response, a bid, a document) → "proposal".
+4. When uncertain between "proposal" and "plain_email", prefer "proposal" if any attachment exists.
+
+Return ONLY the category word, nothing else: decline, proposal, questions, or plain_email`
 
   const userPrompt = `Subject: ${subject}
 Attachments: ${attachInfo || 'none'}
-Body (first 800 chars): ${body.slice(0, 800)}
+Body: ${body.slice(0, 1000)}
 
 Category:`
 
@@ -1409,15 +1624,19 @@ Category:`
     const result = await callLLM(systemPrompt, userPrompt, env, 'gpt-5-nano', 20)
     const clean = result.trim().toLowerCase().replace(/[^a-z_]/g, '')
     if (clean.includes('decline')) return 'decline'
-    if (clean.includes('question')) return 'questions'
     if (clean.includes('proposal')) return 'proposal'
+    if (clean.includes('question')) return 'questions'
     return 'plain_email'
   } catch(_) {
-    // Fallback heuristic — check body for decline keywords
+    // Fallback heuristic — check body for key signals
     const bodyLower = body.toLowerCase()
     const declineKeywords = ['not interested', 'decline', 'unable to participate', 'regret to inform',
       'pass on this', 'withdraw', 'cannot participate', 'not in a position', 'not proceed', 'no thank you']
     if (declineKeywords.some(kw => bodyLower.includes(kw))) return 'decline'
+    // Proposal heuristic: "find attached" + any attachment is a strong signal
+    const proposalKeywords = ['find attached', 'please find', 'find enclosed', 'rfp response', 'our proposal',
+      'our bid', 'our submission', 'response to the rfp', 'response to tender', 'please see attached']
+    if (proposalKeywords.some(kw => bodyLower.includes(kw)) && attachments.length > 0) return 'proposal'
     if (attachments.some((a: any) => a.filename?.match(/\.(xlsx|xls|csv)$/i))) return 'questions'
     if (attachments.some((a: any) => a.filename?.match(/\.pdf$/i))) return 'proposal'
     return 'plain_email'

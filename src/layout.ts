@@ -163,6 +163,7 @@ export function getLayout(): string {
     .toast.success { background:#065f46; }
     .toast.error { background:#991b1b; }
     .toast.info { background:var(--cpc-blue); }
+    .toast.warning { background:#b45309; }
 
     /* Tables */
     table { width:100%; border-collapse:collapse; }

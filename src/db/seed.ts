@@ -157,6 +157,18 @@ export async function initDb(db: D1Database) {
     `ALTER TABLE rfp_vendors ADD COLUMN status TEXT DEFAULT 'active'`,
     // rfp_vendors.declined_at — timestamp when vendor declined participation
     `ALTER TABLE rfp_vendors ADD COLUMN declined_at TEXT`,
+    // proposals.budget_amount — extracted financial bid value (numeric)
+    `ALTER TABLE proposals ADD COLUMN budget_amount REAL`,
+    // proposals.budget_currency — currency of the bid (AED, USD, etc.)
+    `ALTER TABLE proposals ADD COLUMN budget_currency TEXT`,
+    // proposals.timeline_months — extracted implementation timeline in months
+    `ALTER TABLE proposals ADD COLUMN timeline_months INTEGER`,
+    // proposals.executive_summary — LLM-extracted 2–3 sentence summary of the proposal
+    `ALTER TABLE proposals ADD COLUMN executive_summary TEXT`,
+    // proposals.key_strengths — LLM-extracted bullet list of vendor strengths from proposal
+    `ALTER TABLE proposals ADD COLUMN key_strengths TEXT`,
+    // proposals.questions_responded — 1 if vendor already responded to Q&A
+    `ALTER TABLE rfp_vendors ADD COLUMN questions_responded INTEGER DEFAULT 0`,
   ]
   for (const sql of alterMigrations) {
     try {

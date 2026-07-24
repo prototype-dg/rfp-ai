@@ -1403,10 +1403,40 @@ var _lastSeenEmailId = {};
 async function silentCheckInbox(rfpId) {
   try {
     const received = await apiCall('GET', '/rfps/' + rfpId + '/emails/received').catch(function(){ return []; });
+
+    // Also fetch current RFP state to detect stage changes (e.g. Q&A auto-closed)
+    const rfpNow = await apiCall('GET', '/rfps/' + rfpId).catch(function(){ return null; });
+    const prevStage = appState.currentRfp ? appState.currentRfp.stage : null;
+    const currentStage = rfpNow ? rfpNow.stage : prevStage;
+
+    // ── Stage transition detection: Q&A auto-closed → submissions_closed ──
+    if (prevStage === 'qa_open' && currentStage === 'submissions_closed') {
+      if (rfpNow) appState.currentRfp = rfpNow;
+      addNotification('stage',
+        '🔒 Q&A Stage Closed',
+        'All invited vendors have submitted their questions. Q&A is now closed — proceeding to Proposals.',
+        rfpId, 'proposals', null
+      );
+      showToast('Q&A closed — all vendors responded. Redirecting to Proposals tab...', 'success', 5000);
+      if (appState.currentRfpId && String(appState.currentRfpId) === String(rfpId)) {
+        renderLifecycleBar(rfpNow);
+        renderRfpTabs('proposals', rfpId, false);
+        rfpTabs.proposals(rfpId);
+      }
+      return;
+    }
+
+    // Update lifecycle bar if stage changed for other reasons
+    if (rfpNow && prevStage !== currentStage) {
+      appState.currentRfp = rfpNow;
+      if (appState.currentRfpId && String(appState.currentRfpId) === String(rfpId)) {
+        renderLifecycleBar(rfpNow);
+      }
+    }
+
     if (!received || received.length === 0) return;
 
-    // Detect new emails by comparing the newest email's id to the last seen id.
-    // This works even if the poller starts AFTER emails have already arrived.
+    // Detect new emails by comparing the newest email's id to the last seen id
     var newestId = received[0] ? received[0].id : null;
     var lastSeen = _lastSeenEmailId[rfpId] || null;
 
@@ -1432,12 +1462,23 @@ async function silentCheckInbox(rfpId) {
     var senderName = (newest && (newest.vendor_name || newest.from_email)) || 'vendor';
     var newestVendorId = newest ? (newest.vendor_id || null) : null;
 
-    // Determine what kind of email arrived
-    var isQuestionsEmail = newest && (newest.has_attachment || newest.email_category === 'questions');
-    var isProposalEmail  = newest && (newest.has_pdf || newest.email_category === 'proposal');
+    // Determine what kind of email arrived (use email_category set by LLM in webhook)
+    var isDeclineEmail   = newest && (newest.email_category === 'decline'   || newest.email_type === 'decline');
+    var isQuestionsEmail = newest && (newest.email_category === 'questions' || newest.email_type === 'qa_questions');
+    var isProposalEmail  = newest && (newest.email_category === 'proposal'  || newest.email_type === 'proposal');
 
-    if (isQuestionsEmail) {
-      // Fetch current question count from DB (webhook already inserted them)
+    if (isDeclineEmail) {
+      addNotification('decline',
+        '⛔ Vendor Declined — ' + senderName,
+        senderName + ' has declined participation in this RFP. Shown in red in Vendors tab.',
+        rfpId, 'vendors', newestVendorId
+      );
+      showToast(senderName + ' declined participation in this RFP.', 'warning', 5000);
+      if (appState.currentRfpId && String(appState.currentRfpId) === String(rfpId)) {
+        if (appState.currentRfpTab === 'vendors') rfpTabs.vendors(rfpId, appState.currentRfp);
+      }
+
+    } else if (isQuestionsEmail) {
       var questions = await apiCall('GET', '/rfps/' + rfpId + '/questions').catch(function(){ return []; });
       var emailQs = questions.filter(function(q){ return q.source === 'email'; }).length;
 
@@ -1445,13 +1486,12 @@ async function silentCheckInbox(rfpId) {
       pulseQATab();
       addNotification('questions',
         '📋 Questions ready in Q&A tab',
-        (emailQs > 0 ? emailQs + ' question(s)' : 'Questions') + ' from ' + senderName + ' have been added automatically.',
+        (emailQs > 0 ? emailQs + ' question(s)' : 'Questions') + ' from ' + senderName + ' added automatically.',
         rfpId, 'qa', null
       );
       addNotification('email', '📨 New Email from ' + senderName,
         (newest.subject || 'No Subject') + attachBadge, rfpId, null, newestVendorId);
 
-      // Auto-switch to Q&A tab if user is currently viewing this RFP
       if (appState.currentRfpId && String(appState.currentRfpId) === String(rfpId)) {
         renderRfpTabs('qa', rfpId, true);
         rfpTabs.qa(rfpId);
@@ -1459,14 +1499,14 @@ async function silentCheckInbox(rfpId) {
 
     } else if (isProposalEmail) {
       addNotification('proposal',
-        '📄 Proposal Received — ready in Proposals tab',
-        senderName + ' submitted a proposal. Added to evaluation queue.',
+        '📄 Proposal Received — ' + senderName,
+        senderName + ' submitted a proposal with PDF. Added to Proposals tab.',
         rfpId, 'proposals', newestVendorId
       );
       addNotification('email', '📨 New Email from ' + senderName,
         (newest.subject || 'No Subject') + ' (PDF proposal)', rfpId, null, newestVendorId);
+      showToast('Proposal received from ' + senderName + '. Redirecting to Proposals tab...', 'success', 4000);
 
-      // Auto-switch to Proposals tab if user is currently viewing this RFP
       if (appState.currentRfpId && String(appState.currentRfpId) === String(rfpId)) {
         renderRfpTabs('proposals', rfpId, false);
         rfpTabs.proposals(rfpId);
@@ -1762,8 +1802,21 @@ rfpTabs.proposals = async function(rfpId) {
   let rows = '';
   proposals.forEach(function(p) {
     const ev = getEval(p);
-    const fin = p.financial_proposal ? 'AED ' + Number(p.financial_proposal).toLocaleString() : '-';
-    const dur = p.proposed_duration || '-';
+    // Use budget_amount/currency if available, fallback to financial_proposal
+    let fin = '-';
+    if (p.budget_amount && p.budget_amount > 0) {
+      const cur = p.budget_currency || 'AED';
+      fin = cur + ' ' + Number(p.budget_amount).toLocaleString();
+    } else if (p.financial_proposal) {
+      fin = 'AED ' + Number(p.financial_proposal).toLocaleString();
+    }
+    // Use timeline_months if available, fallback to proposed_duration
+    let dur = '-';
+    if (p.timeline_months && p.timeline_months > 0) {
+      dur = p.timeline_months + ' mo';
+    } else if (p.proposed_duration) {
+      dur = p.proposed_duration;
+    }
     const dateStr = p.created_at ? new Date(p.created_at).toLocaleDateString('en-AE') : '-';
     const isReal = p.is_real_submission;
     const isAwarded = (p.status === 'awarded');
@@ -1955,8 +2008,21 @@ function viewProposalDetail(id) {
   }
 
   // Vendor card + summary section
-  const fin = p.financial_proposal ? 'AED ' + Number(p.financial_proposal).toLocaleString() : '-';
-  const dur = p.proposed_duration || '-';
+  // Use budget_amount/currency if available, fallback to financial_proposal
+  let fin = '-';
+  if (p.budget_amount && p.budget_amount > 0) {
+    const currency = p.budget_currency || 'AED';
+    fin = currency + ' ' + Number(p.budget_amount).toLocaleString();
+  } else if (p.financial_proposal) {
+    fin = 'AED ' + Number(p.financial_proposal).toLocaleString();
+  }
+  // Use timeline_months if available, fallback to proposed_duration
+  let dur = '-';
+  if (p.timeline_months && p.timeline_months > 0) {
+    dur = p.timeline_months + ' month' + (p.timeline_months === 1 ? '' : 's');
+  } else if (p.proposed_duration) {
+    dur = p.proposed_duration;
+  }
   const dateStr = p.created_at ? new Date(p.created_at).toLocaleString('en-AE') : '-';
 
   let evalHighlights = '';
@@ -1995,21 +2061,38 @@ function viewProposalDetail(id) {
     + '<div style="display:flex;align-items:center;gap:0.875rem;margin-bottom:1.25rem">'
     + '<div style="width:44px;height:44px;border-radius:10px;background:var(--cpc-blue);display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:1.1rem">' + escHtml((p.vendor_name||'?').charAt(0)) + '</div>'
     + '<div><h3 style="font-size:1rem;font-weight:700;margin:0">' + escHtml(p.vendor_name||'Unknown') + '</h3>'
-    + '<div style="font-size:0.78rem;color:#9ca3af">' + dateStr + (p.is_real_submission ? ' &bull; <span style="color:#92400e;font-weight:600">Real Submission</span>' : '') + '</div>'
+    + '<div style="font-size:0.78rem;color:#9ca3af">' + dateStr + '</div>'
     + '</div></div>'
 
-    // Vendor data card
-    + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.625rem;background:#f8fafc;border-radius:10px;padding:1rem;margin-bottom:1rem">'
-    + '<div><div style="font-size:0.7rem;color:#9ca3af;font-weight:600;text-transform:uppercase;letter-spacing:0.05em">Financial</div><div style="font-size:1rem;font-weight:700;color:#0f3460">' + fin + '</div></div>'
-    + '<div><div style="font-size:0.7rem;color:#9ca3af;font-weight:600;text-transform:uppercase;letter-spacing:0.05em">Duration</div><div style="font-size:1rem;font-weight:700;color:#0f3460">' + escHtml(dur) + '</div></div>'
-    + '<div><div style="font-size:0.7rem;color:#9ca3af;font-weight:600;text-transform:uppercase;letter-spacing:0.05em">Status</div><div style="margin-top:2px">' + (p.status === 'awarded' ? '<span style="font-size:0.8rem;font-weight:700;color:#065f46"><i class="fas fa-trophy mr-1"></i>Awarded</span>' : escHtml(p.status||'submitted')) + '</div></div>'
+    // Vendor data card — 4 columns: Budget, Timeline, Status, Submission type
+    + '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:0.625rem;background:#f8fafc;border-radius:10px;padding:1rem;margin-bottom:1rem">'
+    + '<div><div style="font-size:0.68rem;color:#9ca3af;font-weight:600;text-transform:uppercase;letter-spacing:0.05em">Budget</div><div style="font-size:0.95rem;font-weight:700;color:#0f3460">' + escHtml(fin) + '</div></div>'
+    + '<div><div style="font-size:0.68rem;color:#9ca3af;font-weight:600;text-transform:uppercase;letter-spacing:0.05em">Timeline</div><div style="font-size:0.95rem;font-weight:700;color:#0f3460">' + escHtml(dur) + '</div></div>'
+    + '<div><div style="font-size:0.68rem;color:#9ca3af;font-weight:600;text-transform:uppercase;letter-spacing:0.05em">Status</div><div style="margin-top:2px">' + (p.status === 'awarded' ? '<span style="font-size:0.8rem;font-weight:700;color:#065f46"><i class="fas fa-trophy mr-1"></i>Awarded</span>' : '<span style="font-size:0.8rem;font-weight:600;color:#374151">' + escHtml(p.status||'submitted') + '</span>') + '</div></div>'
+    + '<div><div style="font-size:0.68rem;color:#9ca3af;font-weight:600;text-transform:uppercase;letter-spacing:0.05em">Submission</div><div style="margin-top:2px">' + (p.is_real_submission ? '<span style="font-size:0.75rem;font-weight:700;color:#92400e"><i class="fas fa-envelope-open mr-1"></i>Email</span>' : '<span style="font-size:0.75rem;color:#9ca3af">Manual</span>') + '</div></div>'
     + '</div>'
 
     // Eval scores
     + evalHighlights
 
-    // Technical summary
-    + (p.technical_proposal ? '<div style="margin-bottom:1rem"><div style="font-weight:700;font-size:0.875rem;color:#1f2937;margin-bottom:0.5rem"><i class="fas fa-lightbulb mr-2" style="color:var(--cpc-gold)"></i>Technical Proposal Summary</div><div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:0.875rem;font-size:0.82rem;max-height:180px;overflow-y:auto;white-space:pre-wrap;line-height:1.6;color:#374151">' + escHtml(p.technical_proposal) + '</div></div>' : '')
+    // Executive Summary (LLM-extracted)
+    + (p.executive_summary ? '<div style="margin-bottom:1rem"><div style="font-weight:700;font-size:0.875rem;color:#1f2937;margin-bottom:0.5rem"><i class="fas fa-file-alt mr-2" style="color:var(--cpc-blue)"></i>Executive Summary</div><div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:0.875rem;font-size:0.82rem;line-height:1.7;color:#1e3a5f">' + escHtml(p.executive_summary) + '</div></div>' : '')
+
+    // Key Strengths (LLM-extracted bullet list)
+    + (p.key_strengths ? (function() {
+        const lines = p.key_strengths.split('\n').map(function(l){ return l.trim(); }).filter(function(l){ return l.length > 0; });
+        const bullets = lines.map(function(l) {
+          const text = l.replace(/^[•\-\*]\s*/, '');
+          return '<li style="margin-bottom:0.3rem;color:#374151">' + escHtml(text) + '</li>';
+        }).join('');
+        return '<div style="margin-bottom:1rem"><div style="font-weight:700;font-size:0.875rem;color:#1f2937;margin-bottom:0.5rem"><i class="fas fa-star mr-2" style="color:var(--cpc-gold)"></i>Key Strengths</div>'
+          + '<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:0.875rem">'
+          + '<ul style="margin:0;padding-left:1.25rem;font-size:0.82rem;line-height:1.6">' + bullets + '</ul>'
+          + '</div></div>';
+      })() : '')
+
+    // Technical summary (raw extracted text — shown only if no executive_summary)
+    + (!p.executive_summary && p.technical_proposal ? '<div style="margin-bottom:1rem"><div style="font-weight:700;font-size:0.875rem;color:#1f2937;margin-bottom:0.5rem"><i class="fas fa-lightbulb mr-2" style="color:var(--cpc-gold)"></i>Technical Proposal</div><div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:0.875rem;font-size:0.82rem;max-height:180px;overflow-y:auto;white-space:pre-wrap;line-height:1.6;color:#374151">' + escHtml(p.technical_proposal) + '</div></div>' : '')
 
     // AI summary
     + (ev && ev.ai_summary ? '<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:0.875rem;margin-bottom:1rem"><div style="font-size:0.72rem;font-weight:700;color:#92400e;margin-bottom:4px"><i class="fas fa-robot mr-1"></i>AI Evaluation Summary</div><div style="font-size:0.82rem;color:#374151;line-height:1.6">' + escHtml(ev.ai_summary) + '</div></div>' : '')
