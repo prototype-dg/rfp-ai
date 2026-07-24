@@ -759,7 +759,7 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
 
       if (existing) {
         await db.prepare(`
-          UPDATE proposals SET pdf_attachment_url=?, pdf_filename=?, technical_proposal=?, proposed_duration=?, status='submitted', is_real_submission=?, updated_at=datetime('now') WHERE id=?
+          UPDATE proposals SET pdf_attachment_url=?, pdf_filename=?, technical_proposal=?, proposed_duration=?, status='submitted', is_real_submission=? WHERE id=?
         `).bind(
           pdfBase64 ? 'data:application/pdf;base64,' + pdfBase64 : null,
           pdfFilename || null,
