@@ -1778,6 +1778,181 @@ apiRouter.get('/rfps/:rfpId/proposals/:proposalId/reprocess-from-r2/status', asy
   })
 })
 
+// ── Synchronous reprocess endpoint ───────────────────────────────────────────────────────────────
+// POST /api/rfps/:rfpId/proposals/:proposalId/reprocess-sync
+//
+// Unlike /reprocess-from-r2 (which uses ctx.waitUntil() and hits a ~30s wall-clock limit),
+// this endpoint runs the ENTIRE pipeline synchronously and returns the final result.
+// Cloudflare Workers for Platform allows up to 900s (15 min) for synchronous requests,
+// so even large PDFs and LLM calls have time to complete.
+//
+// Call this with a long HTTP timeout from the client (e.g. curl --max-time 300).
+apiRouter.post('/rfps/:rfpId/proposals/:proposalId/reprocess-sync', async (c) => {
+  const rfpId = Number(c.req.param('rfpId'))
+  const proposalId = Number(c.req.param('proposalId'))
+  const db = c.env.DB as D1Database
+  const bucket: R2Bucket | undefined = (c.env as any).PROPOSALS_BUCKET
+
+  const proposal = await db.prepare(
+    `SELECT p.*, v.name as vendor_name, v.contact_email FROM proposals p LEFT JOIN vendors v ON p.vendor_id=v.id WHERE p.id=? AND p.rfp_id=?`
+  ).bind(proposalId, rfpId).first<any>()
+  if (!proposal) return c.json({ error: 'Proposal not found' }, 404)
+
+  const rfp = await db.prepare(`SELECT * FROM rfps WHERE id=?`).bind(rfpId).first<any>()
+  if (!rfp) return c.json({ error: 'RFP not found' }, 404)
+
+  if (!bucket) return c.json({ error: 'PROPOSALS_BUCKET binding missing' }, 500)
+
+  const attachments: any[] = JSON.parse(proposal.proposal_attachments || '[]')
+  if (attachments.length === 0) return c.json({ error: 'No attachments stored for this proposal' }, 404)
+
+  console.log(`[reprocess-sync] Starting SYNC reprocess for proposal #${proposalId} (${proposal.vendor_name})`)
+
+  // Mark as processing (in case client polls the status endpoint concurrently)
+  await db.prepare(`UPDATE proposals SET key_strengths='⏳ Vision extraction in progress…', updated_at=datetime('now') WHERE id=?`)
+    .bind(proposalId).run().catch(() => {})
+
+  // Run the full pipeline synchronously — same logic as doReprocessFromR2 but inline
+  const allExtractedTexts: string[] = []
+  const updatedAttachments: any[] = []
+
+  for (const att of attachments) {
+    if (!att.r2_key) { updatedAttachments.push(att); continue }
+    try {
+      const obj = await bucket.get(att.r2_key)
+      if (!obj) {
+        console.warn(`[reprocess-sync] R2 object not found: ${att.r2_key}`)
+        updatedAttachments.push({ ...att, error: 'R2 object not found' }); continue
+      }
+      const rawBytes = new Uint8Array(await obj.arrayBuffer())
+      console.log(`[reprocess-sync] Fetched ${rawBytes.length} bytes for ${att.filename}`)
+
+      const { text: extracted, method: exMethod, rawGarbage } = await extractPdfTextSmart(rawBytes, att.filename, c.env)
+      console.log(`[reprocess-sync] Extracted ${extracted.length} chars via ${exMethod} from ${att.filename}`)
+
+      // Run wrong-doc detection using extracted text OR rawGarbage OR just filename
+      // detectWrongDocument has a filename-overlap check that works even with empty text
+      const textForDetection = extracted.length >= 100 ? extracted : (rawGarbage || '')
+      console.log(`[reprocess-sync] Running detectWrongDocument: filename="${att.filename}", textLen=${textForDetection.length}, rfpTitle="${rfp.title}"`)
+      const wrongDoc = await detectWrongDocument(
+        textForDetection, att.filename, proposal.vendor_name || 'Vendor',
+        rfp.ref_number || '', rfp.title || '', c.env
+      )
+      console.log(`[reprocess-sync] detectWrongDocument result: isWrong=${wrongDoc.isWrong}, detectedDocType="${wrongDoc.detectedDocType}", reason="${wrongDoc.reason.slice(0,100)}"`)
+
+      if (wrongDoc.isWrong) {
+        const markedText = `[WRONG DOCUMENT DETECTED]\nFile: ${att.filename}\nDetected type: ${wrongDoc.detectedDocType}\n\n${wrongDoc.reason}\n\n[EXTRACTED CONTENT FOR REFERENCE]\n${extracted || '(no readable text extracted)'}`
+        console.warn(`[reprocess-sync] Wrong document: ${att.filename} — ${wrongDoc.reason.slice(0, 120)}`)
+        updatedAttachments.push({ ...att, text_chars: extracted.length, extract_method: exMethod, wrong_document: wrongDoc.reason, _marked_text: markedText })
+        continue
+      }
+
+      if (extracted.length >= 100) {
+        allExtractedTexts.push(`[${(att.label || 'TECHNICAL').toUpperCase()} DOCUMENT: ${att.filename}]\n${extracted}`)
+      }
+      updatedAttachments.push({ ...att, text_chars: extracted.length, extract_method: exMethod })
+    } catch (e: any) {
+      console.error(`[reprocess-sync] Error processing ${att.filename}: ${e?.message}`)
+      updatedAttachments.push({ ...att, error: e?.message })
+    }
+  }
+
+  const wrongDocAtts = updatedAttachments.filter((a: any) => a.wrong_document)
+  const allWrong = wrongDocAtts.length > 0 && allExtractedTexts.length === 0
+
+  let technicalProposalText = ''
+  let executiveSummary: string | null = null
+  let keyStrengths: string | null = null
+  let budgetAmount: number | null = null
+  let budgetCurrency = 'AED'
+  let timelineMonths: number | null = null
+  let proposedDuration: string | null = null
+
+  if (allWrong) {
+    const wrongReasons = wrongDocAtts.map((a: any) => `File: ${a.filename}\nReason: ${a.wrong_document}`).join('\n\n')
+    technicalProposalText = `[WRONG DOCUMENT DETECTED]\n${wrongReasons}\n\n[NO VALID PROPOSAL CONTENT EXTRACTED]`
+    executiveSummary = `Wrong document submitted. ${wrongDocAtts[0]?.wrong_document?.split('.')[0] || 'No valid proposal was submitted.'}`
+    keyStrengths = `⚠ Wrong document detected. This vendor did not submit a valid proposal for this RFP.`
+    console.log(`[reprocess-sync] All attachments are wrong documents — will score 0`)
+  } else if (allExtractedTexts.length > 0) {
+    technicalProposalText = allExtractedTexts.join('\n\n')
+    if (wrongDocAtts.length > 0) {
+      const warnList = wrongDocAtts.map((a: any) => `• ${a.filename}`).join('\n')
+      technicalProposalText += `\n\n⚠ NOTE: The following file(s) were identified as wrong documents and excluded:\n${warnList}`
+    }
+    try {
+      const fields = await extractProposalFieldsWithLLM(technicalProposalText, '', proposal.vendor_name || 'Vendor', rfp.title || 'RFP', c.env)
+      executiveSummary = fields.executive_summary || null
+      keyStrengths = fields.key_strengths || null
+      budgetAmount = fields.budget_amount || null
+      budgetCurrency = fields.budget_currency || 'AED'
+      timelineMonths = fields.timeline_months || null
+      proposedDuration = fields.proposed_duration || extractProposedDuration(technicalProposalText) || null
+    } catch (e: any) {
+      console.error(`[reprocess-sync] Field extraction failed: ${e?.message}`)
+      keyStrengths = '⚠ Could not extract proposal fields from the submitted documents.'
+    }
+  } else {
+    technicalProposalText = ''
+    keyStrengths = '⚠ Vision extraction could not read any text from the submitted files. Please re-upload a clearer PDF.'
+  }
+
+  // Strip temp _marked_text before saving
+  const cleanAttachments = updatedAttachments.map(({ _marked_text, ...rest }: any) => rest)
+
+  // Save to D1
+  await db.prepare(`
+    UPDATE proposals SET
+      technical_proposal=?, executive_summary=?, key_strengths=?,
+      budget_amount=?, budget_currency=?, timeline_months=?, proposed_duration=?,
+      proposal_attachments=?, updated_at=datetime('now')
+    WHERE id=?
+  `).bind(
+    technicalProposalText || null,
+    executiveSummary, keyStrengths,
+    budgetAmount, budgetCurrency, timelineMonths, proposedDuration,
+    JSON.stringify(cleanAttachments),
+    proposalId
+  ).run()
+
+  console.log(`[reprocess-sync] DB updated. Running evaluation for proposal #${proposalId}`)
+
+  // Re-fetch the updated proposal row (with new technical_proposal) for evaluation
+  const updatedProposal = await db.prepare(
+    `SELECT p.*, v.name as vendor_name FROM proposals p LEFT JOIN vendors v ON p.vendor_id=v.id WHERE p.id=?`
+  ).bind(proposalId).first<any>()
+
+  // Run evaluation using the same function used everywhere else
+  let evalRow: any = null
+  try {
+    await runSingleEvaluation(updatedProposal, rfp, rfpId, c.env)
+    evalRow = await db.prepare(
+      `SELECT total_score, is_real, ai_summary FROM evaluations WHERE proposal_id=? ORDER BY id DESC LIMIT 1`
+    ).bind(proposalId).first<any>()
+    console.log(`[reprocess-sync] Evaluation complete: score=${evalRow?.total_score ?? 'n/a'}, is_real=${evalRow?.is_real}`)
+  } catch (e: any) {
+    console.error(`[reprocess-sync] Evaluation failed: ${e?.message}`)
+  }
+
+  return c.json({
+    ok: true,
+    proposal_id: proposalId,
+    vendor_name: proposal.vendor_name,
+    extraction: {
+      attachments_processed: cleanAttachments.length,
+      total_chars: technicalProposalText.length,
+      is_wrong_document: allWrong,
+      methods: cleanAttachments.map((a: any) => ({ filename: a.filename, method: a.extract_method, chars: a.text_chars ?? 0, wrong: !!a.wrong_document, error: a.error ?? null })),
+      text_preview: technicalProposalText.slice(0, 300),
+    },
+    evaluation: evalRow ? {
+      total_score: evalRow.total_score,
+      is_real: evalRow.is_real,
+      summary: (evalRow.ai_summary || '').slice(0, 500),
+    } : null,
+  })
+})
+
 // ── Diagnostic: vision-test endpoint ─────────────────────────────────────────────────────────────
 // GET /api/rfps/:rfpId/proposals/:proposalId/vision-test
 // Fetches the first R2 attachment, calls the vision API, and returns the FULL HTTP status + body
@@ -1803,59 +1978,20 @@ apiRouter.get('/rfps/:rfpId/proposals/:proposalId/vision-test', async (c) => {
   const rawBytes = new Uint8Array(await obj.arrayBuffer())
   const base64Pdf = uint8ToBase64(rawBytes)
 
-  // --- Test 1: Claude document content type (primary approach) ---
-  const reqBody1 = {
-    model: 'claude-sonnet-4-5', max_tokens: 200, temperature: 0.1,
-    messages: [{
-      role: 'user',
-      content: [
-        { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64Pdf }, title: firstAtt.filename, context: 'Extract text.' },
-        { type: 'text', text: 'What is the first sentence of this document?' }
-      ]
-    }]
-  }
-  const res1 = await fetch(`${baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(reqBody1)
-  })
-  const status1 = res1.status
-  const body1 = await res1.text().catch(() => 'unreadable')
-
-  // --- Test 2: plain text message (connectivity + model check) ---
-  const reqBody2 = {
-    model: 'claude-sonnet-4-5', max_tokens: 20, temperature: 0,
-    messages: [{ role: 'user', content: 'Say HELLO in one word.' }]
-  }
-  const res2 = await fetch(`${baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(reqBody2)
-  })
-  const status2 = res2.status
-  const body2 = await res2.text().catch(() => 'unreadable')
+  // Run the text-layer extractor directly on this PDF
+  const textLayerResult = await extractPdfText(rawBytes)
+  const isGarbage = isPostScriptGarbage(textLayerResult)
 
   return c.json({
     vendor_name: proposal.vendor_name,
-    attachment: {
-      filename: firstAtt.filename,
-      r2_key: firstAtt.r2_key,
-      size_bytes: rawBytes.length,
-      b64_chars: base64Pdf.length,
-    },
-    api_key_present: !!apiKey,
+    attachment: { filename: firstAtt.filename, size_bytes: rawBytes.length, b64_chars: base64Pdf.length },
     api_key_prefix: apiKey ? (apiKey.slice(0, 8) + '...') : 'MISSING',
-    base_url: baseUrl,
-    test1_claude_document: {
-      description: 'claude-sonnet-4-5 with Anthropic document content type',
-      http_status: status1,
-      response_body: body1.slice(0, 800),
+    text_layer: {
+      chars: textLayerResult.length,
+      is_garbage: isGarbage,
+      preview: textLayerResult.slice(0, 500),
     },
-    test2_claude_plain: {
-      description: 'claude-sonnet-4-5 plain text (connectivity check)',
-      http_status: status2,
-      response_body: body2.slice(0, 400),
-    },
+    vision_api_conclusion: 'Genspark proxy does not forward PDF bytes to Claude. prompt_tokens=3 on all document-type calls confirms proxy strips the PDF. Vision-based extraction is not available via this proxy.',
   })
 })
 
@@ -1891,36 +2027,34 @@ async function doReprocessFromR2(
       const rawBytes = new Uint8Array(await obj.arrayBuffer())
       console.log(`[reprocess-r2-bg] Fetched ${rawBytes.length} bytes for ${att.filename}`)
 
-      // Vision extraction — no CPU limit here
-      const { text: extracted, method: exMethod } = await extractPdfTextSmart(rawBytes, att.filename, env)
+      // Extraction (text-layer; vision proxy not available)
+      const { text: extracted, method: exMethod, rawGarbage } = await extractPdfTextSmart(rawBytes, att.filename, env)
       console.log(`[reprocess-r2-bg] Extracted ${extracted.length} chars from ${att.filename} via ${exMethod}`)
 
-      // Wrong-document detection
-      let wrongDocReason = ''
-      if (extracted.length >= 100) {
-        const wrongDoc = await detectWrongDocument(
-          extracted, att.filename, proposal.vendor_name || 'Vendor',
-          rfp.ref_number || '', rfp.title || '', env
-        )
-        if (wrongDoc.isWrong) {
-          wrongDocReason = wrongDoc.reason
-          const markedText = `[WRONG DOCUMENT DETECTED]\nFile: ${att.filename}\nDetected type: ${wrongDoc.detectedDocType}\n\n${wrongDoc.reason}\n\n[EXTRACTED CONTENT FOR REFERENCE]\n${extracted}`
-          // For wrong docs we don't add to allExtractedTexts — they contaminate the proposal
-          console.warn(`[reprocess-r2-bg] Wrong document: ${att.filename} — ${wrongDoc.reason.slice(0, 120)}`)
-          // Store the marked text in the slot (will be used to build technicalProposalText below)
-          updatedAttachments.push({
-            ...att,
-            text_chars: extracted.length,
-            extract_method: exMethod,
-            wrong_document: wrongDocReason,
-            _marked_text: markedText,   // temporary field, stripped before saving
-          })
-          continue
-        } else {
-          allExtractedTexts.push(`[${(att.label || 'TECHNICAL').toUpperCase()} DOCUMENT: ${att.filename}]\n${extracted}`)
-        }
+      // Wrong-document detection — uses filename overlap even when text is empty
+      const textForDetection = extracted.length >= 100 ? extracted : (rawGarbage || '')
+      const wrongDoc = await detectWrongDocument(
+        textForDetection, att.filename, proposal.vendor_name || 'Vendor',
+        rfp.ref_number || '', rfp.title || '', env
+      )
+      if (wrongDoc.isWrong) {
+        const wrongDocReason = wrongDoc.reason
+        const markedText = `[WRONG DOCUMENT DETECTED]\nFile: ${att.filename}\nDetected type: ${wrongDoc.detectedDocType}\n\n${wrongDoc.reason}\n\n[EXTRACTED CONTENT FOR REFERENCE]\n${extracted || '(no readable text extracted)'}`
+        // For wrong docs we don't add to allExtractedTexts — they contaminate the proposal
+        console.warn(`[reprocess-r2-bg] Wrong document: ${att.filename} — ${wrongDoc.reason.slice(0, 120)}`)
+        // Store the marked text in the slot (will be used to build technicalProposalText below)
+        updatedAttachments.push({
+          ...att,
+          text_chars: extracted.length,
+          extract_method: exMethod,
+          wrong_document: wrongDocReason,
+          _marked_text: markedText,   // temporary field, stripped before saving
+        })
+        continue
       }
 
+      // Not a wrong document — add to extracted texts
+      allExtractedTexts.push(`[${(att.label || 'TECHNICAL').toUpperCase()} DOCUMENT: ${att.filename}]\n${extracted}`)
       updatedAttachments.push({
         ...att,
         text_chars: extracted.length,
@@ -3273,8 +3407,6 @@ Never say "I don't know". Never say "Based on standard enterprise/industry pract
 
 async function runSingleEvaluation(p: any, rfp: any, rfpId: any, env: any): Promise<void> {
   const db = env.DB
-  const isAndersen = p.vendor_name?.toLowerCase().includes('andersen')
-  const isEPAM = p.vendor_name?.includes('EPAM')
 
   // Delete existing evaluation for this proposal
   await db.prepare('DELETE FROM evaluations WHERE proposal_id=?').bind(p.id).run()
@@ -3310,12 +3442,33 @@ async function runSingleEvaluation(p: any, rfp: any, rfpId: any, env: any): Prom
     usedRealLLM = 1 // Mark as real (not simulation) so it shows in UI
 
   // ── MEANINGFUL PROPOSAL CHECK ───────────────────────────────────────────────
-  // All real submissions (has PDF/attachment text) get real LLM evaluation.
-  // Guard: reject PostScript garbage (complex embedded-font PDFs) — length >200 is not enough.
-  // Only pre-seeded/manual vendor entries without actual proposal text fall back to simulation.
+  // All proposals must be evaluated by real LLM — no simulation fallback allowed.
+  // If text extraction failed (empty or PostScript garbage), score 0 with explanation.
+  // If LLM errors, surface the error rather than producing fake scores.
   } else {
-    const hasMeaningfulProposal = proposalCandidate.length > 200 && !isPostScriptGarbage(proposalCandidate)
-    if (hasMeaningfulProposal) {
+    const isGarbage = proposalCandidate.length > 0 && isPostScriptGarbage(proposalCandidate)
+    const hasMeaningfulProposal = proposalCandidate.length > 200 && !isGarbage
+
+    if (!hasMeaningfulProposal) {
+      // No usable text — either extraction failed entirely or produced PostScript garbage.
+      // Score 0 with a clear explanation so evaluators know why.
+      const criteriaNames = ['Technical Approach & Methodology', 'Relevant Experience & References', 'Team Qualifications', 'Commercial & Financial Proposal', 'Project Management & Risk']
+      const reason = isGarbage
+        ? `PDF text extraction returned only PostScript/font rendering bytecode (${proposalCandidate.length} chars of unreadable data). The PDF uses complex embedded Type3 fonts that cannot be parsed by the text extractor. The vendor should re-upload their proposal as a text-searchable or flattened PDF.`
+        : `No proposal text was extracted from the submitted file(s). The PDF may be encrypted, image-only (scanned without OCR), or empty. The vendor should re-upload a searchable PDF.`
+      scoringDetails = criteriaNames.map(name => ({
+        criterion: name,
+        score: 0,
+        weight: 20,
+        weighted: 0,
+        justification: `Score: 0/100 — Proposal text could not be extracted. ${reason.split('.')[0]}.`,
+      }))
+      scores = { business: 0, technical: 0, financial: 0, experience: 0 }
+      aiSummary = `⚠️ EVALUATION FAILED — UNREADABLE PROPOSAL\n\n${reason}\n\nAll criteria scored 0. No evaluation can be performed without readable proposal content. Please contact the vendor to resubmit a text-searchable PDF.`
+      usedRealLLM = 0
+      console.warn(`[evaluation] No readable text for ${p.vendor_name} — scored 0. isGarbage=${isGarbage}, chars=${proposalCandidate.length}`)
+    } else {
+      // Has meaningful text — always use real LLM evaluation
       try {
         const evalResult = await evaluateAndersenWithLLM(p, rfp, env)
         scores = evalResult.scores
@@ -3324,20 +3477,19 @@ async function runSingleEvaluation(p: any, rfp: any, rfpId: any, env: any): Prom
         usedRealLLM = 1
       } catch(llmErr: any) {
         console.error(`[evaluation] LLM failed for ${p.vendor_name}:`, llmErr?.message || llmErr)
-        // Fall back to simulation on LLM error
-        const simResult = isAndersen ? simulateAndersenEvaluation(p) : simulateVendorEvaluation(p, isEPAM)
-        scores = simResult.scores
-        scoringDetails = simResult.scoringDetails
-        aiSummary = simResult.summary
+        // Surface LLM failure — do NOT simulate
+        const criteriaNames = ['Technical Approach & Methodology', 'Relevant Experience & References', 'Team Qualifications', 'Commercial & Financial Proposal', 'Project Management & Risk']
+        scoringDetails = criteriaNames.map(name => ({
+          criterion: name,
+          score: 0,
+          weight: 20,
+          weighted: 0,
+          justification: `Score: 0/100 — LLM evaluation failed: ${llmErr?.message || 'Unknown error'}. Please retry evaluation.`,
+        }))
+        scores = { business: 0, technical: 0, financial: 0, experience: 0 }
+        aiSummary = `⚠️ EVALUATION ERROR — LLM UNAVAILABLE\n\nThe AI evaluation service returned an error: ${llmErr?.message || 'Unknown error'}\n\nPlease retry the evaluation. All scores are set to 0 pending a successful evaluation run.`
         usedRealLLM = 0
       }
-    } else {
-      // No meaningful proposal text — deterministic simulation (pre-seeded entries)
-      const simResult = isAndersen ? simulateAndersenEvaluation(p) : simulateVendorEvaluation(p, isEPAM)
-      scores = simResult.scores
-      scoringDetails = simResult.scoringDetails
-      aiSummary = simResult.summary
-      usedRealLLM = 0
     }
   }
 
@@ -3867,7 +4019,7 @@ Rules:
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-5',
-        max_tokens: 16000,
+        max_tokens: 4096,
         temperature: 0.1,
         messages: [
           {
@@ -3893,8 +4045,10 @@ Rules:
       })
     })
 
+    const responseText = await res.text().catch(() => '')
     if (res.ok) {
-      const data = await res.json() as any
+      let data: any = {}
+      try { data = JSON.parse(responseText) } catch { /* ignore */ }
       // Claude returns content as array [{type:'text', text:'...'}] or choices[0].message.content
       const content = data.choices?.[0]?.message?.content || data.content?.[0]?.text || ''
       const extracted = typeof content === 'string' ? content : (Array.isArray(content) ? content.map((b: any) => b.text || '').join('') : '')
@@ -3902,10 +4056,9 @@ Rules:
         console.log(`[vision] Claude document extraction OK: ${extracted.length} chars from ${filename}`)
         return extracted
       }
-      console.warn(`[vision] Claude document extraction returned too little: ${extracted.length} chars`)
+      console.warn(`[vision] Claude document extraction returned too little: ${extracted.length} chars. Raw response start: ${responseText.slice(0, 200)}`)
     } else {
-      const errText = await res.text().catch(() => 'unknown')
-      console.error(`[vision] Claude document attempt failed ${res.status}: ${errText.slice(0, 400)}`)
+      console.error(`[vision] Claude document attempt failed HTTP ${res.status}: ${responseText.slice(0, 500)}`)
     }
   } catch (err: any) {
     console.error(`[vision] Claude document attempt threw: ${err?.message}`)
@@ -3938,7 +4091,7 @@ async function extractPdfTextWithVisionImages(bytes: Uint8Array, filename: strin
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-5',
-        max_tokens: 8000,
+        max_tokens: 4096,
         temperature: 0.1,
         messages: [
           {
@@ -3974,7 +4127,7 @@ export async function extractPdfTextSmart(
   bytes: Uint8Array,
   filename: string,
   env: any
-): Promise<{ text: string; method: 'text' | 'vision' | 'failed'; chars: number }> {
+): Promise<{ text: string; method: 'text' | 'vision' | 'failed'; chars: number; rawGarbage?: string }> {
   // Step 1: Try the existing text-layer extractor
   const textLayerResult = await extractPdfText(bytes)
   const isGarbage = isPostScriptGarbage(textLayerResult)
@@ -3985,18 +4138,14 @@ export async function extractPdfTextSmart(
     return { text: textLayerResult, method: 'text', chars: textLayerResult.length }
   }
 
-  // Step 2: Text layer failed or produced garbage — use vision LLM
-  const reason = !textLayerResult ? 'empty' : isGarbage ? 'garbage' : 'too-short'
-  console.log(`[smart-extract] ${filename}: text-layer ${reason} (${textLayerResult.length} chars) — trying vision`)
+  // Step 2: Text layer failed or produced garbage
+  // Note: The Genspark LLM proxy does not forward PDF bytes to Claude (prompt_tokens=3 confirmed).
+  // Vision extraction is not available via this proxy. We return the garbage text as rawGarbage
+  // so callers can still run filename-based wrong-document detection.
+  const reason = !textLayerResult ? 'empty' : isGarbage ? 'PostScript-garbage' : 'too-short'
+  console.warn(`[smart-extract] ${filename}: text-layer ${reason} (${textLayerResult.length} chars). Vision not available via proxy.`)
 
-  const visionText = await extractPdfTextWithVision(bytes, filename, env)
-  if (visionText && visionText.length >= 100) {
-    console.log(`[smart-extract] ${filename}: vision OK (${visionText.length} chars)`)
-    return { text: visionText, method: 'vision', chars: visionText.length }
-  }
-
-  console.warn(`[smart-extract] ${filename}: both methods failed — 0 extractable chars`)
-  return { text: '', method: 'failed', chars: 0 }
+  return { text: '', method: 'failed', chars: 0, rawGarbage: textLayerResult }
 }
 
 // ============================================================
@@ -4012,6 +4161,52 @@ async function detectWrongDocument(
   rfpTitle: string,
   env: any
 ): Promise<{ isWrong: boolean; reason: string; detectedDocType: string }> {
+  // --- Filename-based detection (works even when text extraction failed) ---
+  const filenameLower = filename.toLowerCase().replace(/[^a-z0-9\s]/g, ' ')
+  const rfpTitleLower = (rfpTitle || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ')
+  const rfpTitleWords = rfpTitleLower.split(/\s+/).filter(w => w.length > 3)
+  const filenameWords = filenameLower.split(/\s+/).filter(w => w.length > 3)
+
+  // Check 1: Filename closely matches this RFP's title → vendor submitted the RFP itself.
+  const overlap = rfpTitleWords.filter(w => filenameWords.includes(w)).length
+  const overlapRatio = rfpTitleWords.length > 0 ? overlap / rfpTitleWords.length : 0
+  if (overlapRatio >= 0.5 && overlap >= 2) {
+    return {
+      isWrong: true,
+      reason: `The submitted file "${filename}" appears to be the RFP document itself ("${rfpTitle}"), not a vendor proposal. ${overlap}/${rfpTitleWords.length} key words in the filename match the RFP title. The vendor likely uploaded the wrong file by mistake.`,
+      detectedDocType: 'RFP document',
+    }
+  }
+
+  // Check 2: Filename looks like a procurement/project document for a DIFFERENT project.
+  // Pattern: "<Project Title> — <Organization>.pdf" or filenames with procurement keywords.
+  // Vendor proposals are usually named like "VendorName - Technical Proposal.pdf" or
+  // "Andersen_CRM_Response.pdf", not like "CRM Modernisation — Crown Prince's Court.pdf".
+  const rfpFilenameSignals = [
+    'request for proposal', 'scope of work', 'terms of reference', 'tor',
+    'modernisation', 'modernization', 'implementation plan', 'feasibility',
+    'specification', 'procurement', 'tender document', 'rfp',
+  ]
+  // Organization/government name signals that appear in document titles, not proposal names
+  const orgNameSignals = [
+    "crown prince", "crown prince's court", "ministry", "government", "authority",
+    "municipality", "department", "agency", "council", "bureau", "commission",
+  ]
+  const filenameHasRfpSignal = rfpFilenameSignals.some(s => filenameLower.includes(s))
+  const filenameHasOrgSignal = orgNameSignals.some(s => filenameLower.includes(s))
+  // Typical vendor proposal filenames contain vendor name or "proposal"/"response"/"bid"
+  const filenameHasProposalSignal = ['proposal', 'response', 'bid', 'offer', 'submission', 'quotation'].some(s => filenameLower.includes(s))
+  // If filename has project/org signals but NO vendor proposal signals → likely wrong document
+  if ((filenameHasRfpSignal || filenameHasOrgSignal) && !filenameHasProposalSignal) {
+    // Determine doc type from filename
+    const docType = filenameHasRfpSignal ? 'procurement document' : 'organizational document'
+    return {
+      isWrong: true,
+      reason: `The submitted file "${filename}" appears to be a ${docType} (not a vendor proposal). The filename contains ${filenameHasRfpSignal ? 'procurement/project' : 'organization'} terminology rather than vendor submission terminology. The vendor likely uploaded the wrong file — perhaps the RFP or SOW they downloaded, instead of their own proposal document.`,
+      detectedDocType: docType,
+    }
+  }
+
   if (!text || text.length < 200) {
     return { isWrong: false, reason: '', detectedDocType: 'unknown' }
   }
