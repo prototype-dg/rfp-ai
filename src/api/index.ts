@@ -350,12 +350,27 @@ apiRouter.post('/rfps/:id/questions/draft-all', async (c) => {
   const rfpId = c.req.param('id')
   const rfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(rfpId).first<any>()
   const { results: qs } = await c.env.DB.prepare('SELECT * FROM questions WHERE (answer IS NULL OR answer="") AND published=0 AND rfp_id=?').bind(rfpId).all<any>()
+
+  // ── Parallel LLM calls in batches of 5 for speed ─────────────────────────
+  // Sequential was ~3s/question × 15 questions = 45s+; parallel batches cut this to ~10–15s
+  const BATCH_SIZE = 5
   let manualCount = 0
-  for (const q of qs) {
-    const { answer, needsManual } = await draftAnswerLLM(q.question, rfp, c.env)
-    await c.env.DB.prepare('UPDATE questions SET answer=?, needs_manual=? WHERE id=?').bind(answer, needsManual ? 1 : 0, q.id).run()
-    if (needsManual) manualCount++
+
+  for (let i = 0; i < qs.length; i += BATCH_SIZE) {
+    const batch = qs.slice(i, i + BATCH_SIZE)
+    const results = await Promise.all(
+      batch.map(async (q: any) => {
+        const { answer, needsManual } = await draftAnswerLLM(q.question, rfp, c.env)
+        return { id: q.id, answer, needsManual }
+      })
+    )
+    // Write DB updates for the batch sequentially (D1 does not support concurrent writes)
+    for (const r of results) {
+      await c.env.DB.prepare('UPDATE questions SET answer=?, needs_manual=? WHERE id=?').bind(r.answer, r.needsManual ? 1 : 0, r.id).run()
+      if (r.needsManual) manualCount++
+    }
   }
+
   return c.json({ ok: true, total: qs.length, manualRequired: manualCount })
 })
 
@@ -742,8 +757,27 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
       else if (pdfAttachment) emailCategory = 'proposal'
     }
 
-    // ── Hard safety override — LLM sometimes misses obvious cases ───────────
-    // If LLM said plain_email but there's a PDF with no spreadsheet → treat as proposal
+    // ── Hard safety overrides — LLM sometimes misses obvious cases ───────────
+    // Override 1: plain_email + decline keywords → decline (MUST check BEFORE proposal/questions)
+    if (emailCategory === 'plain_email') {
+      const bodyLower = bodyText.toLowerCase()
+      const declineOverrideKeywords = [
+        'not interested', 'not interested in participating', 'not interested in this',
+        'decline to participate', 'declining to participate',
+        'unable to participate', 'cannot participate', 'not in a position to participate',
+        'regret to inform', 'regret to advise', 'regret that we',
+        'pass on this opportunity', 'pass on this rfp', 'pass on this tender',
+        'withdraw from', 'withdrawing from',
+        'will not be submitting', 'will not be able to submit',
+        'not proceeding', 'not able to proceed',
+        'no thank you', 'no, thank you',
+      ]
+      if (declineOverrideKeywords.some(kw => bodyLower.includes(kw))) {
+        emailCategory = 'decline'
+        console.log('[webhook] Safety override: plain_email → decline (decline keywords found in body)')
+      }
+    }
+    // Override 2: If LLM said plain_email but there's a PDF with no spreadsheet → treat as proposal
     if (emailCategory === 'plain_email' && pdfAttachment && !spreadsheetAttachment) {
       const bodyLower = bodyText.toLowerCase()
       const proposalKeywords = ['find attached', 'please find', 'proposal', 'rfp response', 'bid', 'tender response', 'submission', 'attached our', 'attaching our']
@@ -752,7 +786,7 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
         console.log('[webhook] Safety override: plain_email → proposal (PDF attachment + proposal keywords)')
       }
     }
-    // If LLM said plain_email but there's a spreadsheet → treat as questions
+    // Override 3: If LLM said plain_email but there's a spreadsheet → treat as questions
     if (emailCategory === 'plain_email' && spreadsheetAttachment) {
       emailCategory = 'questions'
       console.log('[webhook] Safety override: plain_email → questions (spreadsheet attachment found)')
@@ -797,19 +831,45 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
             ? (allAttachData.find((a: any) => a.id === proposalAttach.id) || allAttachData[0])
             : allAttachData[0]
           if (attachData?.download_url) {
-            const fileRes = await fetch(attachData.download_url)
-            if (fileRes.ok) {
-              const fileBuffer = await fileRes.arrayBuffer()
+            try {
+              // Use AbortController to enforce a 25s timeout on large PDF downloads
+              const controller = new AbortController()
+              const timeoutId = setTimeout(() => controller.abort(), 25000)
+              const fileRes = await fetch(attachData.download_url, { signal: controller.signal })
+              clearTimeout(timeoutId)
+              if (fileRes.ok) {
+                const fileBuffer = await fileRes.arrayBuffer()
+                pdfFilename = (proposalAttach?.filename) || attachData.filename || 'proposal.pdf'
+                // Ensure .pdf extension for display purposes if it's a generic name
+                if (!pdfFilename.match(/\.(pdf|doc|docx)$/i)) pdfFilename += '.pdf'
+                // Store as base64 for display/download
+                // Cap at 10MB base64 to avoid D1 blob size limits (10MB raw ≈ 13MB b64)
+                const rawBytes = new Uint8Array(fileBuffer)
+                const MAX_PDF_BYTES = 8_000_000 // 8MB raw — safe D1 limit
+                pdfBase64 = uint8ToBase64(rawBytes.length > MAX_PDF_BYTES ? rawBytes.slice(0, MAX_PDF_BYTES) : rawBytes)
+                // Extract text from PDF for LLM analysis
+                const pdfBytes = new Uint8Array(fileBuffer)
+                const pdfText = await extractPdfText(pdfBytes)
+                console.log(`[webhook] PDF extracted: ${pdfText.length} chars from ${pdfFilename} (${rawBytes.length} bytes)`)
+                // Parse proposed duration from PDF text or email body
+                proposedDuration = extractProposedDuration(pdfText + '\n' + bodyText)
+              } else {
+                console.error(`[webhook] PDF download failed: HTTP ${fileRes.status} for ${attachData.download_url}`)
+                // Still record the filename from the attachment metadata so we know a PDF was submitted
+                pdfFilename = (proposalAttach?.filename) || attachData.filename || 'proposal.pdf'
+                if (!pdfFilename.match(/\.(pdf|doc|docx)$/i)) pdfFilename += '.pdf'
+              }
+            } catch(downloadErr: any) {
+              console.error(`[webhook] PDF download error: ${downloadErr?.message} for ${attachData.download_url}`)
+              // Still record the filename — proposal will be created with empty text
               pdfFilename = (proposalAttach?.filename) || attachData.filename || 'proposal.pdf'
-              // Ensure .pdf extension for display purposes if it's a generic name
               if (!pdfFilename.match(/\.(pdf|doc|docx)$/i)) pdfFilename += '.pdf'
-              // Store as base64 for display/download
-              pdfBase64 = uint8ToBase64(new Uint8Array(fileBuffer))
-              // Extract text from PDF for LLM analysis
-              const pdfBytes = new Uint8Array(fileBuffer)
-              const pdfText = await extractPdfText(pdfBytes)
-              // Parse proposed duration from PDF text or email body
-              proposedDuration = extractProposedDuration(pdfText + '\n' + bodyText)
+            }
+          } else {
+            // No download URL available — use filename from attachment metadata if present
+            if (proposalAttach?.filename) {
+              pdfFilename = proposalAttach.filename
+              console.log(`[webhook] No download_url for attachment ${pdfFilename} — proposal will be created without PDF text`)
             }
           }
         }
@@ -932,8 +992,9 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
       const vendorDisplayName = vendorRow?.name || fromAddress || 'Vendor'
 
       // ── Missing attachment: reply to sender asking to resubmit with PDF ──
-      // Send to any known vendor (identified by email) — not just Andersen
-      if (!pdfBase64 && !pdfFilename) {
+      // Only send "missing attachment" reply if there truly was no attachment at all
+      // (pdfFilename may be set even when download failed — still create the proposal)
+      if (!pdfBase64 && !pdfFilename && attachments.length === 0) {
         const canSendReal = (isAndersen || isKnownVendor) && !!(c.env as any).RESEND_API_KEY
         if (canSendReal) {
           const missingAttachReply = `Dear ${vendorDisplayName},
@@ -970,12 +1031,14 @@ procurement@cpc-rfp.website`
             console.error('[webhook] Failed to send missing-attachment reply:', replyErr?.message)
           }
         }
-        // Do NOT create a proposal record — nothing to store
+        // Do NOT create a proposal record — no attachment at all
       } else {
-        // ── We have a PDF — extract text and create/update the proposal record ──
+        // ── We have a PDF (or at minimum a PDF filename) — create/update the proposal record ──
         // Works regardless of RFP stage (qa_open, submissions_closed, evaluation, etc.)
+        // Create the record even if PDF download/extraction failed — the email was received
 
-        // Always extract PDF text for any identified vendor (not just Andersen)
+        // pdfExtractedText was already extracted during download above; re-extract only if
+        // pdfBase64 is available but we didn't already do it (shouldn't happen, but defensive)
         let pdfExtractedText = ''
         if (pdfBase64) {
           try {
@@ -1350,6 +1413,17 @@ apiRouter.post('/rfps/:id/evaluations/run', async (c) => {
   for (const p of proposals) {
     await runSingleEvaluation(p, rfp, rfpId, c.env)
   }
+
+  // Advance stage → submissions_closed when Run AI Evaluation is pressed
+  // (signals that no more proposals will be accepted from this point)
+  try {
+    const currentRfp = await c.env.DB.prepare('SELECT stage FROM rfps WHERE id=?').bind(rfpId).first<{stage:string}>()
+    const eligibleStages = ['qa_open', 'published', 'evaluation']
+    if (currentRfp && eligibleStages.includes(currentRfp.stage)) {
+      await c.env.DB.prepare(`UPDATE rfps SET stage='submissions_closed', updated_at=datetime('now') WHERE id=?`).bind(rfpId).run()
+    }
+  } catch(_) {}
+
   return c.json({ ok: true })
 })
 
@@ -1631,7 +1705,8 @@ async function extractProposalFieldsWithLLM(
   timeline_months: number | null
   technical_proposal: string
 }> {
-  const combinedText = (pdfText + '\n\n' + emailBody).slice(0, 12000)
+  // Use first 20000 chars of PDF text for large proposals; include email body for context
+  const combinedText = (pdfText.slice(0, 18000) + '\n\n' + emailBody.slice(0, 2000)).slice(0, 20000)
 
   const systemPrompt = `You are a procurement analyst extracting structured information from a vendor proposal document.
 Extract the following fields and return them as a JSON object (no markdown, no code block, just raw JSON):
@@ -1642,14 +1717,15 @@ Extract the following fields and return them as a JSON object (no markdown, no c
   "budget_amount": <number or null — the total financial bid amount as a plain number with no commas or currency symbols>,
   "budget_currency": "<3-letter currency code, e.g. AED or USD — default AED if not specified>",
   "timeline_months": <integer or null — implementation timeline in months>,
-  "technical_proposal": "Detailed technical summary: approach, methodology, technology stack, team, milestones (max 800 chars)"
+  "technical_proposal": "Detailed technical summary: approach, methodology, technology stack, team, milestones (max 1200 chars)"
 }
 
 Rules:
 - If a field cannot be determined from the text, use null for numbers or "" for strings.
 - budget_amount must be a plain number (e.g. 1250000, not "1,250,000 AED")
 - timeline_months must be an integer (e.g. 18 for "18 months")
-- Do not invent information not present in the document.`
+- Do not invent information not present in the document.
+- Even if only partial text is available, extract whatever is visible.`
 
   const userPrompt = `Vendor: ${vendorName}
 RFP: ${rfpTitle}
@@ -1658,7 +1734,8 @@ Proposal text:
 ${combinedText}`
 
   try {
-    const result = await callLLM(systemPrompt, userPrompt, env, 'gpt-5-mini', 1200)
+    // Use larger token budget (2000) to handle rich proposals; gpt-5-mini is fast enough
+    const result = await callLLM(systemPrompt, userPrompt, env, 'gpt-5-mini', 2000)
     const cleaned = result.trim().replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/, '').trim()
     const parsed = JSON.parse(cleaned)
     return {
@@ -2112,7 +2189,7 @@ async function extractPdfText(bytes: Uint8Array): Promise<string> {
     const streamEndMarker = 'endstream'
     let sMatch: RegExpExecArray | null
     let streamCount = 0
-    while ((sMatch = streamStartRe.exec(latin)) !== null && streamCount < 80) {
+    while ((sMatch = streamStartRe.exec(latin)) !== null && streamCount < 200) {
       streamCount++
       const headerStart = Math.max(0, sMatch.index - 400)
       const headerSlice = latin.slice(headerStart, sMatch.index)
@@ -2127,12 +2204,12 @@ async function extractPdfText(bytes: Uint8Array): Promise<string> {
       let compressedBytes: Uint8Array
       if (lenMatch) {
         const declaredLen = parseInt(lenMatch[1], 10)
-        if (declaredLen <= 0 || declaredLen > 2_000_000) continue
+        if (declaredLen <= 0 || declaredLen > 5_000_000) continue
         compressedBytes = bytes.slice(dataStart, dataStart + declaredLen)
       } else {
         // Fallback: scan for 'endstream' marker in latin string
         const endIdx = latin.indexOf(streamEndMarker, dataStart)
-        if (endIdx < 0 || endIdx - dataStart > 2_000_000) continue
+        if (endIdx < 0 || endIdx - dataStart > 5_000_000) continue
         // Strip trailing \r\n before endstream
         let endPos = endIdx
         if (endPos > 0 && latin[endPos-1] === '\n') endPos--
@@ -2147,14 +2224,18 @@ async function extractPdfText(bytes: Uint8Array): Promise<string> {
 
       const streamText = extractTextFromStreamBytes(decompressed)
       if (streamText.length > 10) collectedText.push(streamText)
+
+      // Stop early if we have enough text for LLM analysis
+      const currentTotal = collectedText.join(' ').length
+      if (currentTotal > 15_000) break
     }
 
     const combined = collectedText.join(' ').replace(/\s+/g,' ').replace(/[^\x20-\x7E\n]/g,' ').trim()
-    if (combined.length > 100) return combined.slice(0, 8000)
+    if (combined.length > 100) return combined.slice(0, 15000)
 
     // --- Last resort: ASCII word sequences from raw bytes ---
     const asciiWords = latin.match(/[A-Za-z][A-Za-z0-9 .,;:!?()\-']{20,}/g) || []
-    return asciiWords.slice(0, 200).join(' ').slice(0, 8000)
+    return asciiWords.slice(0, 400).join(' ').slice(0, 15000)
   } catch(err) {
     console.error('[extractPdfText] error:', err)
     return ''

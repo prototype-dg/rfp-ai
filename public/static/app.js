@@ -70,8 +70,8 @@ function updateBellBadge() {
 }
 
 function showNotifPopup(notif) {
-  const icons = { email: 'fa-envelope', questions: 'fa-question-circle', proposal: 'fa-inbox', info: 'fa-info-circle' };
-  const colors = { email: '#7c3aed', questions: '#0f3460', proposal: '#c9a84c', info: '#6b7280' };
+  const icons = { email: 'fa-envelope', questions: 'fa-question-circle', proposal: 'fa-inbox', info: 'fa-info-circle', decline: 'fa-times-circle', stage: 'fa-flag' };
+  const colors = { email: '#7c3aed', questions: '#0f3460', proposal: '#c9a84c', info: '#6b7280', decline: '#dc2626', stage: '#16a34a' };
   const icon = icons[notif.type] || 'fa-bell';
   const color = colors[notif.type] || '#6b7280';
   const popupId = 'notif-popup-' + notif.id;
@@ -164,8 +164,8 @@ function toggleNotifPanel() {
 function renderNotifPanel() {
   var panel = document.getElementById('notifPanel');
   if (!panel) return;
-  const typeColors = { email: '#7c3aed', questions: '#0f3460', proposal: '#c9a84c', info: '#6b7280' };
-  const typeIcons = { email: 'fa-envelope', questions: 'fa-question-circle', proposal: 'fa-inbox', info: 'fa-info-circle' };
+  const typeColors = { email: '#7c3aed', questions: '#0f3460', proposal: '#c9a84c', info: '#6b7280', decline: '#dc2626', stage: '#16a34a' };
+  const typeIcons = { email: 'fa-envelope', questions: 'fa-question-circle', proposal: 'fa-inbox', info: 'fa-info-circle', decline: 'fa-times-circle', stage: 'fa-flag' };
   let html = '<div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid #f3f4f6">'
     + '<span style="font-weight:700;font-size:0.875rem;color:#1f2937"><i class="fas fa-bell mr-1"></i>Notifications</span>'
     + '<button onclick="markAllNotifsRead();renderNotifPanel()" style="font-size:0.72rem;color:#7c3aed;background:none;border:none;cursor:pointer">Mark all read</button>'
@@ -246,9 +246,9 @@ function stageBadgeClass(stage) {
 function stageLabelMap(stage) {
   const map = {
     draft: 'Draft',
-    published: 'Published',
+    published: 'Vendor Invitation',
     qa_open: 'Q&A Open',
-    submissions_closed: 'Closed',
+    submissions_closed: 'Submissions Closed',
     evaluation: 'Evaluation',
     awarded: 'Awarded',
   };
@@ -349,14 +349,14 @@ function goBack() {
 // LIFECYCLE BAR
 // ============================================================
 var STAGES = ['draft','published','qa_open','submissions_closed','evaluation','awarded'];
-var STAGE_LABELS = ['Draft','Published','Q&A Open','Submissions\nClosed','Evaluation','Awarded'];
-var STAGE_ICONS = ['fa-pencil-alt','fa-paper-plane','fa-comments','fa-lock','fa-star','fa-trophy'];
+var STAGE_LABELS = ['Draft','Vendor\nInvitation','Q&A Open','Submissions\nClosed','Evaluation','Awarded'];
+var STAGE_ICONS = ['fa-pencil-alt','fa-envelope-open-text','fa-comments','fa-lock','fa-star','fa-trophy'];
 var STAGE_INFO = {
   draft: 'RFP is being prepared. Fill in details and generate the document.',
-  published: 'RFP is live. Vendor invitations can be sent.',
-  qa_open: 'Vendors can submit questions. Q&A management is active.',
-  submissions_closed: 'Proposal submissions are closed. Evaluation phase begins.',
-  evaluation: 'AI is scoring and ranking vendor proposals.',
+  published: 'Vendor Invitation phase — shortlist vendors and send invitations.',
+  qa_open: 'Q&A Open — vendors may submit questions. Manage and publish answers.',
+  submissions_closed: 'Proposal submissions closed. Review proposals and run AI evaluation.',
+  evaluation: 'AI evaluation complete — review scores and select the winning vendor.',
   awarded: 'Contract has been awarded. Procurement is complete.',
 };
 
@@ -412,6 +412,10 @@ function renderRfpTabs(activeTab, rfpId, qaBadge) {
 
 function switchRfpTab(tab, rfpId) {
   appState.currentRfpTab = tab;
+  // Clear Q&A unread badge when user navigates to the Q&A tab
+  if (tab === 'qa' && appState.unreadQA) {
+    appState.unreadQA = false;
+  }
   renderRfpTabs(tab, rfpId, appState.unreadQA);
   const rfp = appState.currentRfp;
   const tabFn = rfpTabs[tab];
@@ -736,7 +740,7 @@ rfpTabs.generate = function(rfpId, rfp) {
 function advanceStageButton(rfp) {
   const stage = rfp ? rfp.stage : 'draft';
   const id = rfp ? rfp.id : '';
-  if (stage === 'draft') return '<button class="btn-primary" style="flex:1" onclick="advanceRfpStage(' + id + ',\'published\')"><i class="fas fa-paper-plane"></i>Publish RFP</button>';
+  if (stage === 'draft') return '<button class="btn-primary" style="flex:1" onclick="advanceRfpStage(' + id + ',\'published\')"><i class="fas fa-rocket"></i>Publish RFP</button>';
   return '';
 }
 
@@ -809,14 +813,40 @@ async function saveRfpFields(rfpId) {
 
 async function advanceRfpStage(rfpId, stage) {
   await apiCall('POST', '/rfps/' + rfpId + '/stage', { stage: stage });
-  showToast('Stage advanced to: ' + stageLabelMap(stage), 'success');
   // reload RFP detail
   const rfp = await apiCall('GET', '/rfps/' + rfpId);
   appState.currentRfp = rfp;
   document.getElementById('pageSubtitle').textContent = (rfp.ref_number||'') + ' \u2022 ' + stageLabelMap(rfp.stage||'draft');
   renderLifecycleBar(rfp);
-  renderRfpTabs(appState.currentRfpTab, rfpId, appState.unreadQA);
-  switchRfpTab(appState.currentRfpTab, rfpId);
+
+  if (stage === 'published') {
+    // Draft → Published: redirect to Vendors tab + show prominent popup
+    renderRfpTabs('vendors', rfpId, appState.unreadQA);
+    switchRfpTab('vendors', rfpId);
+    // Delay toast slightly so the page renders first
+    setTimeout(function() {
+      showToast('\uD83C\uDF89 RFP Published! Please proceed to inviting vendors.', 'success', 6000);
+      // Show a prominent modal popup
+      showModal(
+        '<div style="max-width:480px;text-align:center">'
+        + '<div style="width:64px;height:64px;border-radius:50%;background:#dcfce7;display:flex;align-items:center;justify-content:center;margin:0 auto 1rem">'
+        + '<i class="fas fa-paper-plane" style="font-size:1.75rem;color:#16a34a"></i></div>'
+        + '<h3 style="font-size:1.1rem;font-weight:700;color:#1f2937;margin:0 0 0.75rem">RFP Published Successfully</h3>'
+        + '<p style="font-size:0.875rem;color:#6b7280;line-height:1.6;margin:0 0 1.25rem">'
+        + 'Your RFP is now live. You are now in the <strong>Vendor Invitation</strong> phase.<br>'
+        + 'Please proceed to shortlisting vendors and sending them invitations to participate in this tender.'
+        + '</p>'
+        + '<div style="display:flex;gap:0.75rem;justify-content:center">'
+        + '<button class="btn-primary" onclick="closeModal()" style="min-width:140px"><i class="fas fa-building"></i>Go to Vendors</button>'
+        + '</div>'
+        + '</div>'
+      );
+    }, 200);
+  } else {
+    renderRfpTabs(appState.currentRfpTab, rfpId, appState.unreadQA);
+    switchRfpTab(appState.currentRfpTab, rfpId);
+    showToast('Stage advanced to: ' + stageLabelMap(stage), 'success');
+  }
 }
 
 function downloadRfpPdf(rfpId) {
@@ -1147,7 +1177,7 @@ async function confirmSendInvitations(rfpId) {
       submission_deadline: sDeadline,
       notes: notes,
     });
-    // Auto-advance stage to qa_open after sending invitations
+    // Advance stage from published → qa_open to mark Vendor Invitation as complete on the lifecycle bar
     var currentStage = appState.currentRfp ? appState.currentRfp.stage : 'published';
     if (currentStage === 'published') {
       await apiCall('POST', '/rfps/' + rfpId + '/stage', { stage: 'qa_open' }).catch(function(){});
@@ -1160,9 +1190,10 @@ async function confirmSendInvitations(rfpId) {
     renderRfpTabs('vendors', rfpId, appState.unreadQA);
     // Count shortlisted vendors from local state (avoid undefined reference)
     var sentCount = (result && result.results) ? result.results.length : (appState.rfpVendors ? appState.rfpVendors.filter(function(v){ return v.shortlisted; }).length : 0);
-    showToast('Invitations sent to ' + sentCount + ' vendor(s)! Stage advanced to Q&A Open.', 'success');
+    showToast('\u2709\uFE0F Invitations sent to ' + sentCount + ' vendor(s)! Now waiting for vendor responses.', 'success', 5000);
     addNotification('email', 'Invitations Sent', 'RFP invitations sent to ' + sentCount + ' vendor(s) with PDF attachment', rfpId, 'vendors', null);
     closeModal();
+    // Stay on Vendors tab — no redirect
     switchRfpTab('vendors', rfpId);
     // Start 5s global background poller — runs regardless of active tab for 2h
     startGlobalInboxPolling(rfpId);
@@ -1733,17 +1764,19 @@ async function saveQAnswer(rfpId, qId) {
 async function publishAllQAnswers(rfpId) {
   try {
     await apiCall('POST', '/rfps/' + rfpId + '/questions/publish-all', {});
-    showToast('Q&A answers sent to vendors. RFP advanced to Proposal Submission stage.', 'success', 5000);
-    // Refresh RFP to get updated stage
+    // Refresh RFP to get updated stage (backend advances qa_open → submissions_closed)
     const rfp = await apiCall('GET', '/rfps/' + rfpId).catch(function(){ return null; });
     if (rfp) {
       appState.currentRfp = rfp;
       renderLifecycleBar(rfp);
-      document.getElementById('pageSubtitle').textContent = (rfp.ref_number||'') + ' • ' + stageLabelMap(rfp.stage||'draft');
+      document.getElementById('pageSubtitle').textContent = (rfp.ref_number||'') + ' \u2022 ' + stageLabelMap(rfp.stage||'draft');
     }
-    // Switch to Proposals tab
-    renderRfpTabs('proposals', rfpId, false);
-    rfpTabs.proposals(rfpId);
+    showToast('\u2705 Q&A answers published and sent to all vendors. Q&A stage is now complete.', 'success', 5000);
+    addNotification('info', '\u2705 Q&A Closed', 'All approved Q&A answers sent to vendors. Now accepting proposals.', rfpId, 'proposals', null);
+    // Stay on Q&A tab so user sees the confirmation — update tab bar to clear badge
+    appState.unreadQA = false;
+    renderRfpTabs('qa', rfpId, false);
+    rfpTabs.qa(rfpId);
   } catch(e) {
     showToast('Publish failed: ' + e.message, 'error');
   }
@@ -1846,11 +1879,14 @@ rfpTabs.proposals = async function(rfpId) {
       ? '<button class="award-btn" onclick="awardProposal(' + rfpId + ',' + p.id + ')" title="Award contract to this vendor"><i class="fas fa-award"></i>Award Contract</button>'
       : '<span style="font-size:0.75rem;color:#92400e;font-weight:700;background:#fef3c7;padding:4px 10px;border-radius:6px;display:inline-flex;align-items:center;gap:4px"><i class="fas fa-trophy"></i>Winner</span>';
 
+    const pdfDownloadBtn = (p.pdf_attachment_url && p.pdf_filename)
+      ? '<a href="' + escHtml(p.pdf_attachment_url) + '" target="_blank" class="btn-ghost btn-sm" style="text-decoration:none" title="Download ' + escHtml(p.pdf_filename) + '"><i class="fas fa-file-pdf" style="color:#dc2626"></i>PDF</a>'
+      : '';
+
     rows += '<tr style="' + rowBg + '">'
       + '<td><div style="display:flex;align-items:center;gap:8px">'
       + '<div style="width:32px;height:32px;border-radius:8px;background:var(--cpc-blue);display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:0.8rem;flex-shrink:0">' + escHtml((p.vendor_name||'?').charAt(0)) + '</div>'
-      + '<div><div style="font-weight:600;font-size:0.87rem">' + escHtml(p.vendor_name||'Unknown') + '</div>'
-      + (isReal ? '<span style="font-size:0.68rem;background:#fef3c7;color:#92400e;border-radius:4px;padding:1px 5px;font-weight:600">Real PDF</span>' : '') + '</div>'
+      + '<div><div style="font-weight:600;font-size:0.87rem">' + escHtml(p.vendor_name||'Unknown') + '</div></div>'
       + '</div></td>'
       + '<td style="font-size:0.82rem;color:#6b7280">' + dateStr + '</td>'
       + '<td style="font-weight:600">' + fin + '</td>'
@@ -1860,6 +1896,7 @@ rfpTabs.proposals = async function(rfpId) {
       + '<td>'
       + '<div style="display:flex;gap:4px;align-items:center">'
       + '<button class="btn-ghost btn-sm" onclick="viewProposalDetail(' + p.id + ')"><i class="fas fa-eye"></i>View</button>'
+      + pdfDownloadBtn
       + awardBtn
       + '</div>'
       + '</td>'
@@ -1933,7 +1970,14 @@ async function evaluateAllProposals(rfpId) {
   setLoading(btn, true, 'Evaluating All...');
   try {
     await apiCall('POST', '/rfps/' + rfpId + '/evaluations/run', {});
-    showToast('All proposals evaluated! Results updated.', 'success');
+    // Refresh RFP — backend advances stage to submissions_closed when evaluation is run
+    const rfp = await apiCall('GET', '/rfps/' + rfpId).catch(function(){ return null; });
+    if (rfp) {
+      appState.currentRfp = rfp;
+      renderLifecycleBar(rfp);
+      document.getElementById('pageSubtitle').textContent = (rfp.ref_number||'') + ' \u2022 ' + stageLabelMap(rfp.stage||'draft');
+    }
+    showToast('\uD83E\uDD16 AI Evaluation complete! Proposal submissions are now closed.', 'success', 5000);
     rfpTabs.proposals(rfpId);
   } catch(e) {
     setLoading(btn, false);
@@ -1947,9 +1991,9 @@ async function awardProposal(rfpId, proposalId) {
   showToast('Processing award...', 'info', 3000);
   try {
     await apiCall('POST', '/rfps/' + rfpId + '/proposals/' + proposalId + '/award', {});
-    showToast('\ud83c\udfc6 Contract awarded to ' + vendorName + '! Award email sent.', 'success', 6000);
-    addNotification('info', '\ud83c\udfc6 Contract Awarded', vendorName + ' has been awarded the contract. RFP is now archived.', rfpId, null, null);
-    // Reload RFP data
+    showToast('\uD83C\uDFC6 Contract awarded to ' + vendorName + '! Award email sent.', 'success', 6000);
+    addNotification('info', '\uD83C\uDFC6 Contract Awarded', vendorName + ' has been awarded the contract. RFP is now complete.', rfpId, null, null);
+    // Reload RFP data — backend set stage to 'awarded'
     const rfp = await apiCall('GET', '/rfps/' + rfpId);
     appState.currentRfp = rfp;
     document.getElementById('pageSubtitle').textContent = (rfp.ref_number||'') + ' \u2022 Awarded';
@@ -2048,15 +2092,7 @@ function viewProposalDetail(id) {
       + '</div>';
   }
 
-  const pdfSection = p.pdf_filename
-    ? '<div style="margin-top:1rem;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden">'
-      + '<div style="background:#f9fafb;padding:0.625rem 0.875rem;display:flex;align-items:center;justify-content:space-between">'
-      + '<span style="font-size:0.82rem;font-weight:600;color:#374151"><i class="fas fa-file-pdf mr-1" style="color:#dc2626"></i>' + escHtml(p.pdf_filename) + '</span>'
-      + (p.pdf_attachment_url ? '<a href="' + escHtml(p.pdf_attachment_url) + '" target="_blank" class="btn-ghost btn-sm" style="text-decoration:none"><i class="fas fa-download"></i>Download PDF</a>' : '')
-      + '</div>'
-      + (p.pdf_attachment_url ? '<iframe src="' + escHtml(p.pdf_attachment_url) + '" style="width:100%;height:320px;border:none"></iframe>' : '<div style="padding:1.5rem;text-align:center;color:#9ca3af;font-size:0.82rem">PDF content not accessible for preview</div>')
-      + '</div>'
-    : '';
+  // PDF section removed from modal per UX request — download button is on the proposals list row instead
 
   showModal(
     '<div style="max-width:700px">'
@@ -2102,9 +2138,6 @@ function viewProposalDetail(id) {
 
     // Scoring table
     + scoringTable
-
-    // PDF viewer
-    + pdfSection
 
     + '<div style="display:flex;gap:0.5rem;margin-top:1.25rem">'
     + '<button class="btn-ghost" style="flex:1" onclick="closeModal()">Close</button>'
