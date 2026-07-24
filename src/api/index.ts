@@ -4570,23 +4570,27 @@ async function detectWrongDocument(
   const rfpHits = rfpSignals.filter(s => textLower.includes(s)).length
   const vendorHits = vendorSignals.filter(s => textLower.includes(s)).length
 
-  // If the doc looks overwhelmingly like an RFP (issuer perspective, not vendor)
-  const looksLikeRfp = rfpHits >= 3 && vendorHits <= 1
+  // Does the vendor's own name appear in the document?
+  // Proposals always mention the submitting vendor's name. If it does, it's almost
+  // certainly their own document regardless of other signals.
+  const vendorMentioned = submittingVendorName
+    ? textLower.includes(submittingVendorName.toLowerCase().split(' ')[0].toLowerCase())
+    : true
 
   // Does it contain a DIFFERENT RFP ref number than expected?
   const refMatch = text.match(/CPC\/PROC\/\d{4}\/\d+/g)
   const differentRef = refMatch && !refMatch.includes(rfpRefNumber) && refMatch.length > 0
   const foundRef = refMatch ? refMatch[0] : null
 
-  // Does it NOT mention the submitting vendor's name anywhere?
-  const vendorMentioned = submittingVendorName
-    ? text.toLowerCase().includes(submittingVendorName.toLowerCase().split(' ')[0])
-    : true
+  // If the doc looks overwhelmingly like an RFP with NO vendor signals and vendor not mentioned:
+  // Use a strict threshold — proposals often quote RFP language in compliance matrices.
+  // Only flag if: lots of RFP signals (>=5), almost no vendor signals (<=1), AND vendor not mentioned.
+  const looksLikeRfp = rfpHits >= 5 && vendorHits <= 1 && !vendorMentioned
 
   if (looksLikeRfp || differentRef) {
     const reason = differentRef
       ? `Document appears to be RFP ${foundRef} — a different procurement document, not a vendor proposal for ${rfpRefNumber}. The file "${filename}" was likely uploaded by mistake.`
-      : `Document contains RFP-authoring language (${rfpHits} procurement issuer signals vs ${vendorHits} vendor proposal signals). This appears to be a procurement/tender document, not a vendor submission.`
+      : `Document contains RFP-authoring language (${rfpHits} procurement issuer signals vs ${vendorHits} vendor proposal signals) and does not mention the submitting vendor. This appears to be a procurement/tender document, not a vendor submission.`
     return {
       isWrong: true,
       reason,
