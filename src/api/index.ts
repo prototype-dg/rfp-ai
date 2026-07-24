@@ -1416,6 +1416,323 @@ apiRouter.get('/proposals/pdf/:key{.+}', async (c) => {
   })
 })
 
+// ── Admin: Upload a PDF directly to R2 for a proposal (accepts raw binary body) ──
+// PUT /api/rfps/:rfpId/proposals/:proposalId/upload-pdf
+// Body: raw PDF bytes (Content-Type: application/pdf)
+// Used by the sandbox script to upload local PDFs to R2 without going through Resend.
+apiRouter.put('/rfps/:rfpId/proposals/:proposalId/upload-pdf', async (c) => {
+  const rfpId = Number(c.req.param('rfpId'))
+  const proposalId = Number(c.req.param('proposalId'))
+
+  const bucket: R2Bucket | undefined = (c.env as any).PROPOSALS_BUCKET
+  if (!bucket) return c.json({ error: 'R2 storage not configured' }, 503)
+
+  const proposal = await c.env.DB.prepare(
+    `SELECT p.*, v.name as vendor_name FROM proposals p LEFT JOIN vendors v ON p.vendor_id=v.id WHERE p.id=? AND p.rfp_id=?`
+  ).bind(proposalId, rfpId).first<any>()
+  if (!proposal) return c.json({ error: 'Proposal not found' }, 404)
+
+  const rawBody = await c.req.arrayBuffer()
+  const rawBytes = new Uint8Array(rawBody)
+  if (rawBytes.length < 100) return c.json({ error: 'Empty or invalid PDF body' }, 400)
+
+  const pdfFilename = c.req.header('X-Filename') || proposal.pdf_filename || 'proposal.pdf'
+  const safeVendorName = (proposal.vendor_name || 'vendor').replace(/[^a-zA-Z0-9_-]/g,'_').slice(0,40)
+  const r2Key = `proposals/${rfpId}/${proposal.vendor_id}_${safeVendorName}_${Date.now()}.pdf`
+
+  await bucket.put(r2Key, rawBytes, {
+    httpMetadata: { contentType: 'application/pdf' },
+    customMetadata: { rfpId: String(rfpId), vendorId: String(proposal.vendor_id), filename: pdfFilename },
+  })
+
+  // Update D1 with the new R2 key
+  await c.env.DB.prepare(`UPDATE proposals SET pdf_attachment_url=?, pdf_filename=? WHERE id=?`)
+    .bind(`r2://${r2Key}`, pdfFilename, proposalId).run()
+
+  return c.json({ ok: true, r2_key: r2Key, bytes: rawBytes.length })
+})
+
+// ── Admin: Re-run LLM field extraction + evaluation using pre-extracted text ──
+// POST /api/rfps/:rfpId/proposals/:proposalId/reprocess-from-text
+// Body: { pdf_text: string, email_body?: string }
+// Used when PDF text has been extracted externally (e.g. via pdfminer in sandbox).
+apiRouter.post('/rfps/:rfpId/proposals/:proposalId/reprocess-from-text', async (c) => {
+  const rfpId = Number(c.req.param('rfpId'))
+  const proposalId = Number(c.req.param('proposalId'))
+
+  const body = await c.req.json() as { pdf_text: string, email_body?: string }
+  const pdfText = (body.pdf_text || '').slice(0, 60000)
+  if (!pdfText || pdfText.length < 50) {
+    return c.json({ error: 'pdf_text is required and must be at least 50 chars' }, 400)
+  }
+
+  const proposal = await c.env.DB.prepare(
+    `SELECT p.*, v.name as vendor_name, v.contact_email FROM proposals p LEFT JOIN vendors v ON p.vendor_id=v.id WHERE p.id=? AND p.rfp_id=?`
+  ).bind(proposalId, rfpId).first<any>()
+  if (!proposal) return c.json({ error: 'Proposal not found' }, 404)
+
+  const rfp = await c.env.DB.prepare(`SELECT * FROM rfps WHERE id=?`).bind(rfpId).first<any>()
+  const emailBody = body.email_body || ''
+  const rfpTitle = rfp?.title || 'RFP'
+
+  // Run LLM field extraction with the provided text
+  let fields: any = {}
+  try {
+    fields = await extractProposalFieldsWithLLM(pdfText, emailBody, proposal.vendor_name || 'Vendor', rfpTitle, c.env)
+  } catch(llmErr: any) {
+    console.error(`[reprocess-from-text] LLM failed: ${llmErr?.message}`)
+    fields = { executive_summary: '', key_strengths: '', budget_amount: null, budget_currency: 'AED', timeline_months: null, technical_proposal: pdfText.slice(0, 8000) }
+  }
+
+  const proposedDuration = extractProposedDuration(pdfText + '\n' + emailBody)
+
+  // Update proposal in D1 with extracted fields
+  await c.env.DB.prepare(`
+    UPDATE proposals SET
+      executive_summary=?, key_strengths=?,
+      budget_amount=?, budget_currency=?, timeline_months=?,
+      technical_proposal=?, proposed_duration=?
+    WHERE id=?
+  `).bind(
+    fields.executive_summary, fields.key_strengths,
+    fields.budget_amount, fields.budget_currency, fields.timeline_months,
+    fields.technical_proposal, proposedDuration || proposal.proposed_duration,
+    proposalId
+  ).run()
+
+  // Re-run AI evaluation for real submissions (Andersen)
+  let evaluation: any = null
+  const isAndersen = proposal.contact_email?.includes('andersenlab.com') || proposal.vendor_name?.toLowerCase().includes('andersen')
+  if (isAndersen) {
+    try {
+      const updatedProposal = {
+        ...proposal,
+        technical_proposal: fields.technical_proposal,
+        budget_amount: fields.budget_amount,
+        timeline_months: fields.timeline_months,
+        proposed_duration: proposedDuration || proposal.proposed_duration,
+      }
+      const evalResult = await evaluateAndersenWithLLM(updatedProposal, rfp, c.env)
+      const total = Math.round(
+        evalResult.scores.business * 0.30 +
+        evalResult.scores.technical * 0.40 +
+        evalResult.scores.financial * 0.30
+      )
+      await c.env.DB.prepare('DELETE FROM evaluations WHERE proposal_id=?').bind(proposalId).run()
+      await c.env.DB.prepare(`
+        INSERT INTO evaluations (rfp_id, proposal_id, vendor_id, business_score, technical_score, financial_score, experience_score, total_score, ai_summary, scoring_details_json, is_real, created_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
+      `).bind(
+        rfpId, proposalId, proposal.vendor_id,
+        evalResult.scores.business, evalResult.scores.technical,
+        evalResult.scores.financial, evalResult.scores.experience,
+        total, evalResult.summary, JSON.stringify(evalResult.scoringDetails), 1
+      ).run()
+      evaluation = { total_score: total, summary: evalResult.summary }
+    } catch(evalErr: any) {
+      console.error(`[reprocess-from-text] Evaluation failed: ${evalErr?.message}`)
+    }
+  }
+
+  return c.json({
+    ok: true,
+    text_chars: pdfText.length,
+    extracted_fields: {
+      executive_summary: (fields.executive_summary || '').slice(0, 150) + '...',
+      budget_amount: fields.budget_amount,
+      budget_currency: fields.budget_currency,
+      timeline_months: fields.timeline_months,
+      technical_proposal_chars: (fields.technical_proposal || '').length,
+    },
+    evaluation: evaluation ? { total_score: evaluation.total_score, summary: (evaluation.summary || '').slice(0, 200) } : null,
+  })
+})
+
+// ── Re-process a proposal PDF: re-fetch from Resend, upload to R2, re-extract + re-evaluate ──
+// POST /api/rfps/:rfpId/proposals/:proposalId/reprocess
+// Looks up resend_email_id from email_log, re-downloads the PDF attachment, stores it in R2,
+// re-runs LLM field extraction (60k chars), updates D1, and triggers AI evaluation.
+apiRouter.post('/rfps/:rfpId/proposals/:proposalId/reprocess', async (c) => {
+  const rfpId = Number(c.req.param('rfpId'))
+  const proposalId = Number(c.req.param('proposalId'))
+
+  // 1. Load proposal
+  const proposal = await c.env.DB.prepare(
+    `SELECT p.*, v.name as vendor_name, v.contact_email FROM proposals p LEFT JOIN vendors v ON p.vendor_id=v.id WHERE p.id=? AND p.rfp_id=?`
+  ).bind(proposalId, rfpId).first<any>()
+  if (!proposal) return c.json({ error: 'Proposal not found' }, 404)
+
+  // 2. Load RFP for LLM context
+  const rfp = await c.env.DB.prepare(`SELECT * FROM rfps WHERE id=?`).bind(rfpId).first<any>()
+
+  // 3. Find the email_log entry for this vendor+RFP to get resend_email_id
+  const emailLog = await c.env.DB.prepare(
+    `SELECT * FROM email_log WHERE rfp_id=? AND vendor_id=? AND email_category='proposal' ORDER BY id DESC LIMIT 1`
+  ).bind(rfpId, proposal.vendor_id).first<any>()
+
+  const resendEmailId = emailLog?.resend_email_id
+  const apiKey = (c.env as any).RESEND_API_KEY || ''
+
+  let rawBytes: Uint8Array | null = null
+  let pdfFilename = proposal.pdf_filename || 'proposal.pdf'
+
+  // 4. Attempt to re-fetch PDF from Resend API
+  if (resendEmailId && apiKey) {
+    try {
+      console.log(`[reprocess] Fetching attachments for email ${resendEmailId}`)
+      const attachListRes = await fetch(`https://api.resend.com/emails/receiving/${resendEmailId}/attachments`, {
+        headers: { 'Authorization': `Bearer ${apiKey}` }
+      })
+      if (attachListRes.ok) {
+        const attachList = await attachListRes.json() as any
+        const allAttachData: any[] = attachList.data || []
+        // Prefer PDF attachment
+        const pdfAttach = allAttachData.find((a: any) => a.content_type?.includes('pdf') || a.filename?.match(/\.pdf$/i))
+        const attachData = pdfAttach || allAttachData[0]
+        if (attachData?.download_url) {
+          const controller = new AbortController()
+          const timeoutId = setTimeout(() => controller.abort(), 55000) // 55s — max CF Worker lifetime
+          try {
+            const fileRes = await fetch(attachData.download_url, { signal: controller.signal })
+            clearTimeout(timeoutId)
+            if (fileRes.ok) {
+              const buf = await fileRes.arrayBuffer()
+              rawBytes = new Uint8Array(buf)
+              pdfFilename = attachData.filename || proposal.pdf_filename || 'proposal.pdf'
+              console.log(`[reprocess] Downloaded ${rawBytes.length} bytes from Resend`)
+            } else {
+              console.error(`[reprocess] Resend download failed: HTTP ${fileRes.status}`)
+            }
+          } catch(fetchErr: any) {
+            clearTimeout(timeoutId)
+            console.error(`[reprocess] Download error: ${fetchErr?.message}`)
+          }
+        }
+      }
+    } catch(err: any) {
+      console.error(`[reprocess] Resend API error: ${err?.message}`)
+    }
+  }
+
+  // 5. If Resend fetch failed, report error — cannot proceed without bytes
+  if (!rawBytes || rawBytes.length === 0) {
+    return c.json({
+      error: 'Could not re-fetch PDF from Resend. The attachment may have expired.',
+      hint: 'Resend attachment download URLs typically expire after 7 days. Upload the PDF manually via the admin panel.',
+      resend_email_id: resendEmailId || null,
+    }, 422)
+  }
+
+  // 6. Upload to R2
+  let pdfR2Key = ''
+  const bucket: R2Bucket | undefined = (c.env as any).PROPOSALS_BUCKET
+  if (bucket) {
+    const safeVendorName = (proposal.vendor_name || 'vendor').replace(/[^a-zA-Z0-9_-]/g,'_').slice(0,40)
+    pdfR2Key = `proposals/${rfpId}/${proposal.vendor_id}_${safeVendorName}_${Date.now()}.pdf`
+    try {
+      await bucket.put(pdfR2Key, rawBytes, {
+        httpMetadata: { contentType: 'application/pdf' },
+        customMetadata: { rfpId: String(rfpId), vendorId: String(proposal.vendor_id), filename: pdfFilename },
+      })
+      console.log(`[reprocess] PDF stored in R2: ${pdfR2Key} (${rawBytes.length} bytes)`)
+    } catch(r2Err: any) {
+      console.error(`[reprocess] R2 put failed: ${r2Err?.message}`)
+      pdfR2Key = ''
+    }
+  }
+
+  // 7. Extract full text
+  const pdfText = await extractPdfText(rawBytes)
+  console.log(`[reprocess] Extracted ${pdfText.length} chars from PDF`)
+
+  // 8. Extract proposed duration
+  const emailBody = emailLog?.body || ''
+  const proposedDuration = extractProposedDuration(pdfText + '\n' + emailBody)
+
+  // 9. LLM field extraction (60k chars)
+  const rfpTitle = rfp?.title || 'RFP'
+  let fields: any = {}
+  try {
+    fields = await extractProposalFieldsWithLLM(pdfText, emailBody, proposal.vendor_name || 'Vendor', rfpTitle, c.env)
+    console.log(`[reprocess] LLM extracted fields: budget=${fields.budget_amount}, timeline=${fields.timeline_months}`)
+  } catch(llmErr: any) {
+    console.error(`[reprocess] LLM field extraction failed: ${llmErr?.message}`)
+    fields = { executive_summary: '', key_strengths: '', budget_amount: null, budget_currency: 'AED', timeline_months: null, technical_proposal: pdfText.slice(0, 8000) }
+  }
+
+  // 10. Update D1 proposal record
+  const pdfUrl = pdfR2Key ? `r2://${pdfR2Key}` : proposal.pdf_attachment_url
+  await c.env.DB.prepare(`
+    UPDATE proposals SET
+      pdf_attachment_url=?, pdf_filename=?,
+      executive_summary=?, key_strengths=?,
+      budget_amount=?, budget_currency=?, timeline_months=?,
+      technical_proposal=?, proposed_duration=?
+    WHERE id=?
+  `).bind(
+    pdfUrl, pdfFilename,
+    fields.executive_summary, fields.key_strengths,
+    fields.budget_amount, fields.budget_currency, fields.timeline_months,
+    fields.technical_proposal, proposedDuration || proposal.proposed_duration,
+    proposalId
+  ).run()
+
+  // 11. Re-run AI evaluation if this is a real submission (Andersen)
+  let evaluation: any = null
+  const isAndersen = proposal.contact_email?.includes('andersenlab.com') || proposal.vendor_name?.toLowerCase().includes('andersen')
+  if (isAndersen) {
+    try {
+      // Build updated proposal object for evaluation
+      const updatedProposal = {
+        ...proposal,
+        technical_proposal: fields.technical_proposal,
+        budget_amount: fields.budget_amount,
+        timeline_months: fields.timeline_months,
+        proposed_duration: proposedDuration || proposal.proposed_duration,
+      }
+      const evalResult = await evaluateAndersenWithLLM(updatedProposal, rfp, c.env)
+
+      const total = Math.round(
+        evalResult.scores.business * 0.30 +
+        evalResult.scores.technical * 0.40 +
+        evalResult.scores.financial * 0.30
+      )
+
+      // Delete existing evaluation for this proposal and re-insert
+      await c.env.DB.prepare('DELETE FROM evaluations WHERE proposal_id=?').bind(proposalId).run()
+      await c.env.DB.prepare(`
+        INSERT INTO evaluations (rfp_id, proposal_id, vendor_id, business_score, technical_score, financial_score, experience_score, total_score, ai_summary, scoring_details_json, is_real, created_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
+      `).bind(
+        rfpId, proposalId, proposal.vendor_id,
+        evalResult.scores.business, evalResult.scores.technical,
+        evalResult.scores.financial, evalResult.scores.experience,
+        total, evalResult.summary, JSON.stringify(evalResult.scoringDetails), 1
+      ).run()
+
+      evaluation = { total_score: total, summary: evalResult.summary }
+      console.log(`[reprocess] Re-evaluated Andersen: total=${total}`)
+    } catch(evalErr: any) {
+      console.error(`[reprocess] Re-evaluation failed: ${evalErr?.message}`)
+    }
+  }
+
+  return c.json({
+    ok: true,
+    proposal_id: proposalId,
+    pdf_bytes: rawBytes.length,
+    r2_key: pdfR2Key || null,
+    text_chars: pdfText.length,
+    extracted_fields: {
+      executive_summary: (fields.executive_summary || '').slice(0, 100) + '...',
+      budget_amount: fields.budget_amount,
+      budget_currency: fields.budget_currency,
+      timeline_months: fields.timeline_months,
+    },
+    evaluation: evaluation ? { total_score: evaluation.total_score } : null,
+  })
+})
+
 apiRouter.post('/rfps/:id/proposals/sample', async (c) => {
   const rfpId = c.req.param('id')
   const { results: shortlisted } = await c.env.DB.prepare(`

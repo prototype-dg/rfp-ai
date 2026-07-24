@@ -1831,6 +1831,42 @@ async function reprocessQuestions(rfpId) {
   }
 }
 
+async function reprocessProposalPdf(rfpId, proposalId) {
+  if (!confirm('Re-process this proposal? This will:\n• Re-fetch the PDF from the original email\n• Extract full text (up to 60k chars)\n• Re-run AI field extraction (summary, budget, timeline)\n• Re-run AI evaluation\n\nThis may take 30–60 seconds.')) return;
+
+  // Find and disable the button
+  var btns = document.querySelectorAll('button[onclick*="reprocessProposalPdf(' + rfpId + ',' + proposalId + ')"]');
+  btns.forEach(function(b) { b.disabled = true; b.innerHTML = '<i class="fas fa-spinner fa-spin"></i>Processing...'; });
+
+  showToast('⏳ Re-processing proposal PDF — re-fetching from email, extracting text, running LLM...', 'info', 60000);
+
+  try {
+    const result = await apiCall('POST', '/rfps/' + rfpId + '/proposals/' + proposalId + '/reprocess', {});
+    if (result.ok) {
+      var msg = '✅ Proposal re-processed successfully!\n'
+        + '• PDF: ' + (result.pdf_bytes ? Math.round(result.pdf_bytes / 1024 / 1024 * 10) / 10 + ' MB' : 'N/A') + ' stored in R2\n'
+        + '• Text extracted: ' + result.text_chars + ' chars\n'
+        + '• Budget: ' + (result.extracted_fields.budget_amount ? result.extracted_fields.budget_currency + ' ' + Number(result.extracted_fields.budget_amount).toLocaleString() : 'Not found') + '\n'
+        + '• Timeline: ' + (result.extracted_fields.timeline_months ? result.extracted_fields.timeline_months + ' months' : 'Not found') + '\n'
+        + (result.evaluation ? '• New AI score: ' + result.evaluation.total_score + '/100' : '');
+      showToast('✅ Re-processed! Budget: ' + (result.extracted_fields.budget_amount ? result.extracted_fields.budget_currency + ' ' + Number(result.extracted_fields.budget_amount).toLocaleString() : 'N/A') + ' | Timeline: ' + (result.extracted_fields.timeline_months || '?') + ' months' + (result.evaluation ? ' | Score: ' + result.evaluation.total_score + '/100' : ''), 'success', 12000);
+      // Refresh proposals tab to show updated data
+      rfpTabs.proposals(rfpId);
+    } else {
+      showToast('Re-process failed: ' + (result.error || 'Unknown error'), 'error', 8000);
+      btns.forEach(function(b) { b.disabled = false; b.innerHTML = '<i class="fas fa-sync"></i>Re-process'; });
+    }
+  } catch(e) {
+    var errMsg = e.message || String(e);
+    if (errMsg.includes('attachment may have expired')) {
+      showToast('❌ Resend attachment expired (>7 days). Use "Upload PDF" to manually re-upload the file.', 'error', 10000);
+    } else {
+      showToast('Re-process error: ' + errMsg, 'error', 8000);
+    }
+    btns.forEach(function(b) { b.disabled = false; b.innerHTML = '<i class="fas fa-sync"></i>Re-process'; });
+  }
+}
+
 // --- TAB: PROPOSALS ---
 rfpTabs.proposals = async function(rfpId) {
   const [proposals, evaluations] = await Promise.all([
@@ -1932,9 +1968,10 @@ rfpTabs.proposals = async function(rfpId) {
       + '<td>' + scoreCell + '</td>'
       + '<td>' + statusBadge(p) + '</td>'
       + '<td>'
-      + '<div style="display:flex;gap:4px;align-items:center">'
+      + '<div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">'
       + '<button class="btn-ghost btn-sm" onclick="viewProposalDetail(' + p.id + ')"><i class="fas fa-eye"></i>View</button>'
       + pdfDownloadBtn
+      + (isReal && !p.pdf_attachment_url ? '<button class="btn-ghost btn-sm" style="color:#7c3aed;border-color:#c4b5fd" onclick="reprocessProposalPdf(' + rfpId + ',' + p.id + ')" title="Re-fetch PDF from email and re-extract proposal fields"><i class="fas fa-sync"></i>Re-process</button>' : '')
       + awardBtn
       + '</div>'
       + '</td>'
@@ -2227,7 +2264,15 @@ function viewProposalDetail(id) {
     + (function() {
         if (!p.pdf_attachment_url) {
           if (p.pdf_filename) {
-            return '<div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:0.75rem;margin-bottom:1rem;display:flex;align-items:center;gap:0.5rem;font-size:0.82rem;color:#6b7280"><i class="fas fa-file-pdf" style="color:#9ca3af"></i><span><strong>' + escHtml(p.pdf_filename) + '</strong> — received but could not be stored (file may be very large). Original PDF was processed for AI extraction.</span></div>';
+            var reprocessBtn = p.is_real_submission
+              ? '<button class="btn-secondary" style="margin-top:0.5rem;background:#7c3aed;border-color:#7c3aed;color:white" onclick="closeModal();reprocessProposalPdf(' + p.rfp_id + ',' + p.id + ')"><i class="fas fa-sync mr-1"></i>Re-process PDF from Email</button>'
+              : '';
+            return '<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:0.875rem;margin-bottom:1rem">'
+              + '<div style="display:flex;align-items:center;gap:0.5rem;font-size:0.82rem;color:#92400e;margin-bottom:0.35rem"><i class="fas fa-exclamation-circle" style="color:#f97316"></i><strong>PDF not stored</strong></div>'
+              + '<div style="font-size:0.8rem;color:#78350f">File: <strong>' + escHtml(p.pdf_filename) + '</strong><br>This proposal was received before cloud storage was configured. '
+              + 'The summary and scores are based on the email body only — not the actual PDF content.</div>'
+              + reprocessBtn
+              + '</div>';
           }
           return '';
         }
