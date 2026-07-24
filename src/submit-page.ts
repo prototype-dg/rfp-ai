@@ -296,133 +296,163 @@ export function getSubmitPage(rfpId: string, participantCode: string): string {
 </div><!-- /page -->
 
 <script>
-const RFP_ID = ${rfpId};
-const PRESET_CODE = ${JSON.stringify(participantCode)};
-let rfpData = null;
-let uploadedFiles = []; // { file, label, summary, confidence, status }
+(function() {
+// ── Constants injected server-side ────────────────────────────
+var RFP_ID = ${rfpId};
+var PRESET_CODE = ${JSON.stringify(participantCode)};
+var uploadedFiles = []; // { file, label, summary, confidence, status }
+var rfpData = null;
+
+// ── Expose globals needed by inline event handlers ─────────────
+window.handleDrop = handleDrop;
+window.handleFiles = handleFiles;
+window.removeFile = removeFile;
+window.setLabel = setLabel;
+window.submitProposal = submitProposal;
+window.onCodeInput = onCodeInput;
+window.expandSection = expandSection;
 
 // ── Boot ──────────────────────────────────────────────────────
-window.addEventListener('DOMContentLoaded', async () => {
-  await loadRfp();
+window.addEventListener("DOMContentLoaded", function() {
+  loadRfp();
   if (PRESET_CODE) updateSubmitBtn();
 });
 
-async function loadRfp() {
-  try {
-    const res = await fetch('/api/submit/' + RFP_ID);
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      showRfpError(err.error || 'This RFP is not available for submission.');
-      document.getElementById('formCard').style.display = 'none';
-      return;
-    }
-    rfpData = await res.json();
-    renderRfpCard(rfpData);
-  } catch(e) {
-    showRfpError('Could not load RFP details. Please refresh the page.');
-  }
+function loadRfp() {
+  fetch("/api/submit/" + RFP_ID)
+    .then(function(res) {
+      if (!res.ok) {
+        return res.json().catch(function(){ return {}; }).then(function(err) {
+          showRfpError(err.error || "This RFP is not available for submission.");
+          document.getElementById("formCard").style.display = "none";
+        });
+      }
+      return res.json().then(function(data) {
+        rfpData = data;
+        renderRfpCard(data);
+      });
+    })
+    .catch(function() {
+      showRfpError("Could not load RFP details. Please refresh the page.");
+    });
 }
 
 function renderRfpCard(rfp) {
-  const deadline = rfp.deadline ? new Date(rfp.deadline).toLocaleDateString('en-AE', { day:'numeric', month:'long', year:'numeric' }) : '—';
-  let sections = '';
-  if (rfp.background) sections += sectionBlock('Project Background', rfp.background, 'fa-info-circle', '#0f3460');
-  if (rfp.scope) sections += sectionBlock('Scope of Work', rfp.scope, 'fa-list-check', '#7c3aed');
-  if (rfp.tech_requirements) sections += sectionBlock('Technical Requirements', rfp.tech_requirements, 'fa-microchip', '#0369a1');
-  if (rfp.objectives) sections += sectionBlock('Objectives', rfp.objectives, 'fa-bullseye', '#166534');
+  var deadline = rfp.deadline
+    ? new Date(rfp.deadline).toLocaleDateString("en-AE", { day:"numeric", month:"long", year:"numeric" })
+    : "\u2014";
+  var sections = "";
+  if (rfp.background) sections += sectionBlock("Project Background", rfp.background, "fa-info-circle", "#0f3460");
+  if (rfp.scope) sections += sectionBlock("Scope of Work", rfp.scope, "fa-list-alt", "#7c3aed");
+  if (rfp.tech_requirements) sections += sectionBlock("Technical Requirements", rfp.tech_requirements, "fa-microchip", "#0369a1");
+  if (rfp.objectives) sections += sectionBlock("Objectives", rfp.objectives, "fa-bullseye", "#166534");
 
-  document.getElementById('rfpCard').innerHTML =
-    '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap">' +
-    '<div><div class="label">RFP Reference</div><div class="value">' + esc(rfp.ref_number || '—') + '</div></div>' +
-    '<div style="text-align:right"><span style="background:#fef3c7;color:#92400e;border-radius:20px;padding:4px 14px;font-size:0.75rem;font-weight:700"><i class="fas fa-clock" style="margin-right:4px"></i>Deadline: ' + deadline + '</span></div>' +
-    '</div>' +
-    '<div style="margin-top:10px"><div style="font-size:1.15rem;font-weight:700;color:#1a202c">' + esc(rfp.title || '') + '</div>' +
-    '<div style="font-size:0.82rem;color:#6b7280;margin-top:3px">' + esc(rfp.category || '') + ' &nbsp;|&nbsp; Crown Prince\'s Court, Abu Dhabi</div></div>' +
-    '<div class="rfp-meta">' +
-    '<div><div class="label">Issuing Entity</div><div class="value">Crown Prince\'s Court (CPC)</div></div>' +
-    '<div><div class="label">Category</div><div class="value">' + esc(rfp.category || '—') + '</div></div>' +
-    '<div><div class="label">Submission Deadline</div><div class="value" style="color:#dc2626">' + deadline + '</div></div>' +
-    '</div>' +
+  document.getElementById("rfpCard").innerHTML =
+    "<div style=\"display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap\">" +
+    "<div><div class=\"label\">RFP Reference</div><div class=\"value\">" + esc(rfp.ref_number || "\u2014") + "</div></div>" +
+    "<div style=\"text-align:right\"><span style=\"background:#fef3c7;color:#92400e;border-radius:20px;padding:4px 14px;font-size:0.75rem;font-weight:700\"><i class=\"fas fa-clock\" style=\"margin-right:4px\"></i>Deadline: " + deadline + "</span></div>" +
+    "</div>" +
+    "<div style=\"margin-top:10px\"><div style=\"font-size:1.15rem;font-weight:700;color:#1a202c\">" + esc(rfp.title || "") + "</div>" +
+    "<div style=\"font-size:0.82rem;color:#6b7280;margin-top:3px\">" + esc(rfp.category || "") + " &nbsp;|&nbsp; Crown Prince\u2019s Court, Abu Dhabi</div></div>" +
+    "<div class=\"rfp-meta\">" +
+    "<div><div class=\"label\">Issuing Entity</div><div class=\"value\">Crown Prince\u2019s Court (CPC)</div></div>" +
+    "<div><div class=\"label\">Category</div><div class=\"value\">" + esc(rfp.category || "\u2014") + "</div></div>" +
+    "<div><div class=\"label\">Submission Deadline</div><div class=\"value\" style=\"color:#dc2626\">" + deadline + "</div></div>" +
+    "</div>" +
     sections;
 }
 
+// Use data-secid attribute to avoid any quoting in onclick
+var _expandMap = {};
 function sectionBlock(title, text, icon, color) {
-  const id = 'sec_' + Math.random().toString(36).slice(2);
-  const truncated = text.length > 280;
-  const display = truncated ? text.slice(0, 280) + '…' : text;
-  return '<div class="rfp-section-block">' +
-    '<div class="sec-title"><i class="fas ' + icon + '" style="color:' + color + '"></i>' + esc(title) + '</div>' +
-    '<div class="sec-body" id="' + id + '">' + esc(display) + '</div>' +
-    (truncated ? '<button class="expand-btn" onclick="expandSection(\'' + id + '\',' + JSON.stringify(text) + ')">Show more</button>' : '') +
-    '</div>';
+  var id = "sec_" + Math.random().toString(36).slice(2);
+  var truncated = text.length > 280;
+  var display = truncated ? text.slice(0, 280) + "\u2026" : text;
+  _expandMap[id] = text;
+  return "<div class=\"rfp-section-block\">" +
+    "<div class=\"sec-title\"><i class=\"fas " + icon + "\" style=\"color:" + color + "\"></i>" + esc(title) + "</div>" +
+    "<div class=\"sec-body\" id=\"" + id + "\">" + esc(display) + "</div>" +
+    (truncated ? "<button class=\"expand-btn\" data-secid=\"" + id + "\" onclick=\"expandSection(this)\">Show more</button>" : "") +
+    "</div>";
 }
-function expandSection(id, full) {
-  document.getElementById(id).textContent = full;
-  event.target.style.display = 'none';
+
+function expandSection(btn) {
+  var id = btn.getAttribute("data-secid");
+  if (id && _expandMap[id]) {
+    document.getElementById(id).textContent = _expandMap[id];
+    btn.style.display = "none";
+  }
 }
 
 function showRfpError(msg) {
-  document.getElementById('rfpCard').innerHTML =
-    '<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:16px;color:#991b1b"><i class="fas fa-exclamation-triangle" style="margin-right:8px"></i>' + esc(msg) + '</div>';
+  document.getElementById("rfpCard").innerHTML =
+    "<div style=\"background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:16px;color:#991b1b\"><i class=\"fas fa-exclamation-triangle\" style=\"margin-right:8px\"></i>" + esc(msg) + "</div>";
 }
 
 // ── Code input (when no preset) ───────────────────────────────
 function onCodeInput(val) {
-  document.getElementById('codeDisplay').textContent = val || '—';
+  document.getElementById("codeDisplay").textContent = val || "\u2014";
   updateSubmitBtn();
 }
 
 function getCode() {
-  return PRESET_CODE || (document.getElementById('codeInput') ? document.getElementById('codeInput').value.trim() : '');
+  return PRESET_CODE || (document.getElementById("codeInput") ? document.getElementById("codeInput").value.trim() : "");
 }
 
 // ── File handling ─────────────────────────────────────────────
 function handleDrop(event) {
   event.preventDefault();
-  document.getElementById('dropZone').classList.remove('dragover');
-  const files = Array.from(event.dataTransfer.files).filter(f => f.type === 'application/pdf' || f.name.endsWith('.pdf'));
+  document.getElementById("dropZone").classList.remove("dragover");
+  var files = Array.from(event.dataTransfer.files).filter(function(f) {
+    return f.type === "application/pdf" || f.name.endsWith(".pdf");
+  });
   if (files.length) handleFiles(files);
-  else showAlert('error', 'Please upload PDF files only.');
+  else showAlert("error", "Please upload PDF files only.");
 }
 
 function handleFiles(filesOrList) {
-  const files = Array.from(filesOrList);
-  const pdfs = files.filter(f => f.type === 'application/pdf' || f.name.endsWith('.pdf'));
-  const nonPdf = files.filter(f => f.type !== 'application/pdf' && !f.name.endsWith('.pdf'));
-  if (nonPdf.length) showAlert('error', 'Only PDF files are accepted. ' + nonPdf.map(f => f.name).join(', ') + ' skipped.');
+  var files = Array.from(filesOrList);
+  var pdfs = files.filter(function(f) { return f.type === "application/pdf" || f.name.endsWith(".pdf"); });
+  var nonPdf = files.filter(function(f) { return f.type !== "application/pdf" && !f.name.endsWith(".pdf"); });
+  if (nonPdf.length) showAlert("error", "Only PDF files are accepted. " + nonPdf.map(function(f){ return f.name; }).join(", ") + " skipped.");
 
-  for (const file of pdfs) {
-    if (uploadedFiles.find(f => f.file.name === file.name && f.file.size === file.size)) continue; // dedupe
-    if (file.size > 50 * 1024 * 1024) { showAlert('error', file.name + ' exceeds 50 MB limit and was skipped.'); continue; }
-    const entry = { file, label: 'other', summary: '', confidence: 'medium', status: 'uploading' };
+  for (var i = 0; i < pdfs.length; i++) {
+    var file = pdfs[i];
+    if (uploadedFiles.find(function(f) { return f.file.name === file.name && f.file.size === file.size; })) continue;
+    if (file.size > 50 * 1024 * 1024) { showAlert("error", file.name + " exceeds 50 MB limit and was skipped."); continue; }
+    var entry = { file: file, label: "other", summary: "", confidence: "medium", status: "pending" };
     uploadedFiles.push(entry);
     renderFileList();
     categorizeFile(entry);
   }
-  document.getElementById('fileInput').value = '';
+  // Reset input so same file can be re-selected if removed
+  document.getElementById("fileInput").value = "";
 }
 
-async function categorizeFile(entry) {
-  try {
-    const fd = new FormData();
-    fd.append('file', entry.file);
-    entry.status = 'categorizing';
-    renderFileList();
-
-    const res = await fetch('/api/submit/' + RFP_ID + '/categorize', { method: 'POST', body: fd });
-    const data = await res.json();
-
-    entry.label = data.label || 'other';
-    entry.summary = data.summary || '';
-    entry.confidence = data.confidence || 'medium';
-    entry.status = 'done';
-  } catch(e) {
-    entry.label = 'other';
-    entry.summary = 'Categorization failed — please set the document type manually.';
-    entry.status = 'error';
-  }
+function categorizeFile(entry) {
+  entry.status = "categorizing";
   renderFileList();
-  updateSubmitBtn();
+
+  var fd = new FormData();
+  fd.append("file", entry.file);
+
+  fetch("/api/submit/" + RFP_ID + "/categorize", { method: "POST", body: fd })
+    .then(function(res) { return res.json(); })
+    .then(function(data) {
+      entry.label = data.label || "other";
+      entry.summary = data.summary || "";
+      entry.confidence = data.confidence || "medium";
+      entry.status = "done";
+      renderFileList();
+      updateSubmitBtn();
+    })
+    .catch(function() {
+      entry.label = "other";
+      entry.summary = "Categorization failed \u2014 please set the document type manually.";
+      entry.status = "error";
+      renderFileList();
+      updateSubmitBtn();
+    });
 }
 
 function removeFile(idx) {
@@ -436,118 +466,124 @@ function setLabel(idx, val) {
   renderFileList();
 }
 
-const LABEL_META = {
-  technical:  { text: 'Technical Proposal',  icon: 'fa-laptop-code',  color: '#1d4ed8' },
-  commercial: { text: 'Commercial Proposal',  icon: 'fa-file-invoice-dollar', color: '#166534' },
-  supporting: { text: 'Supporting Document', icon: 'fa-paperclip',     color: '#7c3aed' },
-  other:      { text: 'Other Document',       icon: 'fa-file',          color: '#6b7280' },
+var LABEL_META = {
+  technical:  { text: "Technical Proposal",   icon: "fa-laptop-code",          color: "#1d4ed8" },
+  commercial: { text: "Commercial Proposal",   icon: "fa-file-invoice-dollar",  color: "#166534" },
+  supporting: { text: "Supporting Document",   icon: "fa-paperclip",            color: "#7c3aed" },
+  other:      { text: "Other Document",        icon: "fa-file",                 color: "#6b7280" }
 };
 
 function renderFileList() {
-  const container = document.getElementById('fileList');
-  if (!uploadedFiles.length) { container.innerHTML = ''; return; }
+  var container = document.getElementById("fileList");
+  if (!uploadedFiles.length) { container.innerHTML = ""; return; }
 
-  container.innerHTML = uploadedFiles.map((entry, idx) => {
-    const lm = LABEL_META[entry.label] || LABEL_META.other;
-    const sizeMb = (entry.file.size / 1024 / 1024).toFixed(1);
-    const isCategorizing = entry.status === 'categorizing' || entry.status === 'uploading';
-    const confClass = entry.confidence === 'high' ? 'high' : entry.confidence === 'low' ? 'low' : '';
+  container.innerHTML = uploadedFiles.map(function(entry, idx) {
+    var lm = LABEL_META[entry.label] || LABEL_META.other;
+    var sizeMb = (entry.file.size / 1024 / 1024).toFixed(1);
+    var isCategorizing = entry.status === "categorizing" || entry.status === "pending";
+    var confClass = entry.confidence === "high" ? "high" : entry.confidence === "low" ? "low" : "";
 
-    const labelOptions = Object.entries(LABEL_META).map(([k, v]) =>
-      '<option value="' + k + '"' + (entry.label === k ? ' selected' : '') + '>' + v.text + '</option>'
-    ).join('');
+    var labelOptions = Object.keys(LABEL_META).map(function(k) {
+      var v = LABEL_META[k];
+      return "<option value=\"" + k + "\"" + (entry.label === k ? " selected" : "") + ">" + v.text + "</option>";
+    }).join("");
 
-    return '<div class="file-item ' + (isCategorizing ? 'categorizing' : entry.status) + '">' +
-      '<div class="file-icon"><i class="fas fa-file-pdf"></i></div>' +
-      '<div class="file-info">' +
-      '<div class="file-name" title="' + esc(entry.file.name) + '">' + esc(entry.file.name) + '</div>' +
-      '<div class="file-size">' + sizeMb + ' MB</div>' +
+    return "<div class=\"file-item " + (isCategorizing ? "categorizing" : entry.status) + "\">" +
+      "<div class=\"file-icon\"><i class=\"fas fa-file-pdf\"></i></div>" +
+      "<div class=\"file-info\">" +
+      "<div class=\"file-name\" title=\"" + esc(entry.file.name) + "\">" + esc(entry.file.name) + "</div>" +
+      "<div class=\"file-size\">" + sizeMb + " MB</div>" +
       (isCategorizing
-        ? '<div class="cat-spinner"><i class="fas fa-spinner fa-spin"></i> Analysing document…</div>'
-        : '<div class="file-summary">' + esc(entry.summary) + (entry.confidence ? ' <span class="conf-badge ' + confClass + '">' + entry.confidence + ' confidence</span>' : '') + '</div>') +
-      '<div class="file-label-row">' +
-      '<span style="font-size:0.72rem;color:#6b7280;font-weight:600">Type:</span>' +
-      '<select class="label-select" onchange="setLabel(' + idx + ', this.value)">' + labelOptions + '</select>' +
-      '<span style="font-size:0.72rem;color:' + lm.color + ';font-weight:700"><i class="fas ' + lm.icon + '" style="margin-right:3px"></i>' + lm.text + '</span>' +
-      '</div>' +
-      '</div>' +
-      '<button class="file-remove" onclick="removeFile(' + idx + ')" title="Remove"><i class="fas fa-times"></i></button>' +
-      '</div>';
-  }).join('');
+        ? "<div class=\"cat-spinner\"><i class=\"fas fa-spinner fa-spin\"></i> Analysing document\u2026</div>"
+        : "<div class=\"file-summary\">" + esc(entry.summary) +
+          (entry.confidence ? " <span class=\"conf-badge " + confClass + "\">" + entry.confidence + " confidence</span>" : "") +
+          "</div>") +
+      "<div class=\"file-label-row\">" +
+      "<span style=\"font-size:0.72rem;color:#6b7280;font-weight:600\">Type:</span>" +
+      "<select class=\"label-select\" onchange=\"setLabel(" + idx + ", this.value)\">" + labelOptions + "</select>" +
+      "<span style=\"font-size:0.72rem;color:" + lm.color + ";font-weight:700\"><i class=\"fas " + lm.icon + "\" style=\"margin-right:3px\"></i>" + lm.text + "</span>" +
+      "</div>" +
+      "</div>" +
+      "<button class=\"file-remove\" onclick=\"removeFile(" + idx + ")\" title=\"Remove\"><i class=\"fas fa-times\"></i></button>" +
+      "</div>";
+  }).join("");
 }
 
 // ── Submit ────────────────────────────────────────────────────
 function updateSubmitBtn() {
-  const code = getCode();
-  const hasFiles = uploadedFiles.length > 0 && uploadedFiles.every(f => f.status !== 'categorizing' && f.status !== 'uploading');
-  const hasCode = code.match(/^RFP-\\d+-V\\d+$/);
-  document.getElementById('submitBtn').disabled = !(hasCode && hasFiles);
+  var code = getCode();
+  var hasFiles = uploadedFiles.length > 0 && uploadedFiles.every(function(f) {
+    return f.status !== "categorizing" && f.status !== "pending";
+  });
+  var hasCode = /^RFP-\d+-V\d+$/i.test(code);
+  document.getElementById("submitBtn").disabled = !(hasCode && hasFiles);
 }
 
-async function submitProposal() {
-  const code = getCode();
-  if (!code) { showAlert('error', 'Please enter your Participant Reference Code.'); return; }
-  if (!uploadedFiles.length) { showAlert('error', 'Please upload at least one proposal document.'); return; }
-  if (uploadedFiles.some(f => f.status === 'categorizing' || f.status === 'uploading')) {
-    showAlert('error', 'Please wait for all files to finish processing before submitting.'); return;
+function submitProposal() {
+  var code = getCode();
+  if (!code) { showAlert("error", "Please enter your Participant Reference Code."); return; }
+  if (!uploadedFiles.length) { showAlert("error", "Please upload at least one proposal document."); return; }
+  if (uploadedFiles.some(function(f) { return f.status === "categorizing" || f.status === "pending"; })) {
+    showAlert("error", "Please wait for all files to finish processing before submitting."); return;
   }
 
-  showLoading('Submitting your proposal… please do not close this window.');
+  showLoading("Submitting your proposal\u2026 please do not close this window.");
 
-  try {
-    const fd = new FormData();
-    fd.append('vendor_code', code);
-    fd.append('cover_letter', document.getElementById('coverLetter').value.trim());
+  var fd = new FormData();
+  fd.append("vendor_code", code);
+  fd.append("cover_letter", document.getElementById("coverLetter").value.trim());
 
-    const fileLabels = {};
-    uploadedFiles.forEach((entry, i) => {
-      fd.append('file_' + i, entry.file, entry.file.name);
-      fileLabels[entry.file.name] = entry.label;
-      fileLabels[String(i)] = entry.label;
+  var fileLabels = {};
+  uploadedFiles.forEach(function(entry, i) {
+    fd.append("file_" + i, entry.file, entry.file.name);
+    fileLabels[entry.file.name] = entry.label;
+    fileLabels[String(i)] = entry.label;
+  });
+  fd.append("file_labels", JSON.stringify(fileLabels));
+
+  fetch("/api/submit/" + RFP_ID, { method: "POST", body: fd })
+    .then(function(res) {
+      return res.json().then(function(data) { return { ok: res.ok, data: data }; });
+    })
+    .then(function(result) {
+      hideLoading();
+      if (!result.ok || result.data.error) {
+        showAlert("error", result.data.error || "Submission failed. Please try again.");
+        return;
+      }
+      document.getElementById("formCard").style.display = "none";
+      var ss = document.getElementById("successScreen");
+      ss.style.display = "block";
+      document.getElementById("successRef").textContent = code;
+      var n = result.data.files_stored || uploadedFiles.length;
+      document.getElementById("successFiles").textContent =
+        n + " document" + (n === 1 ? "" : "s") + " received";
+    })
+    .catch(function() {
+      hideLoading();
+      showAlert("error", "Network error. Please check your connection and try again.");
     });
-    fd.append('file_labels', JSON.stringify(fileLabels));
-
-    const res = await fetch('/api/submit/' + RFP_ID, { method: 'POST', body: fd });
-    const data = await res.json();
-
-    hideLoading();
-
-    if (!res.ok || data.error) {
-      showAlert('error', data.error || 'Submission failed. Please try again.');
-      return;
-    }
-
-    // Show success
-    document.getElementById('formCard').style.display = 'none';
-    const ss = document.getElementById('successScreen');
-    ss.style.display = 'block';
-    document.getElementById('successRef').textContent = code;
-    document.getElementById('successFiles').textContent =
-      data.files_stored + ' document' + (data.files_stored === 1 ? '' : 's') + ' received';
-
-  } catch(e) {
-    hideLoading();
-    showAlert('error', 'Network error. Please check your connection and try again.');
-  }
 }
 
 // ── Helpers ───────────────────────────────────────────────────
 function esc(s) {
-  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  return String(s || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 }
 function showAlert(type, msg) {
-  const el = document.getElementById('alert' + (type === 'error' ? 'Error' : 'Info'));
+  var el = document.getElementById("alert" + (type === "error" ? "Error" : "Info"));
   el.textContent = msg;
-  el.style.display = 'block';
-  setTimeout(() => { el.style.display = 'none'; }, 8000);
+  el.style.display = "block";
+  setTimeout(function() { el.style.display = "none"; }, 8000);
 }
 function showLoading(msg) {
-  document.getElementById('loadingText').textContent = msg || 'Loading…';
-  document.getElementById('loadingOverlay').classList.add('show');
+  document.getElementById("loadingText").textContent = msg || "Loading\u2026";
+  document.getElementById("loadingOverlay").classList.add("show");
 }
 function hideLoading() {
-  document.getElementById('loadingOverlay').classList.remove('show');
+  document.getElementById("loadingOverlay").classList.remove("show");
 }
+
+})(); // end IIFE
 </script>
 </body>
 </html>`
