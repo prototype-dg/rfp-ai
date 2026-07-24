@@ -928,8 +928,12 @@ function downloadRfpPdf(rfpId) {
     '.rfp-footer{background:#215868;color:white;padding:10pt 24pt;text-align:center;font-size:8pt;line-height:1.8;}',
   ].join('');
 
+  // IMPORTANT: Do NOT use innerHTML += after appendChild(style).
+  // innerHTML += serializes the DOM back to a string and re-parses it, which
+  // drops the <style> element we just appended (DOM nodes are not serializable).
+  // Use insertAdjacentHTML to append content WITHOUT re-serializing the DOM.
   wrapper.appendChild(style);
-  wrapper.innerHTML += rfp.content;
+  wrapper.insertAdjacentHTML('beforeend', rfp.content);
   document.body.appendChild(wrapper);
 
   var safeTitle = (rfp.ref_number || rfp.title || 'RFP').replace(/[^a-zA-Z0-9_\-]/g, '_');
@@ -1705,6 +1709,11 @@ rfpTabs.qa = async function(rfpId) {
     + '<button class="btn-ghost btn-sm" id="reprocessQBtn" onclick="reprocessQuestions(' + rfpId + ')" title="Re-extract questions from received emails"><i class="fas fa-sync"></i>Re-extract</button>'
     + '<button class="btn-secondary" id="draftAllBtn" onclick="draftAllQAnswers(' + rfpId + ')"><i class="fas fa-robot"></i>AI Answer All</button>'
     + '<button class="btn-primary" onclick="publishAllQAnswers(' + rfpId + ')" ' + (manualNeeded > 0 ? 'title="Blocked: ' + manualNeeded + ' question(s) need manual answers" style="opacity:0.6"' : '') + '><i class="fas fa-paper-plane"></i>Publish All Approved</button>'
+    + (appState.currentRfp && appState.currentRfp.stage === 'qa_open'
+        ? '<button class="btn-danger" onclick="closeQA(' + rfpId + ')" title="Stop accepting vendor questions and mark Q&amp;A stage as complete" style="background:#dc2626;color:#fff;border:none;padding:0.35rem 0.75rem;border-radius:6px;font-size:0.82rem;cursor:pointer;display:flex;align-items:center;gap:0.35rem"><i class="fas fa-lock"></i>Close Q&amp;A</button>'
+        : (appState.currentRfp && ['submissions_closed','evaluation','awarded'].includes(appState.currentRfp.stage)
+            ? '<span style="font-size:0.78rem;color:#065f46;font-weight:600;display:flex;align-items:center;gap:0.35rem;padding:0.35rem 0.5rem"><i class="fas fa-lock mr-1"></i>Q&amp;A Closed</span>'
+            : ''))
     + '</div>'
     + '</div>'
     + manualWarning
@@ -1764,21 +1773,37 @@ async function saveQAnswer(rfpId, qId) {
 async function publishAllQAnswers(rfpId) {
   try {
     await apiCall('POST', '/rfps/' + rfpId + '/questions/publish-all', {});
-    // Refresh RFP to get updated stage (backend advances qa_open → submissions_closed)
+    // NOTE: Publish All Approved does NOT advance stage — use "Close Q&A" button for that
+    showToast('\u2705 Q&A answers published and sent to all vendors!', 'success', 5000);
+    addNotification('info', '\u2705 Answers Published', 'All approved Q&A answers sent to vendors.', rfpId, 'qa', null);
+    // Stay on Q&A tab, clear badge
+    appState.unreadQA = false;
+    renderRfpTabs('qa', rfpId, false);
+    rfpTabs.qa(rfpId);
+  } catch(e) {
+    showToast('Publish failed: ' + e.message, 'error');
+  }
+}
+
+async function closeQA(rfpId) {
+  if (!confirm('Close Q&A? This will mark the Q&A stage as complete and prevent further vendor questions from being processed. Vendors will still be able to submit proposals.')) return;
+  try {
+    await apiCall('POST', '/rfps/' + rfpId + '/stage', { stage: 'submissions_closed' });
+    // Refresh RFP to update lifecycle bar
     const rfp = await apiCall('GET', '/rfps/' + rfpId).catch(function(){ return null; });
     if (rfp) {
       appState.currentRfp = rfp;
       renderLifecycleBar(rfp);
       document.getElementById('pageSubtitle').textContent = (rfp.ref_number||'') + ' \u2022 ' + stageLabelMap(rfp.stage||'draft');
     }
-    showToast('\u2705 Q&A answers published and sent to all vendors. Q&A stage is now complete.', 'success', 5000);
-    addNotification('info', '\u2705 Q&A Closed', 'All approved Q&A answers sent to vendors. Now accepting proposals.', rfpId, 'proposals', null);
-    // Stay on Q&A tab so user sees the confirmation — update tab bar to clear badge
+    showToast('\uD83D\uDD12 Q&A closed. Now accepting proposals. Vendor questions will no longer be processed.', 'success', 6000);
+    addNotification('info', '\uD83D\uDD12 Q&A Closed', 'Q&A stage complete. Now accepting proposals.', rfpId, 'proposals', null);
+    // Refresh Q&A tab to hide the Close Q&A button (stage is now submissions_closed)
     appState.unreadQA = false;
     renderRfpTabs('qa', rfpId, false);
     rfpTabs.qa(rfpId);
   } catch(e) {
-    showToast('Publish failed: ' + e.message, 'error');
+    showToast('Close Q&A failed: ' + e.message, 'error');
   }
 }
 
@@ -1879,9 +1904,15 @@ rfpTabs.proposals = async function(rfpId) {
       ? '<button class="award-btn" onclick="awardProposal(' + rfpId + ',' + p.id + ')" title="Award contract to this vendor"><i class="fas fa-award"></i>Award Contract</button>'
       : '<span style="font-size:0.75rem;color:#92400e;font-weight:700;background:#fef3c7;padding:4px 10px;border-radius:6px;display:inline-flex;align-items:center;gap:4px"><i class="fas fa-trophy"></i>Winner</span>';
 
-    const pdfDownloadBtn = (p.pdf_attachment_url && p.pdf_filename)
-      ? '<a href="' + escHtml(p.pdf_attachment_url) + '" target="_blank" class="btn-ghost btn-sm" style="text-decoration:none" title="Download ' + escHtml(p.pdf_filename) + '"><i class="fas fa-file-pdf" style="color:#dc2626"></i>PDF</a>'
-      : '';
+    // Use Blob + URL.createObjectURL for data: URIs — opening data: URIs in new tab shows blank page
+    var pdfDownloadBtn = '';
+    if (p.pdf_attachment_url && p.pdf_filename) {
+      if (p.pdf_attachment_url.startsWith('data:')) {
+        pdfDownloadBtn = '<button class="btn-ghost btn-sm" onclick="downloadProposalPdf(' + p.id + ')" title="Download ' + escHtml(p.pdf_filename) + '"><i class="fas fa-file-pdf" style="color:#dc2626"></i>PDF</button>';
+      } else {
+        pdfDownloadBtn = '<a href="' + escHtml(p.pdf_attachment_url) + '" download="' + escHtml(p.pdf_filename) + '" class="btn-ghost btn-sm" style="text-decoration:none" title="Download ' + escHtml(p.pdf_filename) + '"><i class="fas fa-file-pdf" style="color:#dc2626"></i>PDF</a>';
+      }
+    }
 
     rows += '<tr style="' + rowBg + '">'
       + '<td><div style="display:flex;align-items:center;gap:8px">'
@@ -2002,6 +2033,41 @@ async function awardProposal(rfpId, proposalId) {
     rfpTabs.proposals(rfpId);
   } catch(e) {
     showToast('Award failed: ' + e.message, 'error');
+  }
+}
+
+function downloadProposalPdf(id) {
+  var p = appState.proposals.find(function(pp){ return pp.id === id; });
+  if (!p || !p.pdf_attachment_url || !p.pdf_filename) { showToast('PDF not available', 'error'); return; }
+  try {
+    // Convert data: URI to Blob and trigger programmatic download
+    var dataUrl = p.pdf_attachment_url;
+    if (dataUrl.startsWith('data:')) {
+      var parts = dataUrl.split(',');
+      var mime = (parts[0].match(/data:([^;]+)/) || [])[1] || 'application/pdf';
+      var binary = atob(parts[1]);
+      var bytes = new Uint8Array(binary.length);
+      for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      var blob = new Blob([bytes], { type: mime });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = p.pdf_filename;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function() { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
+    } else {
+      // Regular URL — use normal anchor download
+      var a2 = document.createElement('a');
+      a2.href = dataUrl;
+      a2.download = p.pdf_filename;
+      a2.target = '_blank';
+      document.body.appendChild(a2);
+      a2.click();
+      document.body.removeChild(a2);
+    }
+  } catch(e) {
+    showToast('Download failed: ' + (e.message || e), 'error');
   }
 }
 
@@ -2130,8 +2196,19 @@ function viewProposalDetail(id) {
           + '</div></div>';
       })() : '')
 
-    // Technical summary (raw extracted text — shown only if no executive_summary)
-    + (!p.executive_summary && p.technical_proposal ? '<div style="margin-bottom:1rem"><div style="font-weight:700;font-size:0.875rem;color:#1f2937;margin-bottom:0.5rem"><i class="fas fa-lightbulb mr-2" style="color:var(--cpc-gold)"></i>Technical Proposal</div><div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:0.875rem;font-size:0.82rem;max-height:180px;overflow-y:auto;white-space:pre-wrap;line-height:1.6;color:#374151">' + escHtml(p.technical_proposal) + '</div></div>' : '')
+    // Technical summary (raw extracted text — shown only if no executive_summary AND text is not PostScript garbage)
+    + (function() {
+        if (p.executive_summary || !p.technical_proposal) return '';
+        // Detect PostScript garbage: high density of known PS operators/short tokens
+        var tp = p.technical_proposal;
+        var psOpCount = (tp.match(/\b(dup|pop|exch|sub|add|truncate|ifelse|RG|rg|Tf|Td|Tm|BT|ET|NonStruct|F\d+)\b/g) || []).length;
+        var totalWords = (tp.match(/\S+/g) || []).length;
+        var isGarbage = totalWords > 10 && (psOpCount / totalWords) > 0.15;
+        if (isGarbage) {
+          return '<div style="margin-bottom:1rem"><div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:0.875rem;font-size:0.82rem;color:#92400e"><i class="fas fa-exclamation-triangle mr-2"></i>The PDF for this proposal uses a complex font encoding that could not be extracted as readable text. Please download the PDF directly to view the full proposal content.</div></div>';
+        }
+        return '<div style="margin-bottom:1rem"><div style="font-weight:700;font-size:0.875rem;color:#1f2937;margin-bottom:0.5rem"><i class="fas fa-lightbulb mr-2" style="color:var(--cpc-gold)"></i>Technical Proposal</div><div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:0.875rem;font-size:0.82rem;max-height:180px;overflow-y:auto;white-space:pre-wrap;line-height:1.6;color:#374151">' + escHtml(tp) + '</div></div>';
+      })()
 
     // AI summary
     + (ev && ev.ai_summary ? '<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:0.875rem;margin-bottom:1rem"><div style="font-size:0.72rem;font-weight:700;color:#92400e;margin-bottom:4px"><i class="fas fa-robot mr-1"></i>AI Evaluation Summary</div><div style="font-size:0.82rem;color:#374151;line-height:1.6">' + escHtml(ev.ai_summary) + '</div></div>' : '')

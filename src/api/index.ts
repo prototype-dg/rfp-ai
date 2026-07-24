@@ -493,15 +493,8 @@ Please include this reference code in ALL correspondence regarding this RFP.
       }
     }
 
-    // ALWAYS advance RFP stage from qa_open → submissions_closed after publish
-    try {
-      const currentRfp = await c.env.DB.prepare('SELECT stage FROM rfps WHERE id=?').bind(rfpId).first<{stage:string}>()
-      if (currentRfp?.stage === 'qa_open') {
-        await c.env.DB.prepare(`UPDATE rfps SET stage='submissions_closed', updated_at=datetime('now') WHERE id=?`).bind(rfpId).run()
-      }
-    } catch(stageErr: any) {
-      console.error('[publish-all] stage advance failed:', stageErr?.message)
-    }
+    // NOTE: Stage advancement (qa_open → submissions_closed) is now done via the
+    // "Close Q&A" button, NOT by Publish All Approved. Publish All just sends emails.
 
     return c.json({ ok: true, sentTo, totalQuestions: allQuestions.length, vendorCount: activeVendors.length })
   } catch(e: any) {
@@ -798,6 +791,7 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
     let pdfBase64 = ''
     let pdfFilename = ''
     let proposedDuration = ''
+    let pdfExtractedTextFromDownload = '' // Cached from download, reused in proposal creation
 
     try {
       const attachListRes = await fetch(`https://api.resend.com/emails/receiving/${emailId}/attachments`, {
@@ -842,17 +836,22 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
                 pdfFilename = (proposalAttach?.filename) || attachData.filename || 'proposal.pdf'
                 // Ensure .pdf extension for display purposes if it's a generic name
                 if (!pdfFilename.match(/\.(pdf|doc|docx)$/i)) pdfFilename += '.pdf'
-                // Store as base64 for display/download
-                // Cap at 10MB base64 to avoid D1 blob size limits (10MB raw ≈ 13MB b64)
                 const rawBytes = new Uint8Array(fileBuffer)
-                const MAX_PDF_BYTES = 8_000_000 // 8MB raw — safe D1 limit
-                pdfBase64 = uint8ToBase64(rawBytes.length > MAX_PDF_BYTES ? rawBytes.slice(0, MAX_PDF_BYTES) : rawBytes)
-                // Extract text from PDF for LLM analysis
-                const pdfBytes = new Uint8Array(fileBuffer)
-                const pdfText = await extractPdfText(pdfBytes)
-                console.log(`[webhook] PDF extracted: ${pdfText.length} chars from ${pdfFilename} (${rawBytes.length} bytes)`)
+                const MAX_PDF_BYTES = 8_000_000 // 8MB raw — safe D1 TEXT column limit
+                // For large PDFs (>8MB): skip base64 storage — D1 TEXT limit exceeded.
+                // We still extract text for LLM analysis using a capped slice.
+                if (rawBytes.length <= MAX_PDF_BYTES) {
+                  pdfBase64 = uint8ToBase64(rawBytes)
+                } else {
+                  // Too large to store in D1 — record filename only, no inline PDF viewer
+                  console.log(`[webhook] PDF too large for D1 storage (${rawBytes.length} bytes > ${MAX_PDF_BYTES}) — skipping base64, filename recorded`)
+                }
+                // Extract text from first 8MB only to avoid Worker CPU timeout on huge files
+                const pdfBytes = rawBytes.length > MAX_PDF_BYTES ? rawBytes.slice(0, MAX_PDF_BYTES) : rawBytes
+                pdfExtractedTextFromDownload = await extractPdfText(pdfBytes)
+                console.log(`[webhook] PDF extracted: ${pdfExtractedTextFromDownload.length} chars from ${pdfFilename} (${rawBytes.length} bytes raw, ${pdfBytes.length} bytes scanned)`)
                 // Parse proposed duration from PDF text or email body
-                proposedDuration = extractProposedDuration(pdfText + '\n' + bodyText)
+                proposedDuration = extractProposedDuration(pdfExtractedTextFromDownload + '\n' + bodyText)
               } else {
                 console.error(`[webhook] PDF download failed: HTTP ${fileRes.status} for ${attachData.download_url}`)
                 // Still record the filename from the attachment metadata so we know a PDF was submitted
@@ -1037,15 +1036,9 @@ procurement@cpc-rfp.website`
         // Works regardless of RFP stage (qa_open, submissions_closed, evaluation, etc.)
         // Create the record even if PDF download/extraction failed — the email was received
 
-        // pdfExtractedText was already extracted during download above; re-extract only if
-        // pdfBase64 is available but we didn't already do it (shouldn't happen, but defensive)
-        let pdfExtractedText = ''
-        if (pdfBase64) {
-          try {
-            const pdfBytes2 = Uint8Array.from(atob(pdfBase64), c2 => c2.charCodeAt(0))
-            pdfExtractedText = await extractPdfText(pdfBytes2)
-          } catch(_) {}
-        }
+        // Use text extracted during download — avoids re-decoding base64 and re-running extraction.
+        // For large PDFs (>8MB) where pdfBase64 is empty, this still has the extracted text.
+        const pdfExtractedText = pdfExtractedTextFromDownload
 
         // Use LLM to extract structured proposal fields
         let proposalFields = {
@@ -2125,6 +2118,24 @@ async function inflatePdfStream(compressed: Uint8Array): Promise<Uint8Array> {
 
 /** Extract printable text from a decompressed PDF stream buffer.
  *  Handles both Latin-1 (legacy) and UTF-16BE (FEFF BOM) encodings. */
+// PostScript operators that appear in content streams but are NOT readable text.
+// These come from complex font encodings (Type3, embedded PostScript programs, colour ops, etc.)
+const PS_OPERATOR_RE = /^(?:dup|pop|exch|sub|add|mul|div|mod|neg|abs|truncate|round|ceiling|floor|sqrt|exp|ln|log|sin|cos|atan|idiv|copy|roll|index|mark|cleartomark|counttomark|and|or|not|xor|bitshift|eq|ne|gt|ge|lt|le|ifelse|if|loop|repeat|for|forall|exit|stop|exec|load|store|def|put|get|known|where|currentfile|filter|closefile|flush|flushfile|print|pstack|stack|type|cvn|cvs|cvi|cvr|string|array|dict|begin|end|gsave|grestore|setgray|setrgbcolor|setcmykcolor|setlinewidth|setlinecap|setlinejoin|moveto|lineto|curveto|closepath|fill|stroke|clip|newpath|currentpoint|translate|scale|rotate|concat|setfont|findfont|scalefont|makefont|show|showpage|copypage|erasepage|initgraphics|rg|RG|re|w|W|W\*|n|h|f|F|f\*|b|b\*|B|B\*|q|Q|cm|m|l|c|v|y|k|K|g|G|d|ri|i|cs|CS|scn|SCN|sc|SC|sh|Do|BI|ID|EI|BMC|BDC|EMC|MP|DP|BT|ET|Tc|Tw|Tz|TL|Tf|Tr|Ts|Td|TD|Tm|T\*|Tj|TJ|\')\s*$/.test
+
+function isPostScriptOperatorLine(s: string): boolean {
+  // Lines that are purely PDF/PostScript operators (no readable text)
+  // Filter: if >50% of tokens look like PS operators or numbers, skip it.
+  const tokens = s.trim().split(/\s+/)
+  if (tokens.length === 0) return false
+  let opCount = 0
+  for (const t of tokens) {
+    if (/^-?[0-9]+\.?[0-9]*$/.test(t)) { opCount++; continue }  // number
+    if (/^[A-Z][A-Z*]?$/.test(t) && t.length <= 3) { opCount++; continue } // short PDF ops (RG, rg, Tf, Td, Tj, TJ, BT, ET, etc.)
+    if (/^(dup|pop|exch|sub|add|mul|div|neg|abs|truncate|round|ceiling|floor|ifelse|if|loop|for|def|put|get|exec|load|store|begin|end|true|false|null|NonStruct)$/.test(t)) { opCount++ }
+  }
+  return opCount > tokens.length * 0.45
+}
+
 function extractTextFromStreamBytes(buf: Uint8Array): string {
   // Detect UTF-16BE (starts with FEFF BOM)
   if (buf.length >= 2 && buf[0] === 0xFE && buf[1] === 0xFF) {
@@ -2144,12 +2155,19 @@ function extractTextFromStreamBytes(buf: Uint8Array): string {
     const tjRegex = /\(((?:[^()\\]|\\[\s\S])*)\)\s*Tj/g
     let m: RegExpExecArray | null
     while ((m = tjRegex.exec(block)) !== null) {
-      lines.push(m[1].replace(/\\n/g,'\n').replace(/\\r/g,'\r').replace(/\\\(/g,'(').replace(/\\\)/g,')').replace(/\\\\/g,'\\'))
+      const text = m[1]
+        .replace(/\\n/g,'\n').replace(/\\r/g,'\r')
+        .replace(/\\\(/g,'(').replace(/\\\)/g,')').replace(/\\\\/g,'\\')
+      // Skip lines that are just PostScript operators
+      if (!isPostScriptOperatorLine(text)) lines.push(text)
     }
     const arrRegex = /\[((?:[^\[\]]*\([^()]*\)[^\[\]]*)*)\]\s*TJ/g
     while ((m = arrRegex.exec(block)) !== null) {
       const inner = m[1].match(/\(([^()]*)\)/g) || []
-      for (const p of inner) lines.push(p.slice(1,-1))
+      for (const p of inner) {
+        const text = p.slice(1,-1)
+        if (!isPostScriptOperatorLine(text)) lines.push(text)
+      }
     }
   }
 
@@ -2471,10 +2489,12 @@ function generateRfpPdf(rfp: any): Uint8Array {
 
   for (const pageLines of pages) {
     // Build BT...ET text block
+    // Use Tm (absolute text matrix) for each line — Td is cumulative and causes misplacement
     let textCmds = `BT\n/F1 ${FONT_SIZE} Tf\n`
     let y = MARGIN_T
     for (const line of pageLines) {
-      textCmds += `${MARGIN_L} ${y} Td\n(${pdfStr(line)}) Tj\n0 0 Td\n`
+      // Tm sets absolute text matrix: [1 0 0 1 x y] Tm  (identity + translation)
+      textCmds += `1 0 0 1 ${MARGIN_L} ${y} Tm\n(${pdfStr(line)}) Tj\n`
       y -= LINE_H
     }
     textCmds += 'ET\n'
