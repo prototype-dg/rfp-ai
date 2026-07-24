@@ -2,7 +2,15 @@ import { Hono } from 'hono'
 import { initDb, seedVendors } from '../db/seed'
 import type { Bindings } from '../types'
 
+// WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
+const WORKER_VERSION = '2026-07-24-v7'
+
 export const apiRouter = new Hono<{ Bindings: Bindings }>()
+
+// ============================================================
+// VERSION — canary endpoint to confirm which Worker code is live
+// ============================================================
+apiRouter.get('/version', (c) => c.json({ version: WORKER_VERSION, ok: true }))
 
 // ============================================================
 // INIT
@@ -4521,14 +4529,17 @@ async function detectWrongDocument(
   const vendorNameLower = (submittingVendorName || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ')
   const vendorWords = vendorNameLower.split(/\s+/).filter(w => w.length > 2)
   const filenameHasVendorName = vendorWords.length > 0 && vendorWords.some(w => filenameLower.includes(w))
-  // If filename has project/org signals but NO vendor proposal signals → likely wrong document
-  // Exception: if the vendor's own name is in the filename, it's their document
-  if ((filenameHasRfpSignal || filenameHasOrgSignal) && !filenameHasProposalSignal && !filenameHasVendorName) {
-    // Determine doc type from filename
-    const docType = filenameHasRfpSignal ? 'procurement document' : 'organizational document'
+  // If filename has BOTH procurement signals AND org signals but NO proposal signals → likely wrong document
+  // IMPORTANT: An org name alone (e.g. "Crown Prince Court - Data platform.pdf") is NOT sufficient
+  // to flag wrong doc — vendors routinely name files after the client project.
+  // Only flag based on filename if there is an explicit RFP/procurement keyword AND an org signal,
+  // OR an explicit procurement keyword alone (e.g. "RFP_Document.pdf", "Scope of Work.pdf").
+  // Never flag based on org name alone.
+  if (filenameHasRfpSignal && !filenameHasProposalSignal && !filenameHasVendorName) {
+    const docType = 'procurement document'
     return {
       isWrong: true,
-      reason: `The submitted file "${filename}" appears to be a ${docType} (not a vendor proposal). The filename contains ${filenameHasRfpSignal ? 'procurement/project' : 'organization'} terminology rather than vendor submission terminology. The vendor likely uploaded the wrong file — perhaps the RFP or SOW they downloaded, instead of their own proposal document.`,
+      reason: `The submitted file "${filename}" appears to be a ${docType} (not a vendor proposal). The filename contains procurement/project terminology rather than vendor submission terminology. The vendor likely uploaded the wrong file — perhaps the RFP or SOW they downloaded, instead of their own proposal document.`,
       detectedDocType: docType,
     }
   }
