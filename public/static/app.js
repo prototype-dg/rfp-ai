@@ -1392,11 +1392,14 @@ async function silentCheckInbox(rfpId) {
       const questions = await apiCall('GET', '/rfps/' + rfpId + '/questions').catch(function(){ return []; });
       const emailQs = questions.filter(function(q){ return q.source === 'email'; }).length;
 
-      // Add notification — route to vendor_comms page via vendorId
-      if (newest && newest.has_attachment && emailQs > 0) {
+      // Auto-populate Q&A or Proposals without requiring manual button press
+      if (newest && (newest.has_attachment || newest.email_category === 'questions') && emailQs > 0) {
+        // Questions are already in DB (webhook inserted them) - notify and auto-switch
+        appState.unreadQA = true;
+        pulseQATab();
         addNotification('questions',
-          '📋 Questions Received',
-          senderName + ' sent ' + emailQs + ' question(s)' + attachBadge,
+          '📋 Questions ready in Q&A tab',
+          emailQs + ' question(s) from ' + senderName + ' have been added automatically.',
           rfpId, 'qa', null
         );
         addNotification('email',
@@ -1404,12 +1407,16 @@ async function silentCheckInbox(rfpId) {
           (newest.subject || 'No Subject') + attachBadge,
           rfpId, null, newestVendorId
         );
-        appState.unreadQA = true;
-        pulseQATab();
-      } else if (newest && newest.has_pdf) {
+        // Auto-switch to Q&A tab if user is viewing this RFP
+        if (appState.currentRfpId && String(appState.currentRfpId) === String(rfpId)) {
+          renderRfpTabs('qa', rfpId, true);
+          rfpTabs.qa(rfpId);
+        }
+      } else if (newest && (newest.has_pdf || newest.email_category === 'proposal')) {
+        // Proposal PDF received - auto-switch to Proposals tab
         addNotification('proposal',
-          '📄 Proposal Received',
-          senderName + ' submitted a proposal PDF',
+          '📄 Proposal Received — ready in Proposals tab',
+          senderName + ' submitted a proposal PDF. Added to evaluation queue.',
           rfpId, 'proposals', newestVendorId
         );
         addNotification('email',
@@ -1417,15 +1424,19 @@ async function silentCheckInbox(rfpId) {
           (newest.subject || 'No Subject') + ' (PDF proposal)',
           rfpId, null, newestVendorId
         );
+        // Auto-switch to proposals tab if user is viewing this RFP
+        if (appState.currentRfpId && String(appState.currentRfpId) === String(rfpId)) {
+          renderRfpTabs('proposals', rfpId, false);
+          rfpTabs.proposals(rfpId);
+        }
       } else {
         addNotification('email',
           '📨 New Email from ' + senderName,
           (newest && newest.subject ? newest.subject : 'No Subject') + attachBadge,
           rfpId, null, newestVendorId
         );
+        renderRfpTabs(appState.currentRfpTab, rfpId, appState.unreadQA);
       }
-
-      renderRfpTabs(appState.currentRfpTab, rfpId, appState.unreadQA);
     }
   } catch(e) {}
 }
@@ -1633,9 +1644,22 @@ async function saveQAnswer(rfpId, qId) {
 }
 
 async function publishAllQAnswers(rfpId) {
-  await apiCall('POST', '/rfps/' + rfpId + '/questions/publish-all', {});
-  showToast('All approved answers published!', 'success');
-  rfpTabs.qa(rfpId);
+  try {
+    await apiCall('POST', '/rfps/' + rfpId + '/questions/publish-all', {});
+    showToast('Q&A answers sent to vendors. RFP advanced to Proposal Submission stage.', 'success', 5000);
+    // Refresh RFP to get updated stage
+    const rfp = await apiCall('GET', '/rfps/' + rfpId).catch(function(){ return null; });
+    if (rfp) {
+      appState.currentRfp = rfp;
+      renderLifecycleBar(rfp);
+      document.getElementById('pageSubtitle').textContent = (rfp.ref_number||'') + ' • ' + stageLabelMap(rfp.stage||'draft');
+    }
+    // Switch to Proposals tab
+    renderRfpTabs('proposals', rfpId, false);
+    rfpTabs.proposals(rfpId);
+  } catch(e) {
+    showToast('Publish failed: ' + e.message, 'error');
+  }
 }
 
 async function loadSampleQs(rfpId) {
@@ -1718,13 +1742,9 @@ rfpTabs.proposals = async function(rfpId) {
 
     const rowBg = isAwarded ? 'background:#f0fdf4' : (isReal ? 'background:#fffbeb' : '');
 
-    const evalBtn = ev
-      ? '<button class="btn-ghost btn-sm" onclick="evaluateOneProposal(' + rfpId + ',' + p.id + ')" title="Re-evaluate"><i class="fas fa-sync"></i></button>'
-      : '<button class="btn-secondary btn-sm" onclick="evaluateOneProposal(' + rfpId + ',' + p.id + ')"><i class="fas fa-robot"></i>AI Evaluate</button>';
-
     const awardBtn = !isAwarded
-      ? '<button class="btn-primary btn-sm" style="background:#065f46" onclick="awardProposal(' + rfpId + ',' + p.id + ')" title="Award contract to this vendor"><i class="fas fa-handshake"></i>Award</button>'
-      : '<span style="font-size:0.75rem;color:#065f46;font-weight:700"><i class="fas fa-trophy mr-1"></i>Winner</span>';
+      ? '<button class="award-btn" onclick="awardProposal(' + rfpId + ',' + p.id + ')" title="Award contract to this vendor"><i class="fas fa-award"></i>Award Contract</button>'
+      : '<span style="font-size:0.75rem;color:#92400e;font-weight:700;background:#fef3c7;padding:4px 10px;border-radius:6px;display:inline-flex;align-items:center;gap:4px"><i class="fas fa-trophy"></i>Winner</span>';
 
     rows += '<tr style="' + rowBg + '">'
       + '<td><div style="display:flex;align-items:center;gap:8px">'
@@ -1740,7 +1760,6 @@ rfpTabs.proposals = async function(rfpId) {
       + '<td>'
       + '<div style="display:flex;gap:4px;align-items:center">'
       + '<button class="btn-ghost btn-sm" onclick="viewProposalDetail(' + p.id + ')"><i class="fas fa-eye"></i>View</button>'
-      + evalBtn
       + awardBtn
       + '</div>'
       + '</td>'
@@ -1751,10 +1770,10 @@ rfpTabs.proposals = async function(rfpId) {
     '<div class="space-y-4">'
     + '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem">'
     + '<div><h3 style="font-weight:700;font-size:0.95rem;color:#1f2937;margin:0">Submitted Proposals &amp; Evaluation</h3>'
-    + '<p style="font-size:0.8rem;color:#9ca3af;margin:0">' + proposals.length + ' proposals &bull; Click <strong>AI Evaluate</strong> per row or <strong>Evaluate All</strong></p></div>'
-    + '<div style="display:flex;gap:0.5rem;flex-wrap:wrap">'
+    + '<p style="font-size:0.8rem;color:#9ca3af;margin:0">' + proposals.length + ' proposal(s) &bull; Run AI evaluation first, then award the contract to the winning vendor.</p></div>'
+    + '<div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center">'
     + '<button class="btn-ghost btn-sm" onclick="loadSampleProposals(' + rfpId + ')"><i class="fas fa-plus"></i>Add Samples</button>'
-    + '<button class="btn-secondary" id="evalAllBtn" onclick="evaluateAllProposals(' + rfpId + ')"><i class="fas fa-robot"></i>Evaluate All</button>'
+    + '<button class="btn-secondary" id="evalAllBtn" onclick="evaluateAllProposals(' + rfpId + ')"><i class="fas fa-robot"></i>Run AI Evaluation</button>'
     + '</div>'
     + '</div>'
 

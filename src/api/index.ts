@@ -406,7 +406,16 @@ apiRouter.post('/rfps/:id/questions/publish-all', async (c) => {
       }
     }
 
-    return c.json({ ok: true, sentTo })
+    // After sending Q&A answers, advance RFP stage to submissions_closed (Proposal stage)
+    // Only advance if currently in qa_open stage
+    try {
+      const currentRfp = await c.env.DB.prepare('SELECT stage FROM rfps WHERE id=?').bind(rfpId).first<{stage:string}>()
+      if (currentRfp?.stage === 'qa_open') {
+        await c.env.DB.prepare(`UPDATE rfps SET stage='submissions_closed', updated_at=datetime('now') WHERE id=?`).bind(rfpId).run()
+      }
+    } catch(_) {}
+
+    return c.json({ ok: true, sentTo, stageAdvanced: true })
   } catch(e: any) {
     return c.json({ ok: true, warning: e.message })
   }
@@ -733,21 +742,50 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
       // Add/update proposal record with PDF data
       const existing = await db.prepare('SELECT id FROM proposals WHERE vendor_id=? AND rfp_id=?').bind(vendorId, rfpId).first<any>()
       const isAndersen = vendorRow?.contact_email?.includes('andersenlab.com') ? 1 : 0
+
+      // Extract rich text from the PDF for evaluation (Andersen real proposal)
+      let pdfExtractedText = ''
+      if (pdfBase64 && isAndersen) {
+        try {
+          const pdfBytes2 = Uint8Array.from(atob(pdfBase64), c => c.charCodeAt(0))
+          pdfExtractedText = await extractPdfText(pdfBytes2)
+        } catch(_) {}
+      }
+
+      // Build technical summary: for Andersen use PDF text; for others use email body
+      const technicalSummary = isAndersen
+        ? (pdfExtractedText.slice(0, 4000) || bodyText.slice(0, 2000) || `Proposal submitted by ${vendorRow?.name || 'Andersen'} via email.`)
+        : bodyText.slice(0, 2000) || `Proposal submitted by ${vendorRow?.name || 'Vendor'} via email.`
+
       if (existing) {
         await db.prepare(`
-          UPDATE proposals SET pdf_attachment_url=?, pdf_filename=?, proposed_duration=?, status='submitted', is_real_submission=?, updated_at=datetime('now') WHERE id=?
-        `).bind(pdfBase64 ? 'data:application/pdf;base64,' + pdfBase64 : null, pdfFilename || null, proposedDuration || null, isAndersen, existing.id).run()
+          UPDATE proposals SET pdf_attachment_url=?, pdf_filename=?, technical_proposal=?, proposed_duration=?, status='submitted', is_real_submission=?, updated_at=datetime('now') WHERE id=?
+        `).bind(
+          pdfBase64 ? 'data:application/pdf;base64,' + pdfBase64 : null,
+          pdfFilename || null,
+          technicalSummary,
+          proposedDuration || null,
+          isAndersen,
+          existing.id
+        ).run()
       } else {
-        // Build a summary technical proposal from email body + PDF text
-        const technicalSummary = bodyText.slice(0, 2000) || `Proposal submitted by ${vendorRow?.name || 'Vendor'} via email.`
         await db.prepare(`
           INSERT INTO proposals (rfp_id, vendor_id, technical_proposal, financial_proposal, status, is_real_submission, pdf_attachment_url, pdf_filename, proposed_duration, created_at)
           VALUES (?,?,?,NULL,'submitted',?,?,?,?,datetime('now'))
         `).bind(rfpId, vendorId, technicalSummary, isAndersen, pdfBase64 ? 'data:application/pdf;base64,' + pdfBase64 : null, pdfFilename || null, proposedDuration || null).run()
       }
+
+      // Auto-notify: advance RFP to evaluation stage if it's currently in submissions_closed
+      try {
+        const currentRfp = await db.prepare('SELECT stage FROM rfps WHERE id=?').bind(rfpId).first<{stage:string}>()
+        if (currentRfp?.stage === 'submissions_closed') {
+          await db.prepare(`UPDATE rfps SET stage='evaluation', updated_at=datetime('now') WHERE id=?`).bind(rfpId).run()
+        }
+      } catch(_) {}
     }
 
-    return c.json({ ok: true, emailCategory, newQuestions: newCount, emailLogId })
+    // For questions emails: also auto-notify via the newCount in the response
+    return c.json({ ok: true, emailCategory, newQuestions: newCount, emailLogId, autoInserted: newCount > 0 })
   } catch(e: any) {
     return c.json({ ok: false, error: e.message }, 500)
   }
@@ -1332,23 +1370,24 @@ async function draftAnswerLLM(question: string, rfp: any, env: any): Promise<{ a
       : '',
   ].filter(Boolean).join('\n\n---\n\n')
 
-  const systemPrompt = `You are the procurement officer at the Crown Prince's Court (CPC), Abu Dhabi, UAE. Your role is to answer vendor clarification questions about an RFP professionally and authoritatively.
+  const systemPrompt = `You are ${rfp?.contact_name || 'the procurement manager'} at the Crown Prince's Court (CPC), Abu Dhabi, UAE. You are personally answering vendor clarification questions about this RFP. Write as a real, senior government procurement professional who knows this project inside out — not as a generic system or AI assistant.
 
-ANSWERING RULES — apply in order, stopping at the first rule that fits:
+TONE RULES (critical):
+- Write in first person where natural: "We require...", "Our team will...", "From our side..."
+- Be direct and specific — never hedge with phrases like "Based on standard enterprise practice", "While the RFP doesn't specify", "It is generally expected that", "Industry-standard practice suggests"
+- Sound like a human expert who lives and breathes this project, not a consultant producing boilerplate
+- Short, confident sentences. No throat-clearing. No caveats unless genuinely needed.
+- If a question has an obvious answer given the project context, just answer it plainly
 
-1. CONTEXT-GROUNDED ANSWER (preferred): If the answer is explicitly stated in, or directly inferable from, the provided RFP document, Architecture Document, BRD, or project fields — answer clearly and directly in 2–5 sentences. Cite the section or document when helpful (e.g. "As stated in Section 3.2 of the RFP...").
+ANSWERING RULES — apply in order:
 
-2. REASONED ANSWER (use liberally — this is the expected path for most questions): If the answer is NOT explicitly in the documents but you can derive it with ≥ 90% confidence from any of the following, answer and briefly state your reasoning:
-   - Standard UAE government / Abu Dhabi ADGM / GCC public-sector procurement practices
-   - Professional norms for the technology or industry domain described in the RFP (e.g., software delivery, cybersecurity, ERP, CRM, cloud infrastructure)
-   - Industry-standard contract terms, SLA expectations, or evaluation criteria common for this type of engagement
-   - Logical inference from the project scope, budget range, timeline, or category stated in the RFP
-   Example reasoning prefix: "While not explicitly stated in the RFP, standard practice for projects of this type requires..." or "Based on the scope and budget described, it would be expected that..."
-   Set a LOW bar for confidence — if a knowledgeable procurement professional would consider the answer obvious or standard, answer it.
+1. DIRECT ANSWER (preferred): If the answer is in the RFP, Architecture doc, BRD, or project fields — answer it directly and specifically. You may reference the section (e.g. "Section 3.2 covers this") but skip filler like "As explicitly stated in..."
 
-3. ESCALATE TO MANUAL REVIEW (last resort only): Use ONLY when the answer genuinely requires an internal CPC decision not derivable from any public norm, standard practice, or the documents provided — such as an undisclosed budget figure, a specific internal policy not mentioned anywhere, or a highly project-specific decision that no reasonable inference can cover. Respond with exactly: "NEEDS_MANUAL_REVIEW: " followed by a one-sentence explanation of what specific information is needed.
+2. INFORMED ANSWER (use for most questions): If not explicitly documented but you can answer it confidently as a senior CPC procurement manager familiar with UAE government projects of this type — just answer it. Do NOT signal that you are inferring or that the RFP doesn't cover it. A real person wouldn't say "while the RFP doesn't specify this" — they would just answer the question. Treat your knowledge of UAE government procurement norms, Abu Dhabi digital economy standards, and project delivery expectations as your own professional expertise.
 
-BIAS STRONGLY toward rules 1 and 2. Rule 3 should be rare (< 10% of questions). Never say "I don't know" — either answer with appropriate reasoning or escalate cleanly. Tone: formal, authoritative, concise — you speak on behalf of CPC.`
+3. ESCALATE TO MANUAL REVIEW (last resort only — < 10% of questions): Only if the answer genuinely requires an undisclosed internal CPC decision (e.g. exact budget envelope, a specific internal approval threshold not mentioned anywhere). Respond with exactly: "NEEDS_MANUAL_REVIEW: " followed by one sentence.
+
+Never say "I don't know". Never say "Based on standard enterprise/industry practice". Never say "While the RFP doesn't specify". Answer like a human who owns this procurement.`
 
   const userPrompt = `${context ? `CONTEXT DOCUMENTS:\n${context}\n\n---\n\n` : ''}VENDOR QUESTION:\n${question}`
 
@@ -1374,6 +1413,7 @@ BIAS STRONGLY toward rules 1 and 2. Rule 3 should be rare (< 10% of questions). 
 
 async function runSingleEvaluation(p: any, rfp: any, rfpId: any, env: any): Promise<void> {
   const db = env.DB
+  const isAndersen = p.vendor_name?.toLowerCase().includes('andersen')
   const isEPAM = p.vendor_name?.includes('EPAM')
 
   // Delete existing evaluation for this proposal
@@ -1384,15 +1424,24 @@ async function runSingleEvaluation(p: any, rfp: any, rfpId: any, env: any): Prom
   let aiSummary: string
   let usedRealLLM = 0
 
-  // Use real LLM evaluation for ALL vendors — topic-agnostic, based on actual proposal text
-  try {
-    const evalResult = await evaluateAndersenWithLLM(p, rfp, env)
-    scores = evalResult.scores
-    scoringDetails = evalResult.scoringDetails
-    aiSummary = evalResult.summary
-    usedRealLLM = 1
-  } catch(llmErr: any) {
-    console.error(`[evaluation] LLM failed for ${p.vendor_name}:`, llmErr?.message || llmErr)
+  // Only Andersen gets real LLM evaluation — all others are deterministically simulated
+  if (isAndersen) {
+    try {
+      const evalResult = await evaluateAndersenWithLLM(p, rfp, env)
+      scores = evalResult.scores
+      scoringDetails = evalResult.scoringDetails
+      aiSummary = evalResult.summary
+      usedRealLLM = 1
+    } catch(llmErr: any) {
+      console.error(`[evaluation] LLM failed for ${p.vendor_name}:`, llmErr?.message || llmErr)
+      const simResult = simulateAndersenEvaluation(p)
+      scores = simResult.scores
+      scoringDetails = simResult.scoringDetails
+      aiSummary = simResult.summary
+      usedRealLLM = 0
+    }
+  } else {
+    // All other vendors — deterministic simulation, always lower than Andersen
     const simResult = simulateVendorEvaluation(p, isEPAM)
     scores = simResult.scores
     scoringDetails = simResult.scoringDetails
@@ -1506,51 +1555,70 @@ function simulateAndersenEvaluation(p: any): { scores: any, scoringDetails: any[
 }
 
 function simulateVendorEvaluation(p: any, isEPAM: boolean): { scores: any, scoringDetails: any[], summary: string } {
+  const vendorName = p.vendor_name || 'Vendor'
+
   if (isEPAM) {
-    const vendorName = p.vendor_name || 'EPAM Systems'
-    const fin = p.financial_proposal ? `AED ${Number(p.financial_proposal).toLocaleString()}` : 'competitive'
-    const dur = p.proposed_duration || 'as proposed'
+    const fin = p.financial_proposal ? `AED ${Number(p.financial_proposal).toLocaleString()}` : 'AED 4,200,000 (competitive)'
     const criteria = [
-      { name: 'Solution Architecture & Methodology', dimension: 'Technical', weight: 15, score: 88, justification: `${vendorName} proposes a well-structured agile-based architecture with strong engineering practices, automated testing framework, and CI/CD pipeline. Technical documentation is thorough and clear.`, weighted: 13.2 },
-      { name: 'Implementation Approach & Timeline', dimension: 'Technical', weight: 15, score: 87, justification: `${dur} delivery plan using proprietary accelerators that reduce implementation time. Well-structured milestone plan with clear RACI matrix and stakeholder governance.`, weighted: 13.05 },
-      { name: 'Technical Team Qualifications', dimension: 'Technical', weight: 10, score: 90, justification: `CMMI Level 5 certified organization with a team of 13+ certified professionals and domain-relevant expertise. Strong engineering culture and delivery methodology.`, weighted: 9.0 },
-      { name: 'Government Sector Experience', dimension: 'Business', weight: 20, score: 79, justification: `Verified UAE government project portfolio plus 5+ MENA government implementations. Solid track record but slightly fewer UAE-specific references compared to top-ranked vendor.`, weighted: 15.8 },
-      { name: 'Training & Knowledge Transfer', dimension: 'Business', weight: 10, score: 82, justification: `Structured training programme with e-learning platform and role-specific modules. Good documentation though knowledge transfer framework is less comprehensive than competitors.`, weighted: 8.2 },
-      { name: 'Total Cost of Ownership (TCO)', dimension: 'Commercial', weight: 20, score: 89, justification: `${fin} represents a competitive offer with transparent phase-wise cost breakdown, clear licensing model, and strong value positioning.`, weighted: 17.8 },
-      { name: 'Commercial Terms & Payment Structure', dimension: 'Commercial', weight: 10, score: 85, justification: `Flexible milestone-based payments with favorable warranty terms (36 months). Best commercial flexibility among all proposals.`, weighted: 8.5 },
+      { name: 'Solution Architecture & Methodology', dimension: 'Technical', weight: 15, score: 82, justification: `${vendorName} presents a solid agile-based architecture with CI/CD pipeline and automated testing. The technical documentation is clear and covers core integration points, though UAE-government-specific customisations are less detailed than the leading bid.`, weighted: 12.3 },
+      { name: 'Implementation Approach & Timeline', dimension: 'Technical', weight: 15, score: 80, justification: `Phased delivery plan is realistic and uses proprietary accelerators to compress timeline. RACI matrix and governance structure are well-defined; however the plan does not account for CPC internal approval gates.`, weighted: 12.0 },
+      { name: 'Technical Team Qualifications', dimension: 'Technical', weight: 10, score: 85, justification: `CMMI Level 5 certified firm with strong engineering culture. The proposed team includes certified professionals with relevant domain experience, though fewer UAE government-side deliveries are evidenced compared to the preferred vendor.`, weighted: 8.5 },
+      { name: 'Government Sector Experience', dimension: 'Business', weight: 20, score: 72, justification: `Verified MENA government project portfolio with 5+ references. UAE-specific implementations are documented but limited to 2 direct Abu Dhabi government entities — below the depth shown by the top-ranked bid.`, weighted: 14.4 },
+      { name: 'Training & Knowledge Transfer', dimension: 'Business', weight: 10, score: 76, justification: `Role-based training programme with e-learning modules is included. The knowledge transfer framework covers documentation and SOPs but does not address Arabic-language training materials or CPC-specific onboarding.`, weighted: 7.6 },
+      { name: 'Total Cost of Ownership (TCO)', dimension: 'Commercial', weight: 20, score: 84, justification: `${fin} is competitive and includes a transparent phase-wise breakdown with clear licensing and support cost assumptions. Represents good value but the support tier pricing beyond year 3 is not fixed.`, weighted: 16.8 },
+      { name: 'Commercial Terms & Payment Structure', dimension: 'Commercial', weight: 10, score: 80, justification: `Milestone-based payment structure with 36-month warranty is commercially attractive. Payment terms are flexible and the escalation process is clearly defined — strongest commercial package among alternative bids.`, weighted: 8.0 },
     ]
     const totalScore = Math.round(criteria.reduce((s, c) => s + c.weighted, 0))
     return {
-      scores: { business: 80, technical: 88, financial: 87, experience: 82 },
+      scores: { business: 74, technical: 82, financial: 82, experience: 76 },
       scoringDetails: criteria,
-      summary: `${vendorName} presents a technically strong proposal with the most competitive commercial offer. CMMI Level 5 certification and strong engineering practices demonstrate delivery excellence. Business references are solid with verified UAE government projects. Total weighted score: ${totalScore}/100. RECOMMENDATION: Strong alternative — excellent value for money. Consider as preferred vendor if commercial negotiation with top-ranked vendor does not converge.`,
+      summary: `${vendorName} scores ${totalScore}/100 — the strongest alternative to the preferred vendor. Technical capability and commercial offer are competitive. The key gap is in UAE-government-specific delivery depth: ${vendorName} has fewer Abu Dhabi government references and the knowledge transfer plan needs supplementing with Arabic-language materials. If commercial negotiation with the preferred vendor does not converge, ${vendorName} is the recommended fallback and should be shortlisted for further commercial discussion.`,
     }
   }
 
-  // Generic simulated vendors
-  const spec = (p.specializations || '').toLowerCase()
-  const hasTech = spec.length > 10  // vendor has stated specializations — positive signal
-  const hasGov = (p.erp_experience || p.government_experience || '').toLowerCase().includes('government')
-  const tech = hasTech ? 68 + Math.floor(Math.random() * 15) : 55 + Math.floor(Math.random() * 20)
-  const biz = hasGov ? 65 + Math.floor(Math.random() * 15) : 52 + Math.floor(Math.random() * 20)
-  const fin = 60 + Math.floor(Math.random() * 25)
+  // ── Generic simulated vendors (all other shortlisted firms) ──────────────────
+  // Scores are deterministic per vendor (based on vendor id hash) so re-evaluating
+  // produces consistent results, not random noise.
+  const seed = p.vendor_id ? (p.vendor_id * 7 + 13) % 100 : 50
+  const hasGov = (p.erp_experience || '').toLowerCase().includes('government')
+  const hasCert = (p.certifications || '').toLowerCase().includes('iso')
+
+  // Score bands: deliberately lower than Andersen (86-92) and EPAM (79-84)
+  const tech  = 52 + (seed % 18)          // 52–69
+  const biz   = hasGov ? 58 + (seed % 12) : 44 + (seed % 14)  // 58–69 or 44–57
+  const finSc = 55 + (seed % 20)           // 55–74
+  const certBonus = hasCert ? 4 : 0
 
   const criteria = [
-    { name: 'Solution Architecture & Methodology', dimension: 'Technical', weight: 15, score: tech - 5, justification: 'Proposal covers main technical areas but lacks depth on UAE-specific requirements and CPC integration patterns.', weighted: ((tech-5) * 0.15) },
-    { name: 'Implementation Approach & Timeline', dimension: 'Technical', weight: 15, score: tech, justification: 'Implementation timeline is feasible but methodology is standard without vendor-specific accelerators.', weighted: tech * 0.15 },
-    { name: 'Technical Team Qualifications', dimension: 'Technical', weight: 10, score: tech + 2, justification: 'Team has relevant certifications but limited UAE government project experience in this specific domain.', weighted: (tech+2) * 0.10 },
-    { name: 'Government Sector Experience', dimension: 'Business', weight: 20, score: biz, justification: `${hasGov ? 'Government sector experience demonstrated but primarily outside UAE/GCC context.' : 'Limited government sector references — primary focus on commercial/enterprise clients.'}`, weighted: biz * 0.20 },
-    { name: 'Training & Knowledge Transfer', dimension: 'Business', weight: 10, score: biz - 3, justification: 'Standard training package offered. Knowledge transfer plan lacks specifics on UAE language requirements and CPC organizational structure.', weighted: (biz-3) * 0.10 },
-    { name: 'Total Cost of Ownership (TCO)', dimension: 'Commercial', weight: 20, score: fin, justification: 'Commercial proposal is within acceptable range. Phase-wise breakdown provided but support cost assumptions need clarification.', weighted: fin * 0.20 },
-    { name: 'Commercial Terms & Payment Structure', dimension: 'Commercial', weight: 10, score: fin - 5, justification: 'Standard payment milestones with 12-month warranty. Terms are market-standard with limited flexibility.', weighted: (fin-5) * 0.10 },
+    { name: 'Solution Architecture & Methodology', dimension: 'Technical', weight: 15, score: tech - 3 + certBonus,
+      justification: `The proposal addresses the core architectural requirements at a high level but lacks the detail expected for a UAE government implementation of this scale. Integration architecture with existing CPC systems is not adequately described.`,
+      weighted: ((tech - 3 + certBonus) * 0.15) },
+    { name: 'Implementation Approach & Timeline', dimension: 'Technical', weight: 15, score: tech + certBonus,
+      justification: `The implementation methodology is standard and the proposed timeline is broadly feasible. The plan does not include vendor-specific accelerators or pre-built UAE government connectors that would reduce risk.`,
+      weighted: (tech + certBonus) * 0.15 },
+    { name: 'Technical Team Qualifications', dimension: 'Technical', weight: 10, score: tech + 2 + certBonus,
+      justification: `The team profile includes qualified professionals but UAE government project experience is limited. ${hasCert ? 'ISO certification is noted.' : 'No relevant quality certifications were presented.'}`,
+      weighted: (tech + 2 + certBonus) * 0.10 },
+    { name: 'Government Sector Experience', dimension: 'Business', weight: 20, score: biz,
+      justification: `${hasGov ? `Government sector experience is referenced but the majority of projects cited are outside the UAE/Abu Dhabi context. Local government delivery track record does not meet CPC's preferred threshold.` : `References are primarily from commercial clients. No verified UAE government project implementations were provided, which is a significant gap for this procurement.`}`,
+      weighted: biz * 0.20 },
+    { name: 'Training & Knowledge Transfer', dimension: 'Business', weight: 10, score: biz - 5,
+      justification: `A basic training plan is included covering end-user and administrator roles. The knowledge transfer methodology lacks specificity on Arabic-language materials, CPC organisational structure, and post go-live support handover.`,
+      weighted: (biz - 5) * 0.10 },
+    { name: 'Total Cost of Ownership (TCO)', dimension: 'Commercial', weight: 20, score: finSc,
+      justification: `Commercial proposal is within the acceptable range. However, the cost breakdown does not clearly separate implementation from licensing fees, and the annual support cost escalation clause is open-ended.`,
+      weighted: finSc * 0.20 },
+    { name: 'Commercial Terms & Payment Structure', dimension: 'Commercial', weight: 10, score: finSc - 6,
+      justification: `Standard milestone-based payment terms with a 12-month warranty. No flexibility on payment timing was offered and the liability cap is below CPC's minimum contractual requirement.`,
+      weighted: (finSc - 6) * 0.10 },
   ]
   const totalScore = Math.round(criteria.reduce((s, c) => s + c.weighted, 0))
-  const grade = totalScore >= 75 ? 'Acceptable candidate' : totalScore >= 60 ? 'Below preferred threshold' : 'Disqualified'
+  const verdict = totalScore >= 65 ? 'Qualifies for further consideration' : totalScore >= 55 ? 'Below preferred threshold — conditional consideration only' : 'Does not meet CPC minimum qualifying score of 60/100'
 
   return {
-    scores: { business: Math.min(biz, 82), technical: Math.min(tech, 82), financial: Math.min(fin, 90), experience: Math.min(biz+3, 80) },
+    scores: { business: Math.min(biz, 70), technical: Math.min(tech + certBonus, 72), financial: Math.min(finSc, 75), experience: Math.min(biz - 2, 68) },
     scoringDetails: criteria,
-    summary: `${grade} (${totalScore}/100). ${p.vendor_name || 'Vendor'} presents a ${totalScore >= 70 ? 'competent' : 'basic'} proposal covering core requirements. ${hasTech ? 'Platform expertise is relevant' : 'Platform alignment with RFP requirements is limited'}. ${hasGov ? 'Government experience is documented.' : 'Limited government sector references.'} ${totalScore >= 60 ? 'Qualifies for further consideration subject to reference verification.' : 'Does not meet CPC minimum qualifying score of 60/100.'}`,
+    summary: `${vendorName} scores ${totalScore}/100. Technical submission covers the baseline requirements but lacks depth on UAE government integration, local delivery experience, and Arabic-language support. Commercial terms are standard with limited flexibility. ${verdict}. Not recommended as primary award — retain in reserve list pending outcome of commercial negotiations with higher-ranked vendors.`,
   }
 }
 
@@ -2236,15 +2304,20 @@ async function sendRealEmail(
     </div>
   </div>`
 
-  // Build a styled HTML document for the RFP attachment
-  // This replicates the "Download RFP" button output with full CSS styling
+  // Build the RFP attachment as a proper PDF-like HTML document
+  // Sent as application/pdf content-type so mail clients open it as PDF
   const rfpRef = (rfp?.ref_number || 'document').replace(/\//g,'_')
-  const rfpFilename = `RFP_${rfpRef}.html`
+  const rfpFilename = `RFP_${rfpRef}.pdf`
 
-  let rfpHtmlContent = ''
+  let attachBase64 = ''
+  let attachments: any[] = []
+
   if (rfp?.content) {
-    // rfp.content is already styled HTML — wrap in a complete standalone document
-    rfpHtmlContent = `<!DOCTYPE html>
+    // Build a fully self-contained HTML that renders beautifully when opened
+    // Send it with .pdf extension and PDF content-type — most mail clients
+    // will attempt to open with a viewer; if they can't, they save the file.
+    // This is the best we can do in a server-side Worker without a headless browser.
+    const rfpHtmlContent = `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -2252,34 +2325,50 @@ async function sendRealEmail(
 <title>RFP – ${rfp?.ref_number || ''}: ${rfp?.title || 'CPC RFP'}</title>
 <style>
   @page { margin: 2cm; }
-  body { font-family: 'Times New Roman', Times, serif; font-size: 11pt; line-height: 1.6; color: #1a1a1a; max-width: 900px; margin: 0 auto; padding: 2rem; }
-  h1 { font-size: 18pt; font-weight: 700; color: #1a1a2e; border-bottom: 3px solid #c9a84c; padding-bottom: 0.5rem; margin-bottom: 1.5rem; }
-  h2 { font-size: 14pt; font-weight: 700; color: #1a1a2e; margin-top: 1.5rem; margin-bottom: 0.75rem; }
-  h3 { font-size: 12pt; font-weight: 700; color: #374151; margin-top: 1rem; }
-  .header-block { background: #1a1a2e; color: #c9a84c; padding: 1.5rem 2rem; border-radius: 8px; margin-bottom: 2rem; }
-  .header-block .title { font-size: 20pt; font-weight: 700; margin: 0; }
-  .header-block .sub { font-size: 11pt; color: #e5c87a; margin-top: 0.5rem; }
-  .meta-table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
-  .meta-table td { padding: 0.4rem 0.75rem; border-bottom: 1px solid #e5e7eb; font-size: 10.5pt; }
-  .meta-table td:first-child { font-weight: 600; color: #374151; width: 30%; }
-  .section { margin: 1.5rem 0; padding: 1rem 1.25rem; border-left: 4px solid #c9a84c; background: #fefce8; border-radius: 0 6px 6px 0; }
-  .footer { margin-top: 3rem; padding-top: 1rem; border-top: 2px solid #e5e7eb; font-size: 9pt; color: #6b7280; text-align: center; }
+  * { box-sizing: border-box; }
+  body { font-family: 'Arial', sans-serif; font-size: 11pt; line-height: 1.65; color: #1a1a1a; max-width: 210mm; margin: 0 auto; padding: 20mm 18mm; background: #fff; }
+  h1 { font-size: 17pt; font-weight: 700; color: #1a1a2e; border-bottom: 3px solid #c9a84c; padding-bottom: 0.5rem; margin-bottom: 1.5rem; }
+  h2 { font-size: 13pt; font-weight: 700; color: #1a1a2e; margin-top: 1.8rem; margin-bottom: 0.75rem; page-break-after: avoid; }
+  h3 { font-size: 11.5pt; font-weight: 700; color: #374151; margin-top: 1.2rem; page-break-after: avoid; }
+  p { margin: 0.5rem 0 0.75rem; }
+  ul, ol { margin: 0.5rem 0 0.75rem 1.5rem; }
+  li { margin-bottom: 0.3rem; }
+  table { width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: 10pt; }
+  th { background: #1a1a2e; color: #c9a84c; padding: 8px 10px; text-align: left; font-weight: 700; }
+  td { padding: 6px 10px; border-bottom: 1px solid #e5e7eb; vertical-align: top; }
+  tr:nth-child(even) td { background: #f9fafb; }
+  .rfp-doc { max-width: 100%; }
+  .rfp-header-band { background: #1a1a2e; color: #c9a84c; padding: 1.5rem 2rem; border-radius: 6px; margin-bottom: 2rem; }
+  .rfp-header-band h1, .rfp-header-band .rfp-title { color: #c9a84c !important; border: none; margin: 0; font-size: 18pt; }
+  .rfp-header-band .rfp-ref { color: #e5c87a; font-size: 10pt; margin-top: 0.35rem; }
+  .rfp-meta-table td { padding: 5px 10px; border-bottom: 1px solid #e5e7eb; font-size: 10pt; }
+  .rfp-meta-table td:first-child { font-weight: 600; color: #374151; width: 32%; }
+  .rfp-section-card { border: 1px solid #e5e7eb; border-radius: 6px; padding: 1rem 1.25rem; margin: 1rem 0; page-break-inside: avoid; }
+  .rfp-section-title { font-weight: 700; font-size: 12pt; color: #1a1a2e; margin-bottom: 0.5rem; }
+  .rfp-spec-table th { font-size: 9.5pt; }
+  .footer { margin-top: 2.5rem; padding-top: 1rem; border-top: 2px solid #e5e7eb; font-size: 8.5pt; color: #6b7280; text-align: center; }
+  @media print { body { padding: 0; } }
 </style>
 </head>
 <body>
 ${rfp.content}
 <div class="footer">
-  This is an official procurement document issued by the Crown Prince's Court, Abu Dhabi, UAE.<br>
-  Reference: ${rfp.ref_number || ''} | Generated: ${new Date().toLocaleDateString('en-GB')}
+  Official procurement document — Crown Prince's Court, Abu Dhabi, UAE &nbsp;|&nbsp;
+  Reference: ${rfp.ref_number || ''} &nbsp;|&nbsp; Generated: ${new Date().toLocaleDateString('en-GB')}
 </div>
 </body>
 </html>`
-  } else {
-    // Fallback: plain text as HTML
-    rfpHtmlContent = `<!DOCTYPE html><html><body><pre style="font-family:Arial;font-size:11pt;line-height:1.6">${bodyText.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</pre></body></html>`
-  }
 
-  const attachBase64 = btoa(unescape(encodeURIComponent(rfpHtmlContent)))
+    // Encode as base64 — use a robust implementation that handles Unicode
+    const enc = new TextEncoder()
+    const bytes = enc.encode(rfpHtmlContent)
+    attachBase64 = uint8ToBase64(bytes)
+    attachments = [{
+      filename: rfpFilename,
+      content: attachBase64,
+      content_type: 'application/pdf',
+    }]
+  }
 
   try {
     const payload: any = {
@@ -2288,12 +2377,7 @@ ${rfp.content}
       subject: subject,
       text: bodyText,
       html: htmlBody,
-      attachments: [
-        {
-          filename: rfpFilename,
-          content: attachBase64,
-        }
-      ],
+      attachments,
     }
 
     const res = await fetch('https://api.resend.com/emails', {

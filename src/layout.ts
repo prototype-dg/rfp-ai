@@ -45,6 +45,10 @@ export function getLayout(): string {
     .btn-ghost { background:transparent; color:#6b7280; font-weight:500; border-radius:8px; padding:0.4rem 0.875rem; cursor:pointer; border:1px solid #e5e7eb; display:inline-flex; align-items:center; gap:0.4rem; font-size:0.875rem; transition:all 0.2s; }
     .btn-ghost:hover { background:#f3f4f6; }
     .btn-sm { padding:0.3rem 0.75rem; font-size:0.8rem; }
+    /* Award button — gold, highlighted, end-of-process */
+    .award-btn { background:linear-gradient(135deg,#c9a84c,#e8c84a,#c9a84c); color:#1a1a2e; font-weight:700; border-radius:8px; padding:0.35rem 0.9rem; cursor:pointer; border:2px solid #c9a84c; display:inline-flex; align-items:center; gap:0.4rem; font-size:0.8rem; box-shadow:0 2px 8px rgba(201,168,76,0.45); transition:all 0.2s; letter-spacing:0.02em; }
+    .award-btn:hover { background:linear-gradient(135deg,#e8c84a,#ffd740,#e8c84a); box-shadow:0 4px 16px rgba(201,168,76,0.6); transform:translateY(-1px) scale(1.03); }
+    .award-btn i { font-size:0.85rem; }
 
     /* Stage badges */
     .stage-badge { padding:0.2rem 0.6rem; border-radius:20px; font-size:0.72rem; font-weight:600; display:inline-block; white-space:nowrap; }
