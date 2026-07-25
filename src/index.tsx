@@ -23,14 +23,14 @@ app.onError((err, c) => {
 app.get('/static/app.js', (c) => {
   return c.body(appJs, 200, {
     'Content-Type': 'application/javascript; charset=utf-8',
-    'Cache-Control': 'public, max-age=3600',
+    'Cache-Control': 'no-cache, no-store, must-revalidate',
   })
 })
 
 app.get('/static/style.css', (c) => {
   return c.body(styleCss, 200, {
     'Content-Type': 'text/css; charset=utf-8',
-    'Cache-Control': 'public, max-age=3600',
+    'Cache-Control': 'no-cache, no-store, must-revalidate',
   })
 })
 
