@@ -729,40 +729,103 @@ function getScoringMatrix(rfp) {
   return JSON.parse(JSON.stringify(DEFAULT_SCORING_MATRIX));
 }
 
+// Render the compact READ-ONLY summary shown inline on the Generate tab
+function renderScoringMatrixSummary(matrix) {
+  var total = matrix.reduce(function(s, r){ return s + (Number(r.weight)||0); }, 0);
+  var totalOk = total === 100;
+  var rows = matrix.map(function(r){
+    return '<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 10px;border-bottom:1px solid var(--cpc-line)">'
+      + '<span style="font-size:0.82rem;color:var(--cpc-ink);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding-right:8px">' + escHtml(r.criterion||'') + '</span>'
+      + '<span style="font-family:\'JetBrains Mono\',monospace;font-size:0.8rem;font-weight:700;color:var(--cpc-gold-deep);background:var(--cpc-gold-tint);border:1px solid var(--cpc-line);border-radius:5px;padding:2px 8px;flex-shrink:0">' + (r.weight||0) + '%</span>'
+      + '</div>';
+  }).join('');
+  return '<div style="border:1px solid var(--cpc-line);border-radius:6px;overflow:hidden">'
+    + rows
+    + '<div style="padding:6px 10px;display:flex;align-items:center;justify-content:space-between;background:var(--cpc-ivory)">'
+    + '<span style="font-family:\'JetBrains Mono\',monospace;font-size:11px;font-weight:700;color:' + (totalOk ? '#065f46' : '#dc2626') + '">'
+    + 'Total: ' + total + '%' + (totalOk ? ' ✓' : ' ⚠') + '</span>'
+    + '</div>'
+    + '</div>';
+}
+
+// Render the FULL editable table used inside the modal
 function renderScoringMatrixEditor(matrix) {
   var total = matrix.reduce(function(s, r){ return s + (Number(r.weight)||0); }, 0);
   var totalColor = total === 100 ? '#065f46' : '#dc2626';
   var rows = matrix.map(function(r, i){
     return '<tr>'
-      + '<td style="padding:6px 8px;border:1px solid var(--cpc-line)">'
-      + '<input id="sm_crit_' + i + '" value="' + escHtml(r.criterion) + '" style="width:100%;border:none;background:transparent;font-size:13px;font-family:inherit;outline:none;color:var(--cpc-ink)" placeholder="Criterion name" onchange="updateScoringMatrixRow(' + i + ')">'
+      + '<td style="padding:8px 10px;border:1px solid var(--cpc-line)">'
+      + '<input id="sm_crit_' + i + '" value="' + escHtml(r.criterion) + '" '
+      + 'style="width:100%;border:none;background:transparent;font-size:13px;font-family:inherit;outline:none;color:var(--cpc-ink)" '
+      + 'placeholder="Criterion name" oninput="updateScoringMatrixRow(' + i + ')">'
       + '</td>'
-      + '<td style="padding:6px 8px;border:1px solid var(--cpc-line);width:64px;text-align:center">'
-      + '<input id="sm_wt_' + i + '" type="number" min="0" max="100" value="' + (r.weight||0) + '" style="width:52px;border:none;background:transparent;font-size:13px;font-family:\'JetBrains Mono\',monospace;text-align:center;outline:none;color:var(--cpc-ink)" onchange="updateScoringMatrixRow(' + i + ')">'
+      + '<td style="padding:8px 10px;border:1px solid var(--cpc-line);width:72px;text-align:center">'
+      + '<input id="sm_wt_' + i + '" type="number" min="0" max="100" value="' + (r.weight||0) + '" '
+      + 'style="width:52px;border:none;background:transparent;font-size:13px;font-family:\'JetBrains Mono\',monospace;text-align:center;outline:none;color:var(--cpc-ink);font-weight:700" '
+      + 'oninput="updateScoringMatrixRow(' + i + ')">'
       + '</td>'
-      + '<td style="padding:6px 8px;border:1px solid var(--cpc-line)">'
-      + '<input id="sm_desc_' + i + '" value="' + escHtml(r.description||'') + '" style="width:100%;border:none;background:transparent;font-size:12px;font-family:inherit;outline:none;color:#6b7280" placeholder="Short description" onchange="updateScoringMatrixRow(' + i + ')">'
+      + '<td style="padding:8px 10px;border:1px solid var(--cpc-line)">'
+      + '<input id="sm_desc_' + i + '" value="' + escHtml(r.description||'') + '" '
+      + 'style="width:100%;border:none;background:transparent;font-size:12px;font-family:inherit;outline:none;color:#4b5563" '
+      + 'placeholder="Describe what this criterion evaluates..." oninput="updateScoringMatrixRow(' + i + ')">'
       + '</td>'
-      + '<td style="padding:4px;border:1px solid var(--cpc-line);width:28px;text-align:center">'
-      + '<button onclick="removeScoringMatrixRow(' + i + ')" class="btn-ghost btn-sm" style="padding:2px 5px;color:#dc2626" title="Remove"><i class="fas fa-times"></i></button>'
+      + '<td style="padding:4px 6px;border:1px solid var(--cpc-line);width:32px;text-align:center">'
+      + '<button onclick="removeScoringMatrixRow(' + i + ')" class="btn-ghost btn-sm" style="padding:3px 6px;color:#dc2626" title="Remove"><i class="fas fa-times"></i></button>'
       + '</td>'
       + '</tr>';
   }).join('');
-  return '<div style="border:1px solid var(--cpc-line);border-radius:6px;overflow:hidden">'
-    + '<table style="width:100%;border-collapse:collapse;font-size:13px">'
+  return '<table style="width:100%;border-collapse:collapse;font-size:13px">'
     + '<thead><tr style="background:var(--cpc-gold-tint)">'
-    + '<th style="padding:7px 8px;text-align:left;font-family:\'JetBrains Mono\',monospace;font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:var(--cpc-gold-deep);border-bottom:1px solid var(--cpc-line)">Criterion</th>'
-    + '<th style="padding:7px 8px;text-align:center;font-family:\'JetBrains Mono\',monospace;font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:var(--cpc-gold-deep);border-bottom:1px solid var(--cpc-line);width:64px">Wt%</th>'
-    + '<th style="padding:7px 8px;text-align:left;font-family:\'JetBrains Mono\',monospace;font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:var(--cpc-gold-deep);border-bottom:1px solid var(--cpc-line)">Description</th>'
-    + '<th style="width:28px;border-bottom:1px solid var(--cpc-line)"></th>'
+    + '<th style="padding:9px 10px;text-align:left;font-family:\'JetBrains Mono\',monospace;font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:var(--cpc-gold-deep);border-bottom:2px solid var(--cpc-line)">Criterion</th>'
+    + '<th style="padding:9px 10px;text-align:center;font-family:\'JetBrains Mono\',monospace;font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:var(--cpc-gold-deep);border-bottom:2px solid var(--cpc-line);width:72px">Wt %</th>'
+    + '<th style="padding:9px 10px;text-align:left;font-family:\'JetBrains Mono\',monospace;font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:var(--cpc-gold-deep);border-bottom:2px solid var(--cpc-line)">Description</th>'
+    + '<th style="width:32px;border-bottom:2px solid var(--cpc-line)"></th>'
     + '</tr></thead>'
     + '<tbody>' + rows + '</tbody>'
     + '</table>'
-    + '<div style="padding:6px 10px;display:flex;align-items:center;justify-content:space-between;background:var(--cpc-ivory);border-top:1px solid var(--cpc-line)">'
-    + '<button onclick="addScoringMatrixRow()" class="btn-ghost btn-sm" style="font-size:11px"><i class="fas fa-plus"></i>Add Criterion</button>'
-    + '<span id="smTotal" style="font-family:\'JetBrains Mono\',monospace;font-size:11px;font-weight:700;color:' + totalColor + '">Total: ' + total + '%' + (total !== 100 ? ' ⚠ must be 100%' : ' ✓') + '</span>'
-    + '</div>'
+    + '<div style="padding:8px 12px;display:flex;align-items:center;justify-content:space-between;background:var(--cpc-ivory);border-top:1px solid var(--cpc-line)">'
+    + '<button onclick="addScoringMatrixRow()" class="btn-ghost btn-sm" style="font-size:12px"><i class="fas fa-plus"></i>Add Criterion</button>'
+    + '<span id="smTotal" style="font-family:\'JetBrains Mono\',monospace;font-size:12px;font-weight:700;color:' + totalColor + '">Total: ' + total + '%' + (total !== 100 ? ' ⚠ must be 100%' : ' ✓') + '</span>'
     + '</div>';
+}
+
+// Open the scoring matrix edit modal
+function openScoringMatrixModal(rfpId) {
+  // Sync working copy from DOM state
+  var matrix = window._currentScoringMatrix || getScoringMatrix(appState.currentRfp);
+  window._currentScoringMatrix = JSON.parse(JSON.stringify(matrix));
+
+  showModal(
+    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">'
+    + '<div>'
+    + '<h3 style="font-size:1rem;font-weight:700;margin:0"><i class="fas fa-balance-scale cpc-gold" style="margin-right:8px"></i>Evaluation Scoring Matrix</h3>'
+    + '<p style="font-size:0.75rem;color:#9ca3af;margin:4px 0 0 0">Define criteria and weights used in AI generation and vendor evaluation. Weights must sum to 100%.</p>'
+    + '</div>'
+    + '</div>'
+    + '<div style="border:1px solid var(--cpc-line);border-radius:6px;overflow:hidden;margin-bottom:1rem" id="scoringMatrixEditor">'
+    + renderScoringMatrixEditor(window._currentScoringMatrix)
+    + '</div>'
+    + '<div style="display:flex;gap:8px;justify-content:flex-end">'
+    + '<button class="btn-ghost" onclick="closeModal()">Cancel</button>'
+    + '<button class="btn-primary" onclick="saveScoringMatrixAndClose(' + rfpId + ')"><i class="fas fa-save"></i>Save Matrix</button>'
+    + '</div>'
+  );
+}
+
+// Save from modal and close, refreshing the inline summary
+async function saveScoringMatrixAndClose(rfpId) {
+  var matrix = window._currentScoringMatrix || getScoringMatrix(appState.currentRfp);
+  var total = matrix.reduce(function(s,r){ return s+(Number(r.weight)||0); }, 0);
+  if (total !== 100) { showToast('Weights must sum to 100%. Current total: ' + total + '%.', 'error'); return; }
+  try {
+    await apiCall('POST', '/rfps/' + rfpId + '/scoring-matrix', { matrix: matrix });
+    if (appState.currentRfp) appState.currentRfp.scoring_matrix = JSON.stringify(matrix);
+    // Refresh inline summary
+    var summaryDiv = document.getElementById('scoringMatrixSummary');
+    if (summaryDiv) summaryDiv.innerHTML = renderScoringMatrixSummary(matrix);
+    showToast('Scoring matrix saved.', 'success');
+    closeModal();
+  } catch(e) { /* apiCall shows error toast */ }
 }
 
 function updateScoringMatrixRow(i) {
@@ -787,10 +850,13 @@ function updateScoringMatrixRow(i) {
 
 function addScoringMatrixRow() {
   var matrix = window._currentScoringMatrix || getScoringMatrix(appState.currentRfp);
-  matrix.push({ criterion: 'New Criterion', weight: 0, description: '' });
+  matrix.push({ criterion: '', weight: 0, description: '' });
   window._currentScoringMatrix = matrix;
   var smDiv = document.getElementById('scoringMatrixEditor');
   if (smDiv) smDiv.innerHTML = renderScoringMatrixEditor(matrix);
+  // focus new criterion input
+  var newInput = document.getElementById('sm_crit_' + (matrix.length - 1));
+  if (newInput) { newInput.focus(); newInput.select(); }
 }
 
 function removeScoringMatrixRow(i) {
@@ -801,6 +867,7 @@ function removeScoringMatrixRow(i) {
   if (smDiv) smDiv.innerHTML = renderScoringMatrixEditor(matrix);
 }
 
+// Legacy save (kept for compatibility — modal path now uses saveScoringMatrixAndClose)
 async function saveScoringMatrix(rfpId) {
   var matrix = window._currentScoringMatrix || getScoringMatrix(appState.currentRfp);
   var total = matrix.reduce(function(s,r){ return s+(Number(r.weight)||0); }, 0);
@@ -808,7 +875,9 @@ async function saveScoringMatrix(rfpId) {
   try {
     await apiCall('POST', '/rfps/' + rfpId + '/scoring-matrix', { matrix: matrix });
     if (appState.currentRfp) appState.currentRfp.scoring_matrix = JSON.stringify(matrix);
-    showToast('Scoring matrix saved. It will be used in the next Generate.', 'success');
+    var summaryDiv = document.getElementById('scoringMatrixSummary');
+    if (summaryDiv) summaryDiv.innerHTML = renderScoringMatrixSummary(matrix);
+    showToast('Scoring matrix saved.', 'success');
   } catch(e) { /* apiCall shows error */ }
 }
 
@@ -851,14 +920,13 @@ rfpTabs.generate = function(rfpId, rfp) {
     + '<div class="form-group"><label>Objectives <span style="color:#ef4444">*</span></label><textarea id="rfpObjectives" rows="3" placeholder="List 4-6 measurable objectives for this project...">' + escHtml(objVal) + '</textarea></div>'
     + '<div class="form-group"><label>Scope of Work <span style="color:#ef4444">*</span></label><textarea id="rfpScope" rows="4" placeholder="Detail the work phases, deliverables, and what is in/out of scope...">' + escHtml(scopeVal) + '</textarea></div>'
     + '<div class="form-group"><label>Technical Requirements</label><textarea id="rfpTech" rows="3" placeholder="Infrastructure, hosting, security, compliance, integration specs...">' + escHtml(techVal) + '</textarea></div>'
-    // SCORING MATRIX SECTION
+    // SCORING MATRIX SECTION — read-only summary + Edit Matrix modal button
     + '<div style="border-top:1px solid var(--cpc-line);padding-top:0.875rem;margin-top:0.25rem">'
     + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">'
     + '<label style="margin:0;font-weight:600;color:var(--cpc-ink);font-size:0.82rem"><i class="fas fa-balance-scale cpc-gold" style="margin-right:6px"></i>Evaluation Scoring Matrix</label>'
-    + '<button onclick="saveScoringMatrix(' + rfpId + ')" class="btn-ghost btn-sm" style="font-size:11px"><i class="fas fa-save"></i>Save Matrix</button>'
+    + '<button onclick="openScoringMatrixModal(' + rfpId + ')" class="btn-ghost btn-sm" style="font-size:11px;display:flex;align-items:center;gap:4px"><i class="fas fa-edit"></i>Edit Matrix</button>'
     + '</div>'
-    + '<p style="font-size:0.75rem;color:#9ca3af;margin:0 0 8px 0">Define evaluation criteria and weights for this RFP. These will be used in AI generation and vendor evaluation. Weights must sum to 100%.</p>'
-    + '<div id="scoringMatrixEditor">' + renderScoringMatrixEditor(window._currentScoringMatrix) + '</div>'
+    + '<div id="scoringMatrixSummary">' + renderScoringMatrixSummary(window._currentScoringMatrix) + '</div>'
     + '</div>'
     // END SCORING MATRIX SECTION
     + '<div style="display:flex;gap:0.5rem;padding-top:0.25rem">'
