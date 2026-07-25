@@ -3,7 +3,7 @@ import { initDb, seedVendors } from '../db/seed'
 import type { Bindings } from '../types'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-07-25-v25'
+const WORKER_VERSION = '2026-07-25-v26'
 
 export const apiRouter = new Hono<{ Bindings: Bindings }>()
 
@@ -1370,12 +1370,13 @@ apiRouter.get('/rfps/:id/proposals', async (c) => {
     FROM proposals p
     LEFT JOIN vendors v ON p.vendor_id = v.id
     WHERE p.rfp_id=?
-    ORDER BY p.id DESC
+    ORDER BY COALESCE(p.ai_total_score, -1) DESC, p.id DESC
   `).bind(rfpId).all()
   return c.json(results)
 })
 
-// GET /proposals/pdf/:key — download a PDF from R2 by key
+// GET /proposals/pdf/:key — stream a PDF from R2 (inline or download)
+// Pass ?dl=1 to force Content-Disposition: attachment (triggers browser save)
 apiRouter.get('/proposals/pdf/:key{.+}', async (c) => {
   const key = c.req.param('key')
   const bucket: R2Bucket | undefined = (c.env as any).PROPOSALS_BUCKET
@@ -1384,9 +1385,13 @@ apiRouter.get('/proposals/pdf/:key{.+}', async (c) => {
   const obj = await bucket.get(key)
   if (!obj) return c.json({ error: 'File not found' }, 404)
 
+  const fname = key.split('/').pop() || 'proposal.pdf'
+  const forceDownload = c.req.query('dl') === '1'
+  const disposition = forceDownload ? `attachment; filename="${fname}"` : `inline; filename="${fname}"`
+
   const headers = new Headers()
   headers.set('Content-Type', obj.httpMetadata?.contentType || 'application/pdf')
-  headers.set('Content-Disposition', `inline; filename="${key.split('/').pop()}"`)
+  headers.set('Content-Disposition', disposition)
   headers.set('Cache-Control', 'private, max-age=3600')
 
   return new Response(obj.body, { headers })
@@ -1485,6 +1490,475 @@ apiRouter.post('/rfps/:rfpId/proposals/:proposalId/award', async (c) => {
     return c.json({ ok: false, error: e.message }, 500)
   }
 })
+
+// ============================================================
+// AI PROPOSAL EVALUATION ENGINE — v26
+// ============================================================
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Extract up to maxChars of text from a proposal record.
+ *  Uses the pre-extracted technical_proposal text and any text stored in
+ *  proposal_attachments[].extracted_text / technical_proposal fields.
+ *  We never try to parse a raw PDF binary at runtime (Worker memory limits). */
+function extractProposalText(proposal: any): string {
+  const parts: string[] = []
+  if (proposal.technical_proposal && typeof proposal.technical_proposal === 'string') {
+    parts.push(proposal.technical_proposal.slice(0, 12000))
+  }
+  if (proposal.executive_summary) parts.push(proposal.executive_summary)
+  if (proposal.key_strengths) parts.push(proposal.key_strengths)
+  try {
+    const atts: any[] = JSON.parse(proposal.proposal_attachments || '[]')
+    for (const a of atts) {
+      if (a.extracted_text) parts.push(String(a.extracted_text).slice(0, 4000))
+    }
+  } catch (_) {}
+  return parts.join('\n\n').slice(0, 20000)
+}
+
+/** Chunk text into ~4000-char blocks */
+function chunkText(text: string, size = 4000): string[] {
+  const chunks: string[] = []
+  for (let i = 0; i < text.length; i += size) chunks.push(text.slice(i, i + size))
+  return chunks.length ? chunks : ['']
+}
+
+/** Simple keyword-overlap relevance: how many words from query appear in chunk */
+function relevanceScore(query: string, chunk: string): number {
+  const words = query.toLowerCase().split(/\W+/).filter(w => w.length > 3)
+  if (!words.length) return 0
+  const lower = chunk.toLowerCase()
+  return words.filter(w => lower.includes(w)).length / words.length
+}
+
+/** Pick the 2 most relevant chunks for a requirement */
+function topChunks(reqText: string, chunks: string[], n = 2): string {
+  return chunks
+    .map(c => ({ c, s: relevanceScore(reqText, c) }))
+    .sort((a, b) => b.s - a.s)
+    .slice(0, n)
+    .map(x => x.c)
+    .join('\n...\n')
+}
+
+/** Extract key noun phrases from a requirement (simplified regex) */
+function keyPhrases(req: string): string[] {
+  return req.toLowerCase()
+    .replace(/[^\w\s]/g, ' ')
+    .split(/\s+/)
+    .filter(w => w.length > 4 && !['shall','must','should','vendor','provide','ensure','that','with','from','have','this','will','been','they','their','which','where','when','also','some','into','than','been','more','such','each','both','then'].includes(w))
+    .slice(0, 10)
+}
+
+/** Phase 1 deterministic compliance check */
+function checkCompliance(reqText: string, proposalText: string): boolean {
+  const phrases = keyPhrases(reqText)
+  if (!phrases.length) return false
+  const lower = proposalText.toLowerCase()
+  const matched = phrases.filter(p => lower.includes(p))
+  return matched.length >= Math.ceil(phrases.length * 0.4)
+}
+
+/** Extract budget from text: returns { amount, currency, confidence } */
+function extractBudget(text: string): { amount: number | null; currency: string; confidence: number } {
+  const currencies = ['AED', 'USD', 'EUR', 'GBP', 'SAR']
+  // Priority 1: Total/Grand Total line
+  const totalRe = /(?:total|grand total|subtotal|total cost|total price)[^\n\r]{0,60}?(AED|USD|EUR|GBP|SAR)?\s*[\$€£]?\s*([\d,]+(?:\.\d{1,2})?)/gi
+  let m: RegExpExecArray | null
+  while ((m = totalRe.exec(text)) !== null) {
+    const cur = m[1] || 'AED'
+    const amt = parseFloat(m[2].replace(/,/g, ''))
+    if (amt > 0) return { amount: amt, currency: cur, confidence: 1.0 }
+  }
+  // Priority 2: Largest currency amount
+  const anyRe = /(AED|USD|EUR|GBP|SAR)?\s*[\$€£]?\s*([\d,]+(?:\.\d{1,2})?)/g
+  let best = { amount: 0, currency: 'AED' }
+  while ((m = anyRe.exec(text)) !== null) {
+    const amt = parseFloat(m[2].replace(/,/g, ''))
+    if (amt > best.amount && amt < 1e10) { best = { amount: amt, currency: m[1] || 'AED' } }
+  }
+  if (best.amount > 1000) return { amount: best.amount, currency: best.currency, confidence: 0.3 }
+  return { amount: null, currency: 'AED', confidence: 0.0 }
+}
+
+/** Extract duration from text */
+function extractDuration(text: string): string | null {
+  const re = /(\d+(?:\.\d+)?)\s*(month|months|week|weeks|quarter|quarters|year|years)/gi
+  const m = re.exec(text)
+  return m ? `${m[1]} ${m[2]}` : null
+}
+
+/** Parse integer from LLM JSON that may be embedded in markdown */
+function parseLLMScore(raw: string): { score: number; justification: string } {
+  try {
+    const jsonMatch = raw.match(/\{[\s\S]*\}/)
+    if (jsonMatch) {
+      const obj = JSON.parse(jsonMatch[0])
+      return { score: Math.min(100, Math.max(0, parseInt(obj.score) || 0)), justification: String(obj.justification || '').slice(0, 150) }
+    }
+  } catch (_) {}
+  const numMatch = raw.match(/\b(\d{1,3})\b/)
+  return { score: numMatch ? Math.min(100, parseInt(numMatch[1])) : 0, justification: raw.slice(0, 120) }
+}
+
+// ── Core evaluation function ──────────────────────────────────────────────────
+
+async function evaluateProposal(proposal: any, rfp: any, env: any): Promise<any> {
+  const proposalText = extractProposalText(proposal)
+  const chunks = chunkText(proposalText)
+
+  // Parse scoring matrix
+  let scoringMatrix: any[] = []
+  try { scoringMatrix = JSON.parse(rfp.scoring_matrix || '[]') } catch (_) {}
+  if (!scoringMatrix.length) {
+    scoringMatrix = [
+      { criterion: 'Technical Approach', weight: 40 },
+      { criterion: 'Commercial / Price', weight: 30 },
+      { criterion: 'Compliance', weight: 20 },
+      { criterion: 'Company Experience', weight: 10 },
+    ]
+  }
+
+  // Build or parse requirement glossary
+  let glossary: any[] = []
+  try { glossary = JSON.parse(rfp.requirement_glossary || '[]') } catch (_) {}
+  if (!glossary.length) {
+    // Auto-extract requirements from RFP content
+    const rfpText = (rfp.content || rfp.scope || rfp.tech_requirements || rfp.objectives || '').replace(/<[^>]+>/g, ' ').slice(0, 8000)
+    const lines = rfpText.split(/[\n\r]+/).map((l: string) => l.trim()).filter((l: string) => l.length > 20)
+    let reqId = 0
+    for (const line of lines) {
+      const lo = line.toLowerCase()
+      const isMandatory = /\bmust\b|\bshall\b|\brequired\b|\bmandatory\b/.test(lo)
+      const isCriteria = /\bmust\b|\bshall\b|\brequired\b|\bcriteria\b|\bscope\b|\bobjective\b|\bevaluation\b/.test(lo) || /^[-•*]\s/.test(line) || /^\d+[\.)]\s/.test(line)
+      if (isCriteria) {
+        glossary.push({ id: `req_${++reqId}`, text: line.slice(0, 300), mandatory: isMandatory })
+      }
+      if (reqId >= 20) break
+    }
+    if (!glossary.length && rfpText) {
+      glossary.push({ id: 'req_1', text: rfpText.slice(0, 500), mandatory: false })
+    }
+  }
+
+  // ── Phase 1+2: Compliance + AI depth scoring per requirement ────────────────
+  const complianceBreakdown: any[] = []
+  let totalAiScore = 0; let aiScoreCount = 0
+  const totalMandatory = glossary.filter((r: any) => r.mandatory).length
+  let mandatoryMet = 0; let mandatoryFailed: string[] = []
+
+  for (const req of glossary.slice(0, 15)) {  // cap at 15 reqs to stay within CPU budget
+    const complianceMet = checkCompliance(req.text, proposalText)
+    if (req.mandatory && complianceMet) mandatoryMet++
+    if (req.mandatory && !complianceMet) mandatoryFailed.push(req.text.slice(0, 80))
+
+    let aiScore = 0; let justification = 'Not addressed'
+    if (complianceMet && proposalText.length > 50) {
+      try {
+        const relevant = topChunks(req.text, chunks)
+        const raw = await callLLM(
+          'You are an expert procurement evaluator. Rate the vendor proposal strictly based on the given requirement.',
+          `Requirement: ${req.text}\n\nVendor Proposal Excerpt:\n${relevant.slice(0, 2000)}\n\nRate from 0-100 based on depth, clarity and feasibility. Return ONLY JSON: {"score": <integer>, "justification": "<max 20 words>"}`,
+          env, 'gpt-5-mini', 300
+        )
+        const parsed = parseLLMScore(raw)
+        aiScore = parsed.score
+        justification = parsed.justification
+      } catch (_) {
+        aiScore = 0; justification = 'AI scoring failed'
+      }
+    }
+    if (complianceMet) { totalAiScore += aiScore; aiScoreCount++ }
+    complianceBreakdown.push({
+      id: req.id, text: req.text, mandatory: req.mandatory,
+      compliance_met: complianceMet, ai_score: aiScore, justification,
+    })
+  }
+
+  // ── Budget & Duration ─────────────────────────────────────────────────────
+  const budget = extractBudget(proposalText)
+  const duration = extractDuration(proposalText) || proposal.proposed_duration || null
+
+  // Use stored budget_amount if extraction failed
+  if (!budget.amount && proposal.budget_amount) {
+    budget.amount = proposal.budget_amount
+    budget.currency = proposal.budget_currency || 'AED'
+    budget.confidence = 0.5
+  }
+
+  // ── Score calculation ──────────────────────────────────────────────────────
+  const complianceScore = totalMandatory > 0 ? (mandatoryMet / totalMandatory) * 100 : (complianceBreakdown.filter(r => r.compliance_met).length / Math.max(1, complianceBreakdown.length)) * 100
+  const qualityScore = aiScoreCount > 0 ? totalAiScore / aiScoreCount : 0
+
+  let commercialScore: number | null = null
+  let validationStatus = 'EVALUATED'
+  if (budget.confidence < 0.8) {
+    validationStatus = 'PENDING_MANUAL_REVIEW'
+  } else if (budget.amount) {
+    // Compare against RFP budget ceiling if available
+    const rfpBudget = parseFloat((rfp.budget || '').replace(/[^0-9.]/g, '')) || 0
+    commercialScore = rfpBudget > 0 ? Math.min(100, (rfpBudget / budget.amount) * 100) : 70
+  }
+
+  let totalScore: number
+  if (commercialScore !== null) {
+    totalScore = (complianceScore * 0.3) + (qualityScore * 0.5) + (commercialScore * 0.2)
+  } else {
+    totalScore = (complianceScore * 0.4) + (qualityScore * 0.6)
+  }
+  totalScore = Math.round(totalScore * 10) / 10
+
+  // ── Strengths & Weaknesses ─────────────────────────────────────────────────
+  const strengths = complianceBreakdown.filter(r => r.compliance_met && r.ai_score > 80).map(r => r.justification).filter(Boolean)
+  const weaknesses = complianceBreakdown.filter(r => !r.compliance_met || r.ai_score < 40).map(r => (r.mandatory ? '[MANDATORY] ' : '') + r.text.slice(0, 80))
+
+  // ── AI Verdict ─────────────────────────────────────────────────────────────
+  let recommendation: string
+  let reasoning: string
+  if (mandatoryFailed.length > 0) {
+    recommendation = 'NOT RECOMMENDED'
+    reasoning = `Vendor failed ${mandatoryFailed.length} mandatory requirement(s): ${mandatoryFailed.slice(0, 2).join('; ')}`
+  } else if (totalScore >= 80) {
+    recommendation = 'RECOMMENDED'
+    reasoning = `Strong compliance (${Math.round(complianceScore)}%) and high quality scores (avg ${Math.round(qualityScore)}/100).`
+  } else if (totalScore >= 60) {
+    recommendation = 'CONDITIONAL'
+    reasoning = `Meets most requirements but some gaps exist. Review weaknesses before proceeding.`
+  } else {
+    recommendation = 'NOT RECOMMENDED'
+    reasoning = `Insufficient compliance or quality. Total score ${totalScore}/100 is below threshold.`
+  }
+
+  // ── Scoring Matrix breakdown ───────────────────────────────────────────────
+  const scoringBreakdown = scoringMatrix.map((criterion: any) => {
+    const name = (criterion.criterion || criterion.name || '').toLowerCase()
+    let achieved: number
+    if (name.includes('technical') || name.includes('approach') || name.includes('methodology')) {
+      achieved = qualityScore
+    } else if (name.includes('commercial') || name.includes('price') || name.includes('financial') || name.includes('cost')) {
+      achieved = commercialScore ?? 0
+    } else if (name.includes('compliance') || name.includes('mandatory')) {
+      achieved = complianceScore
+    } else {
+      achieved = (qualityScore + complianceScore) / 2
+    }
+    const weight = criterion.weight || 0
+    return {
+      criterion: criterion.criterion || criterion.name,
+      weight,
+      achieved: Math.round(achieved),
+      weighted: Math.round(achieved * weight / 100 * 10) / 10,
+    }
+  })
+
+  return {
+    evaluated_at: new Date().toISOString(),
+    proposal_id: proposal.id,
+    vendor_name: proposal.vendor_name || '',
+    total_score: totalScore,
+    recommendation,
+    validation_status: validationStatus,
+    compliance_score: Math.round(complianceScore),
+    quality_score: Math.round(qualityScore),
+    commercial_score: commercialScore !== null ? Math.round(commercialScore) : null,
+    budget_extracted: budget.amount,
+    budget_currency: budget.currency,
+    budget_confidence: budget.confidence,
+    duration_extracted: duration,
+    strengths,
+    weaknesses,
+    recommendation_reasoning: reasoning,
+    mandatory_failed: mandatoryFailed,
+    compliance_breakdown: complianceBreakdown,
+    scoring_breakdown: scoringBreakdown,
+    glossary_used: glossary.length,
+    text_chars_analyzed: proposalText.length,
+  }
+}
+
+// ── POST /api/rfps/:id/proposals/evaluate-all — batch AI evaluation ────────
+apiRouter.post('/rfps/:id/proposals/evaluate-all', async (c) => {
+  const rfpId = c.req.param('id')
+  const db = c.env.DB
+  try {
+    const rfp = await db.prepare('SELECT * FROM rfps WHERE id=?').bind(rfpId).first<any>()
+    if (!rfp) return c.json({ error: 'RFP not found' }, 404)
+
+    const { results: proposals } = await db.prepare(`
+      SELECT p.*, v.name as vendor_name FROM proposals p
+      LEFT JOIN vendors v ON p.vendor_id = v.id
+      WHERE p.rfp_id=? ORDER BY p.id ASC
+    `).bind(rfpId).all<any>()
+
+    if (!proposals.length) return c.json({ ok: true, evaluated: 0, message: 'No proposals to evaluate' })
+
+    const results: any[] = []
+    for (const proposal of proposals) {
+      try {
+        const evalData = await evaluateProposal(proposal, rfp, c.env)
+        await db.prepare(`
+          UPDATE proposals SET
+            evaluation_data=?, ai_total_score=?, ai_recommendation=?,
+            ai_validation_status=?, ai_evaluated_at=datetime('now'),
+            ai_compliance_score=?, ai_quality_score=?, ai_commercial_score=?,
+            updated_at=datetime('now')
+          WHERE id=?
+        `).bind(
+          JSON.stringify(evalData),
+          evalData.total_score,
+          evalData.recommendation,
+          evalData.validation_status,
+          evalData.compliance_score,
+          evalData.quality_score,
+          evalData.commercial_score,
+          proposal.id
+        ).run()
+        results.push({ id: proposal.id, vendor: proposal.vendor_name, score: evalData.total_score, recommendation: evalData.recommendation })
+      } catch (e: any) {
+        results.push({ id: proposal.id, vendor: proposal.vendor_name, error: e?.message || 'failed' })
+      }
+    }
+    return c.json({ ok: true, evaluated: results.length, results })
+  } catch (e: any) {
+    return c.json({ ok: false, error: e?.message }, 500)
+  }
+})
+
+// ── POST /api/rfps/:rfpId/proposals/:proposalId/evaluate — single evaluation ─
+apiRouter.post('/rfps/:rfpId/proposals/:proposalId/evaluate', async (c) => {
+  const rfpId = c.req.param('rfpId')
+  const proposalId = c.req.param('proposalId')
+  const db = c.env.DB
+  try {
+    const rfp = await db.prepare('SELECT * FROM rfps WHERE id=?').bind(rfpId).first<any>()
+    if (!rfp) return c.json({ error: 'RFP not found' }, 404)
+    const proposal = await db.prepare(`
+      SELECT p.*, v.name as vendor_name FROM proposals p
+      LEFT JOIN vendors v ON p.vendor_id = v.id WHERE p.id=? AND p.rfp_id=?
+    `).bind(proposalId, rfpId).first<any>()
+    if (!proposal) return c.json({ error: 'Proposal not found' }, 404)
+
+    const evalData = await evaluateProposal(proposal, rfp, c.env)
+    await db.prepare(`
+      UPDATE proposals SET
+        evaluation_data=?, ai_total_score=?, ai_recommendation=?,
+        ai_validation_status=?, ai_evaluated_at=datetime('now'),
+        ai_compliance_score=?, ai_quality_score=?, ai_commercial_score=?,
+        updated_at=datetime('now')
+      WHERE id=?
+    `).bind(
+      JSON.stringify(evalData), evalData.total_score, evalData.recommendation,
+      evalData.validation_status, evalData.compliance_score, evalData.quality_score,
+      evalData.commercial_score, proposal.id
+    ).run()
+    return c.json({ ok: true, ...evalData })
+  } catch (e: any) {
+    return c.json({ ok: false, error: e?.message }, 500)
+  }
+})
+
+// ── GET /api/rfps/:rfpId/proposals/:proposalId/evaluation — fetch results ────
+apiRouter.get('/rfps/:rfpId/proposals/:proposalId/evaluation', async (c) => {
+  const proposalId = c.req.param('proposalId')
+  const proposal = await c.env.DB.prepare('SELECT * FROM proposals WHERE id=?').bind(proposalId).first<any>()
+  if (!proposal) return c.json({ error: 'Not found' }, 404)
+  let evalData = null
+  try { evalData = proposal.evaluation_data ? JSON.parse(proposal.evaluation_data) : null } catch (_) {}
+  return c.json({
+    proposal_id: proposal.id,
+    ai_total_score: proposal.ai_total_score,
+    ai_recommendation: proposal.ai_recommendation,
+    ai_validation_status: proposal.ai_validation_status,
+    ai_evaluated_at: proposal.ai_evaluated_at,
+    evaluation_data: evalData,
+  })
+})
+
+// ── POST /api/rfps/:rfpId/proposals/:proposalId/manual-override ──────────────
+apiRouter.post('/rfps/:rfpId/proposals/:proposalId/manual-override', async (c) => {
+  const proposalId = c.req.param('proposalId')
+  const db = c.env.DB
+  try {
+    const body = await c.req.json()
+    const proposal = await db.prepare('SELECT * FROM proposals WHERE id=?').bind(proposalId).first<any>()
+    if (!proposal) return c.json({ error: 'Not found' }, 404)
+    let evalData: any = {}
+    try { evalData = JSON.parse(proposal.evaluation_data || '{}') } catch (_) {}
+
+    if (body.manual_budget) {
+      const rfp = await db.prepare('SELECT budget FROM rfps WHERE id=?').bind(c.req.param('rfpId')).first<any>()
+      const rfpBudget = parseFloat((rfp?.budget || '').replace(/[^0-9.]/g, '')) || 0
+      const commercialScore = rfpBudget > 0 ? Math.min(100, (rfpBudget / body.manual_budget) * 100) : 70
+      evalData.budget_extracted = body.manual_budget
+      evalData.budget_confidence = 1.0
+      evalData.commercial_score = Math.round(commercialScore)
+      evalData.validation_status = 'MANUALLY_VALIDATED'
+      // Recalculate total
+      const cs = evalData.compliance_score || 0
+      const qs = evalData.quality_score || 0
+      evalData.total_score = Math.round(((cs * 0.3) + (qs * 0.5) + (commercialScore * 0.2)) * 10) / 10
+      // Update recommendation
+      if (evalData.mandatory_failed?.length > 0) evalData.recommendation = 'NOT RECOMMENDED'
+      else if (evalData.total_score >= 80) evalData.recommendation = 'RECOMMENDED'
+      else if (evalData.total_score >= 60) evalData.recommendation = 'CONDITIONAL'
+      else evalData.recommendation = 'NOT RECOMMENDED'
+    }
+
+    await db.prepare(`
+      UPDATE proposals SET evaluation_data=?, ai_total_score=?, ai_recommendation=?,
+      ai_validation_status=?, ai_commercial_score=?, updated_at=datetime('now') WHERE id=?
+    `).bind(JSON.stringify(evalData), evalData.total_score, evalData.recommendation,
+      evalData.validation_status, evalData.commercial_score, proposalId).run()
+
+    return c.json({ ok: true, ...evalData })
+  } catch (e: any) {
+    return c.json({ ok: false, error: e?.message }, 500)
+  }
+})
+
+// ── POST /api/rfps/:id/ingest — extract requirement glossary from RFP text ───
+apiRouter.post('/rfps/:id/ingest', async (c) => {
+  const rfpId = c.req.param('id')
+  const db = c.env.DB
+  try {
+    const rfp = await db.prepare('SELECT * FROM rfps WHERE id=?').bind(rfpId).first<any>()
+    if (!rfp) return c.json({ error: 'RFP not found' }, 404)
+    const rfpText = [rfp.content || '', rfp.scope || '', rfp.tech_requirements || '', rfp.objectives || '', rfp.arch_doc_text || '', rfp.brd_doc_text || '']
+      .join('\n').replace(/<[^>]+>/g, ' ').slice(0, 12000)
+
+    const raw = await callLLM(
+      'You are a procurement analyst. Extract structured requirements from an RFP document.',
+      `Extract all vendor requirements from this RFP text. For each requirement, determine if it is mandatory (contains "must", "shall", "required", "mandatory"). Return a JSON array of objects: [{"id":"req_1","text":"...","mandatory":true/false},...]. Extract up to 20 requirements. Return ONLY the JSON array.\n\nRFP TEXT:\n${rfpText}`,
+      c.env, 'gpt-5-mini', 2000
+    )
+    let glossary: any[] = []
+    try {
+      const match = raw.match(/\[[\s\S]*\]/)
+      if (match) glossary = JSON.parse(match[0])
+    } catch (_) {}
+
+    if (!glossary.length) {
+      // Fallback: regex extraction
+      const lines = rfpText.split(/[\n\r]+/).filter(l => l.trim().length > 20)
+      let id = 0
+      for (const line of lines) {
+        const lo = line.toLowerCase()
+        if (/must|shall|required|mandatory|criteria|scope|objective/.test(lo) || /^[-•*\d]/.test(line.trim())) {
+          glossary.push({ id: `req_${++id}`, text: line.trim().slice(0, 300), mandatory: /must|shall/.test(lo) })
+          if (id >= 20) break
+        }
+      }
+    }
+    await db.prepare(`UPDATE rfps SET requirement_glossary=?, updated_at=datetime('now') WHERE id=?`).bind(JSON.stringify(glossary), rfpId).run()
+    return c.json({ ok: true, requirements: glossary.length, glossary })
+  } catch (e: any) {
+    return c.json({ ok: false, error: e?.message }, 500)
+  }
+})
+
+// ── GET /api/proposals/pdf/:key — with Content-Disposition: attachment ────────
+// (Also update the existing endpoint to support download mode)
 
 // ============================================================
 // PUBLIC VENDOR SUBMISSION PORTAL

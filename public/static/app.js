@@ -2001,7 +2001,7 @@ async function silentCheckInbox(rfpId) {
       showToast('Proposal received from ' + senderName + '. Redirecting to Proposals tab...', 'success', 4000);
 
       if (appState.currentRfpId && String(appState.currentRfpId) === String(rfpId)) {
-        renderRfpTabs('proposals', rfpId, false);
+        renderRfpTabs('proposals', rfpId, appState.unreadQA);
         rfpTabs.proposals(rfpId);
       }
 
@@ -2306,6 +2306,20 @@ async function reprocessQuestions(rfpId) {
 }
 
 // --- TAB: PROPOSALS ---
+// ── Helper: build a proper download/open URL for an R2 attachment ────────────
+// Attachment objects from proposal_attachments JSON have a `url` field that is either:
+//   • "r2://proposals/...key..."  — stored in R2, need to route via API
+//   • "https://..."              — public URL (legacy)
+//   • "data:..."                 — base64 (legacy)
+function attachmentApiUrl(urlOrKey, forDownload) {
+  if (!urlOrKey) return null;
+  if (urlOrKey.startsWith('r2://')) {
+    var key = urlOrKey.replace('r2://', '');
+    return '/api/proposals/pdf/' + encodeURIComponent(key).replace(/%2F/g, '/') + (forDownload ? '?dl=1' : '');
+  }
+  return urlOrKey;
+}
+
 rfpTabs.proposals = async function(rfpId) {
   const proposals = await apiCall('GET', '/rfps/' + rfpId + '/proposals').catch(function(){ return []; });
   appState.proposals = proposals;
@@ -2316,6 +2330,17 @@ rfpTabs.proposals = async function(rfpId) {
     if (s === 'recommended') return '<span style="background:#fef3c7;color:#92400e;border-radius:20px;padding:3px 10px;font-size:0.73rem;font-weight:700"><i class="fas fa-star mr-1"></i>Recommended</span>';
     if (s === 'not_awarded') return '<span style="background:#f3f4f6;color:#6b7280;border-radius:20px;padding:3px 10px;font-size:0.73rem;font-weight:500">Not Awarded</span>';
     return '<span style="background:#e0f2fe;color:#0369a1;border-radius:20px;padding:3px 10px;font-size:0.73rem;font-weight:500">Submitted</span>';
+  }
+
+  function aiBadge(p) {
+    if (!p.ai_recommendation) return '<span style="color:#9ca3af;font-size:0.75rem">—</span>';
+    var score = p.ai_total_score != null ? Math.round(p.ai_total_score) : '?';
+    var vs = p.ai_validation_status || '';
+    if (vs === 'PENDING_MANUAL_REVIEW') return '<span style="background:#fef3c7;color:#92400e;border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:600" title="Budget not auto-extracted — manual review needed"><i class="fas fa-clock mr-1"></i>' + score + '/100 · Review</span>';
+    var rec = p.ai_recommendation;
+    if (rec === 'RECOMMENDED') return '<span style="background:#d1fae5;color:#065f46;border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:700"><i class="fas fa-check-circle mr-1"></i>' + score + '/100</span>';
+    if (rec === 'CONDITIONAL') return '<span style="background:#fef3c7;color:#92400e;border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:700"><i class="fas fa-exclamation-circle mr-1"></i>' + score + '/100</span>';
+    return '<span style="background:#fee2e2;color:#991b1b;border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:700"><i class="fas fa-times-circle mr-1"></i>' + score + '/100</span>';
   }
 
   let rows = '';
@@ -2371,19 +2396,27 @@ rfpTabs.proposals = async function(rfpId) {
       + '<td style="font-weight:600">' + fin + '</td>'
       + '<td style="font-size:0.82rem;color:#6b7280">' + escHtml(dur) + '</td>'
       + '<td>' + filesCell + '</td>'
+      + '<td>' + aiBadge(p) + '</td>'
       + '<td>' + statusBadge(p) + '</td>'
       + '<td style="white-space:nowrap">'
-      + '<button class="btn-ghost btn-sm" onclick="viewProposalDetail(' + p.id + ')" style="margin-right:4px"><i class="fas fa-eye"></i>View</button>'
+      + '<button class="btn-ghost btn-sm" onclick="viewProposalDetail(' + p.id + ')" style="margin-right:4px" title="View details"><i class="fas fa-eye"></i>View</button>'
       + awardBtn
       + '</td>'
       + '</tr>';
   });
 
+  var evaluated = proposals.filter(function(p){ return p.ai_recommendation; }).length;
+  var evalBtn = proposals.length > 0
+    ? '<button class="btn-primary" id="evaluateAllBtn" onclick="evaluateAllProposals(' + rfpId + ')" style="background:linear-gradient(135deg,var(--cpc-gold-deep),var(--cpc-gold));border:none"><i class="fas fa-robot"></i>Evaluate with AI</button>'
+    : '';
+
   setContent(
     '<div class="space-y-4">'
     + '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem">'
     + '<div><h3 style="font-weight:700;font-size:0.95rem;color:#1f2937;margin:0">Submitted Proposals</h3>'
-    + '<p style="font-size:0.8rem;color:#9ca3af;margin:0">' + proposals.length + ' proposal(s) received</p></div>'
+    + '<p style="font-size:0.8rem;color:#9ca3af;margin:0">' + proposals.length + ' proposal(s) received'
+    + (evaluated > 0 ? ' · <span style="color:var(--cpc-gold-deep);font-weight:600">' + evaluated + ' AI-evaluated</span>' : '') + '</p></div>'
+    + '<div style="display:flex;gap:0.5rem;align-items:center">' + evalBtn + '</div>'
     + '</div>'
 
     + '<div class="card" style="overflow:hidden">'
@@ -2393,8 +2426,8 @@ rfpTabs.proposals = async function(rfpId) {
         + '<p style="font-size:0.8rem;color:#c4b5fd;margin:0"><i class="fas fa-link" style="margin-right:4px"></i>Vendors submit proposals via the secure submission portal link included in their invitation email.</p></div>'
       : '<div style="overflow-x:auto"><table>'
         + '<thead><tr>'
-        + '<th>Vendor</th><th>Date</th><th>Financial</th><th>Duration</th>'
-        + '<th>Files</th><th>Status</th>'
+        + '<th>Vendor</th><th>Date</th><th>Budget</th><th>Duration</th>'
+        + '<th>Files</th><th>AI Score</th><th>Status</th>'
         + '<th style="text-align:right">Actions</th>'
         + '</tr></thead>'
         + '<tbody>' + rows + '</tbody>'
@@ -2403,6 +2436,23 @@ rfpTabs.proposals = async function(rfpId) {
     + '</div>'
   );
 };
+
+// ── Evaluate all proposals with AI ────────────────────────────────────────────
+async function evaluateAllProposals(rfpId) {
+  var btn = document.getElementById('evaluateAllBtn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>Evaluating…'; }
+  try {
+    showToast('🤖 AI evaluation started — this may take 1–2 minutes for all proposals…', 'info', 10000);
+    var result = await apiCall('POST', '/rfps/' + rfpId + '/proposals/evaluate-all', {});
+    var count = result.evaluated || 0;
+    showToast('✅ AI evaluation complete — ' + count + ' proposal(s) scored!', 'success', 7000);
+    addNotification('info', '🤖 AI Evaluation Complete', count + ' proposal(s) scored and ranked by AI.', rfpId, 'proposals', null);
+    rfpTabs.proposals(rfpId);
+  } catch(e) {
+    showToast('Evaluation failed: ' + (e.message || e), 'error');
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-robot"></i>Evaluate with AI'; }
+  }
+}
 
 async function loadSampleProposals(rfpId) {
   await apiCall('POST', '/rfps/' + rfpId + '/proposals/sample', {});
@@ -2476,163 +2526,421 @@ function closeProposalPanel() {
   if (panel) { panel.style.transform = 'translateX(100%)'; setTimeout(function(){ panel.remove(); }, 300); }
 }
 
+// ── Proposal detail side panel with AI evaluation tabs ────────────────────────
 function viewProposalDetail(id) {
   const p = appState.proposals.find(function(p){ return p.id === id; });
   if (!p) return;
+  // Load evaluation data async and render the panel (with or without AI results)
+  _renderProposalPanel(p, null);
+  if (p.ai_evaluated_at) {
+    apiCall('GET', '/rfps/' + p.rfp_id + '/proposals/' + p.id + '/evaluation').then(function(ev) {
+      _renderProposalPanel(p, ev.evaluation_data);
+    }).catch(function(){});
+  }
+}
 
+function _proposalAttachmentRow(a) {
+  var openUrl  = attachmentApiUrl(a.url || a.r2_key || '', false);
+  var dlUrl    = attachmentApiUrl(a.url || a.r2_key || '', true);
+  var sizeStr  = a.size_bytes > 0 ? (Math.round(a.size_bytes / 1024 / 1024 * 10) / 10) + ' MB' : '';
+  var openBtn  = openUrl ? '<a href="' + escHtml(openUrl) + '" target="_blank" style="text-decoration:none;font-size:0.73rem;font-weight:600;color:var(--cpc-ink);padding:3px 8px;border:1px solid #bfdbfe;border-radius:5px;background:#eff6ff;display:inline-flex;align-items:center;gap:3px"><i class="fas fa-external-link-alt" style="font-size:0.6rem"></i>Open</a>' : '';
+  var dlBtn    = dlUrl  ? '<a href="' + escHtml(dlUrl) + '" download="' + escHtml(a.filename||'document.pdf') + '" style="text-decoration:none;font-size:0.73rem;color:#fff;padding:3px 8px;border-radius:5px;background:var(--cpc-gold-deep);display:inline-flex;align-items:center;gap:3px"><i class="fas fa-download" style="font-size:0.6rem"></i>Download</a>' : '';
+  return '<div style="display:flex;align-items:center;gap:0.625rem;padding:0.55rem 0.75rem;border-bottom:1px solid #f3f4f6">'
+    + '<i class="fas fa-file-pdf" style="color:#dc2626;font-size:1rem;flex-shrink:0"></i>'
+    + '<div style="flex:1;min-width:0">'
+    + '<div style="font-size:0.8rem;font-weight:600;color:#1f2937;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + escHtml(a.filename||'document.pdf') + '</div>'
+    + '<div style="font-size:0.7rem;color:#9ca3af">' + (sizeStr || '') + (sizeStr && a.label ? ' · ' : '') + (a.label ? escHtml(a.label) : '') + '</div>'
+    + '</div>'
+    + '<div style="display:flex;gap:0.3rem;flex-shrink:0">' + openBtn + ' ' + dlBtn + '</div>'
+    + '</div>';
+}
 
-  // ── Budget & Timeline ────────────────────────────────────────────────────
-  let fin = '-';
+function _renderProposalPanel(p, evalData) {
+  // ── Scalar metadata ──────────────────────────────────────────────────────
+  var rfpId = p.rfp_id;
+  var fin = '-';
   if (p.budget_amount && p.budget_amount > 0) {
-    const currency = p.budget_currency || 'AED';
-    fin = currency + ' ' + Number(p.budget_amount).toLocaleString();
+    fin = (p.budget_currency || 'AED') + ' ' + Number(p.budget_amount).toLocaleString();
   } else if (p.financial_proposal) {
     fin = 'AED ' + Number(p.financial_proposal).toLocaleString();
   }
-  let dur = '-';
+  var dur = '-';
   if (p.timeline_months && p.timeline_months > 0) {
     dur = p.timeline_months + ' month' + (p.timeline_months === 1 ? '' : 's');
   } else if (p.proposed_duration) {
     dur = p.proposed_duration;
   }
-  const dateStr = p.created_at ? new Date(p.created_at).toLocaleString('en-AE') : '-';
+  var dateStr = p.created_at ? new Date(p.created_at).toLocaleString('en-AE') : '-';
 
-  // ── Technical approach ──────────────────────────────────────────────────
-  let techHtml = '';
-  if (p.executive_summary) {
-    techHtml = '<div style="margin-bottom:1.25rem">'
-      + '<div class="panel-section-title"><i class="fas fa-file-alt" style="color:var(--cpc-ink)"></i>Technical Approach</div>'
-      + '<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:0.875rem;font-size:0.82rem;line-height:1.7;color:#1e3a5f">' + escHtml(p.executive_summary) + '</div>'
-      + '</div>';
-  } else if (p.technical_proposal) {
-    var tp = p.technical_proposal;
-    var psOpCount = (tp.match(/\b(dup|pop|exch|sub|add|truncate|ifelse|RG|rg|Tf|Td|Tm|BT|ET|NonStruct|F\d+)\b/g) || []).length;
-    var totalWords = (tp.match(/\S+/g) || []).length;
-    var isGarbage = totalWords > 10 && (psOpCount / totalWords) > 0.15;
-    if (isGarbage) {
-      techHtml = '<div style="margin-bottom:1.25rem"><div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:0.875rem;font-size:0.82rem;color:#92400e"><i class="fas fa-exclamation-triangle mr-2"></i>PDF uses complex font encoding — text could not be extracted. Download the file to read it.</div></div>';
-    } else {
-      techHtml = '<div style="margin-bottom:1.25rem">'
-        + '<div class="panel-section-title"><i class="fas fa-lightbulb" style="color:var(--cpc-gold)"></i>Technical Approach</div>'
-        + '<div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:0.875rem;font-size:0.82rem;max-height:160px;overflow-y:auto;white-space:pre-wrap;line-height:1.6;color:#374151">' + escHtml(tp.slice(0, 1200)) + (tp.length > 1200 ? '…' : '') + '</div>'
-        + '</div>';
-    }
-  }
-
-  // ── Key Strengths ───────────────────────────────────────────────────────
-  let strengthsHtml = '';
-  if (p.key_strengths) {
-    const lines = p.key_strengths.split('\n').map(function(l){ return l.trim().replace(/^[•\-\*]\s*/, ''); }).filter(Boolean);
-    if (lines.length > 0) {
-      strengthsHtml = '<div style="margin-bottom:1.25rem">'
-        + '<div class="panel-section-title"><i class="fas fa-star" style="color:var(--cpc-gold)"></i>Key Strengths</div>'
-        + '<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:0.875rem">'
-        + '<ul style="margin:0;padding-left:1.25rem;font-size:0.82rem;line-height:1.7;color:#374151">'
-        + lines.map(function(l){ return '<li>' + escHtml(l) + '</li>'; }).join('')
-        + '</ul></div></div>';
-    }
-  }
-
-  // ── Documents list ──────────────────────────────────────────────────────
-  let docsHtml = '';
+  // ── Attachments list (shared across tabs) ────────────────────────────────
   var attachments = [];
   try { if (p.proposal_attachments) attachments = JSON.parse(p.proposal_attachments); } catch(e) {}
-
+  var attachHtml = '';
   if (attachments.length > 0) {
-    var docItems = attachments.map(function(a) {
-      var sizeStr = a.size_bytes > 0 ? (Math.round(a.size_bytes / 1024 / 1024 * 10) / 10) + ' MB' : '';
-      var openBtn = a.url
-        ? '<a href="' + escHtml(a.url) + '" target="_blank" style="text-decoration:none;font-size:0.75rem;font-weight:600;color:var(--cpc-ink);padding:3px 8px;border:1px solid #bfdbfe;border-radius:5px;background:#eff6ff;display:inline-flex;align-items:center;gap:3px"><i class="fas fa-external-link-alt" style="font-size:0.6rem"></i>Open</a>' : '';
-      var dlBtn = a.url
-        ? '<a href="' + escHtml(a.url) + '" download="' + escHtml(a.filename) + '" style="text-decoration:none;font-size:0.75rem;color:#6b7280;padding:3px 7px;border:1px solid #e5e7eb;border-radius:5px;background:#f9fafb;display:inline-flex;align-items:center;gap:3px"><i class="fas fa-download" style="font-size:0.6rem"></i>Save</a>' : '';
-      return '<div style="display:flex;align-items:center;gap:0.625rem;padding:0.55rem 0.75rem;border-bottom:1px solid #f3f4f6">'
-        + '<i class="fas fa-file-pdf" style="color:#dc2626;font-size:1rem;flex-shrink:0"></i>'
-        + '<div style="flex:1;min-width:0">'
-        + '<div style="font-size:0.8rem;font-weight:600;color:#1f2937;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + escHtml(a.filename) + '</div>'
-        + '<div style="font-size:0.7rem;color:#9ca3af">' + (sizeStr || '') + (sizeStr && a.label ? ' · ' : '') + (a.label ? attachmentLabelText(a.label) : '') + '</div>'
-        + '</div>'
-        + attachmentLabelPill(a.label)
-        + '<div style="display:flex;gap:0.3rem;flex-shrink:0">' + openBtn + dlBtn + '</div>'
-        + '</div>';
-    }).join('');
-    docsHtml = '<div style="margin-bottom:1.25rem">'
-      + '<div class="panel-section-title"><i class="fas fa-paperclip" style="color:#6b7280"></i>Submitted Documents (' + attachments.length + ')</div>'
-      + '<div style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;background:#fff">' + docItems + '</div>'
-      + '</div>';
+    attachHtml = attachments.map(_proposalAttachmentRow).join('');
   } else if (p.pdf_attachment_url) {
-    var singleOpen = p.pdf_attachment_url.startsWith('data:')
-      ? '<button class="btn-secondary" onclick="downloadProposalPdf(' + p.id + ')"><i class="fas fa-download mr-1"></i>Download PDF</button>'
-      : '<a href="' + escHtml(p.pdf_attachment_url) + '" target="_blank" style="text-decoration:none;font-size:0.78rem;font-weight:600;color:var(--cpc-ink);padding:5px 12px;border:1px solid #bfdbfe;border-radius:6px;background:#eff6ff;display:inline-flex;align-items:center;gap:4px"><i class="fas fa-external-link-alt" style="font-size:0.65rem"></i>Open PDF</a>'
-        + ' <a href="' + escHtml(p.pdf_attachment_url) + '" download="' + escHtml(p.pdf_filename||'proposal.pdf') + '" style="text-decoration:none;font-size:0.78rem;color:#6b7280;padding:5px 10px;border:1px solid #e5e7eb;border-radius:6px;background:#f9fafb;display:inline-flex;align-items:center;gap:4px;margin-left:4px"><i class="fas fa-download" style="font-size:0.65rem"></i>Save</a>';
-    docsHtml = '<div style="margin-bottom:1.25rem">'
-      + '<div class="panel-section-title"><i class="fas fa-paperclip" style="color:#6b7280"></i>Submitted Document</div>'
-      + '<div style="padding:0.75rem;border:1px solid #e5e7eb;border-radius:8px;display:flex;align-items:center;gap:0.75rem">'
-      + '<i class="fas fa-file-pdf" style="color:#dc2626;font-size:1.1rem"></i>'
-      + '<div style="flex:1;font-size:0.82rem;font-weight:600;color:#1f2937">' + escHtml(p.pdf_filename||'proposal.pdf') + '</div>'
-      + '<div>' + singleOpen + '</div>'
-      + '</div></div>';
+    var singleUrl = attachmentApiUrl(p.pdf_attachment_url, false);
+    var singleDl  = attachmentApiUrl(p.pdf_attachment_url, true);
+    attachHtml = _proposalAttachmentRow({ url: p.pdf_attachment_url, filename: p.pdf_filename || 'proposal.pdf', size_bytes: 0, label: 'proposal' });
+  }
+  var attachSection = attachments.length > 0 || p.pdf_attachment_url
+    ? '<div style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;background:#fff">' + attachHtml + '</div>'
+    : '<div style="padding:1rem;text-align:center;color:#9ca3af;font-size:0.82rem"><i class="fas fa-inbox" style="display:block;font-size:1.5rem;margin-bottom:0.5rem;color:#d1d5db"></i>No documents attached</div>';
+
+  // ── TAB 1: Executive Summary ─────────────────────────────────────────────
+  var budgetMissing = (!p.budget_amount || p.budget_amount <= 0) && (!p.financial_proposal);
+  var budgetExtracted = evalData && evalData.budget_extracted;
+  var evalBudget = budgetExtracted
+    ? (evalData.budget_currency || 'AED') + ' ' + Number(evalData.budget_extracted).toLocaleString()
+      + (evalData.budget_confidence != null ? ' <span style="font-size:0.7rem;color:#9ca3af">(confidence: ' + Math.round(evalData.budget_confidence * 100) + '%)</span>' : '')
+    : null;
+
+  var manualBudgetBanner = '';
+  if (evalData && evalData.validation_status === 'PENDING_MANUAL_REVIEW') {
+    manualBudgetBanner = '<div style="background:#fffbeb;border:1.5px solid #fcd34d;border-radius:8px;padding:0.75rem 1rem;margin-bottom:1rem;display:flex;flex-direction:column;gap:0.5rem">'
+      + '<div style="display:flex;align-items:center;gap:0.5rem;font-weight:700;font-size:0.85rem;color:#92400e"><i class="fas fa-exclamation-triangle"></i>Budget not auto-extracted — manual entry required</div>'
+      + '<div style="font-size:0.78rem;color:#78350f">The AI could not find a clear "Total" line in the proposal. Enter the total budget to unlock full commercial scoring.</div>'
+      + '<div style="display:flex;gap:0.5rem;align-items:center;margin-top:0.25rem">'
+      + '<input id="manualBudgetInput_' + p.id + '" type="number" min="0" placeholder="Enter amount (e.g. 1500000)" style="flex:1;padding:6px 10px;border:1.5px solid #fcd34d;border-radius:6px;font-size:0.82rem">'
+      + '<select id="manualBudgetCur_' + p.id + '" style="padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:0.82rem"><option>AED</option><option>USD</option><option>EUR</option><option>GBP</option></select>'
+      + '<button onclick="saveManualBudget(' + rfpId + ',' + p.id + ')" style="background:var(--cpc-gold-deep);color:white;border:none;border-radius:6px;padding:6px 14px;font-size:0.82rem;font-weight:600;cursor:pointer;white-space:nowrap"><i class="fas fa-save" style="margin-right:4px"></i>Save &amp; Re-evaluate</button>'
+      + '</div>'
+      + '</div>';
   }
 
-  // ── Build side panel ────────────────────────────────────────────────────
-  // Remove any existing panel
+  var techSummaryHtml = '';
+  var techText = (evalData && evalData.technical_summary) || p.executive_summary || '';
+  if (!techText && p.technical_proposal) {
+    var tp = p.technical_proposal;
+    var psOps = (tp.match(/\b(dup|pop|exch|sub|add|truncate|ifelse|RG|rg|Tf|Td|Tm|BT|ET|NonStruct|F\d+)\b/g) || []).length;
+    var twds = (tp.match(/\S+/g) || []).length;
+    if (twds > 10 && (psOps / twds) > 0.15) {
+      techText = '[PDF uses complex font encoding — text could not be extracted. Download the file to read it.]';
+    } else {
+      techText = tp.slice(0, 2000) + (tp.length > 2000 ? '…' : '');
+    }
+  }
+  if (techText) {
+    techSummaryHtml = '<div style="margin-bottom:1rem">'
+      + '<div class="panel-section-title"><i class="fas fa-file-alt" style="color:var(--cpc-ink)"></i>Technical Summary</div>'
+      + '<div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:0.875rem;font-size:0.82rem;max-height:200px;overflow-y:auto;white-space:pre-wrap;line-height:1.6;color:#374151">' + escHtml(techText) + '</div>'
+      + '</div>';
+  }
+
+  var strengthsHtml = '';
+  var strengthLines = [];
+  if (evalData && evalData.strengths && evalData.strengths.length) {
+    strengthLines = evalData.strengths;
+  } else if (p.key_strengths) {
+    strengthLines = p.key_strengths.split('\n').map(function(l){ return l.trim().replace(/^[•\-\*]\s*/, ''); }).filter(Boolean);
+  }
+  if (strengthLines.length > 0) {
+    strengthsHtml = '<div style="margin-bottom:1rem">'
+      + '<div class="panel-section-title"><i class="fas fa-star" style="color:var(--cpc-gold)"></i>Key Strengths</div>'
+      + '<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:0.875rem">'
+      + '<ul style="margin:0;padding-left:1.25rem;font-size:0.82rem;line-height:1.8;color:#374151">'
+      + strengthLines.map(function(l){ return '<li>' + escHtml(l) + '</li>'; }).join('')
+      + '</ul></div></div>';
+  }
+
+  var tabSummaryHtml = manualBudgetBanner
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem;margin-bottom:1rem">'
+    + '<div style="background:#faf9f7;border:1px solid #e5e7eb;border-radius:8px;padding:0.75rem">'
+    + '<div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#9a8c78;margin-bottom:4px">Budget</div>'
+    + '<div style="font-size:0.97rem;font-weight:700;color:#745B35">' + (evalBudget || escHtml(fin)) + '</div>'
+    + (evalData && evalData.budget_confidence != null && evalData.budget_confidence < 0.8 ? '<div style="font-size:0.7rem;color:#d97706;margin-top:3px"><i class="fas fa-exclamation-circle mr-1"></i>Low confidence — verify manually</div>' : '')
+    + '</div>'
+    + '<div style="background:#faf9f7;border:1px solid #e5e7eb;border-radius:8px;padding:0.75rem">'
+    + '<div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#9a8c78;margin-bottom:4px">Timeline</div>'
+    + '<div style="font-size:0.97rem;font-weight:700;color:#745B35">' + escHtml((evalData && evalData.duration_extracted) || dur) + '</div>'
+    + '</div>'
+    + '</div>'
+    + techSummaryHtml
+    + strengthsHtml
+    + '<div style="margin-bottom:1rem">'
+    + '<div class="panel-section-title"><i class="fas fa-paperclip" style="color:#6b7280"></i>Submitted Documents (' + (attachments.length || (p.pdf_attachment_url ? 1 : 0)) + ')</div>'
+    + attachSection
+    + '</div>';
+
+  // ── TAB 2: Compliance Matrix ──────────────────────────────────────────────
+  var tabComplianceHtml = '';
+  var compBreakdown = evalData && evalData.compliance_breakdown;
+  if (compBreakdown && compBreakdown.length > 0) {
+    var failedMandatory = compBreakdown.filter(function(r){ return r.mandatory && !r.compliance_met; });
+    var critBanner = failedMandatory.length > 0
+      ? '<div style="background:#fee2e2;border:1.5px solid #fca5a5;border-radius:8px;padding:0.75rem 1rem;margin-bottom:1rem;display:flex;align-items:flex-start;gap:0.625rem">'
+        + '<i class="fas fa-ban" style="color:#dc2626;font-size:1rem;margin-top:2px;flex-shrink:0"></i>'
+        + '<div><div style="font-weight:700;font-size:0.85rem;color:#991b1b;margin-bottom:2px">🚨 Mandatory Requirement(s) Not Met — Proposal Automatically Disqualified</div>'
+        + failedMandatory.map(function(r){ return '<div style="font-size:0.78rem;color:#dc2626"><i class="fas fa-times-circle mr-1"></i>' + escHtml(r.requirement_text || r.id) + '</div>'; }).join('')
+        + '</div></div>'
+      : '';
+
+    var rows = compBreakdown.map(function(r) {
+      var metIcon = r.compliance_met
+        ? '<span style="color:#059669;font-size:1rem"><i class="fas fa-check-circle"></i></span>'
+        : '<span style="color:' + (r.mandatory ? '#dc2626' : '#f59e0b') + ';font-size:1rem"><i class="fas fa-times-circle"></i></span>';
+      var scoreCell = r.compliance_met && r.ai_score != null
+        ? '<div style="display:flex;align-items:center;gap:0.4rem"><div style="width:40px;height:5px;border-radius:3px;background:#e5e7eb;overflow:hidden"><div style="height:100%;width:' + r.ai_score + '%;background:' + (r.ai_score >= 75 ? '#059669' : r.ai_score >= 50 ? '#d97706' : '#dc2626') + '"></div></div><span style="font-size:0.75rem;color:#374151">' + r.ai_score + '/100</span></div>'
+        : '<span style="color:#9ca3af;font-size:0.75rem">—</span>';
+      return '<tr style="border-bottom:1px solid #f3f4f6">'
+        + '<td style="padding:0.5rem 0.75rem;font-size:0.78rem;color:#374151;max-width:280px;word-break:break-word">' + escHtml(r.requirement_text || r.id) + '</td>'
+        + '<td style="padding:0.5rem 0.75rem;text-align:center">' + (r.mandatory ? '<span style="background:#fee2e2;color:#991b1b;border-radius:4px;padding:2px 6px;font-size:0.68rem;font-weight:700">MUST</span>' : '<span style="background:#f3f4f6;color:#6b7280;border-radius:4px;padding:2px 6px;font-size:0.68rem">should</span>') + '</td>'
+        + '<td style="padding:0.5rem 0.75rem;text-align:center">' + metIcon + '</td>'
+        + '<td style="padding:0.5rem 0.75rem">' + scoreCell + '</td>'
+        + '<td style="padding:0.5rem 0.75rem;font-size:0.72rem;color:#6b7280;max-width:220px">' + escHtml(r.justification || '') + '</td>'
+        + '</tr>';
+    }).join('');
+
+    tabComplianceHtml = critBanner
+      + '<div style="overflow-x:auto;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden">'
+      + '<table style="width:100%;border-collapse:collapse;min-width:520px">'
+      + '<thead><tr style="background:#f9fafb;border-bottom:1.5px solid #e5e7eb">'
+      + '<th style="padding:0.5rem 0.75rem;text-align:left;font-size:0.72rem;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em">Requirement</th>'
+      + '<th style="padding:0.5rem 0.75rem;text-align:center;font-size:0.72rem;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em">Mandatory</th>'
+      + '<th style="padding:0.5rem 0.75rem;text-align:center;font-size:0.72rem;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em">Met?</th>'
+      + '<th style="padding:0.5rem 0.75rem;text-align:left;font-size:0.72rem;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em">AI Depth</th>'
+      + '<th style="padding:0.5rem 0.75rem;text-align:left;font-size:0.72rem;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em">Justification</th>'
+      + '</tr></thead>'
+      + '<tbody>' + rows + '</tbody>'
+      + '</table></div>';
+  } else {
+    tabComplianceHtml = '<div style="padding:2.5rem;text-align:center;color:#9ca3af">'
+      + '<i class="fas fa-clipboard-list" style="font-size:2rem;display:block;margin-bottom:0.75rem;color:#d1d5db"></i>'
+      + '<div style="font-weight:600;margin-bottom:0.4rem">No compliance data yet</div>'
+      + '<div style="font-size:0.8rem">Run AI evaluation to generate the compliance matrix.</div>'
+      + '</div>';
+  }
+
+  // ── TAB 3: Scoring Breakdown ──────────────────────────────────────────────
+  var tabScoringHtml = '';
+  if (evalData && evalData.compliance_score != null) {
+    var totalScore = evalData.total_score || 0;
+    var compScore  = evalData.compliance_score || 0;
+    var qualScore  = evalData.quality_score || 0;
+    var commScore  = evalData.commercial_score;
+
+    function scoreBar(score, color) {
+      return '<div style="flex:1;height:8px;background:#e5e7eb;border-radius:4px;overflow:hidden"><div style="height:100%;width:' + Math.min(100, score) + '%;background:' + color + ';border-radius:4px;transition:width 0.5s"></div></div>';
+    }
+
+    var scoringRows = [
+      { label: 'Compliance Score', weight: '40%', score: compScore, color: '#3b82f6', desc: 'Mandatory + optional requirement coverage' },
+      { label: 'Quality Score',    weight: '60%', score: qualScore, color: '#8b5cf6', desc: 'AI-assessed depth, clarity & feasibility' },
+    ];
+    if (commScore != null) {
+      scoringRows.push({ label: 'Commercial Score', weight: 'bonus', score: commScore, color: '#059669', desc: 'Budget vs. RFP ceiling ratio' });
+    }
+
+    tabScoringHtml = '<div style="margin-bottom:1.25rem;background:linear-gradient(135deg,var(--cpc-ink),#2d2519);border-radius:12px;padding:1.25rem;color:white;display:flex;align-items:center;justify-content:space-between">'
+      + '<div><div style="font-size:0.75rem;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:rgba(255,255,255,0.6);margin-bottom:4px">Overall AI Score</div>'
+      + '<div style="font-size:2.5rem;font-weight:800;line-height:1;color:' + (totalScore >= 80 ? '#4ade80' : totalScore >= 60 ? '#fbbf24' : '#f87171') + '">' + Math.round(totalScore) + '<span style="font-size:1.2rem;font-weight:500;color:rgba(255,255,255,0.4)">/100</span></div>'
+      + '</div>'
+      + '<div style="width:72px;height:72px;border-radius:50%;border:4px solid ' + (totalScore >= 80 ? '#4ade80' : totalScore >= 60 ? '#fbbf24' : '#f87171') + ';display:flex;align-items:center;justify-content:center">'
+      + '<i class="fas ' + (totalScore >= 80 ? 'fa-check-circle' : totalScore >= 60 ? 'fa-exclamation-circle' : 'fa-times-circle') + '" style="font-size:1.75rem;color:' + (totalScore >= 80 ? '#4ade80' : totalScore >= 60 ? '#fbbf24' : '#f87171') + '"></i></div>'
+      + '</div>'
+      + '<div style="display:flex;flex-direction:column;gap:0.75rem">'
+      + scoringRows.map(function(r) {
+          return '<div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:0.875rem">'
+            + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'
+            + '<div><span style="font-size:0.85rem;font-weight:600;color:#1f2937">' + escHtml(r.label) + '</span>'
+            + ' <span style="font-size:0.7rem;color:#9ca3af;background:#f3f4f6;border-radius:4px;padding:1px 6px">' + r.weight + '</span></div>'
+            + '<span style="font-size:1.1rem;font-weight:800;color:' + r.color + '">' + Math.round(r.score) + '/100</span>'
+            + '</div>'
+            + '<div style="display:flex;align-items:center;gap:0.5rem">' + scoreBar(r.score, r.color) + '</div>'
+            + '<div style="font-size:0.72rem;color:#9ca3af;margin-top:4px">' + escHtml(r.desc) + '</div>'
+            + '</div>';
+        }).join('')
+      + '</div>'
+      + (evalData.validation_status === 'PENDING_MANUAL_REVIEW' ? '<div style="margin-top:0.75rem;background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;padding:0.75rem;font-size:0.78rem;color:#92400e"><i class="fas fa-clock mr-1"></i>Commercial score excluded — budget needs manual entry (see Executive Summary tab)</div>' : '')
+      + (evalData.validation_status === 'MANUALLY_VALIDATED' ? '<div style="margin-top:0.75rem;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:0.75rem;font-size:0.78rem;color:#065f46"><i class="fas fa-user-check mr-1"></i>Budget manually validated and included in scoring</div>' : '');
+  } else {
+    tabScoringHtml = '<div style="padding:2.5rem;text-align:center;color:#9ca3af">'
+      + '<i class="fas fa-chart-bar" style="font-size:2rem;display:block;margin-bottom:0.75rem;color:#d1d5db"></i>'
+      + '<div style="font-weight:600;margin-bottom:0.4rem">No scoring data yet</div>'
+      + '<div style="font-size:0.8rem">Run AI evaluation to see the detailed scoring breakdown.</div>'
+      + '</div>';
+  }
+
+  // ── TAB 4: AI Verdict ────────────────────────────────────────────────────
+  var tabVerdictHtml = '';
+  if (evalData && evalData.recommendation) {
+    var rec = evalData.recommendation;
+    var recColor  = rec === 'RECOMMENDED' ? '#059669' : rec === 'CONDITIONAL' ? '#d97706' : '#dc2626';
+    var recBg     = rec === 'RECOMMENDED' ? '#d1fae5' : rec === 'CONDITIONAL' ? '#fef3c7' : '#fee2e2';
+    var recIcon   = rec === 'RECOMMENDED' ? 'fa-check-circle' : rec === 'CONDITIONAL' ? 'fa-exclamation-circle' : 'fa-times-circle';
+
+    var weakLines = (evalData.weaknesses || []).filter(Boolean);
+
+    tabVerdictHtml = '<div style="text-align:center;padding:1.25rem;background:' + recBg + ';border-radius:12px;margin-bottom:1.25rem">'
+      + '<i class="fas ' + recIcon + '" style="font-size:2.5rem;color:' + recColor + ';display:block;margin-bottom:0.5rem"></i>'
+      + '<div style="font-size:1.5rem;font-weight:800;color:' + recColor + '">' + escHtml(rec) + '</div>'
+      + (evalData.total_score != null ? '<div style="font-size:0.85rem;color:' + recColor + ';opacity:0.75;margin-top:4px">Score: ' + Math.round(evalData.total_score) + ' / 100</div>' : '')
+      + '</div>'
+      + (evalData.recommendation_reasoning ? '<div style="margin-bottom:1.25rem"><div class="panel-section-title"><i class="fas fa-gavel" style="color:var(--cpc-ink)"></i>Reasoning</div>'
+        + '<div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:0.875rem;font-size:0.82rem;line-height:1.7;color:#374151">' + escHtml(evalData.recommendation_reasoning) + '</div></div>' : '')
+      + (strengthLines.length > 0 ? '<div style="margin-bottom:1.25rem"><div class="panel-section-title"><i class="fas fa-thumbs-up" style="color:#059669"></i>Strong Points</div>'
+        + '<ul style="margin:0;padding-left:1.25rem;font-size:0.82rem;line-height:1.8;color:#374151">'
+        + strengthLines.map(function(l){ return '<li><i class="fas fa-check" style="color:#059669;margin-right:4px"></i>' + escHtml(l) + '</li>'; }).join('')
+        + '</ul></div>' : '')
+      + (weakLines.length > 0 ? '<div style="margin-bottom:1.25rem"><div class="panel-section-title"><i class="fas fa-exclamation-triangle" style="color:#d97706"></i>Risks &amp; Weak Points</div>'
+        + '<ul style="margin:0;padding-left:1.25rem;font-size:0.82rem;line-height:1.8;color:#374151">'
+        + weakLines.map(function(l){ return '<li><i class="fas fa-exclamation-triangle" style="color:#d97706;margin-right:4px"></i>' + escHtml(l) + '</li>'; }).join('')
+        + '</ul></div>' : '')
+      + '<details style="margin-top:0.75rem;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden">'
+      + '<summary style="padding:0.75rem 1rem;cursor:pointer;font-size:0.82rem;font-weight:600;background:#f9fafb;list-style:none;display:flex;align-items:center;gap:0.5rem"><i class="fas fa-paperclip" style="color:#6b7280"></i>Original Attachments (' + (attachments.length || (p.pdf_attachment_url ? 1 : 0)) + ')</summary>'
+      + '<div>' + (attachHtml || '<div style="padding:0.75rem;text-align:center;color:#9ca3af;font-size:0.82rem">No documents</div>') + '</div>'
+      + '</details>';
+  } else {
+    var hasEvaluated = p.ai_evaluated_at;
+    tabVerdictHtml = '<div style="padding:2.5rem;text-align:center;color:#9ca3af">'
+      + '<i class="fas fa-robot" style="font-size:2.5rem;display:block;margin-bottom:0.75rem;color:#d1d5db"></i>'
+      + '<div style="font-weight:600;font-size:0.95rem;margin-bottom:0.5rem">No AI verdict yet</div>'
+      + '<div style="font-size:0.8rem;margin-bottom:1.25rem">Run an evaluation to get the AI recommendation, compliance matrix, and full scoring breakdown.</div>'
+      + '<button onclick="evaluateSingleProposal(' + rfpId + ',' + p.id + ')" style="background:linear-gradient(135deg,var(--cpc-gold-deep),var(--cpc-gold));color:white;border:none;border-radius:8px;padding:0.6rem 1.5rem;font-size:0.85rem;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:0.5rem" id="evalSingleBtn_' + p.id + '"><i class="fas fa-robot"></i>Evaluate this Proposal</button>'
+      + '</div>';
+  }
+
+  // ── Build the panel DOM ───────────────────────────────────────────────────
   closeProposalPanel();
 
   var overlay = document.createElement('div');
   overlay.id = 'proposalPanelOverlay';
-  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.35);z-index:900;transition:opacity 0.25s';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.35);z-index:900;opacity:0;transition:opacity 0.25s';
   overlay.addEventListener('click', closeProposalPanel);
 
   var panel = document.createElement('div');
   panel.id = 'proposalSidePanel';
-  panel.style.cssText = 'position:fixed;top:0;right:0;bottom:0;width:min(680px,100vw);background:#fff;z-index:901;overflow-y:auto;box-shadow:-4px 0 32px rgba(0,0,0,0.15);transform:translateX(100%);transition:transform 0.3s cubic-bezier(0.16,1,0.3,1);display:flex;flex-direction:column';
+  panel.style.cssText = 'position:fixed;top:0;right:0;bottom:0;width:min(740px,100vw);background:#fff;z-index:901;overflow:hidden;box-shadow:-4px 0 32px rgba(0,0,0,0.15);transform:translateX(100%);transition:transform 0.3s cubic-bezier(0.16,1,0.3,1);display:flex;flex-direction:column';
+
+  var activeTab = evalData ? 'verdict' : 'summary';
 
   panel.innerHTML =
     // ── Panel header ──────────────────────────────────────────────────────
-    '<div style="position:sticky;top:0;z-index:10;background:#fff;border-bottom:1px solid #e5e7eb;padding:1rem 1.25rem;display:flex;align-items:center;gap:0.875rem">'
+    '<div style="position:sticky;top:0;z-index:10;background:#fff;border-bottom:1px solid #e5e7eb;padding:0.875rem 1.25rem;display:flex;align-items:center;gap:0.875rem;flex-shrink:0">'
     + '<div style="width:40px;height:40px;border-radius:10px;background:var(--cpc-ink);display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:1rem;flex-shrink:0">' + escHtml((p.vendor_name||'?').charAt(0)) + '</div>'
     + '<div style="flex:1;min-width:0">'
     + '<div style="font-weight:700;font-size:0.97rem;color:#1f2937;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + escHtml(p.vendor_name||'Unknown Vendor') + '</div>'
-    + '<div style="font-size:0.75rem;color:#9ca3af">' + dateStr + '</div>'
+    + '<div style="font-size:0.73rem;color:#9ca3af">' + dateStr + ' &bull; ' + escHtml((p.status||'submitted').replace(/_/g,' '))
+    + (p.ai_recommendation ? ' &bull; <span style="color:' + (p.ai_recommendation === 'RECOMMENDED' ? '#059669' : p.ai_recommendation === 'CONDITIONAL' ? '#d97706' : '#dc2626') + ';font-weight:700">' + p.ai_recommendation + '</span>' : '') + '</div>'
     + '</div>'
-    + '<button onclick="closeProposalPanel()" style="flex-shrink:0;width:32px;height:32px;border-radius:8px;border:1px solid #e5e7eb;background:#f9fafb;color:#6b7280;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:1rem;transition:background 0.15s" title="Close panel"><i class="fas fa-times"></i></button>'
-    + '</div>'
-
-    // ── Key metrics bar ───────────────────────────────────────────────────
-    + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0;border-bottom:1px solid #e5e7eb">'
-    + '<div style="padding:0.875rem 1.25rem;border-right:1px solid #e5e7eb">'
-    + '<div style="font-size:0.68rem;color:#9ca3af;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:3px">Budget</div>'
-    + '<div style="font-size:1rem;font-weight:700;color:#745B35">' + escHtml(fin) + '</div>'
-    + '</div>'
-    + '<div style="padding:0.875rem 1.25rem;border-right:1px solid #e5e7eb">'
-    + '<div style="font-size:0.68rem;color:#9ca3af;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:3px">Delivery Timeline</div>'
-    + '<div style="font-size:1rem;font-weight:700;color:#745B35">' + escHtml(dur) + '</div>'
-    + '</div>'
-    + '<div style="padding:0.875rem 1.25rem">'
-    + '<div style="font-size:0.68rem;color:#9ca3af;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:3px">Status</div>'
-    + '<div style="margin-top:1px">' + (p.status === 'awarded' ? '<span style="font-size:0.82rem;font-weight:700;color:#065f46"><i class="fas fa-trophy mr-1"></i>Awarded</span>' : '<span style="font-size:0.82rem;font-weight:600;color:#374151">' + escHtml((p.status||'submitted').replace(/_/g,' ')) + '</span>') + '</div>'
-    + '</div>'
+    + '<button onclick="closeProposalPanel()" style="flex-shrink:0;width:32px;height:32px;border-radius:8px;border:1px solid #e5e7eb;background:#f9fafb;color:#6b7280;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:1rem" title="Close"><i class="fas fa-times"></i></button>'
     + '</div>'
 
-    // ── Scrollable body ───────────────────────────────────────────────────
-    + '<div style="padding:1.25rem;flex:1">'
-    + techHtml
-    + strengthsHtml
-    + docsHtml
+    // ── Tab nav ───────────────────────────────────────────────────────────
+    + '<div id="proposalTabNav" style="display:flex;border-bottom:1px solid #e5e7eb;flex-shrink:0;overflow-x:auto">'
+    + ['summary','compliance','scoring','verdict'].map(function(tab) {
+        var labels = { summary: '<i class="fas fa-file-alt mr-1"></i>Summary', compliance: '<i class="fas fa-clipboard-check mr-1"></i>Compliance', scoring: '<i class="fas fa-chart-bar mr-1"></i>Scoring', verdict: '<i class="fas fa-robot mr-1"></i>AI Verdict' };
+        var isActive = tab === activeTab;
+        return '<button onclick="switchProposalTab(\'' + tab + '\')" id="ptab_' + tab + '" style="padding:0.75rem 1rem;font-size:0.8rem;font-weight:' + (isActive ? '700' : '500') + ';color:' + (isActive ? 'var(--cpc-gold-deep)' : '#6b7280') + ';background:none;border:none;border-bottom:2px solid ' + (isActive ? 'var(--cpc-gold)' : 'transparent') + ';cursor:pointer;white-space:nowrap;transition:all 0.15s">' + labels[tab] + '</button>';
+      }).join('')
     + '</div>'
+
+    // ── Tab bodies ─────────────────────────────────────────────────────────
+    + '<div id="pTabBody_summary"    style="flex:1;overflow-y:auto;padding:1.25rem;' + (activeTab !== 'summary'    ? 'display:none' : '') + '">' + tabSummaryHtml    + '</div>'
+    + '<div id="pTabBody_compliance" style="flex:1;overflow-y:auto;padding:1.25rem;' + (activeTab !== 'compliance' ? 'display:none' : '') + '">' + tabComplianceHtml + '</div>'
+    + '<div id="pTabBody_scoring"    style="flex:1;overflow-y:auto;padding:1.25rem;' + (activeTab !== 'scoring'    ? 'display:none' : '') + '">' + tabScoringHtml    + '</div>'
+    + '<div id="pTabBody_verdict"    style="flex:1;overflow-y:auto;padding:1.25rem;' + (activeTab !== 'verdict'    ? 'display:none' : '') + '">' + tabVerdictHtml    + '</div>'
 
     // ── Footer ─────────────────────────────────────────────────────────────
-    + '<div style="position:sticky;bottom:0;background:#fff;border-top:1px solid #e5e7eb;padding:0.875rem 1.25rem;display:flex;gap:0.5rem;justify-content:flex-end">'
-    + '<button class="btn-ghost" onclick="closeProposalPanel()" style="padding:0.5rem 1.25rem">Close</button>'
+    + '<div style="position:sticky;bottom:0;background:#fff;border-top:1px solid #e5e7eb;padding:0.75rem 1.25rem;display:flex;gap:0.5rem;justify-content:flex-end;flex-shrink:0">'
+    + (!evalData ? '<button onclick="evaluateSingleProposal(' + rfpId + ',' + p.id + ')" id="evalSingleBtnFooter_' + p.id + '" style="background:linear-gradient(135deg,var(--cpc-gold-deep),var(--cpc-gold));color:white;border:none;border-radius:7px;padding:0.45rem 1.1rem;font-size:0.82rem;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:0.4rem"><i class="fas fa-robot"></i>Evaluate with AI</button>' : '')
+    + '<button class="btn-ghost" onclick="closeProposalPanel()" style="padding:0.45rem 1.1rem">Close</button>'
     + '</div>';
 
   document.body.appendChild(overlay);
   document.body.appendChild(panel);
 
-  // Trigger animations
   requestAnimationFrame(function() {
     overlay.style.opacity = '1';
     requestAnimationFrame(function() { panel.style.transform = 'translateX(0)'; });
   });
+}
+
+// ── Switch between proposal panel tabs ───────────────────────────────────────
+function switchProposalTab(tab) {
+  ['summary','compliance','scoring','verdict'].forEach(function(t) {
+    var body = document.getElementById('pTabBody_' + t);
+    var btn  = document.getElementById('ptab_' + t);
+    var isActive = t === tab;
+    if (body) body.style.display = isActive ? '' : 'none';
+    if (btn) {
+      btn.style.fontWeight = isActive ? '700' : '500';
+      btn.style.color = isActive ? 'var(--cpc-gold-deep)' : '#6b7280';
+      btn.style.borderBottom = isActive ? '2px solid var(--cpc-gold)' : '2px solid transparent';
+    }
+  });
+}
+
+// ── Evaluate a single proposal with AI ───────────────────────────────────────
+async function evaluateSingleProposal(rfpId, proposalId) {
+  // Disable any trigger buttons inside the panel
+  ['evalSingleBtn_' + proposalId, 'evalSingleBtnFooter_' + proposalId].forEach(function(id) {
+    var btn = document.getElementById(id);
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Evaluating…'; }
+  });
+  try {
+    showToast('🤖 AI evaluation running for this proposal — please wait…', 'info', 12000);
+    var result = await apiCall('POST', '/rfps/' + rfpId + '/proposals/' + proposalId + '/evaluate', {});
+    if (result && result.evaluation_data) {
+      showToast('✅ Evaluation complete!', 'success', 4000);
+      // Update local proposal state with scalar fields
+      var p = appState.proposals ? appState.proposals.find(function(pp){ return pp.id === proposalId; }) : null;
+      if (p) {
+        p.ai_recommendation    = result.recommendation;
+        p.ai_total_score       = result.total_score;
+        p.ai_validation_status = result.validation_status;
+        p.ai_evaluated_at      = result.evaluated_at || new Date().toISOString();
+      }
+      // Re-render panel with fresh eval data
+      if (p) _renderProposalPanel(p, result.evaluation_data);
+    } else {
+      showToast('Evaluation finished — refresh to see results.', 'info');
+    }
+  } catch(e) {
+    showToast('Evaluation failed: ' + (e.message || e), 'error');
+    ['evalSingleBtn_' + proposalId, 'evalSingleBtnFooter_' + proposalId].forEach(function(id) {
+      var btn = document.getElementById(id);
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-robot"></i> Evaluate with AI'; }
+    });
+  }
+}
+
+// ── Manual budget override ─────────────────────────────────────────────────────
+async function saveManualBudget(rfpId, proposalId) {
+  var amtEl = document.getElementById('manualBudgetInput_' + proposalId);
+  var curEl = document.getElementById('manualBudgetCur_' + proposalId);
+  if (!amtEl || !amtEl.value) { showToast('Please enter a budget amount', 'error'); return; }
+  var amount = parseFloat(amtEl.value);
+  if (isNaN(amount) || amount <= 0) { showToast('Please enter a valid positive amount', 'error'); return; }
+  var currency = curEl ? curEl.value : 'AED';
+  try {
+    showToast('Saving budget and re-evaluating…', 'info', 6000);
+    var result = await apiCall('POST', '/rfps/' + rfpId + '/proposals/' + proposalId + '/manual-override', {
+      manual_budget: amount,
+      budget_currency: currency,
+    });
+    if (result && result.ok !== false) {
+      showToast('✅ Budget saved! Scores recalculated.', 'success', 4000);
+      var p = appState.proposals ? appState.proposals.find(function(pp){ return pp.id === proposalId; }) : null;
+      if (p) {
+        p.budget_amount        = amount;
+        p.budget_currency      = currency;
+        p.ai_recommendation    = result.recommendation    || p.ai_recommendation;
+        p.ai_total_score       = result.total_score       != null ? result.total_score : p.ai_total_score;
+        p.ai_validation_status = result.validation_status || p.ai_validation_status;
+      }
+      // Re-fetch evaluation data and re-render panel
+      if (p) {
+        apiCall('GET', '/rfps/' + rfpId + '/proposals/' + proposalId + '/evaluation').then(function(ev) {
+          _renderProposalPanel(p, ev.evaluation_data);
+        }).catch(function() { if (p) _renderProposalPanel(p, null); });
+      }
+    } else {
+      showToast('Save failed: ' + ((result && result.error) || 'Unknown error'), 'error');
+    }
+  } catch(e) {
+    showToast('Save failed: ' + (e.message || e), 'error');
+  }
 }
 
 // rfpTabs.evaluation, rfpTabs.recommendation, and rfpTabs.scoring removed — AI evaluation features removed in v8

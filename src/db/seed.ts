@@ -184,6 +184,17 @@ export async function initDb(db: D1Database) {
     `ALTER TABLE vendors ADD COLUMN public_sector_refs TEXT`,
     `ALTER TABLE vendors ADD COLUMN platforms TEXT`,
     `ALTER TABLE vendors ADD COLUMN annual_revenue_usd TEXT`,
+    // proposals AI evaluation columns — v26
+    `ALTER TABLE proposals ADD COLUMN evaluation_data TEXT`,
+    `ALTER TABLE proposals ADD COLUMN ai_total_score REAL`,
+    `ALTER TABLE proposals ADD COLUMN ai_recommendation TEXT`,
+    `ALTER TABLE proposals ADD COLUMN ai_validation_status TEXT`,
+    `ALTER TABLE proposals ADD COLUMN ai_evaluated_at TEXT`,
+    `ALTER TABLE proposals ADD COLUMN ai_compliance_score REAL`,
+    `ALTER TABLE proposals ADD COLUMN ai_quality_score REAL`,
+    `ALTER TABLE proposals ADD COLUMN ai_commercial_score REAL`,
+    // rfps requirement glossary — v26
+    `ALTER TABLE rfps ADD COLUMN requirement_glossary TEXT`,
   ]
   for (const sql of alterMigrations) {
     try {
