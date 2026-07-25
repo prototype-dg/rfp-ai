@@ -9,7 +9,7 @@ import appJs from '../public/static/app.js?raw'
 import styleCss from '../public/static/style.css?raw'
 import submitJs from '../public/static/submit.js?raw'
 import patternSvg from '../public/static/pattern.svg?raw'
-import emblemPng from '../public/static/cpc-emblem.png?base64'
+import { emblemPngBase64 } from './emblem-data'
 
 const app = new Hono<{ Bindings: Bindings }>()
 
@@ -51,11 +51,13 @@ app.get('/static/pattern.svg', (c) => {
 })
 
 app.get('/static/cpc-emblem.png', (c) => {
-  const bin = atob(emblemPng)
+  // emblemPngBase64 is a clean base64 string (no whitespace) from emblem-data.ts
+  // Note: file is actually JPEG format despite the .png extension
+  const bin = atob(emblemPngBase64)
   const bytes = new Uint8Array(bin.length)
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
   return c.body(bytes, 200, {
-    'Content-Type': 'image/png',
+    'Content-Type': 'image/jpeg',
     'Cache-Control': 'public, max-age=86400',
   })
 })
