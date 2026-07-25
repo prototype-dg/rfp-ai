@@ -973,39 +973,118 @@ async function generateRfpDoc(rfpId) {
   }
 
   var btn = document.getElementById('genBtn');
-  setLoading(btn, true, 'Generating...');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating…'; }
+
+  // Show live streaming progress area
+  var previewEl = document.getElementById('rfpPreviewArea');
+  var streamBuf = '';
+  var tokenCount = 0;
+  if (previewEl) {
+    previewEl.innerHTML = '<div id="rfpStreamProgress" style="color:var(--cpc-gold-deep);font-size:0.85rem;padding:0.5rem 0;display:flex;align-items:center;gap:8px">'
+      + '<i class="fas fa-spinner fa-spin"></i><span id="rfpStreamTokens">Connecting to AI…</span></div>'
+      + '<div id="rfpStreamContent" style="font-size:0.85rem;color:#666;white-space:pre-wrap;max-height:300px;overflow:auto"></div>';
+  }
+
+  var data = {
+    title:             title,
+    category:          document.getElementById('rfpCategory').value,
+    budget:            document.getElementById('rfpBudget').value,
+    deadline:          document.getElementById('rfpDeadline').value,
+    scope:             scope,
+    tech_requirements: document.getElementById('rfpTech').value,
+    objectives:        objectives,
+    background:        background,
+  };
+
   try {
-    var data = {
-      title:            title,
-      category:         document.getElementById('rfpCategory').value,
-      budget:           document.getElementById('rfpBudget').value,
-      deadline:         document.getElementById('rfpDeadline').value,
-      scope:            scope,
-      tech_requirements:document.getElementById('rfpTech').value,
-      objectives:       objectives,
-      background:       background,
-    };
-    var result = await apiCall('POST', '/rfps/' + rfpId + '/generate', data);
+    var response = await fetch('/api/rfps/' + rfpId + '/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+
+    if (!response.ok || !response.body) {
+      var errText = await response.text().catch(() => 'Network error');
+      throw new Error('Server error ' + response.status + ': ' + errText);
+    }
+
+    // Read SSE stream token by token
+    var reader = response.body.getReader();
+    var decoder = new TextDecoder();
+    var sseBuffer = '';
+    var result = null;
+
+    while (true) {
+      var chunk = await reader.read();
+      if (chunk.done) break;
+      sseBuffer += decoder.decode(chunk.value, { stream: true });
+
+      // Parse complete SSE lines
+      var lines = sseBuffer.split('\n');
+      sseBuffer = lines.pop() || ''; // keep incomplete last line
+
+      for (var i = 0; i < lines.length; i++) {
+        var line = lines[i].trim();
+        if (!line.startsWith('data:')) continue;
+        var jsonStr = line.slice(5).trim();
+        if (!jsonStr || jsonStr === '[DONE]') continue;
+
+        var evt;
+        try { evt = JSON.parse(jsonStr); } catch(_) { continue; }
+
+        if (evt.error) {
+          throw new Error(evt.error);
+        }
+
+        if (evt.token) {
+          streamBuf += evt.token;
+          tokenCount += evt.token.length;
+          // Update live counter
+          var tokEl = document.getElementById('rfpStreamTokens');
+          if (tokEl) tokEl.textContent = 'Generating… ' + tokenCount + ' chars';
+          // Show rolling preview of the last ~800 chars
+          var contentEl = document.getElementById('rfpStreamContent');
+          if (contentEl) {
+            var preview = streamBuf.length > 800 ? '…' + streamBuf.slice(-800) : streamBuf;
+            contentEl.textContent = preview;
+            contentEl.scrollTop = contentEl.scrollHeight;
+          }
+        }
+
+        if (evt.done && evt.rfp) {
+          result = evt.rfp;
+        }
+      }
+    }
+
+    if (!result) {
+      // Backend sent done without rfp object — fetch it ourselves
+      result = await apiCall('GET', '/rfps/' + rfpId);
+    }
+
     appState.currentRfp = result;
     showToast('RFP document generated!', 'success');
+
     // 1. Update the preview area immediately (fast path)
-    var previewEl = document.getElementById('rfpPreviewArea');
     if (previewEl) previewEl.innerHTML = result.content || '';
-    // 2. Show the action buttons (may already exist in DOM from initial render)
+    // 2. Show the action buttons
     var actionDiv = document.getElementById('genActionButtons');
-    if (actionDiv) {
-      actionDiv.style.display = 'flex';
-    }
+    if (actionDiv) actionDiv.style.display = 'flex';
     var pdfBtn = document.getElementById('genPreviewPdfBtn');
     if (pdfBtn) pdfBtn.style.display = '';
-    // 3. Full re-render as reliable fallback (rebuilds entire left panel with hasContent=true)
+    // 3. Full re-render as reliable fallback
     renderRfpTabs('generate', rfpId, appState.unreadQA);
     rfpTabs.generate(rfpId, result);
+
   } catch(e) {
-    // error shown by apiCall
-    setLoading(btn, false);
+    showToast('Generation failed: ' + (e.message || e), 'error');
+    // Re-enable button on error (DOM may still be intact)
+    var btnAgain = document.getElementById('genBtn');
+    if (btnAgain) { btnAgain.disabled = false; btnAgain.innerHTML = '<i class="fas fa-robot"></i> Generate with AI'; }
+    // Clear progress area
+    if (previewEl) previewEl.innerHTML = '';
   }
-  // Note: do NOT call setLoading in finally — rfpTabs.generate() recreates the DOM
+  // Note: do NOT re-enable btn in finally on success path — rfpTabs.generate() recreates the DOM
   // so the original btn reference is stale. The new genBtn is enabled by default.
 }
 

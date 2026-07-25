@@ -3,7 +3,7 @@ import { initDb, seedVendors } from '../db/seed'
 import type { Bindings } from '../types'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-07-25-v26'
+const WORKER_VERSION = '2026-07-25-v27'
 
 export const apiRouter = new Hono<{ Bindings: Bindings }>()
 
@@ -254,50 +254,153 @@ apiRouter.post('/rfps/:id/scoring-matrix', async (c) => {
   }
 })
 
+// POST /rfps/:id/generate — streams LLM tokens as SSE to avoid Cloudflare CPU timeout.
+// The client reads the SSE stream and shows live progress; the Worker saves to DB after
+// the LLM finishes and sends a final event: data: {"done":true,"rfp":{...}}
 apiRouter.post('/rfps/:id/generate', async (c) => {
-  try {
-    const id = c.req.param('id')
-    const body = await c.req.json()
-    const existingRfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(id).first<any>()
-    let archDocText = body.arch_doc_text || existingRfp?.arch_doc_text || ''
-    let brdDocText  = body.brd_doc_text  || existingRfp?.brd_doc_text  || ''
+  const id = c.req.param('id')
+  let body: any
+  try { body = await c.req.json() } catch { body = {} }
 
-    // If either doc field is just a placeholder note (text not extracted), attempt R2 re-fetch + extract
-    const isPlaceholder = (t: string) => !t || t.length < 500 || t.startsWith('[Document uploaded:') || t.startsWith('[PDF:')
-    const bucket: R2Bucket | undefined = (c.env as any).PROPOSALS_BUCKET
-    if (bucket && (isPlaceholder(archDocText) || isPlaceholder(brdDocText))) {
-      // List arch-docs keys for this RFP to find the stored PDFs
+  const existingRfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(id).first<any>().catch(() => null)
+
+  // Use doc text already extracted at upload time — skip expensive re-extraction at generate time.
+  // Only fall back to R2 if the DB field is genuinely empty (not a placeholder from a failed extract).
+  let archDocText = body.arch_doc_text || existingRfp?.arch_doc_text || ''
+  let brdDocText  = body.brd_doc_text  || existingRfp?.brd_doc_text  || ''
+
+  const isPlaceholder = (t: string) => !t || t.length < 500 || t.startsWith('[Document uploaded:') || t.startsWith('[PDF:')
+  const bucket: R2Bucket | undefined = (c.env as any).PROPOSALS_BUCKET
+  if (bucket && (isPlaceholder(archDocText) || isPlaceholder(brdDocText))) {
+    try {
       const listed = await bucket.list({ prefix: `arch-docs/${id}/` })
       for (const obj of listed.objects) {
         const r2Obj = await bucket.get(obj.key)
         if (!r2Obj) continue
         const ab = await r2Obj.arrayBuffer()
         const bytes = new Uint8Array(ab)
-        const extracted = extractTextFromPdfBytes(bytes)
+        // Cap PDF at 200KB before regex extraction to bound CPU time
+        const sliced = bytes.length > 204800 ? bytes.slice(0, 204800) : bytes
+        const extracted = extractTextFromPdfBytes(sliced)
         if (!extracted || extracted.length < 200) continue
         const docType = r2Obj.customMetadata?.docType || (obj.key.toLowerCase().includes('brd') ? 'brd' : 'arch')
-        const text = `[Source: ${obj.key}, ${Math.round(bytes.length/1024)}KB]\n\n${extracted.slice(0, 15000)}`
+        const text = `[Source: ${obj.key}, ${Math.round(bytes.length/1024)}KB]\n\n${extracted.slice(0, 12000)}`
         if (docType === 'brd' && isPlaceholder(brdDocText)) {
           brdDocText = text
-          await c.env.DB.prepare(`UPDATE rfps SET brd_doc_text=?, updated_at=datetime('now') WHERE id=?`).bind(text, id).run()
+          c.env.DB.prepare(`UPDATE rfps SET brd_doc_text=?, updated_at=datetime('now') WHERE id=?`).bind(text, id).run().catch(() => {})
         } else if (docType !== 'brd' && isPlaceholder(archDocText)) {
           archDocText = text
-          await c.env.DB.prepare(`UPDATE rfps SET arch_doc_text=?, updated_at=datetime('now') WHERE id=?`).bind(text, id).run()
+          c.env.DB.prepare(`UPDATE rfps SET arch_doc_text=?, updated_at=datetime('now') WHERE id=?`).bind(text, id).run().catch(() => {})
         }
       }
-    }
-
-    const existingScoringMatrix = existingRfp?.scoring_matrix || null
-    const content = await generateRFPWithLLM(body, archDocText, brdDocText, c.env, existingScoringMatrix)
-    await c.env.DB.prepare(`
-      UPDATE rfps SET title=?, category=?, budget=?, deadline=?, scope=?, tech_requirements=?, objectives=?, background=?, content=?, arch_doc_text=?, brd_doc_text=?, updated_at=datetime('now')
-      WHERE id=?
-    `).bind(body.title, body.category, body.budget, body.deadline, body.scope, body.tech_requirements||'', body.objectives||'', body.background||'', content, archDocText, brdDocText, id).run()
-    const rfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(id).first()
-    return c.json(rfp)
-  } catch (e: any) {
-    return c.json({ error: e.message }, 500)
+    } catch (_) { /* non-fatal — generate without doc context */ }
   }
+
+  const existingScoringMatrix = existingRfp?.scoring_matrix || null
+
+  // Build the prompts (same as generateRFPWithLLM but without calling callLLM yet)
+  const { systemPrompt, userPrompt } = buildRFPPrompt(body, archDocText, brdDocText, existingScoringMatrix)
+
+  const apiKey = c.env?.OPENAI_API_KEY || (globalThis as any).OPENAI_API_KEY || ''
+  const baseUrl = c.env?.OPENAI_BASE_URL || 'https://www.genspark.ai/api/llm_proxy/v1'
+
+  if (!apiKey) {
+    return c.json({ error: 'OPENAI_API_KEY not configured' }, 500)
+  }
+
+  // Open upstream SSE stream to LLM
+  let llmRes: Response
+  try {
+    llmRes = await fetch(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'gpt-5-mini',
+        messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
+        max_tokens: 32000,
+        temperature: 0.3,
+        stream: true,
+      }),
+    })
+  } catch (e: any) {
+    return c.json({ error: 'LLM fetch failed: ' + e.message }, 502)
+  }
+
+  if (!llmRes.ok || !llmRes.body) {
+    const errText = await llmRes.text().catch(() => 'unknown')
+    return c.json({ error: `LLM error ${llmRes.status}: ${errText}` }, 502)
+  }
+
+  // Pipe upstream SSE → client SSE while collecting full content for DB save.
+  // TransformStream bridges the upstream reader into the response body.
+  let fullContent = ''
+  const encoder = new TextEncoder()
+  const decoder = new TextDecoder()
+
+  const { readable, writable } = new TransformStream()
+  const writer = writable.getWriter()
+
+  // Process upstream in background — ctx.waitUntil keeps the Worker alive after headers flush
+  const streamTask = (async () => {
+    try {
+      const reader = llmRes.body!.getReader()
+      let buf = ''
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buf += decoder.decode(value, { stream: true })
+        const lines = buf.split('\n')
+        buf = lines.pop() ?? ''
+        for (const line of lines) {
+          const t = line.trim()
+          if (!t || t === 'data: [DONE]') continue
+          if (!t.startsWith('data: ')) continue
+          try {
+            const json = JSON.parse(t.slice(6))
+            const delta = json.choices?.[0]?.delta?.content
+            if (delta) {
+              fullContent += delta
+              // Forward raw SSE token chunk to client
+              await writer.write(encoder.encode(`data: ${JSON.stringify({ token: delta })}\n\n`))
+            }
+          } catch { /* skip malformed */ }
+        }
+      }
+
+      // Save to DB
+      const content = fullContent.length > 400 ? `<div class="rfp-doc">${fullContent}</div>` : ''
+      if (content) {
+        await c.env.DB.prepare(`
+          UPDATE rfps SET title=?, category=?, budget=?, deadline=?, scope=?, tech_requirements=?,
+            objectives=?, background=?, content=?, arch_doc_text=?, brd_doc_text=?, updated_at=datetime('now')
+          WHERE id=?
+        `).bind(
+          body.title, body.category, body.budget, body.deadline, body.scope,
+          body.tech_requirements || '', body.objectives || '', body.background || '',
+          content, archDocText, brdDocText, id
+        ).run()
+      }
+
+      const rfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(id).first().catch(() => null)
+      // Send final DONE event with the saved RFP
+      await writer.write(encoder.encode(`data: ${JSON.stringify({ done: true, rfp })}\n\n`))
+    } catch (e: any) {
+      await writer.write(encoder.encode(`data: ${JSON.stringify({ error: e.message })}\n\n`)).catch(() => {})
+    } finally {
+      await writer.close().catch(() => {})
+    }
+  })()
+
+  // Keep Worker alive for the duration of the stream
+  c.executionCtx.waitUntil(streamTask)
+
+  return new Response(readable, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'X-Accel-Buffering': 'no',
+    },
+  })
 })
 
 // PDF text extraction for Cloudflare Workers (no Node.js fs/buffer APIs available)
@@ -2186,9 +2289,9 @@ async function callLLM(systemPrompt: string, userPrompt: string, env: any, model
   return fullContent
 }
 
-async function generateRFPWithLLM(data: any, archDocText: string, brdDocText: string, env: any, scoringMatrixJson?: string | null): Promise<string> {
-  // Letterhead image is stored permanently in R2 and served through the worker.
-  // This URL is injected into the prompt so the LLM can reference it in the generated HTML.
+// buildRFPPrompt — pure function, returns {systemPrompt, userPrompt} without calling the LLM.
+// Used by the streaming generate route. generateRFPWithLLM wraps it for batch/test usage.
+function buildRFPPrompt(data: any, archDocText: string, brdDocText: string, scoringMatrixJson?: string | null): { systemPrompt: string; userPrompt: string } {
   const LETTERHEAD_BG_URL = 'https://a7b32759-e743-4139-9bb0-4bae44886667.vip.gensparksite.com/api/proposals/pdf/letterhead/bg_a4.png'
 
   const systemPrompt = `You are a senior government procurement specialist at the Crown Prince's Court (CPC) of Abu Dhabi, UAE. You are producing a formal, comprehensive, publication-ready Request for Proposal (RFP) document issued to external vendors on official CPC letterhead.
@@ -2436,6 +2539,11 @@ ${'='.repeat(60)}
 
 REMINDER: Do NOT reference any document filename, BRD name, or attached file anywhere in the output. All content must be stated inline as if you wrote it yourself.`
 
+  return { systemPrompt, userPrompt }
+}
+
+async function generateRFPWithLLM(data: any, archDocText: string, brdDocText: string, env: any, scoringMatrixJson?: string | null): Promise<string> {
+  const { systemPrompt, userPrompt } = buildRFPPrompt(data, archDocText, brdDocText, scoringMatrixJson)
   const llmContent = await callLLM(systemPrompt, userPrompt, env, 'gpt-5-mini', 32000)
   if (llmContent && llmContent.length > 400) {
     return `<div class="rfp-doc">${llmContent}</div>`
