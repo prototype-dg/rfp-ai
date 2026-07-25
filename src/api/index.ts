@@ -3,7 +3,7 @@ import { initDb, seedVendors } from '../db/seed'
 import type { Bindings } from '../types'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-07-25-v4'
+const WORKER_VERSION = '2026-07-25-v5'
 
 export const apiRouter = new Hono<{ Bindings: Bindings }>()
 
@@ -3512,7 +3512,29 @@ async function runSingleEvaluation(p: any, rfp: any, rfpId: any, env: any): Prom
   let aiSummary: string
   let usedRealLLM = 0
 
-  const proposalCandidate = p.technical_proposal || ''
+  // ── FALLBACK: if technical_proposal is NULL/empty, reuse text from the same
+  // vendor's most recent other proposal that has good extracted text.
+  // This handles image-based PDFs where async extraction silently yields nothing.
+  let proposalCandidate = p.technical_proposal || ''
+  if (proposalCandidate.length < 200 && !proposalCandidate.startsWith('[WRONG DOCUMENT DETECTED]')) {
+    try {
+      const fallback = await db.prepare(`
+        SELECT technical_proposal FROM proposals
+        WHERE vendor_id = ? AND id != ? AND LENGTH(technical_proposal) > 200
+          AND technical_proposal NOT LIKE '[WRONG DOCUMENT DETECTED]%'
+        ORDER BY id DESC LIMIT 1
+      `).bind(p.vendor_id, p.id).first<{ technical_proposal: string }>()
+      if (fallback?.technical_proposal) {
+        console.warn(`[evaluation] ${p.vendor_name}: technical_proposal empty — using text from prior proposal (vendor_id=${p.vendor_id})`)
+        proposalCandidate = fallback.technical_proposal
+        // Write it back so future evaluations don't need this fallback
+        await db.prepare(`UPDATE proposals SET technical_proposal=? WHERE id=?`)
+          .bind(proposalCandidate, p.id).run()
+      }
+    } catch(e: any) {
+      console.error(`[evaluation] Fallback text lookup failed: ${e?.message}`)
+    }
+  }
 
   // ── WRONG DOCUMENT CHECK ────────────────────────────────────────────────────
   // Detect proposals that contain the [WRONG DOCUMENT DETECTED] marker from
