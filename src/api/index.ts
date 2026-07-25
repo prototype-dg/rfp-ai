@@ -3,7 +3,7 @@ import { initDb, seedVendors } from '../db/seed'
 import type { Bindings } from '../types'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-07-25-v8'
+const WORKER_VERSION = '2026-07-25-v9'
 
 export const apiRouter = new Hono<{ Bindings: Bindings }>()
 
@@ -734,7 +734,60 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
       }
 
     } else if (emailCategory === 'questions') {
-      // Parse questions from email body
+      // ── Q&A Closed Check — reject questions if Q&A stage is over ──────────
+      const qaClosedStages = ['submissions_closed', 'evaluation', 'awarded']
+      if (qaClosedStages.includes(rfp.stage)) {
+        // Send auto-rejection email back to sender
+        const resendKey = (c.env as any).RESEND_API_KEY || ''
+        if (resendKey && fromAddress && fromAddress.includes('@')) {
+          const rfpTitle = rfp?.title || 'CPC RFP'
+          const rfpRef   = rfp?.ref_number || ''
+          const rejectionBody = `Dear ${vendorDisplayName},
+
+Thank you for your enquiry regarding the following procurement:
+
+RFP Title:        ${rfpTitle}
+Reference Number: ${rfpRef}
+
+We regret to inform you that the Q&A period for this Request for Proposal has now closed. The Crown Prince's Court (CPC) is no longer able to accept or process clarification questions for this tender.
+
+All vendors have been provided with a consolidated Q&A response document containing answers to all submitted questions. If you have not received this document, please contact procurement@cpc-rfp.website referencing the RFP above.
+
+Proposal submissions continue to be accepted until the stated deadline. Please refer to your original invitation letter for submission instructions and the deadline date.
+
+We appreciate your interest in participating in this procurement and look forward to receiving your proposal.
+
+Best regards,
+Procurement & Contracting Department
+Crown Prince's Court, Abu Dhabi
+procurement@cpc-rfp.website`
+
+          try {
+            await fetch('https://api.resend.com/emails', {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                from: 'CPC Procurement <procurement@cpc-rfp.website>',
+                to: [fromAddress],
+                subject: `RE: ${subject || 'Q&A Query'} — Q&A Period Closed`,
+                text: rejectionBody,
+              }),
+            })
+          } catch(_) {}
+        }
+
+        // Log the rejection
+        await db.prepare(`
+          INSERT INTO email_log (rfp_id, vendor_id, recipient, from_email, subject, body, email_type, status, created_at)
+          VALUES (?,?,?,?,?,?,'qa_rejection','sent',datetime('now'))
+        `).bind(rfpId, vendorId, fromAddress, 'procurement@cpc-rfp.website',
+          `RE: ${subject} — Q&A Period Closed`,
+          `Auto-reply sent: Q&A closed for RFP ${rfp?.ref_number}. Question from ${vendorDisplayName} rejected.`).run()
+
+        return c.json({ ok: true, emailCategory: 'questions_rejected', note: 'Q&A is closed — auto-rejection sent to sender' })
+      }
+
+      // Q&A is open — Parse questions from email body
       const bodyQuestions = parseQuestionsFromBody(bodyText)
 
       // Fetch Q&A spreadsheet attachment if present
@@ -919,13 +972,7 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
 
       console.log(`[webhook] Proposal from ${vendorDisplayName} stored — ${allProposalAttachments.length} attachment(s)`)
 
-      // Auto-advance RFP stage: submissions_closed → evaluation
-      try {
-        const currentRfp = await db.prepare('SELECT stage FROM rfps WHERE id=?').bind(rfpId).first<{stage:string}>()
-        if (currentRfp?.stage === 'submissions_closed') {
-          await db.prepare(`UPDATE rfps SET stage='evaluation', updated_at=datetime('now') WHERE id=?`).bind(rfpId).run()
-        }
-      } catch(_) {}
+      // Note: Do NOT auto-advance stage — award is manual via Award button only
     }
 
     return c.json({ ok: true, emailCategory, newQuestions: newCount, emailLogId, autoInserted: newCount > 0 })
@@ -972,6 +1019,11 @@ apiRouter.post('/rfps/:id/vendors/:vendorId/reply', async (c) => {
     const rfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(rfpId).first<any>()
     const vendor = await c.env.DB.prepare('SELECT * FROM vendors WHERE id=?').bind(vendorId).first<any>()
     if (!vendor) return c.json({ ok: false, error: 'Vendor not found' }, 404)
+
+    // Block replies after RFP is awarded
+    if (rfp?.stage === 'awarded') {
+      return c.json({ ok: false, error: 'Cannot send email — this RFP has been awarded and is now closed. No further correspondence is permitted.' }, 403)
+    }
 
     const rfpVendorRow = await c.env.DB.prepare(
       `SELECT status FROM rfp_vendors WHERE rfp_id=? AND vendor_id=?`
@@ -1118,6 +1170,45 @@ apiRouter.post('/rfps/:id/proposals/sample', async (c) => {
     `).bind(rfpId, v.id, proposal.technical, proposal.financial, proposal.status, isAndersen ? 1 : 0).run()
   }
   return c.json({ ok: true })
+})
+
+// ============================================================
+// AWARD PROPOSAL
+// POST /rfps/:rfpId/proposals/:proposalId/award
+// ============================================================
+apiRouter.post('/rfps/:rfpId/proposals/:proposalId/award', async (c) => {
+  const rfpId = c.req.param('rfpId')
+  const proposalId = c.req.param('proposalId')
+  const db = c.env.DB
+  try {
+    // Check proposal exists
+    const proposal = await db.prepare('SELECT * FROM proposals WHERE id=? AND rfp_id=?').bind(proposalId, rfpId).first<any>()
+    if (!proposal) return c.json({ error: 'Proposal not found' }, 404)
+
+    // Mark this proposal as awarded, all others as not_awarded
+    await db.prepare(`UPDATE proposals SET status='awarded' WHERE id=?`).bind(proposalId).run()
+    await db.prepare(`UPDATE proposals SET status='not_awarded' WHERE rfp_id=? AND id!=?`).bind(rfpId, proposalId).run()
+
+    // Advance RFP stage to awarded (disables submissions & email replies)
+    await db.prepare(`UPDATE rfps SET stage='awarded', updated_at=datetime('now') WHERE id=?`).bind(rfpId).run()
+
+    // Log award in email_log for audit trail
+    const vendor = await db.prepare('SELECT name, contact_email FROM vendors WHERE id=?').bind(proposal.vendor_id).first<any>()
+    const rfp = await db.prepare('SELECT ref_number, title FROM rfps WHERE id=?').bind(rfpId).first<any>()
+    await db.prepare(`
+      INSERT INTO email_log (rfp_id, vendor_id, recipient, subject, body, email_type, status, created_at)
+      VALUES (?,?,?,?,?,'award','simulated',datetime('now'))
+    `).bind(
+      rfpId, proposal.vendor_id,
+      vendor?.contact_email || '',
+      `Contract Award Notification – ${rfp?.title || 'CPC RFP'} (Ref: ${rfp?.ref_number || ''})`,
+      `Contract has been awarded to ${vendor?.name || 'vendor'} (Proposal ID: ${proposalId}). RFP stage set to Awarded.`
+    ).run()
+
+    return c.json({ ok: true, proposalId, rfpId, stage: 'awarded', vendorName: vendor?.name })
+  } catch (e: any) {
+    return c.json({ ok: false, error: e.message }, 500)
+  }
 })
 
 // ============================================================
@@ -1313,6 +1404,43 @@ IDENTITY & TONE
 - You write on behalf of the Crown Prince's Court (CPC), Abu Dhabi — a sovereign government institution.
 - Language must be authoritative, precise, and formal — as if it will be signed and stamped by a Director-General.
 - No filler sentences, no vague boilerplate. Every paragraph must contain actionable, verifiable requirements.
+
+DOCUMENT STYLING — CROWN PRINCE COURT (DIWAN WALI AL AHD) LETTERHEAD
+The generated HTML will be rendered on an official CPC letterhead page with these pre-existing visual elements (already in the page template — do NOT recreate them in your output):
+• Top decorative strip: ~20-22mm geometric Arabic ornamental pattern in warm khaki/beige #A79C7F
+• Below ornament: thin border of repeating circles ("chain" motif), dark #1A1A1A, full width
+• Logo block centered below border: Arabic calligraphic "ديوان ولي العهد" + "CROWN PRINCE COURT" text + circular heraldic eagle emblem
+• The content area starts 45-50mm from top with 25mm left/right margins
+
+Your HTML content must match this visual identity:
+TYPOGRAPHY (use in inline styles on key elements):
+- Body text: font-family:Arial,Calibri,'Segoe UI',sans-serif; font-size:11pt; line-height:1.25; color:#1A1A1A
+- Title/heading: font-size:20-22pt; font-weight:700; text-align:center; color:#1A1A1A; margin-bottom:30-40pt
+- "REQUEST FOR PROPOSAL" subtitle: font-size:14-16pt; text-align:center; letter-spacing:2px; color:#1A1A1A; margin:30pt 0
+- Section headings (1., 2., 3.): font-size:14pt; font-weight:700; margin-top:18-20pt; margin-bottom:8-10pt; color:#1A1A1A
+- Subheadings (3.1, 3.2): font-size:12-13pt; font-weight:700; margin-top:12-14pt; color:#1A1A1A
+- Body paragraphs: font-size:11pt; line-height:1.3; margin-bottom:6pt; text-align:left; color:#1A1A1A
+- Bullet lists: list-style-type:disc; padding-left:20pt; margin:4pt 0; font-size:11pt; line-height:1.3
+
+TABLES (two-column Attribute/Requirement format):
+- width:100%; border-collapse:collapse; font-size:11pt; margin:8pt 0
+- Header cells: font-weight:700; font-size:11pt; padding:6pt 8pt; border-bottom:0.5pt solid #CCCCCC; background:white; color:#1A1A1A
+- Data cells: padding:4pt 8pt; border-bottom:0.5pt solid #CCCCCC; font-size:10.5pt; color:#1A1A1A; vertical-align:top; background:white
+- No colored fill in cells — strictly monochrome
+
+COLOR PALETTE (strictly enforce — no bright colors in body):
+- Main text: #1A1A1A (near-black)
+- Ornament accent (use sparingly for borders only): #A79C7F (warm khaki)
+- Background: pure white #FFFFFF
+- No blues, no greens, no gradients in body text
+
+TABLE OF CONTENTS format:
+- Each TOC row: display:flex; justify-content:space-between; border-bottom:1pt dotted #CCCCCC; padding:3pt 0; font-size:11pt
+- Top-level: font-weight:700
+- Sub-items: padding-left:20pt; font-weight:400
+
+FOOTER (page numbers):
+- Centered, font-size:10pt, color:#1A1A1A, margin-top:15mm
 
 CONTENT RULES — STRICTLY ENFORCED
 1. Derive ALL content exclusively from the PROJECT DETAILS and SUPPORTING DOCUMENTS provided. Do not invent, assume, or extrapolate any requirement, technology, vendor, module, or feature that is not stated or strongly implied by the input.
@@ -1563,91 +1691,394 @@ function uint8ToBase64(bytes: Uint8Array): string {
 }
 
 function generateRfpPdf(rfp: any): Uint8Array {
-  // Build a minimal valid PDF 1.4 with the RFP content as plain text
-  const title = rfp?.title || 'RFP Document'
-  const refNum = rfp?.ref_number || ''
-  const rawHtml = rfp?.content || ''
-  // Strip HTML tags for plain text version
-  const plainText = rawHtml
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&nbsp;/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
+  // Generate a well-structured, multi-page PDF with CPC letterhead styling.
+  // We use pure PDF 1.4 primitives (no external libs — Workers environment).
+  const title   = rfp?.title    || 'Request for Proposal'
+  const refNum  = rfp?.ref_number || ''
+  const rawHtml = rfp?.content  || ''
+  const deadline = rfp?.deadline || ''
+  const category = rfp?.category || ''
 
-  const maxChars = 8000
-  const truncated = plainText.length > maxChars
-    ? plainText.slice(0, maxChars) + '\n\n[Document truncated — full content available in the system]'
-    : plainText
+  // ── 1. HTML → structured sections ──────────────────────────────────────────
+  // Parse the HTML into a sequence of typed lines for PDF layout
+  type PdfLine = { text: string; bold?: boolean; size?: number; indent?: number; spaceBefore?: number; spaceAfter?: number; divider?: boolean; centered?: boolean }
 
-  const pageWidth = 595
-  const pageHeight = 842
-  const margin = 50
-  const lineHeight = 14
-  const fontSize = 10
-  const maxLineWidth = pageWidth - margin * 2
-  const charsPerLine = Math.floor(maxLineWidth / (fontSize * 0.5))
+  function htmlToLines(html: string): PdfLine[] {
+    const lines: PdfLine[] = []
 
-  // Word-wrap the text
-  const words = truncated.split(' ')
-  const lines: string[] = []
-  let currentLine = ''
-  for (const word of words) {
-    if ((currentLine + ' ' + word).trim().length > charsPerLine) {
-      if (currentLine) lines.push(currentLine.trim())
-      currentLine = word
-    } else {
-      currentLine = currentLine ? currentLine + ' ' + word : word
+    // Strip outer rfp-doc wrapper
+    html = html.replace(/<div class="rfp-doc">/gi, '').replace(/<\/div>\s*$/i, '')
+
+    // Split into blocks by tags — process sequentially
+    const blockRe = /<(h[1-6]|p|li|div|tr|th|td|ul|ol)[^>]*>([\s\S]*?)<\/\1>/gi
+    let match: RegExpExecArray | null
+    const processed = new Set<string>()
+
+    // Simple sequential tag parser
+    const tagStack: string[] = []
+    let i = 0
+    let textBuf = ''
+    const tokens: Array<{ type: 'open'|'close'|'self'|'text'; tag?: string; attrs?: string; text?: string }> = []
+
+    // Tokenize HTML
+    const htmlStr = html
+    let pos = 0
+    while (pos < htmlStr.length) {
+      const lt = htmlStr.indexOf('<', pos)
+      if (lt === -1) {
+        tokens.push({ type: 'text', text: htmlStr.slice(pos) })
+        break
+      }
+      if (lt > pos) tokens.push({ type: 'text', text: htmlStr.slice(pos, lt) })
+      const gt = htmlStr.indexOf('>', lt)
+      if (gt === -1) break
+      const tag = htmlStr.slice(lt + 1, gt)
+      if (tag.startsWith('/')) {
+        tokens.push({ type: 'close', tag: tag.slice(1).split(/\s/)[0].toLowerCase() })
+      } else if (tag.endsWith('/')) {
+        tokens.push({ type: 'self', tag: tag.slice(0, -1).trim().split(/\s/)[0].toLowerCase() })
+      } else {
+        const tagName = tag.split(/\s/)[0].toLowerCase()
+        tokens.push({ type: 'open', tag: tagName, attrs: tag })
+      }
+      pos = gt + 1
     }
+
+    // Convert tokens to lines
+    const contextStack: string[] = []
+    let pendingText = ''
+    let inHeader = false
+    let inBold = false
+    let inTh = false
+
+    const flush = (opts: Partial<PdfLine> = {}) => {
+      const t = pendingText.replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&nbsp;/g,' ').replace(/\s+/g,' ').trim()
+      if (t) lines.push({ text: t, ...opts })
+      pendingText = ''
+    }
+
+    for (const tok of tokens) {
+      if (tok.type === 'text') {
+        pendingText += tok.text
+        continue
+      }
+      if (tok.type === 'open') {
+        const tag = tok.tag || ''
+        if (['h1','h2','h3','h4','h5','h6'].includes(tag)) {
+          flush()
+          inHeader = true
+          contextStack.push(tag)
+        } else if (['p','div'].includes(tag)) {
+          flush()
+          contextStack.push(tag)
+        } else if (tag === 'li') {
+          flush()
+          contextStack.push('li')
+          pendingText = '• '
+        } else if (tag === 'strong' || tag === 'b') {
+          inBold = true
+        } else if (tag === 'th') {
+          flush()
+          inTh = true
+          contextStack.push('th')
+        } else if (tag === 'td') {
+          flush()
+          contextStack.push('td')
+        } else if (tag === 'tr') {
+          contextStack.push('tr')
+        } else if (tag === 'table') {
+          flush()
+          lines.push({ text: '', spaceBefore: 4 })
+        } else if (tag === 'br') {
+          pendingText += '\n'
+        }
+      } else if (tok.type === 'close') {
+        const tag = tok.tag || ''
+        if (['h1','h2','h3','h4','h5','h6'].includes(tag)) {
+          const level = parseInt(tag.charAt(1))
+          const size = level === 1 ? 16 : level === 2 ? 13 : 11
+          const spaceBefore = level <= 2 ? 14 : 8
+          flush({ bold: true, size, spaceBefore, spaceAfter: 4 })
+          inHeader = false
+          contextStack.pop()
+        } else if (tag === 'p') {
+          flush({ size: 10, spaceAfter: 3 })
+          contextStack.pop()
+        } else if (tag === 'div') {
+          flush({ size: 10 })
+          contextStack.pop()
+        } else if (tag === 'li') {
+          flush({ size: 10, indent: 12, spaceAfter: 1 })
+          contextStack.pop()
+        } else if (tag === 'strong' || tag === 'b') {
+          inBold = false
+        } else if (tag === 'th') {
+          flush({ bold: true, size: 10, indent: 0 })
+          inTh = false
+          contextStack.pop()
+        } else if (tag === 'td') {
+          flush({ size: 10, indent: 0 })
+          contextStack.pop()
+        } else if (tag === 'tr') {
+          lines.push({ text: '', divider: true })
+          contextStack.pop()
+        } else if (tag === 'table') {
+          lines.push({ text: '', spaceAfter: 4 })
+        } else if (tag === 'ul' || tag === 'ol') {
+          lines.push({ text: '', spaceAfter: 2 })
+        }
+      }
+    }
+    flush({ size: 10 })
+    return lines
   }
-  if (currentLine) lines.push(currentLine.trim())
 
-  // Build PDF content stream
-  let contentStream = `BT\n/F1 14 Tf\n${margin} ${pageHeight - margin - 20} Td\n`
-  contentStream += `(${escPdfString(title)}) Tj\n`
-  contentStream += `0 -20 Td\n/F1 10 Tf\n`
-  if (refNum) contentStream += `(Reference: ${escPdfString(refNum)}) Tj\n0 -20 Td\n`
-  contentStream += `0 -5 Td\n`
+  const contentLines = htmlToLines(rawHtml)
 
-  for (const line of lines) {
-    contentStream += `(${escPdfString(line)}) Tj\n0 -${lineHeight} Td\n`
+  // ── 2. PDF layout parameters ────────────────────────────────────────────────
+  const PW = 595   // A4 width in pt
+  const PH = 842   // A4 height in pt
+  const ML = 60    // left margin
+  const MR = 60    // right margin
+  const MT = 80    // top margin (below header band)
+  const MB = 60    // bottom margin
+  const TW = PW - ML - MR  // text width
+
+  // Header band height (decorative)
+  const HEADER_H = 56  // pt (ornament strip + thin line + logo area)
+  const LOGO_Y   = PH - 40  // logo baseline from bottom of page (top = PH in PDF coords)
+
+  // Fonts (built-in Type1)
+  const FONT_REG  = '/F1'  // Helvetica
+  const FONT_BOLD = '/F2'  // Helvetica-Bold
+
+  // ── 3. Page text layout ─────────────────────────────────────────────────────
+  type PageContent = { stream: string; pageNum: number }
+  const pages: PageContent[] = []
+
+  let curY = PH - MT - HEADER_H  // current Y (top of content area, decreasing)
+  let stream = ''
+  let pageNum = 1
+
+  function charsPerWidth(size: number, w: number) {
+    return Math.floor(w / (size * 0.52))
   }
-  contentStream += 'ET\n'
 
-  const streamBytes = encodeUtf8(contentStream)
+  function wordWrap(text: string, size: number, maxWidth: number, indent: number): string[] {
+    const cpw = charsPerWidth(size, maxWidth - indent)
+    const words = text.split(' ')
+    const wrapped: string[] = []
+    let line = ''
+    for (const w of words) {
+      if (w.includes('\n')) {
+        const parts = w.split('\n')
+        for (let pi = 0; pi < parts.length; pi++) {
+          if (pi > 0) { if (line) wrapped.push(line); line = parts[pi] }
+          else line = line ? line + ' ' + parts[pi] : parts[pi]
+        }
+        continue
+      }
+      const candidate = line ? line + ' ' + w : w
+      if (candidate.length > cpw && line) {
+        wrapped.push(line)
+        line = w
+      } else {
+        line = candidate
+      }
+    }
+    if (line) wrapped.push(line)
+    return wrapped.length ? wrapped : ['']
+  }
 
-  const objects: string[] = []
-  // obj 1: catalog
-  objects.push('1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n')
-  // obj 2: pages
-  objects.push('2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n')
-  // obj 3: page
-  objects.push(`3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n`)
-  // obj 4: content stream
-  objects.push(`4 0 obj\n<< /Length ${streamBytes.length} >>\nstream\n${contentStream}\nendstream\nendobj\n`)
-  // obj 5: font
-  objects.push('5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n')
+  function drawHeaderBand(): string {
+    // Warm khaki ornament band at top
+    let s = ''
+    // Top decorative strip (filled rect in warm khaki #A79C7F ≈ 0.655 0.612 0.498)
+    s += `0.655 0.612 0.498 rg\n`  // fill color #A79C7F
+    s += `0 ${PH - 24} ${PW} 24 re f\n`  // top strip
+    // Chain divider line (black)
+    s += `0 0 0 rg\n`
+    s += `0.5 w\n0 ${PH - 26} m ${PW} ${PH - 26} l S\n`
+    // Logo text area (white background)
+    s += `1 1 1 rg\n`
+    s += `0 ${PH - HEADER_H} ${PW} ${HEADER_H - 26} re f\n`
+    // CPC text (centered)
+    s += `0 0 0 rg\n`
+    s += `BT\n${FONT_BOLD} 10 Tf\n`
+    s += `${PW/2 - 60} ${PH - HEADER_H + 16} Td\n`
+    s += `(CROWN PRINCE COURT  |  DIWAN WALI AL AHD) Tj\n`
+    s += `${FONT_REG} 8 Tf\n`
+    s += `-0 -12 Td\n`
+    s += `(procurement@cpc-rfp.website) Tj\n`
+    s += `ET\n`
+    // Thin rule below header
+    s += `0.8 0.8 0.8 RG\n0.5 w\n${ML} ${PH - HEADER_H - 2} m ${PW - MR} ${PH - HEADER_H - 2} l S\n`
+    s += `0 0 0 RG\n`
+    return s
+  }
 
-  const header = '%PDF-1.4\n'
+  function drawFooter(pn: number): string {
+    let s = ''
+    s += `0.6 0.6 0.6 rg\n`
+    s += `BT\n${FONT_REG} 8 Tf\n`
+    // Page number centered
+    const pnStr = `Page ${pn}`
+    const pnX = PW / 2 - pnStr.length * 2.2
+    s += `${pnX} ${MB - 16} Td\n(${pnStr}) Tj\nET\n`
+    // Footer rule
+    s += `0.8 0.8 0.8 RG\n0.5 w\n${ML} ${MB - 4} m ${PW - MR} ${MB - 4} l S\n`
+    s += `0 0 0 RG\n0 0 0 rg\n`
+    return s
+  }
+
+  function newPage() {
+    if (stream) {
+      pages.push({ stream: drawHeaderBand() + stream + drawFooter(pageNum), pageNum })
+    }
+    stream = ''
+    pageNum++
+    curY = PH - MT - HEADER_H
+  }
+
+  // Cover page
+  stream += drawHeaderBand()
+  // Title block
+  stream += `BT\n${FONT_BOLD} 11 Tf\n`
+  stream += `${ML} ${PH - MT - HEADER_H - 10} Td\n`
+  stream += `(REQUEST FOR PROPOSAL) Tj\n`
+  stream += `${FONT_REG} 9 Tf\n0 -16 Td\n`
+  if (refNum) stream += `(Reference: ${escPdfString(refNum)}) Tj\n0 -13 Td\n`
+  if (category) stream += `(Category: ${escPdfString(category)}) Tj\n0 -13 Td\n`
+  if (deadline) stream += `(Submission Deadline: ${escPdfString(deadline)}) Tj\n0 -13 Td\n`
+  stream += `ET\n`
+  // Large title
+  stream += `BT\n${FONT_BOLD} 18 Tf\n`
+  stream += `${ML} ${PH - MT - HEADER_H - 80} Td\n`
+  const titleWrapped = wordWrap(title, 18, TW, 0)
+  let ty = PH - MT - HEADER_H - 80
+  stream += `BT\n${FONT_BOLD} 18 Tf\n`
+  for (const tl of titleWrapped) {
+    stream += `${ML} ${ty} Td\n(${escPdfString(tl)}) Tj\n`
+    ty -= 24
+    stream = stream.replace(/(\d+\.\d+|\d+) \d+ Td\n\(/, `${ML} ${ty} Td\n(`)
+  }
+  stream += `ET\n`
+
+  curY = ty - 20
+  // Horizontal rule after title
+  stream += `0.655 0.612 0.498 RG\n2 w\n${ML} ${curY} m ${PW - MR} ${curY} l S\n0 0 0 RG\n1 w\n`
+  curY -= 20
+
+  // Render cover header area separately then start content
+  // Flush cover page and start content
+  pages.push({ stream, pageNum })
+  stream = ''
+  pageNum++
+  curY = PH - MT - HEADER_H
+
+  // Content pages
+  for (const line of contentLines) {
+    const size  = line.size || 10
+    const bold  = line.bold || false
+    const indent = line.indent || 0
+    const spBef  = line.spaceBefore || 0
+    const spAft  = line.spaceAfter || 0
+    const font   = bold ? FONT_BOLD : FONT_REG
+    const lh     = size * 1.35
+
+    if (line.divider) {
+      curY -= 2
+      stream += `0.8 0.8 0.8 RG\n0.25 w\n${ML} ${curY} m ${PW - MR} ${curY} l S\n0 0 0 RG\n`
+      curY -= 2
+      continue
+    }
+
+    curY -= spBef
+
+    const wrapped = line.text ? wordWrap(line.text, size, TW, indent) : ['']
+
+    for (const wl of wrapped) {
+      if (curY - lh < MB + 10) {
+        // Start new page
+        stream += drawFooter(pageNum)
+        pages.push({ stream: drawHeaderBand() + stream, pageNum })
+        stream = ''
+        pageNum++
+        curY = PH - MT - HEADER_H
+      }
+
+      if (wl.trim()) {
+        const x = ML + indent
+        stream += `BT\n${font} ${size} Tf\n${x} ${curY - lh} Td\n(${escPdfString(wl)}) Tj\nET\n`
+      }
+      curY -= lh
+    }
+    curY -= spAft
+  }
+
+  // Final page
+  if (stream || pages.length === 1) {
+    stream += drawFooter(pageNum)
+    pages.push({ stream: drawHeaderBand() + stream, pageNum })
+  }
+
+  // ── 4. Assemble PDF objects ─────────────────────────────────────────────────
+  const pdfObjects: string[] = []
+  let objId = 1
+
+  // obj 1: Catalog (placeholder — will be fixed below)
+  const catalogObjId = objId++  // 1
+  // obj 2: Pages (placeholder)
+  const pagesObjId = objId++   // 2
+  // obj 3-4: Fonts
+  const fontRegId = objId++    // 3
+  const fontBoldId = objId++   // 4
+
+  pdfObjects.push(`${catalogObjId} 0 obj\n<< /Type /Catalog /Pages ${pagesObjId} 0 R >>\nendobj\n`)
+  // Pages will be filled after we know all page IDs
+  pdfObjects.push('')  // placeholder for Pages obj
+  pdfObjects.push(`${fontRegId} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>\nendobj\n`)
+  pdfObjects.push(`${fontBoldId} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>\nendobj\n`)
+
+  const pageObjIds: number[] = []
+  const contentObjIds: number[] = []
+
+  for (let pi = 0; pi < pages.length; pi++) {
+    const pageObj   = objId++
+    const contentObj = objId++
+    pageObjIds.push(pageObj)
+    contentObjIds.push(contentObj)
+
+    // Page object
+    pdfObjects.push(`${pageObj} 0 obj\n<< /Type /Page /Parent ${pagesObjId} 0 R /MediaBox [0 0 ${PW} ${PH}] /Contents ${contentObj} 0 R /Resources << /Font << /F1 ${fontRegId} 0 R /F2 ${fontBoldId} 0 R >> >> >>\nendobj\n`)
+
+    // Content stream
+    const cs = pages[pi].stream
+    const csBytes = encodeUtf8(cs)
+    pdfObjects.push(`${contentObj} 0 obj\n<< /Length ${csBytes.length} >>\nstream\n${cs}\nendstream\nendobj\n`)
+  }
+
+  // Fix Pages object
+  pdfObjects[1] = `${pagesObjId} 0 obj\n<< /Type /Pages /Kids [${pageObjIds.map(id => `${id} 0 R`).join(' ')}] /Count ${pages.length} >>\nendobj\n`
+
+  // ── 5. Cross-reference table ────────────────────────────────────────────────
+  const header = '%PDF-1.4\n%\xE2\xE3\xCF\xD3\n'
   const offsets: number[] = []
   let body = header
 
-  for (let i = 0; i < objects.length; i++) {
+  for (let oi = 0; oi < pdfObjects.length; oi++) {
     offsets.push(body.length)
-    body += objects[i]
+    body += pdfObjects[oi]
   }
 
   const xrefOffset = body.length
-  let xref = `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`
+  const totalObjs  = pdfObjects.length + 1
+  let xref = `xref\n0 ${totalObjs}\n0000000000 65535 f \n`
   for (const off of offsets) {
     xref += String(off).padStart(10, '0') + ' 00000 n \n'
   }
   body += xref
-  body += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`
+  body += `trailer\n<< /Size ${totalObjs} /Root ${catalogObjId} 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`
 
   return encodeUtf8(body)
 }

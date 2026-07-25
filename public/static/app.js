@@ -262,11 +262,11 @@ function stageBadgeClass(stage) {
 
 function stageLabelMap(stage) {
   const map = {
-    draft: 'Draft',
-    published: 'Vendor Invitation',
-    qa_open: 'Q&A Open',
-    submissions_closed: 'Submissions Closed',
-    evaluation: 'Evaluation',
+    draft: 'Publish RFP',
+    published: 'Invite',
+    qa_open: 'Q&A',
+    submissions_closed: 'Proposals',
+    evaluation: 'Proposals',   // legacy compat
     awarded: 'Awarded',
   };
   return map[stage] || stage;
@@ -365,36 +365,77 @@ function goBack() {
 // ============================================================
 // LIFECYCLE BAR
 // ============================================================
-var STAGES = ['draft','published','qa_open','submissions_closed','evaluation','awarded'];
-var STAGE_LABELS = ['Draft','Vendor\nInvitation','Q&A Open','Submissions\nClosed','Evaluation','Awarded'];
-var STAGE_ICONS = ['fa-pencil-alt','fa-envelope-open-text','fa-comments','fa-lock','fa-star','fa-trophy'];
-var STAGE_INFO = {
-  draft: 'RFP is being prepared. Fill in details and generate the document.',
-  published: 'Vendor Invitation phase — shortlist vendors and send invitations.',
-  qa_open: 'Q&A Open — vendors may submit questions. Manage and publish answers.',
-  submissions_closed: 'Proposal submissions closed. Review proposals and run AI evaluation.',
-  evaluation: 'AI evaluation complete — review scores and select the winning vendor.',
-  awarded: 'Contract has been awarded. Procurement is complete.',
-};
+// 5 stages — Evaluation removed; renamed per v9 spec
+var STAGES = ['draft','published','qa_open','submissions_closed','awarded'];
+var STAGE_LABELS = ['Publish\nRFP','Invite','Q&A','Proposals','Award'];
+var STAGE_ICONS = ['fa-paper-plane','fa-envelope-open-text','fa-comments','fa-inbox','fa-trophy'];
+
+// Explicit completion flags — keyed by rfpId, set when each milestone is reached
+// Keys: publish, invite, qa, proposals, award
+var _stageCompleted = {};
+
+function getCompletedFlags(rfpId) {
+  return _stageCompleted[rfpId] || {};
+}
+
+function markStageCompleted(rfpId, key) {
+  if (!_stageCompleted[rfpId]) _stageCompleted[rfpId] = {};
+  _stageCompleted[rfpId][key] = true;
+  // Award implies proposals also done
+  if (key === 'award') _stageCompleted[rfpId]['proposals'] = true;
+}
 
 function renderLifecycleBar(rfp) {
-  const stage = rfp ? rfp.stage : 'draft';
-  const idx = STAGES.indexOf(stage);
+  if (!rfp) return;
+  const rfpId = rfp.id;
+  const stage = rfp.stage || 'draft';
+  const flags = getCompletedFlags(rfpId);
+
+  // Determine completion per stage from explicit flags
+  // Stage order: draft(0), published(1), qa_open(2), submissions_closed(3), awarded(4)
+  // 'publish'   → step 0 done when stage moved past draft OR flag set
+  // 'invite'    → step 1 done when flag set
+  // 'qa'        → step 2 done when flag set
+  // 'proposals' → step 3 done when flag set (set together with award)
+  // 'award'     → step 4 done when flag set
+
+  const stageIdx = STAGES.indexOf(stage);
+  const completionMap = [
+    flags.publish  || stageIdx > 0,   // Publish RFP
+    flags.invite,                       // Invite
+    flags.qa       || stage === 'submissions_closed' || stage === 'awarded',  // Q&A
+    flags.proposals || stage === 'awarded',                                    // Proposals
+    flags.award,                        // Award
+  ];
+
+  // Active step: first step not yet completed
+  let activeIdx = -1;
+  for (let i = 0; i < STAGES.length; i++) {
+    if (!completionMap[i]) { activeIdx = i; break; }
+  }
+  if (activeIdx === -1) activeIdx = STAGES.length - 1; // all done
+
   let html = '';
   for (let i = 0; i < STAGES.length; i++) {
-    const cls = i < idx ? 'lc-done' : (i === idx ? 'lc-active' : 'lc-pending');
-    const icon = i < idx ? 'fa-check' : STAGE_ICONS[i];
+    let cls;
+    if (completionMap[i]) {
+      cls = 'lc-done';
+    } else if (i === activeIdx) {
+      cls = 'lc-active';
+    } else {
+      cls = 'lc-pending';
+    }
+    const icon = completionMap[i] ? 'fa-check' : STAGE_ICONS[i];
     const labelLines = STAGE_LABELS[i].split('\n');
     html += '<div class="lc-step ' + cls + '">';
     html += '<div class="lc-node">';
-    html += '<div class="lc-circle"><i class="fas ' + icon + '" style="font-size:0.72rem"></i></div>';
+    html += '<div class="lc-circle" style="display:flex;align-items:center;justify-content:center"><i class="fas ' + icon + '" style="font-size:0.72rem;line-height:1"></i></div>';
     html += '<div class="lc-label">' + labelLines.join('<br>') + '</div>';
     html += '</div>';
     if (i < STAGES.length - 1) html += '<div class="lc-connector"></div>';
     html += '</div>';
   }
-  // info pill
-  html += '<div class="lc-info-pill"><i class="fas fa-info-circle" style="margin-right:4px"></i>' + (STAGE_INFO[stage] || '') + '</div>';
+  // No info pill
 
   document.getElementById('lifecycleBar').innerHTML = '<div class="lifecycle-bar">' + html + '</div>';
   document.getElementById('lifecycleBar').style.display = 'block';
@@ -807,34 +848,13 @@ async function advanceRfpStage(rfpId, stage) {
   document.getElementById('pageSubtitle').textContent = (rfp.ref_number||'') + ' \u2022 ' + stageLabelMap(rfp.stage||'draft');
   renderLifecycleBar(rfp);
 
+  // Mark Publish RFP stage complete
   if (stage === 'published') {
-    // Draft → Published: redirect to Vendors tab + show prominent popup
-    renderRfpTabs('vendors', rfpId, appState.unreadQA);
-    switchRfpTab('vendors', rfpId);
-    // Delay toast slightly so the page renders first
-    setTimeout(function() {
-      showToast('\uD83C\uDF89 RFP Published! Please proceed to inviting vendors.', 'success', 6000);
-      // Show a prominent modal popup
-      showModal(
-        '<div style="max-width:480px;text-align:center">'
-        + '<div style="width:64px;height:64px;border-radius:50%;background:#dcfce7;display:flex;align-items:center;justify-content:center;margin:0 auto 1rem">'
-        + '<i class="fas fa-paper-plane" style="font-size:1.75rem;color:#16a34a"></i></div>'
-        + '<h3 style="font-size:1.1rem;font-weight:700;color:#1f2937;margin:0 0 0.75rem">RFP Published Successfully</h3>'
-        + '<p style="font-size:0.875rem;color:#6b7280;line-height:1.6;margin:0 0 1.25rem">'
-        + 'Your RFP is now live. You are now in the <strong>Vendor Invitation</strong> phase.<br>'
-        + 'Please proceed to shortlisting vendors and sending them invitations to participate in this tender.'
-        + '</p>'
-        + '<div style="display:flex;gap:0.75rem;justify-content:center">'
-        + '<button class="btn-primary" onclick="closeModal()" style="min-width:140px"><i class="fas fa-building"></i>Go to Vendors</button>'
-        + '</div>'
-        + '</div>'
-      );
-    }, 200);
-  } else {
-    renderRfpTabs(appState.currentRfpTab, rfpId, appState.unreadQA);
-    switchRfpTab(appState.currentRfpTab, rfpId);
-    showToast('Stage advanced to: ' + stageLabelMap(stage), 'success');
+    markStageCompleted(rfpId, 'publish');
+    showToast('\uD83C\uDF89 RFP Published! Now proceed to the Vendors tab to invite vendors.', 'success', 5000);
   }
+  renderRfpTabs(appState.currentRfpTab, rfpId, appState.unreadQA);
+  switchRfpTab(appState.currentRfpTab, rfpId);
 }
 
 function downloadRfpPdf(rfpId) {
@@ -851,106 +871,124 @@ function downloadRfpPdf(rfpId) {
 
   showToast('Generating PDF — please wait…', 'info');
 
-  // Build a fully self-contained wrapper div for html2pdf to render.
-  // All RFP classes are already defined in the global style.css; we add
-  // only the additional page-layout overrides needed for A4 PDF output.
-  var wrapper = document.createElement('div');
-  wrapper.style.cssText = [
-    'position:absolute',
-    'left:-9999px',
-    'top:0',
-    'width:794px',           // A4 at 96 dpi
-    'background:white',
-    'font-family:Arial,sans-serif',
-    'font-size:10.5pt',
-    'color:#1a1a1a',
-  ].join(';');
+  // Use a hidden iframe approach: inject a full HTML document with embedded
+  // styles so html2canvas sees a properly rendered page (not an offscreen div).
+  // This reliably captures all CSS-styled content including tables and colours.
+  var safeTitle = (rfp.ref_number || rfp.title || 'RFP').replace(/[^a-zA-Z0-9_\-]/g, '_');
+  var filename = 'CPC_RFP_' + safeTitle + '.pdf';
 
-  // Inline minimal CSS for elements that depend on print-color-adjust
-  var style = document.createElement('style');
-  style.textContent = [
-    '.rfp-doc{max-width:100%;margin:0;}',
-    '.rfp-header-band{height:20pt;width:100%;',
-      'background:repeating-linear-gradient(90deg,#c9a84c 0,#c9a84c 2px,transparent 2px,transparent 8px),',
-      'repeating-linear-gradient(0deg,#c9a84c 0,#c9a84c 2px,transparent 2px,transparent 8px);',
-      'background-color:#f5e6c0;}',
-    '.rfp-circle-divider{height:8pt;border-bottom:0.5pt solid #d1d5db;',
-      'background:radial-gradient(circle at center,transparent 2pt,#c0c0c0 2pt,#c0c0c0 3pt,transparent 3pt);',
-      'background-size:12pt 8pt;background-repeat:repeat-x;background-position:center;}',
-    '.rfp-cover{background:white;page-break-after:always;min-height:267mm;}',
+  // Build a self-contained HTML document string with all styles inlined
+  var rfpCss = [
+    'body{margin:0;padding:0;font-family:Arial,Calibri,sans-serif;font-size:11pt;color:#1a1a1a;background:#fff;}',
+    '.rfp-doc{max-width:794px;margin:0 auto;}',
+    '.rfp-header-band{height:20pt;width:100%;background:#A79C7F;background-image:repeating-linear-gradient(90deg,rgba(255,255,255,0.15) 0,rgba(255,255,255,0.15) 2px,transparent 2px,transparent 10px),repeating-linear-gradient(0deg,rgba(255,255,255,0.15) 0,rgba(255,255,255,0.15) 2px,transparent 2px,transparent 10px);}',
+    '.rfp-circle-divider{height:8pt;border-top:2px solid #1A1A1A;background:white;}',
+    '.rfp-cover{background:white;page-break-after:always;min-height:220mm;}',
     '.rfp-cover-logo{display:flex;align-items:center;justify-content:center;gap:18pt;padding:18pt 36pt 12pt;}',
-    '.rfp-logo-emblem{flex-shrink:0;}',
-    '.rfp-logo-text{display:flex;flex-direction:column;gap:2pt;}',
-    '.rfp-logo-text .rfp-org-name{font-size:12pt;font-weight:700;color:#1a1a1a;letter-spacing:0.03em;}',
-    '.rfp-logo-text .rfp-org-arabic{font-size:11pt;color:#1a1a1a;direction:rtl;}',
+    '.rfp-logo-emblem{flex-shrink:0;width:56pt;height:56pt;border-radius:50%;border:2pt solid #1A1A1A;display:flex;align-items:center;justify-content:center;background:white;}',
+    '.rfp-logo-emblem svg{width:40pt;height:40pt;}',
+    '.rfp-logo-text{display:flex;flex-direction:column;gap:4pt;}',
+    '.rfp-logo-text .rfp-org-arabic{font-size:16pt;font-weight:700;color:#1a1a1a;direction:rtl;font-family:serif;}',
+    '.rfp-logo-text .rfp-org-name{font-size:9pt;font-weight:700;color:#1a1a1a;letter-spacing:2px;text-transform:uppercase;font-family:Arial,sans-serif;}',
     '.rfp-cover-divider{width:calc(100% - 72pt);height:0.5pt;background:#d1d5db;margin:0 36pt;}',
-    '.rfp-cover-body{padding:54pt 36pt 36pt;}',
-    '.rfp-cover-body .rfp-doc-title{font-size:26pt;font-weight:700;line-height:1.25;color:#1a1a1a;margin-bottom:18pt;}',
+    '.rfp-cover-body{padding:36pt 36pt 24pt;}',
     '.rfp-cover-body .rfp-doc-type{font-size:10pt;font-weight:700;letter-spacing:0.1em;color:#4BACED;text-transform:uppercase;margin-bottom:6pt;}',
+    '.rfp-cover-body .rfp-doc-title{font-size:22pt;font-weight:700;line-height:1.25;color:#1a1a1a;margin-bottom:12pt;}',
     '.rfp-cover-body .rfp-doc-date{font-size:9pt;color:#215868;font-weight:600;}',
     '.rfp-cover-footer-bar{display:none;}',
-    '.rfp-page-header{display:flex;align-items:center;justify-content:space-between;padding:4pt 24pt;border-bottom:1.5pt solid #4BACED;}',
+    '.rfp-page-header{display:flex;align-items:center;justify-content:space-between;padding:4pt 24pt;border-bottom:1.5pt solid #4BACED;background:white;}',
     '.rfp-page-header-logo{font-size:8pt;font-weight:700;color:#215868;}',
     '.rfp-page-header-ref{font-size:7.5pt;color:#9ca3af;}',
-    '.rfp-meta-table{width:100%;border-collapse:collapse;font-size:9pt;}',
+    '.rfp-meta-table{width:100%;border-collapse:collapse;font-size:9pt;margin:8pt 0;}',
     '.rfp-meta-table th{background:#215868;color:white;padding:6pt 10pt;font-weight:700;border:0.5pt solid #163d4e;}',
     '.rfp-meta-table td{background:white;padding:6pt 10pt;border:0.5pt solid #d1d5db;vertical-align:top;}',
     '.rfp-toc{padding:14pt 24pt 10pt;}',
-    '.rfp-toc-title{font-size:13pt;font-weight:700;color:#4BACED;margin-bottom:8pt;}',
+    '.rfp-toc-title{font-size:13pt;font-weight:700;color:#4BACED;margin-bottom:8pt;border-bottom:1pt solid #4BACED;padding-bottom:4pt;}',
     '.rfp-toc-item{display:flex;justify-content:space-between;padding:3pt 0;font-size:9pt;color:#215868;border-bottom:0.5pt dotted #d1d5db;}',
     '.rfp-toc-item.bold{font-weight:700;}',
     '.rfp-toc-item.indent{padding-left:14pt;color:#374151;font-weight:400;}',
     '.rfp-section{padding:12pt 24pt;border-bottom:0.5pt solid #e5e7eb;}',
     '.rfp-section-title{font-size:12pt;font-weight:700;color:#1a1a1a;margin-bottom:7pt;border-bottom:1.5pt solid #4BACED;padding-bottom:3pt;}',
     '.rfp-section-num{display:inline-block;width:18pt;height:18pt;border-radius:50%;background:#4BACED;color:white;text-align:center;line-height:18pt;font-weight:700;font-size:8pt;margin-right:4pt;vertical-align:middle;}',
-    '.rfp-section p{font-size:9.5pt;line-height:1.7;margin:0 0 6pt;}',
+    '.rfp-section p{font-size:10pt;line-height:1.5;margin:0 0 6pt;}',
     '.rfp-section ul{margin:3pt 0 6pt 16pt;}',
-    '.rfp-section li{font-size:9pt;line-height:1.65;margin-bottom:2pt;}',
+    '.rfp-section li{font-size:9.5pt;line-height:1.5;margin-bottom:2pt;}',
     '.rfp-subsection{margin:9pt 0 4pt;}',
     '.rfp-subsection-title{font-size:10pt;font-weight:700;color:#215868;margin-bottom:4pt;}',
-    '.rfp-deliverables{background:#f0f9ff;border-left:2.5pt solid #4BACED;padding:5pt 9pt;font-size:8.5pt;color:#374151;margin-top:4pt;line-height:1.6;}',
+    '.rfp-deliverables{background:#f0f9ff;border-left:2.5pt solid #4BACED;padding:5pt 9pt;font-size:9pt;color:#374151;margin-top:4pt;line-height:1.5;}',
     '.rfp-spec-table{width:100%;border-collapse:collapse;margin:7pt 0;font-size:9pt;}',
-    '.rfp-spec-table th{background:#215868;color:white;padding:5pt 9pt;font-weight:700;}',
-    '.rfp-spec-table td{padding:4.5pt 9pt;border:0.5pt solid #d1d5db;line-height:1.5;vertical-align:top;}',
+    '.rfp-spec-table th{background:#215868;color:white;padding:5pt 9pt;font-weight:700;border:0.5pt solid #163d4e;}',
+    '.rfp-spec-table td{padding:4.5pt 9pt;border:0.5pt solid #d1d5db;line-height:1.5;vertical-align:top;background:white;}',
     '.rfp-spec-table tr:nth-child(even) td{background:#f0f9ff;}',
     '.rfp-footer{background:#215868;color:white;padding:10pt 24pt;text-align:center;font-size:8pt;line-height:1.8;}',
-  ].join('');
+    'table{border-collapse:collapse;}',
+    'h1,h2,h3,h4{color:#1a1a1a;}',
+  ].join('\n');
 
-  // IMPORTANT: Do NOT use innerHTML += after appendChild(style).
-  // innerHTML += serializes the DOM back to a string and re-parses it, which
-  // drops the <style> element we just appended (DOM nodes are not serializable).
-  // Use insertAdjacentHTML to append content WITHOUT re-serializing the DOM.
-  wrapper.appendChild(style);
-  wrapper.insertAdjacentHTML('beforeend', rfp.content);
-  document.body.appendChild(wrapper);
+  var fullHtml = '<!DOCTYPE html><html><head><meta charset="UTF-8">'
+    + '<style>' + rfpCss + '</style>'
+    + '</head><body><div class="rfp-doc">'
+    + rfp.content
+    + '</div></body></html>';
 
-  var safeTitle = (rfp.ref_number || rfp.title || 'RFP').replace(/[^a-zA-Z0-9_\-]/g, '_');
-  var filename = 'CPC_RFP_' + safeTitle + '.pdf';
+  // Build a wrapper div with content rendered in a hidden but on-screen container.
+  // html2canvas requires the element to be in the viewport or visible in DOM.
+  var container = document.createElement('div');
+  container.style.cssText = [
+    'position:fixed',
+    'left:-9999px',
+    'top:0',
+    'width:794px',
+    'min-height:1123px',
+    'background:#ffffff',
+    'z-index:-1',
+    'overflow:visible',
+  ].join(';');
 
-  var opt = {
-    margin:       [10, 14, 14, 14],   // top, right, bottom, left (mm)
-    filename:     filename,
-    image:        { type: 'jpeg', quality: 0.97 },
-    html2canvas:  {
-      scale: 2,
-      useCORS: true,
-      backgroundColor: '#ffffff',
-      logging: false,
-    },
-    jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' },
-    pagebreak:    { mode: ['avoid-all', 'css', 'legacy'] },
-  };
+  container.innerHTML = fullHtml
+    .replace('<!DOCTYPE html><html><head><meta charset="UTF-8"><style>', '<style>')
+    .replace('</style></head><body><div class="rfp-doc">', '</style><div class="rfp-doc">')
+    .replace('</div></body></html>', '</div>');
 
-  html2pdf().set(opt).from(wrapper).save()
-    .then(function() {
-      document.body.removeChild(wrapper);
-      showToast('PDF downloaded successfully!', 'success');
-    })
-    .catch(function(err) {
-      document.body.removeChild(wrapper);
-      console.error('html2pdf error:', err);
-      showToast('PDF generation failed: ' + (err && err.message ? err.message : err), 'error');
-    });
+  // Alternatively, just inject the full HTML as-is inside the div
+  container.innerHTML = '<div style="font-family:Arial,Calibri,sans-serif;font-size:11pt;color:#1a1a1a;background:#fff;padding:20px">'
+    + '<style>' + rfpCss + '</style>'
+    + '<div class="rfp-doc">' + rfp.content + '</div>'
+    + '</div>';
+
+  document.body.appendChild(container);
+
+  // Give browser time to lay out the element before capturing
+  requestAnimationFrame(function() {
+    setTimeout(function() {
+      var opt = {
+        margin:      [12, 12, 12, 12],
+        filename:    filename,
+        image:       { type: 'jpeg', quality: 0.97 },
+        html2canvas: {
+          scale: 2,
+          useCORS: true,
+          allowTaint: true,
+          backgroundColor: '#ffffff',
+          logging: false,
+          windowWidth: 794,
+        },
+        jsPDF:       { unit: 'mm', format: 'a4', orientation: 'portrait' },
+        pagebreak:   { mode: ['css', 'legacy'] },
+      };
+
+      html2pdf().set(opt).from(container.firstChild || container).save()
+        .then(function() {
+          document.body.removeChild(container);
+          showToast('PDF downloaded successfully!', 'success');
+        })
+        .catch(function(err) {
+          document.body.removeChild(container);
+          console.error('html2pdf error:', err);
+          showToast('PDF generation failed: ' + (err && err.message ? err.message : err), 'error');
+        });
+    }, 400);
+  });
 }
 
 // --- TAB: VENDORS ---
@@ -1182,6 +1220,10 @@ async function confirmSendInvitations(rfpId) {
     renderRfpTabs('vendors', rfpId, appState.unreadQA);
     // Count shortlisted vendors from local state (avoid undefined reference)
     var sentCount = (result && result.results) ? result.results.length : (appState.rfpVendors ? appState.rfpVendors.filter(function(v){ return v.shortlisted; }).length : 0);
+    // Mark Invite stage completed on lifecycle bar
+    markStageCompleted(rfpId, 'publish');
+    markStageCompleted(rfpId, 'invite');
+    renderLifecycleBar(rfp);
     showToast('\u2709\uFE0F Invitations sent to ' + sentCount + ' vendor(s)! Now waiting for vendor responses.', 'success', 5000);
     addNotification('email', 'Invitations Sent', 'RFP invitations sent to ' + sentCount + ' vendor(s) with PDF attachment', rfpId, 'vendors', null);
     closeModal();
@@ -1437,20 +1479,18 @@ async function silentCheckInbox(rfpId) {
     const prevStage = appState.currentRfp ? appState.currentRfp.stage : null;
     const currentStage = rfpNow ? rfpNow.stage : prevStage;
 
-    // ── Stage transition detection: Q&A auto-closed → submissions_closed ──
+    // ── Stage transition detection: Q&A closed → submissions_closed ──
     if (prevStage === 'qa_open' && currentStage === 'submissions_closed') {
       if (rfpNow) appState.currentRfp = rfpNow;
-      addNotification('stage',
-        '🔒 Q&A Stage Closed',
-        'All invited vendors have submitted their questions. Q&A is now closed — proceeding to Proposals.',
-        rfpId, 'proposals', null
-      );
-      showToast('Q&A closed — all vendors responded. Redirecting to Proposals tab...', 'success', 5000);
+      // No auto-redirect — just update bar and notify
       if (appState.currentRfpId && String(appState.currentRfpId) === String(rfpId)) {
         renderLifecycleBar(rfpNow);
-        renderRfpTabs('proposals', rfpId, false);
-        rfpTabs.proposals(rfpId);
       }
+      addNotification('stage',
+        '\uD83D\uDD12 Q&A Stage Closed',
+        'Q&A is now closed. You can now proceed to reviewing proposals.',
+        rfpId, 'qa', null
+      );
       return;
     }
 
@@ -1620,7 +1660,7 @@ rfpTabs.qa = async function(rfpId) {
       + '<p style="margin-bottom:1rem;font-size:0.85rem">Vendors submit questions by replying to the RFP invitation email with an Excel attachment.<br>If you received an email but questions are not showing, try <strong>Re-extract Questions</strong> below.</p>'
       + '<div style="display:flex;gap:0.75rem;justify-content:center;flex-wrap:wrap">'
       + '<button class="btn-secondary" id="reprocessQBtn" onclick="reprocessQuestions(' + rfpId + ')"><i class="fas fa-sync"></i>Re-extract Questions from Emails</button>'
-      + '<button class="btn-ghost" onclick="loadSampleQs(' + rfpId + ')"><i class="fas fa-flask"></i>Load Demo Questions</button>'
+      // Load Demo Questions button removed (v9)
       + '</div>'
       + '</div>';
   } else {
@@ -1777,6 +1817,8 @@ async function closeQA(rfpId) {
   if (!confirm('Close Q&A? This will mark the Q&A stage as complete and prevent further vendor questions from being processed. Vendors will still be able to submit proposals.')) return;
   try {
     await apiCall('POST', '/rfps/' + rfpId + '/stage', { stage: 'submissions_closed' });
+    // Mark Q&A stage completed in lifecycle bar
+    markStageCompleted(rfpId, 'qa');
     // Refresh RFP to update lifecycle bar
     const rfp = await apiCall('GET', '/rfps/' + rfpId).catch(function(){ return null; });
     if (rfp) {
@@ -1784,8 +1826,8 @@ async function closeQA(rfpId) {
       renderLifecycleBar(rfp);
       document.getElementById('pageSubtitle').textContent = (rfp.ref_number||'') + ' \u2022 ' + stageLabelMap(rfp.stage||'draft');
     }
-    showToast('\uD83D\uDD12 Q&A closed. Now accepting proposals. Vendor questions will no longer be processed.', 'success', 6000);
-    addNotification('info', '\uD83D\uDD12 Q&A Closed', 'Q&A stage complete. Now accepting proposals.', rfpId, 'proposals', null);
+    showToast('\uD83D\uDD12 Q&A closed. Vendor questions will be rejected with an auto-reply. Proposals are now being accepted.', 'success', 6000);
+    addNotification('info', '\uD83D\uDD12 Q&A Closed', 'Q&A stage complete. Vendors will receive auto-rejection for any new questions.', rfpId, 'qa', null);
     // Refresh Q&A tab to hide the Close Q&A button (stage is now submissions_closed)
     appState.unreadQA = false;
     renderRfpTabs('qa', rfpId, false);
@@ -1864,6 +1906,18 @@ rfpTabs.proposals = async function(rfpId) {
         + '<i class="fas fa-paperclip"></i>' + attachCount + ' file' + (attachCount !== 1 ? 's' : '') + '</span>'
       : '<span style="color:#9ca3af;font-size:0.8rem">—</span>';
 
+    // Award button — gold, prominent, shown only if not yet awarded; locked if another was awarded
+    var rfpAwarded = proposals.some(function(pp){ return pp.status === 'awarded'; });
+    var awardBtn = '';
+    if (isAwarded) {
+      awardBtn = '<span style="background:linear-gradient(135deg,#d4a017,#f5c842);color:#1a1a1a;border-radius:6px;padding:0.3rem 0.7rem;font-size:0.78rem;font-weight:700;display:inline-flex;align-items:center;gap:4px"><i class="fas fa-trophy"></i>Awarded</span>';
+    } else if (!rfpAwarded) {
+      awardBtn = '<button onclick="awardProposal(' + rfpId + ',' + p.id + ',\'' + escHtml(p.vendor_name||'this vendor') + '\')" '
+        + 'style="background:linear-gradient(135deg,#d4a017,#f5c842);color:#1a1a1a;border:none;border-radius:6px;padding:0.3rem 0.7rem;font-size:0.78rem;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:4px;box-shadow:0 2px 6px rgba(212,160,23,0.45);transition:opacity 0.15s" '
+        + 'title="Award contract to ' + escHtml(p.vendor_name||'vendor') + '">'
+        + '<i class="fas fa-trophy"></i>Award</button>';
+    }
+
     rows += '<tr style="' + rowBg + '">'
       + '<td><div style="display:flex;align-items:center;gap:8px">'
       + '<div style="width:32px;height:32px;border-radius:8px;background:var(--cpc-blue);display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:0.8rem;flex-shrink:0">' + escHtml((p.vendor_name||'?').charAt(0)) + '</div>'
@@ -1874,8 +1928,9 @@ rfpTabs.proposals = async function(rfpId) {
       + '<td style="font-size:0.82rem;color:#6b7280">' + escHtml(dur) + '</td>'
       + '<td>' + filesCell + '</td>'
       + '<td>' + statusBadge(p) + '</td>'
-      + '<td>'
-      + '<button class="btn-ghost btn-sm" onclick="viewProposalDetail(' + p.id + ')"><i class="fas fa-eye"></i>View</button>'
+      + '<td style="white-space:nowrap">'
+      + '<button class="btn-ghost btn-sm" onclick="viewProposalDetail(' + p.id + ')" style="margin-right:4px"><i class="fas fa-eye"></i>View</button>'
+      + awardBtn
       + '</td>'
       + '</tr>';
   });
@@ -1909,6 +1964,30 @@ async function loadSampleProposals(rfpId) {
   await apiCall('POST', '/rfps/' + rfpId + '/proposals/sample', {});
   showToast('Sample proposals added!', 'success');
   rfpTabs.proposals(rfpId);
+}
+
+async function awardProposal(rfpId, proposalId, vendorName) {
+  if (!confirm('Award contract to ' + vendorName + '?\n\nThis will:\n• Mark this proposal as Awarded\n• Mark the RFP as complete (Awarded)\n• Disable further document submissions and email replies for this RFP\n\nThis action cannot be undone.')) return;
+
+  try {
+    await apiCall('POST', '/rfps/' + rfpId + '/proposals/' + proposalId + '/award', {});
+    // Mark Award and Proposals stages complete on lifecycle bar
+    markStageCompleted(rfpId, 'award');
+    markStageCompleted(rfpId, 'proposals');
+    // Refresh RFP and lifecycle bar
+    var rfp = await apiCall('GET', '/rfps/' + rfpId).catch(function(){ return null; });
+    if (rfp) {
+      appState.currentRfp = rfp;
+      renderLifecycleBar(rfp);
+      document.getElementById('pageSubtitle').textContent = (rfp.ref_number||'') + ' \u2022 ' + stageLabelMap(rfp.stage||'awarded');
+    }
+    showToast('\uD83C\uDFC6 Contract awarded to ' + vendorName + '! RFP is now complete. Submissions and email replies are disabled.', 'success', 7000);
+    addNotification('info', '\uD83C\uDFC6 Contract Awarded', 'Contract awarded to ' + vendorName + '. RFP procurement cycle is complete.', rfpId, 'proposals', null);
+    // Refresh proposals tab
+    rfpTabs.proposals(rfpId);
+  } catch(e) {
+    showToast('Award failed: ' + (e.message || e), 'error');
+  }
 }
 
 function downloadProposalPdf(id) {
