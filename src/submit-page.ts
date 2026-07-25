@@ -5,269 +5,794 @@ export function getSubmitPage(rfpId: string, participantCode: string): string {
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Proposal Submission — Crown Prince's Court</title>
+
+  <!-- CPC Brand Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,600&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500;600&family=Noto+Kufi+Arabic:wght@400;600&display=swap" rel="stylesheet"/>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css"/>
+
   <style>
+    /* ── CPC Design Tokens ── */
+    :root {
+      --cpc-gold:        #BA9765;
+      --cpc-gold-deep:   #745B35;
+      --cpc-gold-tint:   #F5EFE3;
+      --cpc-gold-line:   #E9DCC4;
+      --cpc-ivory:       #FBF8F2;
+      --cpc-ink:         #1B1712;
+      --cpc-ink-mid:     #3D3328;
+      --cpc-ink-muted:   #7A6E62;
+      --cpc-line:        #E7DFCE;
+      --cpc-white:       #FFFFFF;
+      --cpc-success:     #2E7D52;
+      --cpc-success-bg:  #EDFAF3;
+      --cpc-success-bdr: #A8D5BC;
+      --cpc-error:       #8B2020;
+      --cpc-error-bg:    #FDF2F2;
+      --cpc-error-bdr:   #F5C0C0;
+
+      --font-display: 'Cormorant Garamond', Georgia, serif;
+      --font-body:    'Inter', system-ui, sans-serif;
+      --font-mono:    'JetBrains Mono', 'Courier New', monospace;
+      --font-arabic:  'Noto Kufi Arabic', sans-serif;
+    }
+
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'Segoe UI', Arial, sans-serif; background: #f0f4f8; min-height: 100vh; color: #1a202c; }
+
+    body {
+      font-family: var(--font-body);
+      background: var(--cpc-ivory);
+      min-height: 100vh;
+      color: var(--cpc-ink);
+      -webkit-font-smoothing: antialiased;
+    }
 
     /* ── Header ── */
     .header {
-      background: linear-gradient(135deg, #0f3460 0%, #1a1a2e 100%);
-      color: white; padding: 0;
+      background: var(--cpc-white);
+      border-bottom: 3px solid var(--cpc-gold);
+      padding: 0;
     }
     .header-inner {
-      max-width: 860px; margin: 0 auto; padding: 28px 24px 24px;
-      display: flex; align-items: center; gap: 18px;
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 20px 32px;
+      display: flex;
+      align-items: center;
+      gap: 20px;
     }
-    .header-crest {
-      width: 56px; height: 56px; background: rgba(201,168,76,0.2);
-      border: 2px solid #c9a84c; border-radius: 50%;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 26px; flex-shrink: 0;
+    .header-emblem {
+      width: 60px;
+      height: 60px;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
     }
-    .header-text h1 { font-size: 1.25rem; font-weight: 700; letter-spacing: 0.01em; }
-    .header-text .sub { font-size: 0.82rem; color: #c9a84c; margin-top: 3px; }
-    .header-strip {
-      background: #c9a84c; height: 4px;
+    .header-emblem img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+    .header-divider {
+      width: 1px;
+      height: 40px;
+      background: var(--cpc-line);
+      flex-shrink: 0;
+    }
+    .header-text {}
+    .header-text h1 {
+      font-family: var(--font-display);
+      font-size: 1.45rem;
+      font-weight: 600;
+      color: var(--cpc-ink);
+      letter-spacing: 0.01em;
+      line-height: 1.2;
+    }
+    .header-text .sub {
+      font-family: var(--font-mono);
+      font-size: 0.65rem;
+      color: var(--cpc-gold-deep);
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      margin-top: 5px;
+    }
+    .header-badge {
+      margin-left: auto;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 4px;
+    }
+    .header-badge .secure-label {
+      font-family: var(--font-mono);
+      font-size: 0.6rem;
+      color: var(--cpc-gold-deep);
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .header-badge .secure-label i { font-size: 0.65rem; }
+    .header-badge .location-label {
+      font-family: var(--font-mono);
+      font-size: 0.6rem;
+      color: var(--cpc-ink-muted);
+      letter-spacing: 0.1em;
     }
 
-    /* ── Layout ── */
-    .page { max-width: 860px; margin: 0 auto; padding: 32px 24px 64px; }
-
-    /* ── RFP Info Card ── */
-    .rfp-card {
-      background: white; border-radius: 12px; border: 1px solid #e2e8f0;
-      padding: 24px 28px; margin-bottom: 24px;
-      box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    /* ── Pattern strip under header ── */
+    .header-pattern {
+      height: 32px;
+      background: var(--cpc-gold-tint);
+      border-bottom: 1px solid var(--cpc-line);
+      overflow: hidden;
+      position: relative;
     }
-    .rfp-card .label { font-size: 0.68rem; font-weight: 700; color: #9ca3af;
-      text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 4px; }
-    .rfp-card .value { font-size: 0.9rem; font-weight: 600; color: #0f3460; }
-    .rfp-meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-      gap: 16px; margin-top: 16px; padding-top: 16px; border-top: 1px solid #f1f5f9; }
-    .rfp-section-block { margin-top: 16px; padding-top: 14px; border-top: 1px solid #f1f5f9; }
-    .rfp-section-block .sec-title { font-size: 0.78rem; font-weight: 700; color: #374151;
-      margin-bottom: 6px; display: flex; align-items: center; gap: 6px; }
-    .rfp-section-block .sec-body { font-size: 0.82rem; color: #4b5563; line-height: 1.7;
-      max-height: 120px; overflow-y: auto; white-space: pre-wrap; }
-    .expand-btn { font-size: 0.75rem; color: #3b82f6; cursor: pointer; border: none;
-      background: none; margin-top: 4px; padding: 0; text-decoration: underline; }
-
-    /* ── Form Card ── */
-    .form-card {
-      background: white; border-radius: 12px; border: 1px solid #e2e8f0;
-      padding: 28px; box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    .header-pattern::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background-image: url('/static/pattern.svg');
+      background-repeat: repeat-x;
+      background-size: auto 100%;
+      opacity: 0.25;
     }
-    .form-card h2 { font-size: 1rem; font-weight: 700; color: #1f2937; margin-bottom: 20px;
-      display: flex; align-items: center; gap: 8px; }
-    .form-group { margin-bottom: 20px; }
-    .form-group label { display: block; font-size: 0.82rem; font-weight: 600; color: #374151;
-      margin-bottom: 6px; }
-    .form-group .hint { font-size: 0.75rem; color: #9ca3af; margin-bottom: 6px; }
+
+    /* ── Page layout ── */
+    .page {
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 36px 32px 72px;
+    }
+
+    /* ── Page heading ── */
+    .page-heading {
+      margin-bottom: 28px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--cpc-line);
+    }
+    .page-heading .eyebrow {
+      font-family: var(--font-mono);
+      font-size: 0.62rem;
+      color: var(--cpc-gold-deep);
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .page-heading h2 {
+      font-family: var(--font-display);
+      font-size: 1.9rem;
+      font-weight: 600;
+      color: var(--cpc-ink);
+      line-height: 1.2;
+    }
+    .page-heading .desc {
+      font-size: 0.85rem;
+      color: var(--cpc-ink-muted);
+      margin-top: 6px;
+      line-height: 1.6;
+    }
+
+    /* ── Cards ── */
+    .card {
+      background: var(--cpc-white);
+      border: 1px solid var(--cpc-line);
+      border-radius: 4px;
+      padding: 24px 28px;
+      margin-bottom: 20px;
+    }
+    .card-title {
+      font-family: var(--font-mono);
+      font-size: 0.65rem;
+      font-weight: 600;
+      color: var(--cpc-gold-deep);
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--cpc-line);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .card-title i { font-size: 0.7rem; }
+
+    /* ── RFP info card ── */
+    .rfp-card {}
+    .rfp-meta {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 16px;
+    }
+    .rfp-meta-item .label {
+      font-family: var(--font-mono);
+      font-size: 0.6rem;
+      font-weight: 600;
+      color: var(--cpc-ink-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-bottom: 4px;
+    }
+    .rfp-meta-item .value {
+      font-family: var(--font-body);
+      font-size: 0.88rem;
+      font-weight: 600;
+      color: var(--cpc-ink);
+    }
+    .rfp-section-block {
+      margin-top: 16px;
+      padding-top: 14px;
+      border-top: 1px solid var(--cpc-line);
+    }
+    .rfp-section-block .sec-title {
+      font-family: var(--font-mono);
+      font-size: 0.65rem;
+      font-weight: 600;
+      color: var(--cpc-gold-deep);
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .rfp-section-block .sec-body {
+      font-size: 0.83rem;
+      color: var(--cpc-ink-mid);
+      line-height: 1.7;
+      max-height: 120px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+    }
+    .expand-btn {
+      font-family: var(--font-mono);
+      font-size: 0.65rem;
+      color: var(--cpc-gold);
+      cursor: pointer;
+      border: none;
+      background: none;
+      margin-top: 4px;
+      padding: 0;
+      letter-spacing: 0.05em;
+    }
+    .expand-btn:hover { color: var(--cpc-gold-deep); }
+
+    /* ── Form elements ── */
+    .form-group { margin-bottom: 22px; }
+    .form-group label {
+      display: block;
+      font-size: 0.83rem;
+      font-weight: 600;
+      color: var(--cpc-ink);
+      margin-bottom: 6px;
+    }
+    .form-group .hint {
+      font-size: 0.75rem;
+      color: var(--cpc-ink-muted);
+      margin-bottom: 8px;
+      line-height: 1.5;
+    }
     .form-control {
-      width: 100%; padding: 10px 14px; border: 1.5px solid #d1d5db; border-radius: 8px;
-      font-size: 0.88rem; font-family: inherit; color: #1a202c;
-      transition: border-color 0.15s;
+      width: 100%;
+      padding: 10px 14px;
+      border: 1.5px solid var(--cpc-line);
+      border-radius: 3px;
+      font-size: 0.88rem;
+      font-family: var(--font-body);
+      color: var(--cpc-ink);
+      background: var(--cpc-white);
+      transition: border-color 0.15s, box-shadow 0.15s;
     }
-    .form-control:focus { outline: none; border-color: #0f3460; box-shadow: 0 0 0 3px rgba(15,52,96,0.08); }
-    textarea.form-control { resize: vertical; min-height: 120px; line-height: 1.6; }
+    .form-control:focus {
+      outline: none;
+      border-color: var(--cpc-gold);
+      box-shadow: 0 0 0 3px rgba(186,151,101,0.12);
+    }
+    textarea.form-control {
+      resize: vertical;
+      min-height: 120px;
+      line-height: 1.65;
+    }
 
     /* ── Code field ── */
     .code-field {
-      display: flex; align-items: center; gap: 10px;
-      padding: 10px 14px; border: 1.5px solid #d1d5db; border-radius: 8px;
-      background: #f8fafc;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 16px;
+      border: 1.5px solid var(--cpc-gold-line);
+      border-radius: 3px;
+      background: var(--cpc-gold-tint);
     }
-    .code-field .code-val { font-family: monospace; font-size: 0.95rem;
-      font-weight: 700; color: #0f3460; flex: 1; }
-    .code-badge { font-size: 0.68rem; background: #dcfce7; color: #166534;
-      padding: 2px 8px; border-radius: 20px; font-weight: 700; white-space: nowrap; }
+    .code-field .code-val {
+      font-family: var(--font-mono);
+      font-size: 0.98rem;
+      font-weight: 600;
+      color: var(--cpc-gold-deep);
+      flex: 1;
+      letter-spacing: 0.06em;
+    }
+    .code-badge {
+      font-family: var(--font-mono);
+      font-size: 0.6rem;
+      background: var(--cpc-success-bg);
+      color: var(--cpc-success);
+      border: 1px solid var(--cpc-success-bdr);
+      padding: 3px 10px;
+      border-radius: 100px;
+      font-weight: 600;
+      white-space: nowrap;
+      letter-spacing: 0.08em;
+    }
 
-    /* ── Drop Zone ── */
-    .drop-zone {
-      border: 2px dashed #cbd5e1; border-radius: 10px; padding: 32px 20px;
-      text-align: center; cursor: pointer; transition: all 0.2s;
-      background: #f8fafc;
+    /* ── Section divider ── */
+    .section-divider {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin: 24px 0;
+      font-family: var(--font-mono);
+      font-size: 0.62rem;
+      font-weight: 600;
+      color: var(--cpc-gold-deep);
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
     }
-    .drop-zone.dragover { border-color: #0f3460; background: #eff6ff; }
-    .drop-zone .dz-icon { font-size: 2.2rem; color: #94a3b8; margin-bottom: 10px; }
-    .drop-zone .dz-text { font-size: 0.88rem; color: #4b5563; }
-    .drop-zone .dz-text strong { color: #0f3460; }
-    .drop-zone .dz-sub { font-size: 0.75rem; color: #9ca3af; margin-top: 4px; }
+    .section-divider::before,
+    .section-divider::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--cpc-line);
+    }
+
+    /* ── Drop zone ── */
+    .drop-zone {
+      border: 1.5px dashed var(--cpc-gold-line);
+      border-radius: 4px;
+      padding: 36px 20px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s;
+      background: var(--cpc-ivory);
+    }
+    .drop-zone:hover,
+    .drop-zone.dragover {
+      border-color: var(--cpc-gold);
+      background: var(--cpc-gold-tint);
+    }
+    .drop-zone .dz-icon {
+      font-size: 2rem;
+      color: var(--cpc-gold);
+      margin-bottom: 12px;
+    }
+    .drop-zone .dz-text {
+      font-size: 0.88rem;
+      color: var(--cpc-ink-mid);
+    }
+    .drop-zone .dz-text strong { color: var(--cpc-gold-deep); }
+    .drop-zone .dz-sub {
+      font-family: var(--font-mono);
+      font-size: 0.65rem;
+      color: var(--cpc-ink-muted);
+      margin-top: 6px;
+      letter-spacing: 0.05em;
+    }
 
     /* ── File list ── */
     .file-list { margin-top: 16px; display: flex; flex-direction: column; gap: 10px; }
     .file-item {
-      border: 1.5px solid #e2e8f0; border-radius: 8px; padding: 12px 14px;
-      display: flex; align-items: flex-start; gap: 12px; background: white;
+      border: 1.5px solid var(--cpc-line);
+      border-radius: 4px;
+      padding: 12px 14px;
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      background: var(--cpc-white);
+      transition: border-color 0.15s;
     }
-    .file-item.categorizing { opacity: 0.7; }
-    .file-item.done { border-color: #bbf7d0; background: #f0fdf4; }
-    .file-item.error { border-color: #fecaca; background: #fef2f2; }
-    .file-icon { font-size: 1.4rem; color: #dc2626; flex-shrink: 0; margin-top: 2px; }
+    .file-item.done  { border-color: var(--cpc-success-bdr); background: var(--cpc-success-bg); }
+    .file-item.error { border-color: var(--cpc-error-bdr);   background: var(--cpc-error-bg); }
+    .file-icon { font-size: 1.3rem; color: var(--cpc-error); flex-shrink: 0; margin-top: 2px; }
     .file-info { flex: 1; min-width: 0; }
-    .file-name { font-size: 0.85rem; font-weight: 600; color: #1f2937;
-      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .file-size { font-size: 0.72rem; color: #9ca3af; margin-top: 1px; }
-    .file-summary { font-size: 0.78rem; color: #4b5563; margin-top: 5px; line-height: 1.5; }
+    .file-name {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--cpc-ink);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .file-size {
+      font-family: var(--font-mono);
+      font-size: 0.65rem;
+      color: var(--cpc-ink-muted);
+      margin-top: 2px;
+    }
+    .file-summary { font-size: 0.78rem; color: var(--cpc-ink-mid); margin-top: 5px; line-height: 1.5; }
     .file-label-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
     .label-pill {
-      display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px;
-      border-radius: 20px; font-size: 0.72rem; font-weight: 700; cursor: pointer;
-      border: 1.5px solid transparent; transition: all 0.15s; white-space: nowrap;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 10px;
+      border-radius: 100px;
+      font-family: var(--font-mono);
+      font-size: 0.6rem;
+      font-weight: 600;
+      cursor: pointer;
+      border: 1.5px solid transparent;
+      transition: all 0.15s;
+      white-space: nowrap;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
     }
-    .label-pill.technical { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; }
-    .label-pill.commercial { background: #f0fdf4; color: #166534; border-color: #bbf7d0; }
-    .label-pill.supporting { background: #faf5ff; color: #7c3aed; border-color: #ddd6fe; }
-    .label-pill.other { background: #f3f4f6; color: #6b7280; border-color: #d1d5db; }
-    .label-pill.selected { box-shadow: 0 0 0 2px currentColor; }
-    .label-select { font-size: 0.78rem; padding: 3px 8px; border: 1px solid #d1d5db;
-      border-radius: 6px; background: white; cursor: pointer; color: #374151; }
-    .file-remove { flex-shrink: 0; background: none; border: none; color: #9ca3af;
-      cursor: pointer; font-size: 0.9rem; padding: 2px 4px; border-radius: 4px;
-      align-self: flex-start; }
-    .file-remove:hover { color: #dc2626; background: #fef2f2; }
-    .cat-spinner { font-size: 0.75rem; color: #6b7280; display: flex; align-items: center; gap: 5px; }
-    .conf-badge { font-size: 0.65rem; padding: 1px 6px; border-radius: 10px; font-weight: 600;
-      background: #fef3c7; color: #92400e; }
-    .conf-badge.high { background: #dcfce7; color: #166534; }
-    .conf-badge.low { background: #fee2e2; color: #991b1b; }
+    .label-pill.technical  { background: #EFF6FF; color: #1D4ED8; border-color: #BFDBFE; }
+    .label-pill.commercial { background: var(--cpc-success-bg); color: var(--cpc-success); border-color: var(--cpc-success-bdr); }
+    .label-pill.supporting { background: var(--cpc-gold-tint); color: var(--cpc-gold-deep); border-color: var(--cpc-gold-line); }
+    .label-pill.other      { background: #F3F4F6; color: #6B7280; border-color: #D1D5DB; }
+    .label-pill.selected   { box-shadow: 0 0 0 2px currentColor; }
+    .label-select {
+      font-family: var(--font-mono);
+      font-size: 0.65rem;
+      padding: 3px 8px;
+      border: 1px solid var(--cpc-line);
+      border-radius: 3px;
+      background: var(--cpc-white);
+      cursor: pointer;
+      color: var(--cpc-ink);
+    }
+    .file-remove {
+      flex-shrink: 0;
+      background: none;
+      border: none;
+      color: var(--cpc-ink-muted);
+      cursor: pointer;
+      font-size: 0.85rem;
+      padding: 2px 4px;
+      border-radius: 3px;
+      align-self: flex-start;
+    }
+    .file-remove:hover { color: var(--cpc-error); background: var(--cpc-error-bg); }
+    .cat-spinner {
+      font-family: var(--font-mono);
+      font-size: 0.65rem;
+      color: var(--cpc-ink-muted);
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .conf-badge {
+      font-family: var(--font-mono);
+      font-size: 0.6rem;
+      padding: 2px 8px;
+      border-radius: 100px;
+      font-weight: 600;
+      background: #FEF3C7;
+      color: #92400E;
+      letter-spacing: 0.06em;
+    }
+    .conf-badge.high { background: var(--cpc-success-bg); color: var(--cpc-success); }
+    .conf-badge.low  { background: var(--cpc-error-bg);   color: var(--cpc-error); }
 
     /* ── Submit button ── */
     .submit-btn {
-      width: 100%; padding: 14px; background: #0f3460; color: white;
-      border: none; border-radius: 8px; font-size: 0.95rem; font-weight: 700;
-      cursor: pointer; transition: background 0.15s; display: flex;
-      align-items: center; justify-content: center; gap: 8px;
+      width: 100%;
+      padding: 14px;
+      background: var(--cpc-gold);
+      color: var(--cpc-white);
+      border: none;
+      border-radius: 3px;
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: background 0.15s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
     }
-    .submit-btn:hover:not(:disabled) { background: #1a4a7a; }
-    .submit-btn:disabled { background: #94a3b8; cursor: not-allowed; }
+    .submit-btn:hover:not(:disabled) { background: var(--cpc-gold-deep); }
+    .submit-btn:disabled { background: var(--cpc-line); color: var(--cpc-ink-muted); cursor: not-allowed; }
 
-    /* ── Success / Error states ── */
+    .submit-footer {
+      font-family: var(--font-mono);
+      font-size: 0.62rem;
+      color: var(--cpc-ink-muted);
+      text-align: center;
+      margin-top: 12px;
+      letter-spacing: 0.06em;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+    .submit-footer i { color: var(--cpc-gold); font-size: 0.65rem; }
+
+    /* ── Success screen ── */
     .success-screen {
-      background: white; border-radius: 12px; padding: 48px 28px; text-align: center;
-      box-shadow: 0 1px 4px rgba(0,0,0,0.06); display: none;
+      background: var(--cpc-white);
+      border: 1px solid var(--cpc-line);
+      border-radius: 4px;
+      padding: 56px 36px;
+      text-align: center;
+      display: none;
     }
-    .success-icon { font-size: 3.5rem; color: #22c55e; margin-bottom: 16px; }
-    .success-screen h2 { font-size: 1.4rem; font-weight: 700; color: #1f2937; margin-bottom: 12px; }
-    .success-screen p { font-size: 0.88rem; color: #6b7280; line-height: 1.7; max-width: 480px; margin: 0 auto; }
-    .success-ref { background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px;
-      padding: 14px 20px; margin-top: 20px; font-size: 0.85rem; color: #166534; display: inline-block; }
-    .success-ref strong { font-family: monospace; font-size: 1rem; }
+    .success-icon {
+      width: 72px;
+      height: 72px;
+      border-radius: 50%;
+      background: var(--cpc-success-bg);
+      border: 2px solid var(--cpc-success-bdr);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 24px;
+    }
+    .success-icon i { font-size: 2rem; color: var(--cpc-success); }
+    .success-screen h2 {
+      font-family: var(--font-display);
+      font-size: 1.8rem;
+      font-weight: 600;
+      color: var(--cpc-ink);
+      margin-bottom: 14px;
+    }
+    .success-screen p {
+      font-size: 0.88rem;
+      color: var(--cpc-ink-muted);
+      line-height: 1.75;
+      max-width: 500px;
+      margin: 0 auto;
+    }
+    .success-ref {
+      background: var(--cpc-gold-tint);
+      border: 1px solid var(--cpc-gold-line);
+      border-radius: 4px;
+      padding: 16px 24px;
+      margin-top: 24px;
+      display: inline-block;
+      text-align: left;
+    }
+    .success-ref .ref-label {
+      font-family: var(--font-mono);
+      font-size: 0.6rem;
+      color: var(--cpc-gold-deep);
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      margin-bottom: 4px;
+    }
+    .success-ref .ref-value {
+      font-family: var(--font-mono);
+      font-size: 1.05rem;
+      font-weight: 600;
+      color: var(--cpc-gold-deep);
+    }
+    .success-ref .ref-files {
+      font-family: var(--font-mono);
+      font-size: 0.65rem;
+      color: var(--cpc-ink-muted);
+      margin-top: 6px;
+    }
 
-    .alert { padding: 12px 16px; border-radius: 8px; font-size: 0.85rem;
-      margin-bottom: 16px; display: none; }
-    .alert.error { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
-    .alert.info { background: #eff6ff; border: 1px solid #bfdbfe; color: #1d4ed8; }
-
-    /* ── Divider ── */
-    .section-divider {
-      display: flex; align-items: center; gap: 12px; margin: 24px 0;
-      font-size: 0.75rem; font-weight: 700; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.06em;
+    /* ── Alert ── */
+    .alert {
+      padding: 12px 16px;
+      border-radius: 3px;
+      font-size: 0.83rem;
+      margin-bottom: 16px;
+      display: none;
+      line-height: 1.5;
     }
-    .section-divider::before, .section-divider::after {
-      content: ''; flex: 1; height: 1px; background: #e2e8f0;
-    }
+    .alert.error { background: var(--cpc-error-bg); border: 1px solid var(--cpc-error-bdr); color: var(--cpc-error); }
+    .alert.info  { background: var(--cpc-gold-tint); border: 1px solid var(--cpc-gold-line); color: var(--cpc-gold-deep); }
 
     /* ── Loading overlay ── */
     .loading-overlay {
-      display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.4);
-      z-index: 9999; align-items: center; justify-content: center; flex-direction: column; gap: 16px;
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(27,23,18,0.55);
+      z-index: 9999;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 20px;
+      backdrop-filter: blur(2px);
     }
     .loading-overlay.show { display: flex; }
-    .loading-spinner { width: 48px; height: 48px; border: 5px solid rgba(255,255,255,0.3);
-      border-top-color: white; border-radius: 50%; animation: spin 0.8s linear infinite; }
-    .loading-text { color: white; font-size: 0.9rem; font-weight: 600; }
+    .loading-box {
+      background: var(--cpc-white);
+      border: 1px solid var(--cpc-line);
+      border-radius: 4px;
+      padding: 32px 48px;
+      text-align: center;
+    }
+    .loading-spinner {
+      width: 44px;
+      height: 44px;
+      border: 3px solid var(--cpc-line);
+      border-top-color: var(--cpc-gold);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin: 0 auto 16px;
+    }
+    .loading-text {
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      color: var(--cpc-ink-muted);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
     @keyframes spin { to { transform: rotate(360deg); } }
 
-    @media (max-width: 600px) {
+    /* ── Footer ── */
+    .page-footer {
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 24px 32px;
+      border-top: 1px solid var(--cpc-line);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .page-footer .footer-left {
+      font-family: var(--font-mono);
+      font-size: 0.6rem;
+      color: var(--cpc-ink-muted);
+      letter-spacing: 0.08em;
+    }
+    .page-footer .footer-right {
+      font-family: var(--font-mono);
+      font-size: 0.6rem;
+      color: var(--cpc-ink-muted);
+      letter-spacing: 0.08em;
+      text-align: right;
+    }
+
+    /* ── Responsive ── */
+    @media (max-width: 640px) {
+      .header-inner { padding: 16px 20px; gap: 14px; }
+      .header-badge { display: none; }
+      .page { padding: 24px 20px 56px; }
+      .card { padding: 20px; }
       .rfp-meta { grid-template-columns: repeat(2, 1fr); }
-      .header-inner { padding: 20px 16px; }
-      .page { padding: 20px 16px 48px; }
+      .page-footer { flex-direction: column; align-items: flex-start; }
     }
   </style>
 </head>
 <body>
 
-<div class="header">
+<!-- ── Header ── -->
+<header class="header">
   <div class="header-inner">
-    <div class="header-crest">👑</div>
+    <div class="header-emblem">
+      <img src="/static/cpc-emblem.png" alt="Crown Prince's Court Emblem"/>
+    </div>
+    <div class="header-divider"></div>
     <div class="header-text">
-      <h1>Crown Prince's Court — Procurement Portal</h1>
-      <div class="sub">Secure Proposal Submission System &nbsp;|&nbsp; Abu Dhabi, UAE</div>
+      <h1>Crown Prince's Court</h1>
+      <div class="sub">Procurement Portal &nbsp;·&nbsp; Proposal Submission</div>
+    </div>
+    <div class="header-badge">
+      <div class="secure-label"><i class="fas fa-lock"></i> Secure Submission</div>
+      <div class="location-label">Abu Dhabi, United Arab Emirates</div>
     </div>
   </div>
-  <div class="header-strip"></div>
-</div>
+</header>
+<div class="header-pattern"></div>
 
+<!-- ── Loading overlay ── -->
 <div class="loading-overlay" id="loadingOverlay">
-  <div class="loading-spinner"></div>
-  <div class="loading-text" id="loadingText">Submitting your proposal…</div>
+  <div class="loading-box">
+    <div class="loading-spinner"></div>
+    <div class="loading-text" id="loadingText">Submitting proposal…</div>
+  </div>
 </div>
 
-<div class="page">
+<!-- ── Main content ── -->
+<main class="page">
 
-  <!-- RFP Info (loaded dynamically) -->
-  <div class="rfp-card" id="rfpCard">
-    <div style="display:flex;align-items:center;gap:10px;color:#9ca3af;font-size:0.85rem">
-      <i class="fas fa-spinner fa-spin"></i> Loading RFP details…
+  <!-- Page heading -->
+  <div class="page-heading">
+    <div class="eyebrow"><i class="fas fa-file-import" style="margin-right:6px"></i>Tender Reference &mdash; RFP-${rfpId}</div>
+    <h2>Vendor Proposal Submission</h2>
+    <p class="desc">
+      Upload your proposal documents and submit your response to this Request for Proposal.
+      All submissions are encrypted in transit and securely stored. Please ensure all required
+      documents are included before submitting.
+    </p>
+  </div>
+
+  <!-- RFP Info card (populated dynamically) -->
+  <div class="card rfp-card" id="rfpCard">
+    <div class="card-title"><i class="fas fa-file-alt"></i> Tender Information</div>
+    <div style="display:flex;align-items:center;gap:10px;color:var(--cpc-ink-muted);font-size:0.83rem">
+      <i class="fas fa-spinner fa-spin" style="color:var(--cpc-gold)"></i>
+      Loading tender details…
     </div>
   </div>
 
   <!-- Success screen -->
   <div class="success-screen" id="successScreen">
-    <div class="success-icon"><i class="fas fa-check-circle"></i></div>
+    <div class="success-icon"><i class="fas fa-check"></i></div>
     <h2>Proposal Successfully Submitted</h2>
     <p>
       Thank you for submitting your proposal to the Crown Prince's Court procurement process.
       Your submission has been received and securely recorded. Our evaluation team will review
-      all proposals and contact shortlisted vendors with next steps.
+      all proposals and notify shortlisted vendors of the next steps.
     </p>
-    <p style="margin-top:12px">
-      Please retain this confirmation for your records. If you have any queries, contact us
-      at <strong>procurement@cpc-rfp.website</strong>, quoting your participant reference below.
+    <p style="margin-top:10px">
+      Please retain this confirmation for your records. For enquiries, contact us at
+      <strong>procurement@cpc-rfp.website</strong>, quoting your participant reference.
     </p>
     <div class="success-ref">
-      Participant Reference: <strong id="successRef"></strong><br/>
-      <span style="font-size:0.78rem;color:#166534;margin-top:4px;display:block" id="successFiles"></span>
+      <div class="ref-label">Participant Reference</div>
+      <div class="ref-value" id="successRef"></div>
+      <div class="ref-files" id="successFiles"></div>
     </div>
   </div>
 
-  <!-- Submission Form -->
-  <div class="form-card" id="formCard">
-    <h2><i class="fas fa-file-upload" style="color:#0f3460"></i> Submit Your Proposal</h2>
+  <!-- Submission form -->
+  <div class="card" id="formCard">
+    <div class="card-title"><i class="fas fa-upload"></i> Submit Your Proposal</div>
 
     <div class="alert error" id="alertError"></div>
-    <div class="alert info" id="alertInfo"></div>
+    <div class="alert info"  id="alertInfo"></div>
 
-    <!-- Participant Code -->
+    <!-- Participant code -->
     <div class="form-group">
       <label>Participant Reference Code</label>
-      <div class="hint">This code uniquely identifies your organisation for this tender. It was provided in your invitation email.</div>
-      <div class="code-field">
-        <i class="fas fa-key" style="color:#c9a84c;font-size:1rem"></i>
-        <span class="code-val" id="codeDisplay">${participantCode || '—'}</span>
-        ${participantCode ? '<span class="code-badge"><i class="fas fa-check" style="font-size:0.6rem"></i> Verified</span>' : ''}
+      <div class="hint">
+        This code uniquely identifies your organisation for this tender and was provided
+        in your invitation letter. It cannot be changed.
       </div>
-      ${!participantCode ? '<input type="text" class="form-control" id="codeInput" placeholder="e.g. RFP-1-V5" style="margin-top:8px" oninput="onCodeInput(this.value)"/>' : ''}
+      <div class="code-field">
+        <i class="fas fa-key" style="color:var(--cpc-gold);font-size:0.9rem"></i>
+        <span class="code-val" id="codeDisplay">${participantCode || '—'}</span>
+        ${participantCode
+          ? '<span class="code-badge"><i class="fas fa-check" style="margin-right:3px;font-size:0.55rem"></i>Verified</span>'
+          : ''}
+      </div>
+      ${!participantCode
+        ? '<input type="text" class="form-control" id="codeInput" placeholder="e.g. RFP-1-V5" style="margin-top:10px" oninput="onCodeInput(this.value)"/>'
+        : ''}
     </div>
 
     <div class="section-divider">Cover Letter</div>
 
-    <!-- Cover Letter -->
+    <!-- Cover letter -->
     <div class="form-group">
-      <label for="coverLetter">Cover Letter <span style="color:#9ca3af;font-weight:400">(optional)</span></label>
-      <div class="hint">Briefly introduce your organisation and summarise your key qualifications for this tender.</div>
-      <textarea class="form-control" id="coverLetter" placeholder="Dear Procurement Team,&#10;&#10;We are pleased to submit our proposal for…" rows="6"></textarea>
+      <label for="coverLetter">
+        Cover Letter
+        <span style="font-weight:400;color:var(--cpc-ink-muted);font-size:0.78rem"> — Optional</span>
+      </label>
+      <div class="hint">
+        Briefly introduce your organisation and summarise your key qualifications for this tender.
+      </div>
+      <textarea class="form-control" id="coverLetter"
+        placeholder="Dear Procurement Committee,&#10;&#10;We are pleased to submit our proposal in response to this Request for Proposal…"
+        rows="6"></textarea>
     </div>
 
     <div class="section-divider">Proposal Documents</div>
 
-    <!-- File Upload -->
+    <!-- File upload -->
     <div class="form-group">
-      <label>Proposal Documents <span style="color:#dc2626">*</span></label>
-      <div class="hint">Upload your Technical Proposal, Commercial Proposal, and any supporting documents (CVs, certifications, references). PDF format only.</div>
+      <label>
+        Proposal Documents
+        <span style="color:var(--cpc-error);margin-left:3px">*</span>
+      </label>
+      <div class="hint">
+        Upload your Technical Proposal, Commercial Proposal, and any supporting documents
+        (CVs, certifications, references). PDF format only. Multiple files accepted.
+      </div>
 
       <div class="drop-zone" id="dropZone"
            onclick="document.getElementById('fileInput').click()"
@@ -275,8 +800,8 @@ export function getSubmitPage(rfpId: string, participantCode: string): string {
            ondragleave="this.classList.remove('dragover')"
            ondrop="handleDrop(event)">
         <div class="dz-icon"><i class="fas fa-cloud-upload-alt"></i></div>
-        <div class="dz-text"><strong>Click to browse</strong> or drag & drop files here</div>
-        <div class="dz-sub">PDF documents only • Multiple files accepted • Max 50 MB per file</div>
+        <div class="dz-text"><strong>Click to browse files</strong> or drag &amp; drop here</div>
+        <div class="dz-sub">PDF documents only &nbsp;·&nbsp; Multiple files accepted &nbsp;·&nbsp; Max 50 MB per file</div>
       </div>
       <input type="file" id="fileInput" multiple accept=".pdf,application/pdf" style="display:none"
              onchange="handleFiles(this.files)"/>
@@ -285,15 +810,28 @@ export function getSubmitPage(rfpId: string, participantCode: string): string {
     </div>
 
     <button class="submit-btn" id="submitBtn" onclick="submitProposal()" disabled>
-      <i class="fas fa-paper-plane"></i> Submit Proposal
+      <i class="fas fa-paper-plane"></i>
+      Submit Proposal
     </button>
-    <div style="font-size:0.75rem;color:#9ca3af;text-align:center;margin-top:10px">
-      <i class="fas fa-lock" style="margin-right:4px"></i>
-      Your submission is encrypted and securely stored. Late submissions will not be accepted.
+    <div class="submit-footer">
+      <i class="fas fa-shield-alt"></i>
+      Encrypted transmission &nbsp;·&nbsp; Secure storage &nbsp;·&nbsp; Late submissions are not accepted
     </div>
   </div>
 
-</div><!-- /page -->
+</main>
+
+<!-- ── Footer ── -->
+<footer class="page-footer">
+  <div class="footer-left">
+    © Crown Prince's Court · Abu Dhabi, UAE<br/>
+    AI RFP Management System
+  </div>
+  <div class="footer-right">
+    Confidential — Authorised vendors only<br/>
+    All submissions are logged and audited
+  </div>
+</footer>
 
 <script>
 /* Server-injected globals — read by submit.js */

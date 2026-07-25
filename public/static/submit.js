@@ -53,31 +53,35 @@
       : '\u2014';
 
     var sections = '';
-    if (rfp.background)        sections += sectionBlock('Project Background',      rfp.background,        'fa-info-circle',         '#0f3460');
-    if (rfp.scope)             sections += sectionBlock('Scope of Work',           rfp.scope,             'fa-list-alt',            '#7c3aed');
-    if (rfp.tech_requirements) sections += sectionBlock('Technical Requirements',  rfp.tech_requirements, 'fa-microchip',           '#0369a1');
+    if (rfp.background)        sections += sectionBlock('Project Background',      rfp.background,        'fa-info-circle',         '#745B35');
+    if (rfp.scope)             sections += sectionBlock('Scope of Work',           rfp.scope,             'fa-list-alt',            '#745B35');
+    if (rfp.tech_requirements) sections += sectionBlock('Technical Requirements',  rfp.tech_requirements, 'fa-microchip',           '#745B35');
     if (rfp.objectives)        sections += sectionBlock('Objectives',              rfp.objectives,        'fa-bullseye',            '#166534');
 
     var html = '';
 
     // Top row: ref + deadline badge
     html += '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap">';
-    html += '<div><div class="label">RFP Reference</div><div class="value">' + esc(rfp.ref_number || '\u2014') + '</div></div>';
-    html += '<div style="text-align:right"><span style="background:#fef3c7;color:#92400e;border-radius:20px;padding:4px 14px;font-size:0.75rem;font-weight:700">';
-    html += '<i class="fas fa-clock" style="margin-right:4px"></i>Deadline: ' + deadline + '</span></div>';
+    var metaLabel = 'font-family:JetBrains Mono,monospace;font-size:0.6rem;font-weight:600;color:#7A6E62;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:4px';
+    var metaValue = 'font-size:0.88rem;font-weight:600;color:#1B1712';
+
+    html += '<div style="display:flex;font-family:JetBrains Mono,monospace">';
+    html += '<div style="flex:1"><div style="' + metaLabel + '">RFP Reference</div><div style="' + metaValue + '">' + esc(rfp.ref_number || '\u2014') + '</div></div>';
+    html += '<div style="text-align:right"><span style="background:#F5EFE3;color:#745B35;border:1px solid #E9DCC4;border-radius:100px;padding:4px 14px;font-family:JetBrains Mono,monospace;font-size:0.62rem;font-weight:600;letter-spacing:0.08em">';
+    html += '<i class="fas fa-clock" style="margin-right:4px"></i>DEADLINE&nbsp;&nbsp;' + deadline + '</span></div>';
     html += '</div>';
 
     // Title row
-    html += '<div style="margin-top:10px">';
-    html += '<div style="font-size:1.15rem;font-weight:700;color:#1a202c">' + esc(rfp.title || '') + '</div>';
-    html += '<div style="font-size:0.82rem;color:#6b7280;margin-top:3px">' + esc(rfp.category || '') + ' &nbsp;|&nbsp; Crown Prince\u2019s Court, Abu Dhabi</div>';
+    html += '<div style="margin-top:12px">';
+    html += '<div style="font-family:Cormorant Garamond,Georgia,serif;font-size:1.3rem;font-weight:600;color:#1B1712;line-height:1.25">' + esc(rfp.title || '') + '</div>';
+    html += '<div style="font-family:JetBrains Mono,monospace;font-size:0.65rem;color:#7A6E62;margin-top:5px;letter-spacing:0.06em">' + esc(rfp.category || '') + ' &nbsp;·&nbsp; Crown Prince\u2019s Court, Abu Dhabi</div>';
     html += '</div>';
 
     // Meta grid
-    html += '<div class="rfp-meta">';
-    html += '<div><div class="label">Issuing Entity</div><div class="value">Crown Prince\u2019s Court (CPC)</div></div>';
-    html += '<div><div class="label">Category</div><div class="value">' + esc(rfp.category || '\u2014') + '</div></div>';
-    html += '<div><div class="label">Submission Deadline</div><div class="value" style="color:#dc2626">' + deadline + '</div></div>';
+    html += '<div class="rfp-meta" style="margin-top:16px;padding-top:14px;border-top:1px solid #E7DFCE">';
+    html += '<div class="rfp-meta-item"><div class="label">Issuing Entity</div><div class="value">Crown Prince\u2019s Court (CPC)</div></div>';
+    html += '<div class="rfp-meta-item"><div class="label">Category</div><div class="value">' + esc(rfp.category || '\u2014') + '</div></div>';
+    html += '<div class="rfp-meta-item"><div class="label">Submission Deadline</div><div class="value" style="color:#8B2020">' + deadline + '</div></div>';
     html += '</div>';
 
     // Expandable sections
@@ -114,7 +118,7 @@
   }
 
   function showRfpError(msg) {
-    var html = '<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:16px;color:#991b1b">';
+    var html = '<div style="background:#FDF2F2;border:1px solid #F5C0C0;border-radius:3px;padding:16px;color:#8B2020;font-size:0.85rem">';
     html += '<i class="fas fa-exclamation-triangle" style="margin-right:8px"></i>' + esc(msg) + '</div>';
     document.getElementById('rfpCard').innerHTML = html;
   }
@@ -215,7 +219,7 @@
   var LABEL_META = {
     technical:  { text: 'Technical Proposal',  icon: 'fa-laptop-code',         color: '#1d4ed8' },
     commercial: { text: 'Commercial Proposal',  icon: 'fa-file-invoice-dollar', color: '#166534' },
-    supporting: { text: 'Supporting Document',  icon: 'fa-paperclip',           color: '#7c3aed' },
+    supporting: { text: 'Supporting Document',  icon: 'fa-paperclip',           color: '#BA9765' },
     other:      { text: 'Other Document',       icon: 'fa-file',                color: '#6b7280' }
   };
 
