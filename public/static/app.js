@@ -1089,34 +1089,65 @@ async function generateRfpPdfBlob(rfpId) {
   var dataUri = await fetchLetterheadDataUri();
   var inlined = inlineLetterheadInHtml(rfp.content, dataUri);
 
-  // Create a hidden but rendered container (must be in DOM for html2canvas)
-  var container = document.createElement('div');
-  container.style.cssText = 'position:fixed;left:-19999px;top:0;width:210mm;background:#e8e8e8;z-index:-9999;overflow:visible';
-  container.innerHTML = inlined;
-  document.body.appendChild(container);
+  // Use a hidden iframe so the RFP HTML renders in its own document context
+  // with correct dimensions — html2canvas requires a real rendered layout.
+  var iframe = document.createElement('iframe');
+  iframe.style.cssText = 'position:fixed;top:0;left:0;width:794px;height:1123px;opacity:0;pointer-events:none;border:none;z-index:-1';
+  document.body.appendChild(iframe);
+
+  // Write the full RFP HTML (with inlined letterhead) into the iframe
+  var iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+  iframeDoc.open();
+  iframeDoc.write('<!DOCTYPE html><html><head><meta charset="UTF-8">'
+    + '<style>*{box-sizing:border-box;margin:0;padding:0}body{background:#e8e8e8}</style>'
+    + '</head><body>' + inlined + '</body></html>');
+  iframeDoc.close();
+
+  // Wait for iframe content (including images) to fully load
+  await new Promise(function(resolve) {
+    if (iframe.contentDocument.readyState === 'complete') { resolve(); return; }
+    iframe.contentWindow.addEventListener('load', resolve);
+    setTimeout(resolve, 3000); // max wait 3s
+  });
+  // Extra tick for paint
+  await new Promise(function(r) { setTimeout(r, 500); });
 
   try {
     var opt = {
       margin:      0,
       filename:    filename,
-      image:       { type: 'jpeg', quality: 0.95 },
+      image:       { type: 'jpeg', quality: 0.92 },
       html2canvas: {
         scale: 2,
         useCORS: true,
         allowTaint: true,
         backgroundColor: '#e8e8e8',
         logging: false,
-        width: 794,
+        // target the iframe's body so html2canvas gets actual rendered dimensions
         windowWidth: 794,
+        windowHeight: 1123,
       },
-      jsPDF:       { unit: 'mm', format: 'a4', orientation: 'portrait' },
-      pagebreak:   { mode: ['css', 'legacy'], avoid: ['tr', 'td'] },
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+      pagebreak: { mode: ['css', 'legacy'] },
     };
-    var pdfWorker = html2pdf().set(opt).from(container);
-    var blob = await pdfWorker.outputPdf('blob');
+
+    // Use the full html2pdf pipeline: toContainer→toCanvas→toPdf
+    // then extract the jsPDF instance to get a Blob without triggering download
+    var blob = await new Promise(function(resolve, reject) {
+      html2pdf()
+        .set(opt)
+        .from(iframeDoc.body)
+        .toPdf()
+        .get('pdf')
+        .then(function(pdfObj) {
+          resolve(pdfObj.output('blob'));
+        })
+        .catch(reject);
+    });
+
     return { blob: blob, filename: filename };
   } finally {
-    if (container.parentNode) document.body.removeChild(container);
+    if (iframe.parentNode) document.body.removeChild(iframe);
   }
 }
 
@@ -1148,7 +1179,7 @@ function downloadRfpPdf(rfpId) {
     return;
   }
 
-  showToast('Generating PDF — please wait…', 'info', 8000);
+  showToast('Generating PDF — please wait (this may take 10–20 seconds)…', 'info', 25000);
   generateRfpPdfBlob(rfpId)
     .then(function(result) {
       // Trigger browser download
