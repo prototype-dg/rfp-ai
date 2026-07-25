@@ -3,7 +3,7 @@ import { initDb, seedVendors } from '../db/seed'
 import type { Bindings } from '../types'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-07-25-v7'
+const WORKER_VERSION = '2026-07-25-v8'
 
 export const apiRouter = new Hono<{ Bindings: Bindings }>()
 

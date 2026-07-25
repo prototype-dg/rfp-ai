@@ -13,7 +13,6 @@ let appState = {
   rfpVendors: [],
   questions: [],
   proposals: [],
-  evaluations: [],
   emails: [],
   receivedEmails: [],
   currentRfp: null,
@@ -409,7 +408,6 @@ var RFP_TABS = [
   { id: 'vendors',         icon: 'fa-building',       label: 'Vendors' },
   { id: 'qa',              icon: 'fa-comments',       label: 'Q&A' },
   { id: 'proposals',       icon: 'fa-inbox',          label: 'Proposals' },
-  { id: 'scoring',         icon: 'fa-balance-scale',  label: 'Scoring Model' },
 ];
 
 function renderRfpTabs(activeTab, rfpId, qaBadge) {
@@ -457,15 +455,11 @@ async function init() {
 var pages = {};
 
 pages.dashboard = async function() {
-  let stats, perfData;
+  let stats;
   try {
-    [stats, perfData] = await Promise.all([
-      apiCall('GET', '/stats'),
-      apiCall('GET', '/vendor-performance').catch(function(){ return []; }),
-    ]);
+    stats = await apiCall('GET', '/stats');
   } catch(e) {
     stats = { totalRfps:0, activeRfps:0, awardedRfps:0, winRate:0, totalVendors:0, totalProposals:0, totalEmails:0, avgDuration:null, stageBreakdown:[] };
-    perfData = [];
   }
 
   const stageBreakdown = stats.stageBreakdown || [];
@@ -508,21 +502,6 @@ pages.dashboard = async function() {
     stageChart = '<div style="color:#9ca3af;font-size:0.85rem;padding:1rem">No RFP data yet</div>';
   }
 
-  // Top vendor performance table (top 5)
-  const topVendors = (perfData || []).slice(0, 5);
-  let perfRows = '';
-  topVendors.forEach(function(v) {
-    const score = v.avg_score ? Math.round(v.avg_score) : 0;
-    const perfCls = score >= 75 ? 'perf-high' : score >= 50 ? 'perf-mid' : 'perf-low';
-    perfRows += '<tr>'
-      + '<td style="font-weight:500">' + escHtml(v.name) + '</td>'
-      + '<td style="text-align:center">' + (v.rfps_shortlisted||0) + '</td>'
-      + '<td style="text-align:center">' + (v.proposals_submitted||0) + '</td>'
-      + '<td><div style="display:flex;align-items:center;gap:8px"><span>' + score + '</span>' + scoreBar(score) + '</div></td>'
-      + '<td style="text-align:center"><span class="perf-badge ' + perfCls + '">' + (v.awards_won||0) + ' won</span></td>'
-      + '</tr>';
-  });
-
   setContent(
     '<div style="display:flex;flex-direction:column;gap:1.25rem">'
     // KPI grid
@@ -548,15 +527,6 @@ pages.dashboard = async function() {
     + '</div></div>'
     + '</div>'
 
-    // Vendor performance table
-    + '<div class="card">'
-    + '<div style="padding:1rem 1.25rem;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between">'
-    + '<h3 style="font-weight:700;color:#1f2937;font-size:0.9rem;margin:0"><i class="fas fa-star mr-2 cpc-gold"></i>Top Vendor Performance</h3>'
-    + '<button class="btn-ghost btn-sm" onclick="navigateTo(\'reports\')">Full Report <i class="fas fa-arrow-right" style="margin-left:4px"></i></button>'
-    + '</div>'
-    + (perfRows ? '<div style="overflow-x:auto"><table><thead><tr><th>Vendor</th><th style="text-align:center">Shortlisted</th><th style="text-align:center">Proposals</th><th>Avg Score</th><th style="text-align:center">Awards</th></tr></thead><tbody>' + perfRows + '</tbody></table></div>'
-      : '<div style="padding:2rem;text-align:center;color:#9ca3af">No vendor performance data yet</div>')
-    + '</div>'
     + '</div>'
   );
 };
@@ -1849,84 +1819,21 @@ async function reprocessQuestions(rfpId) {
   }
 }
 
-async function reprocessProposalPdf(rfpId, proposalId) {
-  if (!confirm('Re-process this proposal? This will:\n• Re-fetch the PDF from the original email\n• Extract full text (up to 60k chars)\n• Re-run AI field extraction (summary, budget, timeline)\n• Re-run AI evaluation\n\nThis may take 30–60 seconds.')) return;
-
-  // Find and disable the button
-  var btns = document.querySelectorAll('button[onclick*="reprocessProposalPdf(' + rfpId + ',' + proposalId + ')"]');
-  btns.forEach(function(b) { b.disabled = true; b.innerHTML = '<i class="fas fa-spinner fa-spin"></i>Processing...'; });
-
-  showToast('⏳ Re-processing proposal PDF — re-fetching from email, extracting text, running LLM...', 'info', 60000);
-
-  try {
-    const result = await apiCall('POST', '/rfps/' + rfpId + '/proposals/' + proposalId + '/reprocess', {});
-    if (result.ok) {
-      var msg = '✅ Proposal re-processed successfully!\n'
-        + '• PDF: ' + (result.pdf_bytes ? Math.round(result.pdf_bytes / 1024 / 1024 * 10) / 10 + ' MB' : 'N/A') + ' stored in R2\n'
-        + '• Text extracted: ' + result.text_chars + ' chars\n'
-        + '• Budget: ' + (result.extracted_fields.budget_amount ? result.extracted_fields.budget_currency + ' ' + Number(result.extracted_fields.budget_amount).toLocaleString() : 'Not found') + '\n'
-        + '• Timeline: ' + (result.extracted_fields.timeline_months ? result.extracted_fields.timeline_months + ' months' : 'Not found') + '\n'
-        + (result.evaluation ? '• New AI score: ' + result.evaluation.total_score + '/100' : '');
-      showToast('✅ Re-processed! Budget: ' + (result.extracted_fields.budget_amount ? result.extracted_fields.budget_currency + ' ' + Number(result.extracted_fields.budget_amount).toLocaleString() : 'N/A') + ' | Timeline: ' + (result.extracted_fields.timeline_months || '?') + ' months' + (result.evaluation ? ' | Score: ' + result.evaluation.total_score + '/100' : ''), 'success', 12000);
-      // Refresh proposals tab to show updated data
-      rfpTabs.proposals(rfpId);
-    } else {
-      showToast('Re-process failed: ' + (result.error || 'Unknown error'), 'error', 8000);
-      btns.forEach(function(b) { b.disabled = false; b.innerHTML = '<i class="fas fa-sync"></i>Re-process'; });
-    }
-  } catch(e) {
-    var errMsg = e.message || String(e);
-    if (errMsg.includes('attachment may have expired')) {
-      showToast('❌ Resend attachment expired (>7 days). Use "Upload PDF" to manually re-upload the file.', 'error', 10000);
-    } else {
-      showToast('Re-process error: ' + errMsg, 'error', 8000);
-    }
-    btns.forEach(function(b) { b.disabled = false; b.innerHTML = '<i class="fas fa-sync"></i>Re-process'; });
-  }
-}
-
 // --- TAB: PROPOSALS ---
 rfpTabs.proposals = async function(rfpId) {
-  const [proposals, evaluations] = await Promise.all([
-    apiCall('GET', '/rfps/' + rfpId + '/proposals').catch(function(){ return []; }),
-    apiCall('GET', '/rfps/' + rfpId + '/evaluations').catch(function(){ return []; }),
-  ]);
+  const proposals = await apiCall('GET', '/rfps/' + rfpId + '/proposals').catch(function(){ return []; });
   appState.proposals = proposals;
-  appState.evaluations = evaluations;
 
-  // Build eval map by vendor_id and proposal_id
-  const evalByProposal = {};
-  evaluations.forEach(function(e) {
-    if (e.proposal_id) evalByProposal[e.proposal_id] = e;
-  });
-  const evalByVendor = {};
-  evaluations.forEach(function(e) {
-    if (e.vendor_id) evalByVendor[e.vendor_id] = e;
-  });
-
-  function getEval(p) {
-    return evalByProposal[p.id] || evalByVendor[p.vendor_id] || null;
-  }
-
-  function statusBadge(p, ev) {
+  function statusBadge(p) {
     const s = p.status || 'submitted';
     if (s === 'awarded') return '<span style="background:#d1fae5;color:#065f46;border-radius:20px;padding:3px 10px;font-size:0.73rem;font-weight:700"><i class="fas fa-trophy mr-1"></i>Awarded</span>';
     if (s === 'recommended') return '<span style="background:#fef3c7;color:#92400e;border-radius:20px;padding:3px 10px;font-size:0.73rem;font-weight:700"><i class="fas fa-star mr-1"></i>Recommended</span>';
     if (s === 'not_awarded') return '<span style="background:#f3f4f6;color:#6b7280;border-radius:20px;padding:3px 10px;font-size:0.73rem;font-weight:500">Not Awarded</span>';
-    // Show "Wrong Doc" if the evaluation detected a wrong document (score=0, is_real=1, wrong-doc summary)
-    if (ev && ev.total_score === 0 && ev.is_real === 1 && ev.ai_summary && ev.ai_summary.indexOf('WRONG DOCUMENT') !== -1) {
-      return '<span style="background:#fee2e2;color:#dc2626;border-radius:20px;padding:3px 10px;font-size:0.73rem;font-weight:600"><i class="fas fa-times-circle mr-1"></i>Wrong Doc</span>';
-    }
-    // Show "Evaluated" once a real scored evaluation exists
-    if (ev && ev.is_real === 1 && ev.total_score > 0) {
-      return '<span style="background:#f0fdf4;color:#16a34a;border-radius:20px;padding:3px 10px;font-size:0.73rem;font-weight:500"><i class="fas fa-check-circle mr-1"></i>Evaluated</span>';
-    }
     return '<span style="background:#e0f2fe;color:#0369a1;border-radius:20px;padding:3px 10px;font-size:0.73rem;font-weight:500">Submitted</span>';
   }
 
   let rows = '';
   proposals.forEach(function(p) {
-    const ev = getEval(p);
     // Use budget_amount/currency if available, fallback to financial_proposal
     let fin = '-';
     if (p.budget_amount && p.budget_amount > 0) {
@@ -1945,41 +1852,7 @@ rfpTabs.proposals = async function(rfpId) {
     const dateStr = p.created_at ? new Date(p.created_at).toLocaleDateString('en-AE') : '-';
     const isReal = p.is_real_submission;
     const isAwarded = (p.status === 'awarded');
-
-    // AI Score cell
-    let scoreCell = '-';
-    if (ev && ev.total_score !== undefined && ev.total_score !== null) {
-      const sc = ev.total_score;
-      // Wrong document or evaluation error: score=0 with is_real=1
-      if (sc === 0 && ev.is_real === 1) {
-        const isWrongDoc = ev.ai_summary && ev.ai_summary.indexOf('WRONG DOCUMENT') !== -1;
-        const isEvalError = ev.ai_summary && ev.ai_summary.indexOf('EVALUATION ERROR') !== -1;
-        if (isWrongDoc) {
-          scoreCell = '<span style="font-size:0.75rem;color:#dc2626;font-weight:600;background:#fee2e2;padding:2px 8px;border-radius:6px">Wrong Doc</span>';
-        } else if (isEvalError) {
-          scoreCell = '<span style="font-size:0.75rem;color:#92400e;font-weight:600;background:#fef3c7;padding:2px 8px;border-radius:6px">Eval Error</span>';
-        } else {
-          scoreCell = '<div style="display:flex;align-items:center;gap:6px"><div style="font-size:1.1rem;font-weight:700;color:#6b7280">0</div><div style="font-size:0.7rem;color:#9ca3af">/100</div>' + scoreBar(sc) + '</div>';
-        }
-      } else if (sc > 0) {
-        const scoreColor = sc >= 80 ? '#065f46' : sc >= 65 ? '#92400e' : '#6b7280';
-        scoreCell = '<div style="display:flex;align-items:center;gap:6px">'
-          + '<div style="font-size:1.1rem;font-weight:700;color:' + scoreColor + '">' + sc + '</div>'
-          + '<div style="font-size:0.7rem;color:#9ca3af">/100</div>'
-          + scoreBar(sc)
-          + '</div>';
-      } else {
-        scoreCell = '<div style="display:flex;align-items:center;gap:6px"><div style="font-size:1.1rem;font-weight:700;color:#6b7280">0</div><div style="font-size:0.7rem;color:#9ca3af">/100</div>' + scoreBar(0) + '</div>';
-      }
-    } else if (ev && (ev.total_score === undefined || ev.total_score === null)) {
-      scoreCell = '<span style="font-size:0.78rem;color:#9ca3af">Evaluating...</span>';
-    }
-
     const rowBg = isAwarded ? 'background:#f0fdf4' : (isReal ? 'background:#fffbeb' : '');
-
-    const awardBtn = !isAwarded
-      ? '<button class="award-btn" onclick="awardProposal(' + rfpId + ',' + p.id + ')" title="Award contract to this vendor"><i class="fas fa-award"></i>Award Contract</button>'
-      : '<span style="font-size:0.75rem;color:#92400e;font-weight:700;background:#fef3c7;padding:4px 10px;border-radius:6px;display:inline-flex;align-items:center;gap:4px"><i class="fas fa-trophy"></i>Winner</span>';
 
     // File count badge — clickable to open side panel with download links
     var attachments = [];
@@ -1991,8 +1864,6 @@ rfpTabs.proposals = async function(rfpId) {
         + '<i class="fas fa-paperclip"></i>' + attachCount + ' file' + (attachCount !== 1 ? 's' : '') + '</span>'
       : '<span style="color:#9ca3af;font-size:0.8rem">—</span>';
 
-
-
     rows += '<tr style="' + rowBg + '">'
       + '<td><div style="display:flex;align-items:center;gap:8px">'
       + '<div style="width:32px;height:32px;border-radius:8px;background:var(--cpc-blue);display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:0.8rem;flex-shrink:0">' + escHtml((p.vendor_name||'?').charAt(0)) + '</div>'
@@ -2001,14 +1872,10 @@ rfpTabs.proposals = async function(rfpId) {
       + '<td style="font-size:0.82rem;color:#6b7280">' + dateStr + '</td>'
       + '<td style="font-weight:600">' + fin + '</td>'
       + '<td style="font-size:0.82rem;color:#6b7280">' + escHtml(dur) + '</td>'
-      + '<td>' + scoreCell + '</td>'
       + '<td>' + filesCell + '</td>'
-      + '<td>' + statusBadge(p, ev) + '</td>'
+      + '<td>' + statusBadge(p) + '</td>'
       + '<td>'
-      + '<div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">'
       + '<button class="btn-ghost btn-sm" onclick="viewProposalDetail(' + p.id + ')"><i class="fas fa-eye"></i>View</button>'
-      + awardBtn
-      + '</div>'
       + '</td>'
       + '</tr>';
   });
@@ -2016,15 +1883,9 @@ rfpTabs.proposals = async function(rfpId) {
   setContent(
     '<div class="space-y-4">'
     + '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem">'
-    + '<div><h3 style="font-weight:700;font-size:0.95rem;color:#1f2937;margin:0">Submitted Proposals &amp; Evaluation</h3>'
-    + '<p style="font-size:0.8rem;color:#9ca3af;margin:0">' + proposals.length + ' proposal(s) &bull; Run AI evaluation first, then award the contract to the winning vendor.</p></div>'
-    + '<div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center">'
-    + '<button class="btn-secondary" id="evalAllBtn" onclick="evaluateAllProposals(' + rfpId + ')"><i class="fas fa-robot"></i>Run AI Evaluation</button>'
+    + '<div><h3 style="font-weight:700;font-size:0.95rem;color:#1f2937;margin:0">Submitted Proposals</h3>'
+    + '<p style="font-size:0.8rem;color:#9ca3af;margin:0">' + proposals.length + ' proposal(s) received</p></div>'
     + '</div>'
-    + '</div>'
-
-    // Evaluation legend
-    + (evaluations.length > 0 ? buildEvalSummary(proposals, evaluations) : '')
 
     + '<div class="card" style="overflow:hidden">'
     + (proposals.length === 0
@@ -2034,7 +1895,7 @@ rfpTabs.proposals = async function(rfpId) {
       : '<div style="overflow-x:auto"><table>'
         + '<thead><tr>'
         + '<th>Vendor</th><th>Date</th><th>Financial</th><th>Duration</th>'
-        + '<th>AI Score</th><th>Files</th><th>Status</th>'
+        + '<th>Files</th><th>Status</th>'
         + '<th style="text-align:right">Actions</th>'
         + '</tr></thead>'
         + '<tbody>' + rows + '</tbody>'
@@ -2044,76 +1905,10 @@ rfpTabs.proposals = async function(rfpId) {
   );
 };
 
-function buildEvalSummary(proposals, evaluations) {
-  const sorted = evaluations.slice().sort(function(a,b){ return (b.total_score||0)-(a.total_score||0); });
-  if (sorted.length === 0) return '';
-  const best = sorted[0];
-  return '<div style="background:linear-gradient(135deg,#fef9e7,#fffbeb);border:1.5px solid #fde68a;border-radius:10px;padding:1rem 1.25rem;display:flex;align-items:center;gap:1rem;flex-wrap:wrap">'
-    + '<div style="font-size:1.5rem">🏆</div>'
-    + '<div style="flex:1">'
-    + '<div style="font-weight:700;font-size:0.88rem;color:#92400e">AI Recommendation: <span style="color:#065f46">' + escHtml(best.vendor_name||'') + '</span></div>'
-    + '<div style="font-size:0.78rem;color:#78350f">Highest weighted total score: <strong>' + (best.total_score||0) + '/100</strong>'
-    + (best.ai_summary ? ' \u2022 ' + escHtml(best.ai_summary.slice(0,120)) + '...' : '')
-    + '</div>'
-    + '</div>'
-    + '</div>';
-}
-
 async function loadSampleProposals(rfpId) {
   await apiCall('POST', '/rfps/' + rfpId + '/proposals/sample', {});
   showToast('Sample proposals added!', 'success');
   rfpTabs.proposals(rfpId);
-}
-
-async function evaluateOneProposal(rfpId, proposalId) {
-  showToast('Running AI evaluation...', 'info', 3000);
-  try {
-    await apiCall('POST', '/rfps/' + rfpId + '/proposals/' + proposalId + '/evaluate', {});
-    showToast('Evaluation complete!', 'success');
-    rfpTabs.proposals(rfpId);
-  } catch(e) {
-    showToast('Evaluation failed: ' + e.message, 'error');
-  }
-}
-
-async function evaluateAllProposals(rfpId) {
-  const btn = document.getElementById('evalAllBtn');
-  setLoading(btn, true, 'Evaluating All...');
-  try {
-    await apiCall('POST', '/rfps/' + rfpId + '/evaluations/run', {});
-    // Refresh RFP — backend advances stage to submissions_closed when evaluation is run
-    const rfp = await apiCall('GET', '/rfps/' + rfpId).catch(function(){ return null; });
-    if (rfp) {
-      appState.currentRfp = rfp;
-      renderLifecycleBar(rfp);
-      document.getElementById('pageSubtitle').textContent = (rfp.ref_number||'') + ' \u2022 ' + stageLabelMap(rfp.stage||'draft');
-    }
-    showToast('\uD83E\uDD16 AI Evaluation complete! Proposal submissions are now closed.', 'success', 5000);
-    rfpTabs.proposals(rfpId);
-  } catch(e) {
-    setLoading(btn, false);
-  }
-}
-
-async function awardProposal(rfpId, proposalId) {
-  const p = appState.proposals.find(function(p){ return p.id === proposalId; });
-  const vendorName = p ? p.vendor_name : 'this vendor';
-  if (!confirm('Award the contract to ' + vendorName + '? This will:\n\u2022 Send an award notification email\n\u2022 Update RFP status to Awarded\n\u2022 Move RFP to Archived section')) return;
-  showToast('Processing award...', 'info', 3000);
-  try {
-    await apiCall('POST', '/rfps/' + rfpId + '/proposals/' + proposalId + '/award', {});
-    showToast('\uD83C\uDFC6 Contract awarded to ' + vendorName + '! Award email sent.', 'success', 6000);
-    addNotification('info', '\uD83C\uDFC6 Contract Awarded', vendorName + ' has been awarded the contract. RFP is now complete.', rfpId, null, null);
-    // Reload RFP data — backend set stage to 'awarded'
-    const rfp = await apiCall('GET', '/rfps/' + rfpId);
-    appState.currentRfp = rfp;
-    document.getElementById('pageSubtitle').textContent = (rfp.ref_number||'') + ' \u2022 Awarded';
-    renderLifecycleBar(rfp);
-    renderRfpTabs('proposals', rfpId, false);
-    rfpTabs.proposals(rfpId);
-  } catch(e) {
-    showToast('Award failed: ' + e.message, 'error');
-  }
 }
 
 function downloadProposalPdf(id) {
@@ -2162,8 +1957,6 @@ function viewProposalDetail(id) {
   const p = appState.proposals.find(function(p){ return p.id === id; });
   if (!p) return;
 
-  // Get matching evaluation
-  const ev = (appState.evaluations || []).find(function(e){ return e.proposal_id === id || e.vendor_id === p.vendor_id; });
 
   // ── Budget & Timeline ────────────────────────────────────────────────────
   let fin = '-';
@@ -2180,44 +1973,6 @@ function viewProposalDetail(id) {
     dur = p.proposed_duration;
   }
   const dateStr = p.created_at ? new Date(p.created_at).toLocaleString('en-AE') : '-';
-
-  // ── Score header ────────────────────────────────────────────────────────
-  let scoreHeader = '';
-  if (ev && ev.total_score !== undefined && ev.total_score !== null && ev.total_score > 0) {
-    const sc = ev.total_score;
-    const scoreColor = sc >= 80 ? '#065f46' : sc >= 65 ? '#b45309' : '#dc2626';
-    const scoreBg    = sc >= 80 ? '#d1fae5' : sc >= 65 ? '#fef3c7' : '#fee2e2';
-    scoreHeader = '<div style="display:inline-flex;align-items:baseline;gap:4px;background:' + scoreBg + ';padding:4px 12px;border-radius:20px">'
-      + '<span style="font-size:1.5rem;font-weight:800;color:' + scoreColor + '">' + sc + '</span>'
-      + '<span style="font-size:0.78rem;color:' + scoreColor + ';font-weight:600">/100</span>'
-      + '</div>';
-  }
-
-  // ── Score breakdown tiles ───────────────────────────────────────────────
-  let scoreTiles = '';
-  if (ev) {
-    const tiles = [
-      { label: 'Technical',   val: ev.technical_score,  color: '#0f3460', bg: '#eff6ff' },
-      { label: 'Business',    val: ev.business_score,   color: '#7c3aed', bg: '#f5f3ff' },
-      { label: 'Commercial',  val: ev.financial_score,  color: '#b45309', bg: '#fffbeb' },
-    ];
-    scoreTiles = '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0.5rem;margin-bottom:1rem">';
-    tiles.forEach(function(t) {
-      scoreTiles += '<div style="background:' + t.bg + ';border-radius:8px;padding:0.75rem;text-align:center">'
-        + '<div style="font-size:1.15rem;font-weight:800;color:' + t.color + '">' + (t.val !== undefined && t.val !== null ? t.val : '–') + '</div>'
-        + '<div style="font-size:0.7rem;color:#6b7280;margin-top:2px">' + t.label + '</div>'
-        + '</div>';
-    });
-    scoreTiles += '</div>';
-  }
-
-  // ── AI summary ──────────────────────────────────────────────────────────
-  const aiSummaryHtml = (ev && ev.ai_summary)
-    ? '<div style="margin-bottom:1.25rem">'
-      + '<div class="panel-section-title"><i class="fas fa-robot" style="color:#7c3aed"></i>AI Evaluation Summary</div>'
-      + '<div style="background:#faf5ff;border:1px solid #e9d5ff;border-radius:8px;padding:0.875rem;font-size:0.82rem;line-height:1.7;color:#374151">' + escHtml(ev.ai_summary) + '</div>'
-      + '</div>'
-    : '';
 
   // ── Technical approach ──────────────────────────────────────────────────
   let techHtml = '';
@@ -2253,69 +2008,6 @@ function viewProposalDetail(id) {
         + lines.map(function(l){ return '<li>' + escHtml(l) + '</li>'; }).join('')
         + '</ul></div></div>';
     }
-  }
-
-  // ── Team Composition ────────────────────────────────────────────────────
-  // Rendered only if scoring criteria contain a team-related dimension with justification
-  let teamHtml = '';
-  if (ev && ev.scoring_details_json) {
-    try {
-      var crit = JSON.parse(ev.scoring_details_json);
-      var teamCrit = crit.filter(function(c){ return /team|resource|staff|personnel|key personnel/i.test(c.name||''); });
-      if (teamCrit.length > 0) {
-        var teamRows = teamCrit.map(function(c){
-          return '<div style="padding:0.5rem 0;border-bottom:1px solid #f3f4f6">'
-            + '<div style="font-size:0.8rem;font-weight:600;color:#1f2937">' + escHtml(c.name||'') + '</div>'
-            + (c.justification ? '<div style="font-size:0.77rem;color:#6b7280;margin-top:2px">' + escHtml(c.justification) + '</div>' : '')
-            + '</div>';
-        }).join('');
-        teamHtml = '<div style="margin-bottom:1.25rem">'
-          + '<div class="panel-section-title"><i class="fas fa-users" style="color:#0369a1"></i>Team Composition</div>'
-          + '<div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:0.75rem 0.875rem">' + teamRows + '</div>'
-          + '</div>';
-      }
-    } catch(e) {}
-  }
-
-  // ── Scoring table ───────────────────────────────────────────────────────
-  let scoringTableHtml = '';
-  if (ev && ev.scoring_details_json) {
-    try {
-      var criteria = JSON.parse(ev.scoring_details_json);
-      if (criteria.length > 0) {
-        const displayTotal = ev.total_score || 0;
-        var tableRows = criteria.map(function(c) {
-          const ws = c.weighted !== undefined ? Number(c.weighted) : (Number(c.weight||0) * Number(c.score||0) / 100);
-          const scoreColor = c.score >= 80 ? '#065f46' : c.score >= 60 ? '#92400e' : '#dc2626';
-          return '<tr>'
-            + '<td style="padding:7px 8px;font-weight:500;font-size:0.8rem;color:#1f2937">' + escHtml(c.name||'') + '</td>'
-            + '<td style="padding:7px 8px;text-align:center"><span style="background:#e0f2fe;color:#0369a1;border-radius:4px;padding:2px 5px;font-size:0.7rem">' + escHtml(c.dimension||'') + '</span></td>'
-            + '<td style="padding:7px 8px;text-align:center;font-size:0.8rem;color:#6b7280">' + (c.weight||0) + '%</td>'
-            + '<td style="padding:7px 8px;text-align:center"><span style="font-weight:700;color:' + scoreColor + '">' + (c.score||0) + '</span></td>'
-            + '<td style="padding:7px 8px;font-size:0.75rem;color:#4b5563;max-width:180px">' + escHtml((c.justification||'').slice(0,160)) + '</td>'
-            + '<td style="padding:7px 8px;text-align:center;font-weight:700;color:var(--cpc-blue)">' + ws.toFixed(1) + '</td>'
-            + '</tr>';
-        }).join('');
-        scoringTableHtml = '<div style="margin-bottom:1.25rem">'
-          + '<div class="panel-section-title"><i class="fas fa-table" style="color:var(--cpc-gold)"></i>Scoring Breakdown</div>'
-          + '<div style="overflow-x:auto;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden">'
-          + '<table style="width:100%;border-collapse:collapse;font-size:0.8rem">'
-          + '<thead><tr style="background:#f1f5f9">'
-          + '<th style="padding:8px;text-align:left;font-weight:700;color:#374151;font-size:0.78rem">Criterion</th>'
-          + '<th style="padding:8px;text-align:center;font-weight:700;color:#374151;font-size:0.78rem">Dim.</th>'
-          + '<th style="padding:8px;text-align:center;font-weight:700;color:#374151;font-size:0.78rem">Wt%</th>'
-          + '<th style="padding:8px;text-align:center;font-weight:700;color:#374151;font-size:0.78rem">Score</th>'
-          + '<th style="padding:8px;text-align:left;font-weight:700;color:#374151;font-size:0.78rem">Justification</th>'
-          + '<th style="padding:8px;text-align:center;font-weight:700;color:#374151;font-size:0.78rem">Wtd</th>'
-          + '</tr></thead>'
-          + '<tbody>' + tableRows + '</tbody>'
-          + '<tfoot><tr style="background:#fef3c7;border-top:2px solid #fde68a">'
-          + '<td colspan="5" style="padding:8px;font-weight:700;color:#92400e;text-align:right;font-size:0.8rem">TOTAL SCORE</td>'
-          + '<td style="padding:8px;text-align:center;font-size:1rem;font-weight:800;color:var(--cpc-blue)">' + displayTotal + '</td>'
-          + '</tr></tfoot>'
-          + '</table></div></div>';
-      }
-    } catch(e) {}
   }
 
   // ── Documents list ──────────────────────────────────────────────────────
@@ -2379,7 +2071,6 @@ function viewProposalDetail(id) {
     + '<div style="font-weight:700;font-size:0.97rem;color:#1f2937;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + escHtml(p.vendor_name||'Unknown Vendor') + '</div>'
     + '<div style="font-size:0.75rem;color:#9ca3af">' + dateStr + '</div>'
     + '</div>'
-    + (scoreHeader ? '<div style="flex-shrink:0">' + scoreHeader + '</div>' : '')
     + '<button onclick="closeProposalPanel()" style="flex-shrink:0;width:32px;height:32px;border-radius:8px;border:1px solid #e5e7eb;background:#f9fafb;color:#6b7280;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:1rem;transition:background 0.15s" title="Close panel"><i class="fas fa-times"></i></button>'
     + '</div>'
 
@@ -2399,16 +2090,10 @@ function viewProposalDetail(id) {
     + '</div>'
     + '</div>'
 
-    // ── Score tiles (if evaluated) ────────────────────────────────────────
-    + (scoreTiles ? '<div style="padding:1rem 1.25rem;border-bottom:1px solid #e5e7eb;background:#fafafa">' + scoreTiles + '</div>' : '')
-
     // ── Scrollable body ───────────────────────────────────────────────────
     + '<div style="padding:1.25rem;flex:1">'
-    + aiSummaryHtml
     + techHtml
     + strengthsHtml
-    + teamHtml
-    + scoringTableHtml
     + docsHtml
     + '</div>'
 
@@ -2427,77 +2112,7 @@ function viewProposalDetail(id) {
   });
 }
 
-// --- TAB: SCORING MODEL ---
-rfpTabs.scoring = async function(rfpId, rfp) {
-  let model;
-  try {
-    model = await apiCall('GET', '/rfps/' + rfpId + '/scoring-model');
-  } catch(e) {
-    model = null;
-  }
-
-  if (!model) {
-    setContent(
-      '<div class="card" style="padding:2rem;text-align:center;color:#9ca3af">'
-      + '<i class="fas fa-balance-scale" style="font-size:2.5rem;display:block;margin-bottom:1rem;color:#d1d5db"></i>'
-      + '<p>Scoring model will be auto-generated when the RFP is published.</p>'
-      + '<button class="btn-primary" onclick="generateScoringModel(' + rfpId + ')"><i class="fas fa-robot"></i>Generate Scoring Model</button>'
-      + '</div>'
-    );
-    return;
-  }
-
-  const criteria = model.criteria || [];
-  let criteriaRows = '';
-  criteria.forEach(function(c) {
-    criteriaRows += '<tr>'
-      + '<td style="font-weight:500">' + escHtml(c.name) + '</td>'
-      + '<td><span class="tag" style="background:#e0f2fe;color:#0369a1">' + escHtml(c.dimension) + '</span></td>'
-      + '<td style="font-weight:700;font-size:1.1rem;color:var(--cpc-blue)">' + c.weight + '%</td>'
-      + '<td style="font-size:0.82rem;color:#6b7280">' + escHtml(c.description) + '</td>'
-      + '<td style="font-size:0.82rem;color:#374151">' + escHtml(c.scoring_guide) + '</td>'
-      + '</tr>';
-  });
-
-  setContent(
-    '<div class="space-y-4">'
-    + '<div style="display:flex;align-items:center;justify-content:space-between">'
-    + '<div><h3 style="font-weight:700;font-size:0.95rem;color:#1f2937;margin:0">Evaluation Scoring Model</h3>'
-    + '<p style="font-size:0.8rem;color:#9ca3af;margin:0">AI-generated scoring framework for this RFP</p></div>'
-    + '<button class="btn-secondary" onclick="generateScoringModel(' + rfpId + ')"><i class="fas fa-sync"></i>Regenerate</button>'
-    + '</div>'
-    // dimension summary
-    + '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0.875rem">'
-    + buildDimensionCard('Business', '#7c3aed', criteria, 'Business')
-    + buildDimensionCard('Technical', '#0f3460', criteria, 'Technical')
-    + buildDimensionCard('Commercial', '#c9a84c', criteria, 'Commercial')
-    + '</div>'
-    + '<div class="card"><div style="overflow-x:auto"><table>'
-    + '<thead><tr><th>Criterion</th><th>Dimension</th><th>Weight</th><th>Description</th><th>Scoring Guide</th></tr></thead>'
-    + '<tbody>' + criteriaRows + '</tbody>'
-    + '</table></div></div>'
-    + (model.notes ? '<div class="card" style="padding:1rem;background:#fffbeb;border:1px solid #fde68a"><p style="font-size:0.85rem;color:#374151;margin:0">' + escHtml(model.notes) + '</p></div>' : '')
-    + '</div>'
-  );
-};
-
-function buildDimensionCard(dim, color, criteria, dimKey) {
-  const total = criteria.filter(function(c){ return c.dimension === dimKey; }).reduce(function(s,c){ return s + c.weight; }, 0);
-  return '<div class="stat-card" style="border-left:4px solid ' + color + '">'
-    + '<div style="font-size:0.8rem;color:#6b7280;font-weight:600">' + dim + ' Score</div>'
-    + '<div class="stat-value" style="color:' + color + '">' + total + '%</div>'
-    + '<div style="font-size:0.72rem;color:#9ca3af">' + criteria.filter(function(c){ return c.dimension === dimKey; }).length + ' criteria</div>'
-    + '</div>';
-}
-
-async function generateScoringModel(rfpId) {
-  showToast('Generating scoring model...', 'info');
-  await apiCall('POST', '/rfps/' + rfpId + '/scoring-model/generate', {});
-  showToast('Scoring model generated!', 'success');
-  rfpTabs.scoring(rfpId, appState.currentRfp);
-}
-
-// rfpTabs.evaluation and rfpTabs.recommendation removed — functionality merged into rfpTabs.proposals
+// rfpTabs.evaluation, rfpTabs.recommendation, and rfpTabs.scoring removed — AI evaluation features removed in v8
 
 // ============================================================
 // PAGE: VENDOR COMMUNICATIONS (per-vendor thread)
@@ -2716,21 +2331,11 @@ async function sendVendorCommReply(rfpId, vendorId) {
 // PAGE: VENDORS (global registry)
 // ============================================================
 pages.vendors = async function() {
-  const [vendors, perfData] = await Promise.all([
-    apiCall('GET', '/vendors').catch(function(){ return []; }),
-    apiCall('GET', '/vendor-performance').catch(function(){ return []; }),
-  ]);
+  const vendors = await apiCall('GET', '/vendors').catch(function(){ return []; });
   appState.vendors = vendors;
-
-  // merge performance data
-  const perfMap = {};
-  (perfData||[]).forEach(function(p){ perfMap[p.id] = p; });
 
   let rows = '';
   vendors.forEach(function(v) {
-    const perf = perfMap[v.id] || {};
-    const avgScore = perf.avg_score ? Math.round(perf.avg_score) : null;
-    const perfCls = avgScore ? (avgScore >= 75 ? 'perf-high' : avgScore >= 50 ? 'perf-mid' : 'perf-low') : '';
     const tags = (v.specializations||'').split(',').filter(Boolean).slice(0,3)
       .map(function(s){ return '<span class="tag">' + escHtml(s.trim()) + '</span>'; }).join('');
 
@@ -2742,10 +2347,6 @@ pages.vendors = async function() {
       + '</div></div></td>'
       + '<td>' + escHtml(v.category||'') + '</td>'
       + '<td>' + tags + '</td>'
-      + '<td style="text-align:center">' + (perf.rfps_shortlisted||0) + '</td>'
-      + '<td style="text-align:center">' + (perf.proposals_submitted||0) + '</td>'
-      + (avgScore ? '<td><span class="perf-badge ' + perfCls + '">' + avgScore + '/100</span></td>' : '<td><span style="color:#9ca3af">-</span></td>')
-      + '<td style="text-align:center">' + (perf.awards_won||0) + '</td>'
       + '<td><button class="btn-ghost btn-sm" onclick="viewVendorDetail(' + v.id + ')"><i class="fas fa-eye"></i></button></td>'
       + '</tr>';
   });
@@ -2757,7 +2358,7 @@ pages.vendors = async function() {
     + '<p style="font-size:0.8rem;color:#9ca3af;margin:0">' + vendors.length + ' registered vendors</p></div>'
     + '</div>'
     + '<div class="card"><div style="overflow-x:auto"><table>'
-    + '<thead><tr><th>Vendor</th><th>Category</th><th>Specializations</th><th style="text-align:center">Shortlisted</th><th style="text-align:center">Proposals</th><th>Avg Score</th><th style="text-align:center">Awards</th><th></th></tr></thead>'
+    + '<thead><tr><th>Vendor</th><th>Category</th><th>Specializations</th><th></th></tr></thead>'
     + '<tbody>' + rows + '</tbody>'
     + '</table></div></div>'
     + '</div>'
@@ -2830,33 +2431,12 @@ async function saveVendorEmail(vendorId) {
 // PAGE: REPORTS
 // ============================================================
 pages.reports = async function() {
-  let stats, perfData;
+  let stats;
   try {
-    [stats, perfData] = await Promise.all([
-      apiCall('GET', '/stats'),
-      apiCall('GET', '/vendor-performance').catch(function(){ return []; }),
-    ]);
+    stats = await apiCall('GET', '/stats');
   } catch(e) {
     stats = {};
-    perfData = [];
   }
-
-  let perfRows = '';
-  (perfData||[]).forEach(function(v) {
-    const score = v.avg_score ? Math.round(v.avg_score) : 0;
-    const perfCls = score >= 75 ? 'perf-high' : score >= 50 ? 'perf-mid' : 'perf-low';
-    perfRows += '<tr>'
-      + '<td style="font-weight:500">' + escHtml(v.name) + '</td>'
-      + '<td>' + escHtml(v.category||'') + '</td>'
-      + '<td style="text-align:center">' + (v.rfps_shortlisted||0) + '</td>'
-      + '<td style="text-align:center">' + (v.proposals_submitted||0) + '</td>'
-      + '<td><div style="display:flex;align-items:center;gap:8px">'
-      + '<span class="perf-badge ' + perfCls + '">' + score + '</span>'
-      + '<div style="flex:1;min-width:60px">' + scoreBar(score) + '</div>'
-      + '</div></td>'
-      + '<td style="text-align:center"><strong>' + (v.awards_won||0) + '</strong></td>'
-      + '</tr>';
-  });
 
   setContent(
     '<div class="space-y-4">'
@@ -2866,11 +2446,10 @@ pages.reports = async function() {
     + '<div class="stat-card"><div class="stat-label">Avg RFP Duration</div><div class="stat-value" style="color:#065f46">' + (stats.avgDuration ? stats.avgDuration + 'd' : 'N/A') + '</div></div>'
     + '<div class="stat-card"><div class="stat-label">Registered Vendors</div><div class="stat-value" style="color:#7c3aed">' + (stats.totalVendors||0) + '</div></div>'
     + '</div>'
-    + '<div class="card">'
-    + '<div style="padding:1rem 1.25rem;border-bottom:1px solid #e5e7eb"><h3 style="font-weight:700;font-size:0.9rem;color:#1f2937;margin:0">Vendor Performance Analytics</h3></div>'
-    + (perfRows
-      ? '<div style="overflow-x:auto"><table><thead><tr><th>Vendor</th><th>Category</th><th style="text-align:center">Shortlisted</th><th style="text-align:center">Proposals</th><th>Avg Score</th><th style="text-align:center">Awards Won</th></tr></thead><tbody>' + perfRows + '</tbody></table></div>'
-      : '<div style="padding:2rem;text-align:center;color:#9ca3af">No performance data yet</div>')
+    + '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0.875rem">'
+    + '<div class="stat-card"><div class="stat-label">Total Proposals</div><div class="stat-value" style="color:#dc6803">' + (stats.totalProposals||0) + '</div></div>'
+    + '<div class="stat-card"><div class="stat-label">Emails Sent</div><div class="stat-value" style="color:#1d4ed8">' + (stats.totalEmails||0) + '</div></div>'
+    + '<div class="stat-card"><div class="stat-label">Awarded RFPs</div><div class="stat-value" style="color:#065f46">' + (stats.awardedRfps||0) + '</div></div>'
     + '</div>'
     + '</div>'
   );
