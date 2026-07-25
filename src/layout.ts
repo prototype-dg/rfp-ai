@@ -119,6 +119,7 @@ export function getLayout(): string {
     .sidebar-wordmark .wm-product {
       font-family: 'JetBrains Mono', monospace;
       font-size: 10px;
+      font-weight: 700;
       letter-spacing: 0.14em;
       text-transform: uppercase;
       color: var(--cpc-gold);

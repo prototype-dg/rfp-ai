@@ -401,11 +401,11 @@ function renderLifecycleBar(rfp) {
 
   const stageIdx = STAGES.indexOf(stage);
   const completionMap = [
-    flags.publish  || stageIdx > 0,   // Publish RFP
-    flags.invite,                       // Invite
-    flags.qa       || stage === 'submissions_closed' || stage === 'awarded',  // Q&A
+    flags.publish  || stageIdx > 0,                                           // Publish RFP: done once past draft
+    flags.invite   || stageIdx >= 2,                                           // Invite: done once stage is qa_open or beyond
+    flags.qa       || stageIdx >= 3 || stage === 'submissions_closed' || stage === 'awarded',  // Q&A
     flags.proposals || stage === 'awarded',                                    // Proposals
-    flags.award,                        // Award
+    flags.award,                                                               // Award
   ];
 
   // Active step: first step not yet completed
@@ -710,6 +710,108 @@ pages.rfp_detail = async function(opts) {
 var rfpTabs = {};
 
 // --- TAB: GENERATE ---
+// Default scoring matrix template
+var DEFAULT_SCORING_MATRIX = [
+  { criterion: 'Technical Approach & Methodology', weight: 30, description: 'Quality and clarity of the proposed technical approach, architecture, and methodology' },
+  { criterion: 'Functional Fit & Solution Quality', weight: 25, description: 'Degree to which the proposed solution meets functional and reporting requirements' },
+  { criterion: 'Team Qualifications & Experience', weight: 20, description: 'Relevant experience and qualifications of the proposed team and track record on comparable projects' },
+  { criterion: 'Financial Proposal', weight: 15, description: 'Cost competitiveness, clarity of pricing, and total cost of ownership' },
+  { criterion: 'Implementation Plan & Timeline', weight: 10, description: 'Feasibility and completeness of the implementation plan, milestones and risk mitigation' },
+];
+
+function getScoringMatrix(rfp) {
+  if (rfp && rfp.scoring_matrix) {
+    try {
+      var m = typeof rfp.scoring_matrix === 'string' ? JSON.parse(rfp.scoring_matrix) : rfp.scoring_matrix;
+      if (Array.isArray(m) && m.length > 0) return m;
+    } catch(_) {}
+  }
+  return JSON.parse(JSON.stringify(DEFAULT_SCORING_MATRIX));
+}
+
+function renderScoringMatrixEditor(matrix) {
+  var total = matrix.reduce(function(s, r){ return s + (Number(r.weight)||0); }, 0);
+  var totalColor = total === 100 ? '#065f46' : '#dc2626';
+  var rows = matrix.map(function(r, i){
+    return '<tr>'
+      + '<td style="padding:6px 8px;border:1px solid var(--cpc-line)">'
+      + '<input id="sm_crit_' + i + '" value="' + escHtml(r.criterion) + '" style="width:100%;border:none;background:transparent;font-size:13px;font-family:inherit;outline:none;color:var(--cpc-ink)" placeholder="Criterion name" onchange="updateScoringMatrixRow(' + i + ')">'
+      + '</td>'
+      + '<td style="padding:6px 8px;border:1px solid var(--cpc-line);width:64px;text-align:center">'
+      + '<input id="sm_wt_' + i + '" type="number" min="0" max="100" value="' + (r.weight||0) + '" style="width:52px;border:none;background:transparent;font-size:13px;font-family:\'JetBrains Mono\',monospace;text-align:center;outline:none;color:var(--cpc-ink)" onchange="updateScoringMatrixRow(' + i + ')">'
+      + '</td>'
+      + '<td style="padding:6px 8px;border:1px solid var(--cpc-line)">'
+      + '<input id="sm_desc_' + i + '" value="' + escHtml(r.description||'') + '" style="width:100%;border:none;background:transparent;font-size:12px;font-family:inherit;outline:none;color:#6b7280" placeholder="Short description" onchange="updateScoringMatrixRow(' + i + ')">'
+      + '</td>'
+      + '<td style="padding:4px;border:1px solid var(--cpc-line);width:28px;text-align:center">'
+      + '<button onclick="removeScoringMatrixRow(' + i + ')" class="btn-ghost btn-sm" style="padding:2px 5px;color:#dc2626" title="Remove"><i class="fas fa-times"></i></button>'
+      + '</td>'
+      + '</tr>';
+  }).join('');
+  return '<div style="border:1px solid var(--cpc-line);border-radius:6px;overflow:hidden">'
+    + '<table style="width:100%;border-collapse:collapse;font-size:13px">'
+    + '<thead><tr style="background:var(--cpc-gold-tint)">'
+    + '<th style="padding:7px 8px;text-align:left;font-family:\'JetBrains Mono\',monospace;font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:var(--cpc-gold-deep);border-bottom:1px solid var(--cpc-line)">Criterion</th>'
+    + '<th style="padding:7px 8px;text-align:center;font-family:\'JetBrains Mono\',monospace;font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:var(--cpc-gold-deep);border-bottom:1px solid var(--cpc-line);width:64px">Wt%</th>'
+    + '<th style="padding:7px 8px;text-align:left;font-family:\'JetBrains Mono\',monospace;font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:var(--cpc-gold-deep);border-bottom:1px solid var(--cpc-line)">Description</th>'
+    + '<th style="width:28px;border-bottom:1px solid var(--cpc-line)"></th>'
+    + '</tr></thead>'
+    + '<tbody>' + rows + '</tbody>'
+    + '</table>'
+    + '<div style="padding:6px 10px;display:flex;align-items:center;justify-content:space-between;background:var(--cpc-ivory);border-top:1px solid var(--cpc-line)">'
+    + '<button onclick="addScoringMatrixRow()" class="btn-ghost btn-sm" style="font-size:11px"><i class="fas fa-plus"></i>Add Criterion</button>'
+    + '<span id="smTotal" style="font-family:\'JetBrains Mono\',monospace;font-size:11px;font-weight:700;color:' + totalColor + '">Total: ' + total + '%' + (total !== 100 ? ' ⚠ must be 100%' : ' ✓') + '</span>'
+    + '</div>'
+    + '</div>';
+}
+
+function updateScoringMatrixRow(i) {
+  // read current matrix from DOM — do not touch appState.currentRfp directly
+  var matrix = window._currentScoringMatrix || getScoringMatrix(appState.currentRfp);
+  if (!matrix[i]) return;
+  var critEl = document.getElementById('sm_crit_' + i);
+  var wtEl   = document.getElementById('sm_wt_' + i);
+  var descEl = document.getElementById('sm_desc_' + i);
+  if (critEl) matrix[i].criterion = critEl.value;
+  if (wtEl)   matrix[i].weight    = Number(wtEl.value) || 0;
+  if (descEl) matrix[i].description = descEl.value;
+  window._currentScoringMatrix = matrix;
+  // Update total indicator
+  var total = matrix.reduce(function(s,r){ return s+(Number(r.weight)||0); }, 0);
+  var el = document.getElementById('smTotal');
+  if (el) {
+    el.style.color = total === 100 ? '#065f46' : '#dc2626';
+    el.textContent = 'Total: ' + total + '%' + (total !== 100 ? ' ⚠ must be 100%' : ' ✓');
+  }
+}
+
+function addScoringMatrixRow() {
+  var matrix = window._currentScoringMatrix || getScoringMatrix(appState.currentRfp);
+  matrix.push({ criterion: 'New Criterion', weight: 0, description: '' });
+  window._currentScoringMatrix = matrix;
+  var smDiv = document.getElementById('scoringMatrixEditor');
+  if (smDiv) smDiv.innerHTML = renderScoringMatrixEditor(matrix);
+}
+
+function removeScoringMatrixRow(i) {
+  var matrix = window._currentScoringMatrix || getScoringMatrix(appState.currentRfp);
+  matrix.splice(i, 1);
+  window._currentScoringMatrix = matrix;
+  var smDiv = document.getElementById('scoringMatrixEditor');
+  if (smDiv) smDiv.innerHTML = renderScoringMatrixEditor(matrix);
+}
+
+async function saveScoringMatrix(rfpId) {
+  var matrix = window._currentScoringMatrix || getScoringMatrix(appState.currentRfp);
+  var total = matrix.reduce(function(s,r){ return s+(Number(r.weight)||0); }, 0);
+  if (total !== 100) { showToast('Weights must sum to 100%. Current total: ' + total + '%.', 'error'); return; }
+  try {
+    await apiCall('POST', '/rfps/' + rfpId + '/scoring-matrix', { matrix: matrix });
+    if (appState.currentRfp) appState.currentRfp.scoring_matrix = JSON.stringify(matrix);
+    showToast('Scoring matrix saved. It will be used in the next Generate.', 'success');
+  } catch(e) { /* apiCall shows error */ }
+}
+
 rfpTabs.generate = function(rfpId, rfp) {
   const titleVal = (rfp && rfp.title) || '';
   const catVal = (rfp && rfp.category) || 'IT & Digital Transformation';
@@ -721,6 +823,10 @@ rfpTabs.generate = function(rfpId, rfp) {
   const bgVal = (rfp && rfp.background) || '';
   const hasContent = rfp && rfp.content;
 
+  // Init scoring matrix from RFP or defaults
+  var scoringMatrix = getScoringMatrix(rfp);
+  window._currentScoringMatrix = JSON.parse(JSON.stringify(scoringMatrix));
+
   const previewHtml = hasContent
     ? rfp.content
     : '<div style="text-align:center;padding:3rem 1.5rem;color:#9ca3af">'
@@ -729,7 +835,7 @@ rfpTabs.generate = function(rfpId, rfp) {
       + '</div>';
 
   setContent(
-    '<div style="display:grid;grid-template-columns:420px 1fr;gap:1.25rem;height:calc(100vh - 240px)">'
+    '<div style="display:grid;grid-template-columns:460px 1fr;gap:1.25rem;height:calc(100vh - 240px)">'
     // LEFT: form
     + '<div class="card" style="padding:1.25rem;overflow-y:auto;display:flex;flex-direction:column;gap:0.875rem">'
     + '<h3 style="font-weight:700;color:#1f2937;font-size:0.9rem;margin:0"><i class="fas fa-magic cpc-gold" style="margin-right:6px"></i>RFP Parameters</h3>'
@@ -745,6 +851,16 @@ rfpTabs.generate = function(rfpId, rfp) {
     + '<div class="form-group"><label>Objectives <span style="color:#ef4444">*</span></label><textarea id="rfpObjectives" rows="3" placeholder="List 4-6 measurable objectives for this project...">' + escHtml(objVal) + '</textarea></div>'
     + '<div class="form-group"><label>Scope of Work <span style="color:#ef4444">*</span></label><textarea id="rfpScope" rows="4" placeholder="Detail the work phases, deliverables, and what is in/out of scope...">' + escHtml(scopeVal) + '</textarea></div>'
     + '<div class="form-group"><label>Technical Requirements</label><textarea id="rfpTech" rows="3" placeholder="Infrastructure, hosting, security, compliance, integration specs...">' + escHtml(techVal) + '</textarea></div>'
+    // SCORING MATRIX SECTION
+    + '<div style="border-top:1px solid var(--cpc-line);padding-top:0.875rem;margin-top:0.25rem">'
+    + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">'
+    + '<label style="margin:0;font-weight:600;color:var(--cpc-ink);font-size:0.82rem"><i class="fas fa-balance-scale cpc-gold" style="margin-right:6px"></i>Evaluation Scoring Matrix</label>'
+    + '<button onclick="saveScoringMatrix(' + rfpId + ')" class="btn-ghost btn-sm" style="font-size:11px"><i class="fas fa-save"></i>Save Matrix</button>'
+    + '</div>'
+    + '<p style="font-size:0.75rem;color:#9ca3af;margin:0 0 8px 0">Define evaluation criteria and weights for this RFP. These will be used in AI generation and vendor evaluation. Weights must sum to 100%.</p>'
+    + '<div id="scoringMatrixEditor">' + renderScoringMatrixEditor(window._currentScoringMatrix) + '</div>'
+    + '</div>'
+    // END SCORING MATRIX SECTION
     + '<div style="display:flex;gap:0.5rem;padding-top:0.25rem">'
     + '<button class="btn-primary" id="genBtn" style="flex:1" onclick="generateRfpDoc(' + rfpId + ')"><i class="fas fa-robot"></i>Generate with AI</button>'
     + '<button class="btn-secondary" onclick="saveRfpFields(' + rfpId + ')"><i class="fas fa-save"></i>Save</button>'
@@ -864,17 +980,10 @@ function downloadRfpPdf(rfpId) {
     return;
   }
 
-  // Use server-side PDF generation for pixel-perfect A4 layout.
-  // This avoids html2pdf browser-rendering issues (left-half clipping, scaling).
-  showToast('Preparing PDF download…', 'info');
-  var pdfUrl = '/api/rfps/' + rfpId + '/pdf';
-  var link = document.createElement('a');
-  link.href = pdfUrl;
-  link.download = 'CPC_RFP_' + (rfp.ref_number || rfpId).replace(/\//g, '_') + '.pdf';
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  setTimeout(function() { showToast('PDF download started', 'success'); }, 600);
+  // Open the print-ready HTML page in a new tab.
+  // The page auto-triggers window.print() after 800ms so the user can Save as PDF.
+  showToast('Opening print preview — use "Save as PDF" in the print dialog', 'info');
+  window.open('/api/rfps/' + rfpId + '/pdf', '_blank');
   return;
 
   // LEGACY html2pdf path (kept for reference — no longer used):
@@ -1030,8 +1139,12 @@ rfpTabs.vendors = async function(rfpId, rfp) {
     const isDeclined = v.rfp_status === 'declined';
     const score = v.rfp_fit_score || v.fit_score || 0;
     const fitCls = score >= 75 ? 'perf-high' : score >= 50 ? 'perf-mid' : 'perf-low';
-    const tags = (v.specializations||'').split(',').filter(Boolean).slice(0,3)
-      .map(function(s){ return '<span class="tag">' + escHtml(s.trim()) + '</span>'; }).join('');
+    // Show first 3 tags; clicking the cell opens full vendor detail with all specs
+    var allSpecs = (v.specializations||'').split(',').filter(Boolean);
+    var visibleTags = allSpecs.slice(0,3).map(function(s){ return '<span class="tag">' + escHtml(s.trim()) + '</span>'; }).join('');
+    var moreCount = allSpecs.length - 3;
+    var moreHint = moreCount > 0 ? '<span style="cursor:pointer;font-size:0.75rem;color:var(--cpc-gold-deep);text-decoration:underline;margin-left:3px">+' + moreCount + ' more</span>' : '';
+    const tags = visibleTags + moreHint;
 
     // Row background: RED tint if declined
     const rowStyle = isDeclined ? ' style="background:#fef2f2;opacity:0.85"' : '';
@@ -1084,7 +1197,7 @@ rfpTabs.vendors = async function(rfpId, rfp) {
       + (participantCode ? ' &bull; <span style="font-family:monospace;color:var(--cpc-ink);font-weight:600" title="Participant Reference">' + participantCode + '</span>' : '')
       + '</div>'
       + '</div></div></td>'
-      + '<td><div class="tag-group">' + tags + '</div></td>'
+      + '<td onclick="viewVendorDetail(' + v.id + ')" style="cursor:pointer" title="Click to see all specializations"><div class="tag-group">' + tags + '</div></td>'
       + '<td><span class="perf-badge ' + fitCls + '">' + score + '/100</span></td>'
       + '<td>' + invBadge + rxBadge + '</td>'
       + '<td style="text-align:center">' + actionBtn + '</td>'
@@ -2422,17 +2535,20 @@ pages.vendors = async function() {
 
   let rows = '';
   vendors.forEach(function(v) {
-    const tags = (v.specializations||'').split(',').filter(Boolean).slice(0,3)
-      .map(function(s){ return '<span class="tag">' + escHtml(s.trim()) + '</span>'; }).join('');
+    var allSpecs2 = (v.specializations||'').split(',').filter(Boolean);
+    var visTags2 = allSpecs2.slice(0,3).map(function(s){ return '<span class="tag">' + escHtml(s.trim()) + '</span>'; }).join('');
+    var more2 = allSpecs2.length - 3;
+    var moreBadge2 = more2 > 0 ? '<span style="font-size:0.75rem;color:var(--cpc-gold-deep);text-decoration:underline;margin-left:3px">+' + more2 + ' more</span>' : '';
+    const tags = visTags2 + moreBadge2;
 
     rows += '<tr>'
       + '<td><div style="display:flex;align-items:center;gap:0.75rem">'
-      + '<div style="width:34px;height:34px;border-radius:8px;background:var(--cpc-ink);display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:0.82rem;flex-shrink:0">' + escHtml(v.name.charAt(0)) + '</div>'
-      + '<div><div style="font-weight:600;font-size:0.875rem">' + escHtml(v.name) + '</div>'
-      + '<div style="font-size:0.72rem;color:#9ca3af">' + escHtml(v.country||'UAE') + ' &bull; ' + escHtml(v.size||'') + '</div>'
+      + '<div style="width:36px;height:36px;border-radius:8px;background:var(--cpc-ink);display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:0.9rem;flex-shrink:0">' + escHtml(v.name.charAt(0)) + '</div>'
+      + '<div><div style="font-weight:600;font-size:0.95rem">' + escHtml(v.name) + '</div>'
+      + '<div style="font-size:0.78rem;color:#9ca3af">' + escHtml(v.country||'UAE') + ' &bull; ' + escHtml(v.size||'') + '</div>'
       + '</div></div></td>'
       + '<td>' + escHtml(v.category||'') + '</td>'
-      + '<td><div class="tag-group">' + tags + '</div></td>'
+      + '<td onclick="viewVendorDetail(' + v.id + ')" style="cursor:pointer" title="Click to see all specializations"><div class="tag-group">' + tags + '</div></td>'
       + '<td><button class="btn-ghost btn-sm" onclick="viewVendorDetail(' + v.id + ')"><i class="fas fa-eye"></i></button></td>'
       + '</tr>';
   });
@@ -2478,8 +2594,10 @@ function viewVendorDetail(id) {
     + '<div><label>Certifications</label><p style="margin:0">' + escHtml(vendor.certifications||'-') + '</p></div>'
     + '<div><label>ERP Experience</label><p style="margin:0">' + escHtml(vendor.erp_experience||'-') + '</p></div>'
     + '</div>'
-    + '<div style="margin-bottom:1rem"><label>Specializations</label><div style="margin-top:4px">'
-    + (vendor.specializations||'').split(',').filter(Boolean).map(function(s){ return '<span class="tag">' + escHtml(s.trim()) + '</span>'; }).join('')
+    + '<div style="margin-bottom:1rem"><label>Specializations</label><div class="tag-group" style="margin-top:6px;flex-wrap:wrap;">'
+    + (vendor.specializations||'').split(',').filter(Boolean).map(function(s){
+        return '<span class="tag" style="white-space:normal;max-width:none;word-break:break-word">' + escHtml(s.trim()) + '</span>';
+      }).join('')
     + '</div></div>'
     + '<button class="btn-ghost" style="width:100%" onclick="closeModal()">Close</button>'
   );

@@ -175,6 +175,8 @@ export async function initDb(db: D1Database) {
     `ALTER TABLE rfp_vendors ADD COLUMN questions_responded INTEGER DEFAULT 0`,
     // proposals.updated_at — timestamp of last update (added later; original table only had created_at)
     `ALTER TABLE proposals ADD COLUMN updated_at TEXT`,
+    // rfps.scoring_matrix — JSON array of evaluation criteria with weights, editable by procurement manager
+    `ALTER TABLE rfps ADD COLUMN scoring_matrix TEXT`,
   ]
   for (const sql of alterMigrations) {
     try {
