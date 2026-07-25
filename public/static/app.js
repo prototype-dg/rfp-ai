@@ -1041,6 +1041,99 @@ async function advanceRfpStage(rfpId, stage) {
   switchRfpTab(appState.currentRfpTab, rfpId);
 }
 
+// Fetch the letterhead image and return a base64 data URI so html2canvas
+// can render it without CORS issues.
+async function fetchLetterheadDataUri() {
+  try {
+    var res = await fetch('/api/proposals/pdf/letterhead/bg_a4.png');
+    if (!res.ok) return null;
+    var blob = await res.blob();
+    return await new Promise(function(resolve) {
+      var reader = new FileReader();
+      reader.onloadend = function() { resolve(reader.result); };
+      reader.readAsDataURL(blob);
+    });
+  } catch(e) {
+    return null;
+  }
+}
+
+// Rewrite background-image URL in RFP HTML to embedded data URI so
+// html2canvas can render the letterhead without any CORS issue.
+function inlineLetterheadInHtml(html, dataUri) {
+  if (!dataUri) return html;
+  // Replace any URL pointing to the letterhead PNG (absolute or relative)
+  return html.replace(/url\(['"]?[^'")\s]*bg_a4\.png['"]?\)/g, "url('" + dataUri + "')");
+}
+
+// Build a self-contained HTML document from RFP content, with letterhead inlined.
+async function buildRfpHtmlDoc(rfpContent) {
+  var dataUri = await fetchLetterheadDataUri();
+  var inlined = inlineLetterheadInHtml(rfpContent, dataUri);
+  return '<!DOCTYPE html><html><head><meta charset="UTF-8">'
+    + '<style>'
+    + '* { box-sizing: border-box; margin: 0; padding: 0; }'
+    + 'body { background: #e8e8e8; font-family: Arial, "Segoe UI", sans-serif; }'
+    + '.rfp-doc > div { display: block; margin: 0 auto; }'
+    + '</style>'
+    + '</head><body>' + inlined + '</body></html>';
+}
+
+// Generate PDF blob from RFP content using html2pdf.js.
+// Returns Promise<{ blob, filename }> or throws.
+async function generateRfpPdfBlob(rfpId) {
+  var rfp = appState.currentRfp;
+  if (!rfp || !rfp.content) throw new Error('No RFP content to export');
+  var safeRef = (rfp.ref_number || rfp.title || String(rfpId)).replace(/[^a-zA-Z0-9_\-]/g, '_');
+  var filename = 'CPC_RFP_' + safeRef + '.pdf';
+  var dataUri = await fetchLetterheadDataUri();
+  var inlined = inlineLetterheadInHtml(rfp.content, dataUri);
+
+  // Create a hidden but rendered container (must be in DOM for html2canvas)
+  var container = document.createElement('div');
+  container.style.cssText = 'position:fixed;left:-19999px;top:0;width:210mm;background:#e8e8e8;z-index:-9999;overflow:visible';
+  container.innerHTML = inlined;
+  document.body.appendChild(container);
+
+  try {
+    var opt = {
+      margin:      0,
+      filename:    filename,
+      image:       { type: 'jpeg', quality: 0.95 },
+      html2canvas: {
+        scale: 2,
+        useCORS: true,
+        allowTaint: true,
+        backgroundColor: '#e8e8e8',
+        logging: false,
+        width: 794,
+        windowWidth: 794,
+      },
+      jsPDF:       { unit: 'mm', format: 'a4', orientation: 'portrait' },
+      pagebreak:   { mode: ['css', 'legacy'], avoid: ['tr', 'td'] },
+    };
+    var pdfWorker = html2pdf().set(opt).from(container);
+    var blob = await pdfWorker.outputPdf('blob');
+    return { blob: blob, filename: filename };
+  } finally {
+    if (container.parentNode) document.body.removeChild(container);
+  }
+}
+
+// Convert Blob to base64 string
+function blobToBase64(blob) {
+  return new Promise(function(resolve, reject) {
+    var reader = new FileReader();
+    reader.onloadend = function() {
+      // reader.result is "data:application/pdf;base64,AAAA..."
+      var b64 = reader.result.split(',')[1];
+      resolve(b64);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
 function downloadRfpPdf(rfpId) {
   var rfp = appState.currentRfp;
   if (!rfp || !rfp.content) {
@@ -1048,10 +1141,34 @@ function downloadRfpPdf(rfpId) {
     return;
   }
 
-  // Open the print-ready HTML page in a new tab.
-  // The page auto-triggers window.print() after 800ms so the user can Save as PDF.
-  showToast('Opening print preview — use "Save as PDF" in the print dialog', 'info');
-  window.open('/api/rfps/' + rfpId + '/pdf', '_blank');
+  // Check html2pdf.js is loaded
+  if (typeof html2pdf === 'undefined') {
+    showToast('PDF library not loaded — opening print preview instead', 'warning');
+    window.open('/api/rfps/' + rfpId + '/pdf', '_blank');
+    return;
+  }
+
+  showToast('Generating PDF — please wait…', 'info', 8000);
+  generateRfpPdfBlob(rfpId)
+    .then(function(result) {
+      // Trigger browser download
+      var url = URL.createObjectURL(result.blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = result.filename;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function() {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }, 1000);
+      showToast('PDF downloaded: ' + result.filename, 'success');
+    })
+    .catch(function(err) {
+      console.error('PDF generation error:', err);
+      showToast('PDF generation failed — opening print preview instead', 'warning');
+      window.open('/api/rfps/' + rfpId + '/pdf', '_blank');
+    });
   return;
 
   // LEGACY html2pdf path (kept for reference — no longer used):
@@ -1390,11 +1507,34 @@ async function confirmSendInvitations(rfpId) {
     var qDeadline = document.getElementById('invQDeadline').value;
     var sDeadline = document.getElementById('invSDeadline').value;
     var notes = document.getElementById('invNotes').value;
-    var result = await apiCall('POST', '/rfps/' + rfpId + '/emails/send-invitations', {
+
+    // Generate PDF and attach to email if html2pdf is available and RFP has content
+    var pdfBase64 = null;
+    var pdfFilename = null;
+    var rfp = appState.currentRfp;
+    if (rfp && rfp.content && typeof html2pdf !== 'undefined') {
+      try {
+        setLoading(btn, true, 'Generating PDF…');
+        var pdfResult = await generateRfpPdfBlob(rfpId);
+        pdfBase64 = await blobToBase64(pdfResult.blob);
+        pdfFilename = pdfResult.filename;
+        setLoading(btn, true, 'Sending…');
+      } catch(pdfErr) {
+        console.warn('PDF generation for email failed, sending without attachment:', pdfErr);
+      }
+    }
+
+    var payload = {
       questions_deadline: qDeadline,
       submission_deadline: sDeadline,
       notes: notes,
-    });
+    };
+    if (pdfBase64) {
+      payload.pdf_base64 = pdfBase64;
+      payload.pdf_filename = pdfFilename;
+    }
+
+    var result = await apiCall('POST', '/rfps/' + rfpId + '/emails/send-invitations', payload);
     // Advance stage from published → qa_open to mark Vendor Invitation as complete on the lifecycle bar
     var currentStage = appState.currentRfp ? appState.currentRfp.stage : 'published';
     if (currentStage === 'published') {
@@ -1412,8 +1552,9 @@ async function confirmSendInvitations(rfpId) {
     markStageCompleted(rfpId, 'publish');
     markStageCompleted(rfpId, 'invite');
     renderLifecycleBar(rfp);
-    showToast('\u2709\uFE0F Invitations sent to ' + sentCount + ' vendor(s)! Now waiting for vendor responses.', 'success', 5000);
-    addNotification('email', 'Invitations Sent', 'RFP invitations sent to ' + sentCount + ' vendor(s) with PDF attachment', rfpId, 'vendors', null);
+    var pdfNote = pdfBase64 ? ' with PDF attachment' : '';
+    showToast('\u2709\uFE0F Invitations sent to ' + sentCount + ' vendor(s)' + pdfNote + '!', 'success', 5000);
+    addNotification('email', 'Invitations Sent', 'RFP invitations sent to ' + sentCount + ' vendor(s)' + pdfNote, rfpId, 'vendors', null);
     closeModal();
     // Stay on Vendors tab — no redirect
     switchRfpTab('vendors', rfpId);
