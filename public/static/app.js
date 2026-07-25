@@ -1159,10 +1159,14 @@ async function buildRfpHtmlDoc(rfpContent) {
 }
 
 // Generate PDF blob from RFP content.
-// Strategy: render the ENTIRE rfp-doc container as ONE tall canvas with html2canvas,
-// then slice it into A4-height strips and add each strip as a PDF page.
-// This is the only approach that works reliably for elements below the browser viewport —
-// html2canvas cannot capture elements not in-viewport even with scrollY hints.
+// Strategy (hybrid — best of v24 + v25):
+//   • Use an isolated HIDDEN IFRAME so the reset CSS and LLM-generated <style>
+//     blocks are confined to their own document and cannot leak into the main page.
+//   • After the iframe loads, measure the FULL scrollHeight and render the entire
+//     rfp-doc in ONE html2canvas pass (v25 approach — captures off-viewport content).
+//   • Slice the resulting tall canvas into A4-height strips for jsPDF.
+// Why iframe: the v25 plain-div approach injected <style>* {…}</style> into the main
+// document DOM on every PDF render, corrupting global CSS (including page layout).
 async function generateRfpPdfBlob(rfpId) {
   var rfp = appState.currentRfp;
   if (!rfp || !rfp.content) throw new Error('No RFP content to export');
@@ -1175,6 +1179,7 @@ async function generateRfpPdfBlob(rfpId) {
   var safeRef = (rfp.ref_number || rfp.title || String(rfpId)).replace(/[^a-zA-Z0-9_\-]/g, '_');
   var filename = 'CPC_RFP_' + safeRef + '.pdf';
 
+  // Inline letterhead as base64 data URI — avoids any CORS issue inside the iframe.
   var dataUri = await fetchLetterheadDataUri();
   var inlined = inlineLetterheadInHtml(rfp.content, dataUri);
 
@@ -1182,54 +1187,58 @@ async function generateRfpPdfBlob(rfpId) {
   var PAGE_W_PX = 794;
   var PAGE_H_PX = 1123;
 
-  // ── Off-screen container (NOT an iframe) ──────────────────────────────────
-  // We use a plain div positioned off-screen at a fixed left:0 so the browser
-  // assigns real layout metrics.  We set an explicit large height so the browser
-  // lays out ALL pages before html2canvas runs.  html2canvas has full access to
-  // the element because it's in the main document's DOM — no cross-document
-  // boundary issues.
-  var container = document.createElement('div');
-  container.style.cssText = [
-    'position:fixed',
-    'top:0',
-    'left:0',
+  // ── Isolated hidden iframe ────────────────────────────────────────────────
+  // All reset CSS and LLM HTML stays inside the iframe document — zero CSS leak
+  // to the main page.  opacity:0 + z-index:-9999 keeps it invisible.
+  var iframe = document.createElement('iframe');
+  iframe.style.cssText = [
+    'position:fixed', 'top:0', 'left:0',
     'width:' + PAGE_W_PX + 'px',
-    'height:auto',
-    'overflow:visible',
-    'opacity:0',
-    'pointer-events:none',
-    'z-index:-9999',
+    'height:' + (PAGE_H_PX * 2) + 'px',  // generous initial height; resized after load
+    'opacity:0', 'pointer-events:none', 'border:none', 'z-index:-9999',
   ].join(';');
+  document.body.appendChild(iframe);
 
-  // Inject the RFP HTML with reset styles so page divs stack flush
-  container.innerHTML = [
+  var iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+  iframeDoc.open();
+  iframeDoc.write([
+    '<!DOCTYPE html><html><head><meta charset="UTF-8">',
     '<style>',
-    '* { box-sizing:border-box; }',
+    // Reset only inside the iframe — does NOT affect main page
+    '* { box-sizing:border-box; margin:0; padding:0; }',
+    'body { width:' + PAGE_W_PX + 'px; background:#ffffff; overflow:visible; }',
+    // Page divs: strip auto-margins so they stack flush, enforce exact A4 width
     '.rfp-doc { margin:0; padding:0; }',
-    '.rfp-doc > div {',
-    '  margin:0 !important;',
-    '  display:block !important;',
-    '  width:' + PAGE_W_PX + 'px !important;',
-    '  min-height:' + PAGE_H_PX + 'px;',
-    '}',
+    '.rfp-doc > div { margin:0 !important; display:block !important; width:' + PAGE_W_PX + 'px !important; }',
     '</style>',
-    inlined,
-  ].join('');
+    '</head><body>', inlined, '</body></html>',
+  ].join(''));
+  iframeDoc.close();
 
-  document.body.appendChild(container);
+  // Wait for full load (fonts, background images) — or 5 s max
+  await new Promise(function(resolve) {
+    if (iframeDoc.readyState === 'complete') { resolve(); return; }
+    iframe.contentWindow.addEventListener('load', resolve);
+    setTimeout(resolve, 5000);
+  });
+  // Extra paint tick
+  await new Promise(function(r) { setTimeout(r, 500); });
 
-  // Give the browser one rAF + extra tick to finish layout and paint
-  await new Promise(function(r) { requestAnimationFrame(function() { setTimeout(r, 300); }); });
+  // ── Resize iframe to true content height so ALL pages get real layout ─────
+  var contentH = iframeDoc.body ? iframeDoc.body.scrollHeight : 0;
+  if (contentH < PAGE_H_PX) contentH = PAGE_H_PX;
+  iframe.style.height = contentH + 'px';
+  // Another tick for browser reflow after height change
+  await new Promise(function(r) { setTimeout(r, 400); });
 
   try {
-    var rfpDoc = container.querySelector('.rfp-doc') || container;
-    var totalH = rfpDoc.scrollHeight || rfpDoc.offsetHeight || PAGE_H_PX;
+    var rfpDoc = iframeDoc.querySelector('.rfp-doc') || iframeDoc.body;
+    var totalH = rfpDoc.scrollHeight || rfpDoc.offsetHeight || contentH;
 
-    console.log('[PDF] Container totalH:', totalH, 'px — expected pages:', Math.ceil(totalH / PAGE_H_PX));
+    console.log('[PDF] iframe totalH:', contentH, 'px  rfpDoc totalH:', totalH, 'px  expected pages:', Math.ceil(totalH / PAGE_H_PX));
 
-    // Render the ENTIRE document in one html2canvas pass.
-    // scale:1.5 balances quality vs. memory for large documents (scale:2 on a 10-page
-    // doc produces a ~190 MP canvas that crashes some browsers).
+    // ── ONE html2canvas pass over the full document height ────────────────
+    // scale:1.5 — good quality without crashing on 10+ page documents
     var SCALE = 1.5;
     var fullCanvas = await window.html2canvas(rfpDoc, {
       scale: SCALE,
@@ -1237,9 +1246,9 @@ async function generateRfpPdfBlob(rfpId) {
       allowTaint: true,
       backgroundColor: '#ffffff',
       logging: false,
-      width: PAGE_W_PX,
+      width:  PAGE_W_PX,
       height: totalH,
-      windowWidth: PAGE_W_PX,
+      windowWidth:  PAGE_W_PX,
       windowHeight: totalH,
       scrollX: 0,
       scrollY: 0,
@@ -1249,7 +1258,7 @@ async function generateRfpPdfBlob(rfpId) {
 
     console.log('[PDF] Full canvas:', fullCanvas.width, '×', fullCanvas.height);
 
-    // Slice the full canvas into A4-height strips and add each as a PDF page
+    // ── Slice into A4 strips and assemble PDF ─────────────────────────────
     var pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
     var A4_W_MM = 210;
     var A4_H_MM = 297;
@@ -1261,10 +1270,9 @@ async function generateRfpPdfBlob(rfpId) {
     console.log('[PDF] Slicing into', totalPages, 'page(s), strip height:', pageH_scaled, 'px');
 
     for (var i = 0; i < totalPages; i++) {
-      var sy = i * pageH_scaled;                              // source Y in full canvas
-      var sh = Math.min(pageH_scaled, fullCanvas.height - sy); // actual pixels this strip
+      var sy = i * pageH_scaled;
+      var sh = Math.min(pageH_scaled, fullCanvas.height - sy);
 
-      // Draw this strip onto a fresh A4-sized canvas
       var pageCanvas = document.createElement('canvas');
       pageCanvas.width  = fullCanvas.width;
       pageCanvas.height = pageH_scaled;
@@ -1274,17 +1282,15 @@ async function generateRfpPdfBlob(rfpId) {
       ctx.drawImage(fullCanvas, 0, sy, fullCanvas.width, sh, 0, 0, fullCanvas.width, sh);
 
       var imgData = pageCanvas.toDataURL('image/jpeg', 0.92);
-
       if (i > 0) pdf.addPage('a4', 'portrait');
       pdf.addImage(imgData, 'JPEG', 0, 0, A4_W_MM, A4_H_MM, '', 'FAST');
-
       console.log('[PDF] Added page', i + 1, '— sy:', sy, 'sh:', sh);
     }
 
     var blob = pdf.output('blob');
     return { blob: blob, filename: filename };
   } finally {
-    if (container.parentNode) document.body.removeChild(container);
+    if (iframe.parentNode) document.body.removeChild(iframe);
   }
 }
 

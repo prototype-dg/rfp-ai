@@ -2292,7 +2292,10 @@ async function callLLM(systemPrompt: string, userPrompt: string, env: any, model
 // buildRFPPrompt — pure function, returns {systemPrompt, userPrompt} without calling the LLM.
 // Used by the streaming generate route. generateRFPWithLLM wraps it for batch/test usage.
 function buildRFPPrompt(data: any, archDocText: string, brdDocText: string, scoringMatrixJson?: string | null): { systemPrompt: string; userPrompt: string } {
-  const LETTERHEAD_BG_URL = 'https://a7b32759-e743-4139-9bb0-4bae44886667.vip.gensparksite.com/api/proposals/pdf/letterhead/bg_a4.png'
+  // Use a relative URL so the letterhead works on any domain (local dev, staging, prod).
+  // The browser resolves it against the page origin when rendering the preview.
+  // For PDF export the frontend inlines it as a base64 data URI before rendering.
+  const LETTERHEAD_BG_URL = '/api/proposals/pdf/letterhead/bg_a4.png'
 
   const systemPrompt = `You are a senior government procurement specialist at the Crown Prince's Court (CPC) of Abu Dhabi, UAE. You are producing a formal, comprehensive, publication-ready Request for Proposal (RFP) document issued to external vendors on official CPC letterhead.
 
