@@ -1077,18 +1077,18 @@ rfpTabs.vendors = async function(rfpId, rfp) {
 
     return '<tr' + rowStyle + '>'
       + '<td><div style="display:flex;align-items:center;gap:0.75rem">'
-      + '<div style="width:34px;height:34px;border-radius:8px;background:' + avatarBg + ';display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:0.82rem;flex-shrink:0">'
-      + (isDeclined ? '<i class="fas fa-times" style="font-size:0.75rem"></i>' : escHtml(v.name.charAt(0))) + '</div>'
-      + '<div><div style="font-weight:600;font-size:0.875rem' + (isDeclined ? ';color:#991b1b' : '') + '">' + escHtml(v.name) + '</div>'
-      + '<div style="font-size:0.72rem;color:#9ca3af">' + escHtml(v.country||'UAE') + ' &bull; ' + escHtml(v.size||'')
+      + '<div style="width:36px;height:36px;border-radius:8px;background:' + avatarBg + ';display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:0.9rem;flex-shrink:0">'
+      + (isDeclined ? '<i class="fas fa-times" style="font-size:0.8rem"></i>' : escHtml(v.name.charAt(0))) + '</div>'
+      + '<div><div style="font-weight:600;font-size:0.95rem' + (isDeclined ? ';color:#991b1b' : '') + '">' + escHtml(v.name) + '</div>'
+      + '<div style="font-size:0.78rem;color:#9ca3af">' + escHtml(v.country||'UAE') + ' &bull; ' + escHtml(v.size||'')
       + (participantCode ? ' &bull; <span style="font-family:monospace;color:var(--cpc-ink);font-weight:600" title="Participant Reference">' + participantCode + '</span>' : '')
       + '</div>'
       + '</div></div></td>'
-      + '<td><div>' + tags + '</div></td>'
+      + '<td><div class="tag-group">' + tags + '</div></td>'
       + '<td><span class="perf-badge ' + fitCls + '">' + score + '/100</span></td>'
       + '<td>' + invBadge + rxBadge + '</td>'
       + '<td style="text-align:center">' + actionBtn + '</td>'
-      + '<td style="display:flex;gap:4px">' + commBtn + '<button class="btn-ghost btn-sm" onclick="viewVendorDetail(' + v.id + ')"><i class="fas fa-eye"></i></button></td>'
+      + '<td><div style="display:flex;gap:4px">' + commBtn + '<button class="btn-ghost btn-sm" onclick="viewVendorDetail(' + v.id + ')"><i class="fas fa-eye"></i></button></div></td>'
       + '</tr>';
   }
 
@@ -2432,7 +2432,7 @@ pages.vendors = async function() {
       + '<div style="font-size:0.72rem;color:#9ca3af">' + escHtml(v.country||'UAE') + ' &bull; ' + escHtml(v.size||'') + '</div>'
       + '</div></div></td>'
       + '<td>' + escHtml(v.category||'') + '</td>'
-      + '<td>' + tags + '</td>'
+      + '<td><div class="tag-group">' + tags + '</div></td>'
       + '<td><button class="btn-ghost btn-sm" onclick="viewVendorDetail(' + v.id + ')"><i class="fas fa-eye"></i></button></td>'
       + '</tr>';
   });

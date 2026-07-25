@@ -87,23 +87,23 @@ export function getLayout(): string {
 
     /* Sidebar wordmark */
     .sidebar-brand {
-      padding: 20px 20px 16px;
+      padding: 24px 20px 20px;
       border-bottom: 1px solid var(--cpc-line);
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 14px;
     }
     .sidebar-emblem {
-      width: 36px;
-      height: 36px;
+      width: 52px;
+      height: 52px;
       flex-shrink: 0;
       display: flex;
       align-items: center;
       justify-content: center;
     }
     .sidebar-emblem img {
-      width: 36px;
-      height: 36px;
+      width: 52px;
+      height: 52px;
       object-fit: contain;
       filter: none;
     }
@@ -111,18 +111,18 @@ export function getLayout(): string {
     .sidebar-wordmark .wm-org {
       font-family: 'Cormorant Garamond', serif;
       font-weight: 600;
-      font-size: 13px;
-      line-height: 1.2;
+      font-size: 16px;
+      line-height: 1.25;
       color: var(--cpc-ink);
       letter-spacing: 0.01em;
     }
     .sidebar-wordmark .wm-product {
       font-family: 'JetBrains Mono', monospace;
-      font-size: 9px;
-      letter-spacing: 0.16em;
+      font-size: 10px;
+      letter-spacing: 0.14em;
       text-transform: uppercase;
       color: var(--cpc-gold);
-      margin-top: 2px;
+      margin-top: 4px;
     }
 
     /* Nav */
@@ -353,13 +353,14 @@ export function getLayout(): string {
     }
     .lc-label {
       font-family: 'JetBrains Mono', monospace;
-      font-size: 9px;
-      letter-spacing: 0.08em;
+      font-size: 11px;
+      letter-spacing: 0.06em;
       text-transform: uppercase;
       text-align: center;
       white-space: nowrap;
       line-height: 1.2;
     }
+    .lc-pending .lc-label  { color: var(--cpc-ink-2); opacity: 0.75; }
     .lc-connector { height: 2px; width: 48px; flex-shrink: 0; margin-bottom: 18px; }
     .lc-done .lc-circle    { background: var(--cpc-gold); color: var(--cpc-paper); border-color: var(--cpc-gold); }
     .lc-done .lc-label     { color: var(--cpc-gold-deep); }
@@ -572,25 +573,27 @@ export function getLayout(): string {
     thead th {
       background: transparent;
       color: var(--cpc-gold-deep);
-      padding: 10px 16px;
+      padding: 11px 16px;
       text-align: left;
       font-family: 'JetBrains Mono', monospace;
-      font-size: 10px;
-      font-weight: 500;
-      letter-spacing: 0.12em;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.10em;
       text-transform: uppercase;
       border-bottom: 1px solid var(--cpc-line);
     }
     tbody td {
-      padding: 14px 16px;
+      padding: 15px 16px;
       border-bottom: 1px solid var(--cpc-line);
-      font-size: 13px;
+      font-size: 14px;
       color: var(--cpc-ink);
       font-family: 'Inter', sans-serif;
       vertical-align: middle;
     }
     tbody tr:nth-child(even) td { background: var(--cpc-ivory); }
-    tbody tr:hover td { background: var(--cpc-gold-tint); }
+    /* Hover: use tr background so ALL columns are covered, including flex-display last-td */
+    tbody tr:hover > td { background: var(--cpc-gold-tint) !important; }
+    tbody tr:hover > td:last-child > * { background: transparent; }
 
     /* Mono ID chips in tables */
     .id-chip {
@@ -783,13 +786,25 @@ export function getLayout(): string {
       display: inline-block;
       background: var(--cpc-gold-tint);
       color: var(--cpc-gold-deep);
-      padding: 2px 8px;
+      padding: 3px 10px;
       border-radius: var(--r-pill);
       font-size: 11px;
       font-family: 'JetBrains Mono', monospace;
       letter-spacing: 0.04em;
-      margin: 2px;
+      margin: 2px 2px;
       border: 1px solid var(--cpc-gold-light);
+      white-space: nowrap;
+      max-width: 220px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      vertical-align: middle;
+    }
+    /* Tag container: allow wrapping but never stretch individual tag */
+    .tag-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 3px;
+      align-items: center;
     }
 
     /* ── SPACE HELPERS ── */
@@ -872,7 +887,7 @@ export function getLayout(): string {
     <!-- Brand -->
     <div class="sidebar-brand">
       <div class="sidebar-emblem">
-        <img src="/static/cpc-emblem.png" alt="CPC Emblem" style="width:36px;height:36px;object-fit:contain;">
+        <img src="/static/cpc-emblem.png" alt="CPC Emblem" style="width:52px;height:52px;object-fit:contain;">
       </div>
       <div class="sidebar-wordmark">
         <div class="wm-org">Crown Prince's Court</div>
