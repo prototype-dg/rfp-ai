@@ -3,7 +3,7 @@ import { initDb, seedVendors } from '../db/seed'
 import type { Bindings } from '../types'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-07-25-v13'
+const WORKER_VERSION = '2026-07-25-v14'
 
 export const apiRouter = new Hono<{ Bindings: Bindings }>()
 
@@ -108,6 +108,30 @@ apiRouter.get('/rfps/:id', async (c) => {
   const rfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(id).first()
   if (!rfp) return c.json({ error: 'Not found' }, 404)
   return c.json(rfp)
+})
+
+// GET /rfps/:id/pdf — server-side PDF generation with correct A4 layout
+apiRouter.get('/rfps/:id/pdf', async (c) => {
+  const id = c.req.param('id')
+  const rfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(id).first()
+  if (!rfp) return c.json({ error: 'Not found' }, 404)
+  if (!(rfp as any).content) return c.json({ error: 'RFP has no generated content yet' }, 400)
+  try {
+    const pdfBytes = generateRfpPdf(rfp)
+    const safeRef = ((rfp as any).ref_number || String(id)).replace(/\//g, '_').replace(/[^a-zA-Z0-9_\-]/g, '')
+    const filename = `CPC_RFP_${safeRef}.pdf`
+    return new Response(pdfBytes, {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `attachment; filename="${filename}"`,
+        'Content-Length': String(pdfBytes.length),
+        'Cache-Control': 'no-cache',
+      },
+    })
+  } catch (e: any) {
+    return c.json({ error: 'PDF generation failed: ' + e.message }, 500)
+  }
 })
 
 apiRouter.post('/rfps', async (c) => {
@@ -1605,7 +1629,7 @@ Each page div uses exactly this inline style:
 style="position:relative; width:210mm; min-height:297mm; max-width:210mm; margin:0 auto 8mm auto; background-image:url('${LETTERHEAD_BG_URL}'); background-size:210mm 297mm; background-repeat:no-repeat; background-position:top left; font-family:Arial,Calibri,'Segoe UI',sans-serif; color:#1A1A1A; box-sizing:border-box; overflow:hidden; page-break-after:always;"
 
 Content inner wrapper inside each page div:
-style="padding-top:52mm; padding-bottom:28mm; padding-left:25mm; padding-right:25mm; box-sizing:border-box;"
+style="padding-top:72mm; padding-bottom:28mm; padding-left:25mm; padding-right:25mm; box-sizing:border-box;"
 
 Page footer (position absolute, bottom of each page div):
 <div style="position:absolute; bottom:10mm; left:0; right:0; text-align:center; font-family:Arial,Calibri,'Segoe UI',sans-serif; font-size:9pt; color:#888888;">Crown Prince's Court &mdash; Confidential &nbsp;|&nbsp; Page N</div>
@@ -2108,15 +2132,15 @@ function generateRfpPdf(rfp: any): Uint8Array {
   // ── 2. PDF layout parameters ────────────────────────────────────────────────
   const PW = 595   // A4 width in pt
   const PH = 842   // A4 height in pt
-  const ML = 60    // left margin
-  const MR = 60    // right margin
-  const MT = 80    // top margin (below header band)
-  const MB = 60    // bottom margin
-  const TW = PW - ML - MR  // text width
+  const ML = 56    // left margin (matches letterhead content area)
+  const MR = 56    // right margin
+  const MT = 168   // top margin in pt ≈ 59mm — well below logo block (~52mm tall)
+  const MB = 56    // bottom margin
+  const TW = PW - ML - MR  // text width = 483pt ≈ 170mm (full usable column)
 
   // Header band height (decorative)
-  const HEADER_H = 56  // pt (ornament strip + thin line + logo area)
-  const LOGO_Y   = PH - 40  // logo baseline from bottom of page (top = PH in PDF coords)
+  const HEADER_H = 148  // pt ≈ 52mm — ornament strip + chain + logo block
+  const LOGO_Y   = PH - 40  // logo baseline (unused, kept for reference)
 
   // Fonts (built-in Type1)
   const FONT_REG  = '/F1'  // Helvetica
@@ -2126,7 +2150,7 @@ function generateRfpPdf(rfp: any): Uint8Array {
   type PageContent = { stream: string; pageNum: number }
   const pages: PageContent[] = []
 
-  let curY = PH - MT - HEADER_H  // current Y (top of content area, decreasing)
+  let curY = PH - MT  // current Y (top of content area, below header+clearance)
   let stream = ''
   let pageNum = 1
 
@@ -2161,29 +2185,41 @@ function generateRfpPdf(rfp: any): Uint8Array {
   }
 
   function drawHeaderBand(): string {
-    // Warm khaki ornament band at top
+    // Letterhead header replicating the background image layout:
+    //   0–24pt:   warm khaki ornament strip
+    //   24–32pt:  chain divider (black rule)
+    //   32–148pt: white logo area with CPC text centred
+    //   148–152pt: thin grey rule separating header from content
     let s = ''
-    // Top decorative strip (filled rect in warm khaki #A79C7F ≈ 0.655 0.612 0.498)
-    s += `0.655 0.612 0.498 rg\n`  // fill color #A79C7F
-    s += `0 ${PH - 24} ${PW} 24 re f\n`  // top strip
-    // Chain divider line (black)
+    // Top ornament strip — warm khaki #A79C7F
+    s += `0.655 0.612 0.498 rg\n`
+    s += `0 ${PH - 24} ${PW} 24 re f\n`
+    // Chain / divider rule
     s += `0 0 0 rg\n`
-    s += `0.5 w\n0 ${PH - 26} m ${PW} ${PH - 26} l S\n`
-    // Logo text area (white background)
+    s += `1.2 w\n0 ${PH - 28} m ${PW} ${PH - 28} l S\n`
+    // White logo block (28pt → 148pt from top = 120pt tall)
     s += `1 1 1 rg\n`
-    s += `0 ${PH - HEADER_H} ${PW} ${HEADER_H - 26} re f\n`
-    // CPC text (centered)
+    s += `0 ${PH - HEADER_H} ${PW} ${HEADER_H - 28} re f\n`
+    // Arabic org name (centered, bold)
     s += `0 0 0 rg\n`
-    s += `BT\n${FONT_BOLD} 10 Tf\n`
-    s += `${PW/2 - 60} ${PH - HEADER_H + 16} Td\n`
-    s += `(CROWN PRINCE COURT  |  DIWAN WALI AL AHD) Tj\n`
-    s += `${FONT_REG} 8 Tf\n`
-    s += `-0 -12 Td\n`
-    s += `(procurement@cpc-rfp.website) Tj\n`
+    const logoMidY = PH - HEADER_H + (HEADER_H - 28) / 2
+    s += `BT\n${FONT_BOLD} 13 Tf\n`
+    s += `${PW/2 - 120} ${logoMidY + 18} Td\n`
+    s += `(CROWN PRINCE'S COURT  \u2014  DIWAN WALI AL AHD) Tj\n`
+    // Sub-label
+    s += `${FONT_REG} 8.5 Tf\n`
+    s += `${PW/2 - 78} ${logoMidY + 2} Td\n`
+    s += `(Abu Dhabi, United Arab Emirates) Tj\n`
+    // Contact line
+    s += `${FONT_REG} 7.5 Tf\n`
+    s += `${PW/2 - 70} ${logoMidY - 13} Td\n`
+    s += `(procurement@cpc-rfp.website     \u2022     cpc-rfp.website) Tj\n`
     s += `ET\n`
-    // Thin rule below header
-    s += `0.8 0.8 0.8 RG\n0.5 w\n${ML} ${PH - HEADER_H - 2} m ${PW - MR} ${PH - HEADER_H - 2} l S\n`
-    s += `0 0 0 RG\n`
+    // Thin gold rule below header band
+    s += `0.729 0.592 0.396 RG\n0.75 w\n0 ${PH - HEADER_H - 2} m ${PW} ${PH - HEADER_H - 2} l S\n`
+    // Thin grey rule just above content start (at MT)
+    s += `0.8 0.8 0.8 RG\n0.25 w\n${ML} ${PH - MT + 4} m ${PW - MR} ${PH - MT + 4} l S\n`
+    s += `0 0 0 RG\n0 0 0 rg\n`
     return s
   }
 
@@ -2207,14 +2243,15 @@ function generateRfpPdf(rfp: any): Uint8Array {
     }
     stream = ''
     pageNum++
-    curY = PH - MT - HEADER_H
+    curY = PH - MT  // reset Y to top of content area on new page
   }
 
   // Cover page
   stream += drawHeaderBand()
-  // Title block
+  // Cover title block — starts at MT (below header clearance)
+  let coverY = PH - MT - 10
   stream += `BT\n${FONT_BOLD} 11 Tf\n`
-  stream += `${ML} ${PH - MT - HEADER_H - 10} Td\n`
+  stream += `${ML} ${coverY} Td\n`
   stream += `(REQUEST FOR PROPOSAL) Tj\n`
   stream += `${FONT_REG} 9 Tf\n0 -16 Td\n`
   if (refNum) stream += `(Reference: ${escPdfString(refNum)}) Tj\n0 -13 Td\n`
@@ -2222,21 +2259,18 @@ function generateRfpPdf(rfp: any): Uint8Array {
   if (deadline) stream += `(Submission Deadline: ${escPdfString(deadline)}) Tj\n0 -13 Td\n`
   stream += `ET\n`
   // Large title
-  stream += `BT\n${FONT_BOLD} 18 Tf\n`
-  stream += `${ML} ${PH - MT - HEADER_H - 80} Td\n`
   const titleWrapped = wordWrap(title, 18, TW, 0)
-  let ty = PH - MT - HEADER_H - 80
+  let ty = coverY - 70
   stream += `BT\n${FONT_BOLD} 18 Tf\n`
   for (const tl of titleWrapped) {
     stream += `${ML} ${ty} Td\n(${escPdfString(tl)}) Tj\n`
-    ty -= 24
-    stream = stream.replace(/(\d+\.\d+|\d+) \d+ Td\n\(/, `${ML} ${ty} Td\n(`)
+    ty -= 26
   }
   stream += `ET\n`
 
-  curY = ty - 20
+  curY = ty - 16
   // Horizontal rule after title
-  stream += `0.655 0.612 0.498 RG\n2 w\n${ML} ${curY} m ${PW - MR} ${curY} l S\n0 0 0 RG\n1 w\n`
+  stream += `0.729 0.592 0.396 RG\n1.5 w\n${ML} ${curY} m ${PW - MR} ${curY} l S\n0 0 0 RG\n1 w\n`
   curY -= 20
 
   // Render cover header area separately then start content
@@ -2274,7 +2308,7 @@ function generateRfpPdf(rfp: any): Uint8Array {
         pages.push({ stream: drawHeaderBand() + stream, pageNum })
         stream = ''
         pageNum++
-        curY = PH - MT - HEADER_H
+        curY = PH - MT  // top of content area on new page
       }
 
       if (wl.trim()) {

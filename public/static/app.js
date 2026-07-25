@@ -864,13 +864,20 @@ function downloadRfpPdf(rfpId) {
     return;
   }
 
-  if (typeof html2pdf === 'undefined') {
-    showToast('PDF library not loaded yet — please wait a moment and try again.', 'error');
-    return;
-  }
+  // Use server-side PDF generation for pixel-perfect A4 layout.
+  // This avoids html2pdf browser-rendering issues (left-half clipping, scaling).
+  showToast('Preparing PDF download…', 'info');
+  var pdfUrl = '/api/rfps/' + rfpId + '/pdf';
+  var link = document.createElement('a');
+  link.href = pdfUrl;
+  link.download = 'CPC_RFP_' + (rfp.ref_number || rfpId).replace(/\//g, '_') + '.pdf';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  setTimeout(function() { showToast('PDF download started', 'success'); }, 600);
+  return;
 
-  showToast('Generating PDF — please wait…', 'info');
-
+  // LEGACY html2pdf path (kept for reference — no longer used):
   // Use a hidden iframe approach: inject a full HTML document with embedded
   // styles so html2canvas sees a properly rendered page (not an offscreen div).
   // This reliably captures all CSS-styled content including tables and colours.
