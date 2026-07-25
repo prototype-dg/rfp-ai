@@ -3,7 +3,7 @@ import { initDb, seedVendors } from '../db/seed'
 import type { Bindings } from '../types'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-07-25-v5'
+const WORKER_VERSION = '2026-07-25-v6'
 
 export const apiRouter = new Hono<{ Bindings: Bindings }>()
 
@@ -3512,27 +3512,44 @@ async function runSingleEvaluation(p: any, rfp: any, rfpId: any, env: any): Prom
   let aiSummary: string
   let usedRealLLM = 0
 
-  // ── FALLBACK: if technical_proposal is NULL/empty, reuse text from the same
-  // vendor's most recent other proposal that has good extracted text.
-  // This handles image-based PDFs where async extraction silently yields nothing.
+  // ── OCR FALLBACK: if technical_proposal is NULL/empty, try Claude OCR on the
+  // actual R2 attachments. These are image-only PDFs where text-layer extraction
+  // and the Genspark crawler both return 0 chars. We stream each R2 object to
+  // Genspark blob storage (no arrayBuffer in Worker memory) then send the URL
+  // to Claude's document API which performs OCR on the pages.
   let proposalCandidate = p.technical_proposal || ''
   if (proposalCandidate.length < 200 && !proposalCandidate.startsWith('[WRONG DOCUMENT DETECTED]')) {
-    try {
-      const fallback = await db.prepare(`
-        SELECT technical_proposal FROM proposals
-        WHERE vendor_id = ? AND id != ? AND LENGTH(technical_proposal) > 200
-          AND technical_proposal NOT LIKE '[WRONG DOCUMENT DETECTED]%'
-        ORDER BY id DESC LIMIT 1
-      `).bind(p.vendor_id, p.id).first<{ technical_proposal: string }>()
-      if (fallback?.technical_proposal) {
-        console.warn(`[evaluation] ${p.vendor_name}: technical_proposal empty — using text from prior proposal (vendor_id=${p.vendor_id})`)
-        proposalCandidate = fallback.technical_proposal
-        // Write it back so future evaluations don't need this fallback
-        await db.prepare(`UPDATE proposals SET technical_proposal=? WHERE id=?`)
-          .bind(proposalCandidate, p.id).run()
+    const bucket: R2Bucket | undefined = env.PROPOSALS_BUCKET
+    let attachments: any[] = []
+    try { attachments = JSON.parse(p.proposal_attachments || '[]') } catch(_) {}
+
+    const ocrTexts: string[] = []
+    for (const att of attachments) {
+      if (!att.r2_key || !bucket) continue
+      try {
+        console.log(`[evaluation-ocr] Trying Claude OCR for ${att.filename} (${att.size_bytes} bytes)`)
+        const obj = await bucket.get(att.r2_key)
+        if (!obj) { console.warn(`[evaluation-ocr] R2 object not found: ${att.r2_key}`); continue }
+        const ocrText = await extractPdfViaClaudeOCRStreaming(obj, att.filename, env)
+        if (ocrText && ocrText.length >= 200) {
+          ocrTexts.push(`=== ${(att.label || 'TECHNICAL').toUpperCase()} DOCUMENT: ${att.filename} ===\n${ocrText}`)
+          console.log(`[evaluation-ocr] OCR success: ${ocrText.length} chars from ${att.filename}`)
+        } else {
+          console.warn(`[evaluation-ocr] OCR returned too little (${ocrText.length} chars) for ${att.filename}`)
+        }
+      } catch(ocrErr: any) {
+        console.error(`[evaluation-ocr] OCR failed for ${att.filename}: ${ocrErr?.message}`)
       }
-    } catch(e: any) {
-      console.error(`[evaluation] Fallback text lookup failed: ${e?.message}`)
+    }
+
+    if (ocrTexts.length > 0) {
+      proposalCandidate = ocrTexts.join('\n\n')
+      // Persist so future evaluations skip the OCR step
+      await db.prepare(`UPDATE proposals SET technical_proposal=? WHERE id=?`)
+        .bind(proposalCandidate, p.id).run().catch(() => {})
+      console.log(`[evaluation-ocr] Persisted ${proposalCandidate.length} chars of OCR text to proposal ${p.id}`)
+    } else {
+      console.warn(`[evaluation] ${p.vendor_name}: OCR yielded nothing — proposal cannot be evaluated`)
     }
   }
 
@@ -4509,6 +4526,130 @@ async function extractPdfViaGenskarkCrawler(
 // Streaming variant — accepts an R2ObjectBody and pipes its ReadableStream body
 // directly to Genspark blob storage upload, then calls the crawler.
 // This avoids loading large files (13MB, 25MB) into Worker memory via arrayBuffer().
+// ============================================================
+// CLAUDE OCR: stream R2 → Genspark blob → Claude document API
+// Used for large image-only PDFs where the text layer and crawler return nothing.
+// Steps: (1) get pre-signed upload URL, (2) stream R2 body to Azure blob,
+// (3) send fileWrapperUrl to Claude as a document — Claude OCRs the pages.
+// No arrayBuffer() in the Worker — safe for 10-25 MB PDFs.
+// ============================================================
+async function extractPdfViaClaudeOCRStreaming(
+  r2Object: R2ObjectBody,
+  filename: string,
+  env: any,
+): Promise<string> {
+  const apiKey = (env as any).OPENAI_API_KEY || ''
+  const baseUrl = (env as any).OPENAI_BASE_URL || 'https://www.genspark.ai/api/llm_proxy/v1'
+  const gskApiKey = (env as any).GSK_API_KEY || ''
+  const gskProjectId = (env as any).GSK_PROJECT_ID || ''
+
+  if (!apiKey) throw new Error('OPENAI_API_KEY not configured')
+  if (!gskApiKey) throw new Error('GSK_API_KEY not configured — needed for blob upload')
+
+  const gskBase = 'https://www.genspark.ai'
+  console.log(`[claude-ocr-stream] Uploading ${filename} (${r2Object.size} bytes) to blob...`)
+
+  // Step 1: Get pre-signed upload URL
+  const uploadUrlRes = await fetch(`${gskBase}/api/tool_cli/file/upload_url`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${gskApiKey}`,
+      'Content-Type': 'application/json',
+      ...(gskProjectId ? { 'X-Project-Id': gskProjectId } : {}),
+    },
+    body: JSON.stringify({
+      content_type: 'application/pdf',
+      name: filename,
+      ...(gskProjectId ? { project_id: gskProjectId } : {}),
+    }),
+  })
+  if (!uploadUrlRes.ok) {
+    const t = await uploadUrlRes.text()
+    throw new Error(`upload_url failed ${uploadUrlRes.status}: ${t.slice(0, 200)}`)
+  }
+  const uploadUrlData = await uploadUrlRes.json() as any
+  const blobUploadUrl: string = uploadUrlData?.data?.upload_url || uploadUrlData?.upload_url
+  const fileWrapperUrl: string = uploadUrlData?.data?.file_wrapper_url || uploadUrlData?.file_wrapper_url
+  if (!blobUploadUrl || !fileWrapperUrl) {
+    throw new Error(`Invalid upload URL response: ${JSON.stringify(uploadUrlData).slice(0, 200)}`)
+  }
+
+  // Step 2: Stream R2 body → Azure blob (no arrayBuffer in Worker)
+  const putRes = await fetch(blobUploadUrl, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/pdf',
+      'x-ms-blob-type': 'BlockBlob',
+      ...(r2Object.size ? { 'Content-Length': String(r2Object.size) } : {}),
+    },
+    body: r2Object.body,
+    // @ts-ignore
+    duplex: 'half',
+  })
+  if (!putRes.ok) {
+    const t = await putRes.text()
+    throw new Error(`Blob upload failed ${putRes.status}: ${t.slice(0, 200)}`)
+  }
+  console.log(`[claude-ocr-stream] Blob upload complete. Sending to Claude for OCR...`)
+
+  // Step 3: Send fileWrapperUrl to Claude as a document — Claude fetches and OCRs it
+  const ocrPrompt = `You are a document text extractor. Extract ALL readable text from this PDF completely and verbatim.
+Rules:
+- Extract every word, number, table cell, heading, bullet point visible on every page.
+- For tables: preserve rows using | as column separator.
+- For pricing/cost tables: capture EVERY number, currency (AED/USD), subtotals, totals exactly.
+- For timelines/Gantt charts: describe each phase, duration, months, milestones.
+- For team/org charts: list every role, name, allocation percentage.
+- Do NOT summarize — extract verbatim. Output plain text only, no markdown.`
+
+  const claudeRes = await fetch(`${baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-5',
+      max_tokens: 8000,
+      temperature: 0.1,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'document',
+              source: {
+                type: 'url',
+                url: fileWrapperUrl,
+              },
+              title: filename,
+              context: ocrPrompt,
+            },
+            {
+              type: 'text',
+              text: `Extract all text from this PDF (${filename}). Follow the extraction rules. Output plain text only.`,
+            },
+          ],
+        },
+      ],
+    }),
+  })
+
+  if (!claudeRes.ok) {
+    const t = await claudeRes.text()
+    throw new Error(`Claude OCR API failed ${claudeRes.status}: ${t.slice(0, 300)}`)
+  }
+
+  const claudeData = await claudeRes.json() as any
+  const content = claudeData.choices?.[0]?.message?.content || claudeData.content?.[0]?.text || ''
+  const extracted = typeof content === 'string'
+    ? content
+    : Array.isArray(content) ? content.map((b: any) => b.text || '').join('') : ''
+
+  console.log(`[claude-ocr-stream] Claude OCR returned ${extracted.length} chars from ${filename}`)
+  return extracted
+}
+
 async function extractPdfViaGenskarkCrawlerStreaming(
   r2Object: R2ObjectBody,
   filename: string,
