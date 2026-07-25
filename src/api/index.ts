@@ -3827,16 +3827,22 @@ ${cleanProposalText}`)
         } catch (parseErr2: any) {
           console.warn(`[evaluateProposal] Stage2 failed (${parseErr2.message}), trying truncation repair...`)
 
-          // ── Stage 3: Walk backwards to find last valid closing brace ───────
+          // ── Stage 3: Walk backwards and try closing suffix combinations ──────
+          // The LLM may truncate mid-array so the string has no closing ] or }.
+          // Try closing the JSON with various suffixes after each } candidate.
+          const closingSuffixes = ['', '}', ']}', ',"summary":""}', ']}', ',"summary":"Evaluation complete."]}']
           let repaired = false
-          for (let cut = jsonStr.length - 1; cut > jsonStr.length / 2; cut--) {
+          outer: for (let cut = jsonStr.length - 1; cut > jsonStr.length / 2; cut--) {
             if (jsonStr[cut] === '}') {
-              try {
-                parsed = JSON.parse(jsonStr.slice(0, cut + 1))
-                console.warn(`[evaluateProposal] Stage3 truncation repair succeeded at pos ${cut}`)
-                repaired = true
-                break
-              } catch (_) { /* keep searching */ }
+              const base = jsonStr.slice(0, cut + 1)
+              for (const suffix of closingSuffixes) {
+                try {
+                  parsed = JSON.parse(base + suffix)
+                  console.warn(`[evaluateProposal] Stage3 repair at pos ${cut} with suffix "${suffix}"`)
+                  repaired = true
+                  break outer
+                } catch (_) { /* keep searching */ }
+              }
             }
           }
           if (!repaired) {
