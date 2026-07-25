@@ -156,9 +156,13 @@ export function getLayout(): string {
     }
     .nav-item i {
       width: 16px;
-      text-align: center;
+      height: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
       font-size: 13px;
       flex-shrink: 0;
+      line-height: 1;
     }
     .nav-item:hover {
       background: var(--cpc-gold-tint);
