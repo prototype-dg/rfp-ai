@@ -343,7 +343,7 @@ export function getLayout(): string {
       gap: 0;
       overflow-x: auto;
     }
-    .lc-step { display: flex; align-items: center; flex-shrink: 0; }
+    .lc-step { display: flex; align-items: flex-start; flex-shrink: 0; }
     .lc-node { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 90px; }
     .lc-circle {
       width: 32px;
@@ -368,7 +368,9 @@ export function getLayout(): string {
       line-height: 1.2;
     }
     .lc-pending .lc-label  { color: var(--cpc-ink-2); opacity: 0.75; }
-    .lc-connector { height: 2px; width: 48px; flex-shrink: 0; margin-bottom: 18px; }
+    /* margin-top:15px = (32px circle height / 2) - (2px connector height / 2) — aligns the
+       connector's centre with the circle's centre regardless of label height below */
+    .lc-connector { height: 2px; width: 48px; flex-shrink: 0; margin-top: 15px; }
     .lc-done .lc-circle    { background: var(--cpc-gold); color: var(--cpc-paper); border-color: var(--cpc-gold); }
     .lc-done .lc-label     { color: var(--cpc-gold-deep); }
     .lc-done .lc-connector { background: var(--cpc-gold); }

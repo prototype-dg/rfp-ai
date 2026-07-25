@@ -1108,13 +1108,14 @@ async function generateRfpPdfBlob(rfpId) {
 
   // Mount a hidden iframe so the A4 divs render with correct pixel dimensions.
   // opacity:0 keeps it invisible; position:fixed + large negative z-index keeps
-  // it out of the stacking context.  It MUST be in the viewport (top:0,left:0)
-  // so that the browser assigns real layout metrics.
+  // it out of the stacking context.  The iframe must be tall enough to hold ALL
+  // pages — we set a large height and remove overflow:hidden so every page div
+  // gets real layout metrics even though the iframe is off-screen.
   var iframe = document.createElement('iframe');
   iframe.style.cssText = [
     'position:fixed', 'top:0', 'left:0',
     'width:' + PAGE_W_PX + 'px',
-    'height:' + PAGE_H_PX + 'px',
+    'height:12000px',   // tall enough for ~10 A4 pages; clipped by viewport but layout is computed
     'opacity:0', 'pointer-events:none', 'border:none', 'z-index:-9999',
   ].join(';');
   document.body.appendChild(iframe);
@@ -1125,10 +1126,10 @@ async function generateRfpPdfBlob(rfpId) {
     '<!DOCTYPE html><html><head><meta charset="UTF-8">',
     '<style>',
     '* { box-sizing:border-box; margin:0; padding:0; }',
-    // Force body to be exactly A4 width — no auto-centering margins
-    'body { width:' + PAGE_W_PX + 'px; background:#e8e8e8; overflow:hidden; }',
+    // Force body to be exactly A4 width — no overflow clipping so all pages stack
+    'body { width:' + PAGE_W_PX + 'px; background:#ffffff; overflow:visible; }',
     // Each A4 page div: strip any outer margin/auto so they stack flush
-    '.rfp-doc > div { margin:0 !important; display:block !important; }',
+    '.rfp-doc > div { margin:0 !important; display:block !important; width:' + PAGE_W_PX + 'px !important; }',
     '</style>',
     '</head><body>', inlined, '</body></html>',
   ].join(''));
@@ -1140,7 +1141,7 @@ async function generateRfpPdfBlob(rfpId) {
     iframe.contentWindow.addEventListener('load', resolve);
     setTimeout(resolve, 4000);
   });
-  await new Promise(function(r) { setTimeout(r, 800); }); // extra paint tick
+  await new Promise(function(r) { setTimeout(r, 1000); }); // extra paint tick
 
   try {
     // Collect all A4 page divs — the LLM wraps everything in <div class="rfp-doc">
@@ -1149,6 +1150,9 @@ async function generateRfpPdfBlob(rfpId) {
     var pageDivs = rfpDoc ? Array.from(rfpDoc.children) : [iframeDoc.body];
     if (pageDivs.length === 0) pageDivs = [iframeDoc.body];
 
+    // Log page count for debugging
+    console.log('[PDF] Found', pageDivs.length, 'page div(s) to render');
+
     // Create jsPDF in A4 portrait (units: mm)
     var pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
     var A4_W_MM = 210;
@@ -1156,8 +1160,16 @@ async function generateRfpPdfBlob(rfpId) {
 
     for (var i = 0; i < pageDivs.length; i++) {
       var pageEl = pageDivs[i];
+      // Get this page's vertical position within the iframe document
+      var rect = pageEl.getBoundingClientRect();
+      var scrollTop = iframeDoc.documentElement.scrollTop || iframeDoc.body.scrollTop || 0;
+      var pageOffsetY = rect.top + scrollTop;
 
-      // Capture this single page div at scale:2 (retina quality)
+      console.log('[PDF] Page', i + 1, '— offsetY:', pageOffsetY, 'rect.height:', rect.height);
+
+      // Capture this single page div at scale:2 (retina quality).
+      // scrollY tells html2canvas where in the document the element starts so it
+      // renders the correct vertical slice even when the iframe viewport is smaller.
       var canvas = await window.html2canvas(pageEl, {
         scale: 2,
         useCORS: true,
@@ -1168,6 +1180,8 @@ async function generateRfpPdfBlob(rfpId) {
         height: PAGE_H_PX,
         windowWidth: PAGE_W_PX,
         windowHeight: PAGE_H_PX,
+        scrollX: 0,
+        scrollY: -pageOffsetY,
       });
 
       var imgData = canvas.toDataURL('image/jpeg', 0.92);
@@ -1578,7 +1592,7 @@ async function confirmSendInvitations(rfpId) {
     var pdfBase64 = null;
     var pdfFilename = null;
     var rfp = appState.currentRfp;
-    if (rfp && rfp.content && typeof html2pdf !== 'undefined') {
+    if (rfp && rfp.content && typeof window.html2canvas !== 'undefined' && typeof window.jspdf !== 'undefined') {
       try {
         setLoading(btn, true, 'Generating PDF…');
         var pdfResult = await generateRfpPdfBlob(rfpId);
@@ -1614,9 +1628,12 @@ async function confirmSendInvitations(rfpId) {
     renderRfpTabs('vendors', rfpId, appState.unreadQA);
     // Count shortlisted vendors from local state (avoid undefined reference)
     var sentCount = (result && result.results) ? result.results.length : (appState.rfpVendors ? appState.rfpVendors.filter(function(v){ return v.shortlisted; }).length : 0);
-    // Mark Invite stage completed on lifecycle bar
+    // Mark Invite, Q&A and Proposals stages completed on lifecycle bar
+    // (Sending invitations means we are now waiting for both questions AND proposals)
     markStageCompleted(rfpId, 'publish');
     markStageCompleted(rfpId, 'invite');
+    markStageCompleted(rfpId, 'qa');
+    markStageCompleted(rfpId, 'proposals');
     renderLifecycleBar(rfp);
     var pdfNote = pdfBase64 ? ' with PDF attachment' : '';
     showToast('\u2709\uFE0F Invitations sent to ' + sentCount + ' vendor(s)' + pdfNote + '!', 'success', 5000);
