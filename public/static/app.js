@@ -2572,35 +2572,109 @@ function viewVendorDetail(id) {
   const rv = appState.rfpVendors ? appState.rfpVendors.find(function(v){ return v.id === id; }) : null;
   const vendor = v || rv;
   if (!vendor) return;
-  showModal(
-    '<div style="display:flex;align-items:center;gap:0.875rem;margin-bottom:1.25rem">'
-    + '<div style="width:48px;height:48px;border-radius:12px;background:var(--cpc-ink);display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:1.25rem">' + escHtml(vendor.name.charAt(0)) + '</div>'
-    + '<div><h3 style="font-size:1rem;font-weight:700;margin:0">' + escHtml(vendor.name) + '</h3>'
-    + '<p style="color:#6b7280;font-size:0.82rem;margin:0">' + escHtml(vendor.category||'') + '</p></div>'
+
+  // Helper: render a labelled field row (label on same line as value, never pushed to next line)
+  function field(label, value, fullWidth) {
+    var val = escHtml(value || '–');
+    return '<div style="' + (fullWidth ? 'grid-column:1/-1;' : '') + 'min-width:0">'
+      + '<div style="font-size:0.7rem;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#9a8c78;margin-bottom:2px">' + label + '</div>'
+      + '<div style="font-size:0.84rem;color:var(--cpc-ink);line-height:1.45;word-break:break-word">' + val + '</div>'
+      + '</div>';
+  }
+
+  // Helper: render a section header divider
+  function sectionHead(title) {
+    return '<div style="grid-column:1/-1;border-top:1px solid var(--cpc-line);padding-top:0.75rem;margin-top:0.25rem">'
+      + '<span style="font-size:0.68rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--cpc-gold)">' + title + '</span>'
+      + '</div>';
+  }
+
+  // Render semi-colon-separated items as tag pills
+  function tagList(str) {
+    if (!str) return '<span style="font-size:0.84rem;color:#9a8c78">–</span>';
+    return str.split(';').filter(Boolean).map(function(s){
+      return '<span class="tag" style="white-space:normal;max-width:none;word-break:break-word;margin-bottom:2px">' + escHtml(s.trim()) + '</span>';
+    }).join('');
+  }
+
+  // Website link
+  var websiteHtml = vendor.website
+    ? '<a href="https://' + escHtml(vendor.website) + '" target="_blank" rel="noopener" style="font-size:0.84rem;color:var(--cpc-gold-deep);text-decoration:none">'
+      + escHtml(vendor.website) + ' <i class="fas fa-external-link-alt" style="font-size:0.65rem"></i></a>'
+    : '<span style="font-size:0.84rem;color:#9a8c78">–</span>';
+
+  var websiteFieldHtml = '<div style="min-width:0">'
+    + '<div style="font-size:0.7rem;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#9a8c78;margin-bottom:2px">Website</div>'
+    + websiteHtml + '</div>';
+
+  // Founded badge
+  var foundedStr = vendor.founded_year ? String(vendor.founded_year) : '–';
+
+  var html = ''
+    // ── Header ──
+    + '<div style="display:flex;align-items:center;gap:0.875rem;margin-bottom:1.25rem">'
+    +   '<div style="width:52px;height:52px;border-radius:12px;background:var(--cpc-ink);display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:1.35rem;flex-shrink:0">' + escHtml(vendor.name.charAt(0)) + '</div>'
+    +   '<div style="min-width:0">'
+    +     '<h3 style="font-size:1.05rem;font-weight:700;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + escHtml(vendor.name) + '</h3>'
+    +     '<div style="display:flex;align-items:center;gap:8px;margin-top:3px;flex-wrap:wrap">'
+    +       '<span style="font-size:0.78rem;color:#6b7280">' + escHtml(vendor.category||'') + '</span>'
+    +       (vendor.founded_year ? '<span style="font-size:0.72rem;background:var(--cpc-ivory);border:1px solid var(--cpc-line);border-radius:4px;padding:1px 7px;color:#74635a">Est. ' + foundedStr + '</span>' : '')
+    +       (vendor.size ? '<span style="font-size:0.72rem;background:var(--cpc-ivory);border:1px solid var(--cpc-line);border-radius:4px;padding:1px 7px;color:#74635a">' + escHtml(vendor.size) + '</span>' : '')
+    +     '</div>'
+    +   '</div>'
     + '</div>'
-    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.875rem;font-size:0.85rem;margin-bottom:1rem">'
-    + '<div><label>Contact Name</label><p style="margin:0">' + escHtml(vendor.contact_name||'-') + '</p></div>'
-    + '<div><label style="display:block;margin-bottom:4px">Contact Email <span style="font-size:0.72rem;color:#6b7280">(editable)</span></label>'
-    + '<div style="display:flex;gap:6px;align-items:center">'
-    + '<input id="vendorEmailInput_' + id + '" type="email" value="' + escHtml(vendor.contact_email||'') + '" '
-    + 'style="flex:1;border:1px solid #d1d5db;border-radius:6px;padding:5px 8px;font-size:0.82rem;min-width:0" '
-    + 'placeholder="email@vendor.com">'
-    + '<button class="btn-primary" style="padding:5px 12px;font-size:0.78rem;white-space:nowrap" onclick="saveVendorEmail(' + id + ')"><i class="fas fa-save"></i>Save</button>'
+
+    // ── Grid body ──
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem 1.25rem;font-size:0.85rem;margin-bottom:0.5rem">'
+
+    // Section: Company
+    + sectionHead('Company')
+    + field('Country', vendor.country)
+    + field('Headquarters', vendor.hq_city)
+    + websiteFieldHtml
+    + field('Annual Revenue', vendor.annual_revenue_usd)
+
+    // Section: Contact
+    + sectionHead('Contact')
+    + field('Contact Name', vendor.contact_name)
+    + '<div style="min-width:0">'
+    +   '<div style="font-size:0.7rem;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#9a8c78;margin-bottom:2px">Contact Email <span style="font-size:0.68rem;color:#b8a898;font-weight:400;text-transform:none;letter-spacing:0">(editable)</span></div>'
+    +   '<div style="display:flex;gap:6px;align-items:center">'
+    +     '<input id="vendorEmailInput_' + id + '" type="email" value="' + escHtml(vendor.contact_email||'') + '" '
+    +     'style="flex:1;border:1px solid #d1d5db;border-radius:6px;padding:5px 8px;font-size:0.82rem;min-width:0" '
+    +     'placeholder="email@vendor.com">'
+    +     '<button class="btn-primary" style="padding:5px 12px;font-size:0.78rem;white-space:nowrap;flex-shrink:0" onclick="saveVendorEmail(' + id + ')"><i class="fas fa-save"></i>Save</button>'
+    +   '</div>'
+    +   '<div id="vendorEmailMsg_' + id + '" style="font-size:0.72rem;margin-top:3px"></div>'
     + '</div>'
-    + '<div id="vendorEmailMsg_' + id + '" style="font-size:0.72rem;margin-top:3px"></div>'
+
+    // Section: Technical Profile
+    + sectionHead('Technical Profile')
+    + '<div style="grid-column:1/-1;min-width:0">'
+    +   '<div style="font-size:0.7rem;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#9a8c78;margin-bottom:6px">Platforms &amp; Technologies</div>'
+    +   '<div class="tag-group" style="flex-wrap:wrap;gap:4px">' + tagList(vendor.platforms) + '</div>'
     + '</div>'
-    + '<div><label>Country</label><p style="margin:0">' + escHtml(vendor.country||'-') + '</p></div>'
-    + '<div><label>Size</label><p style="margin:0">' + escHtml(vendor.size||'-') + '</p></div>'
-    + '<div><label>Certifications</label><p style="margin:0">' + escHtml(vendor.certifications||'-') + '</p></div>'
-    + '<div><label>ERP Experience</label><p style="margin:0">' + escHtml(vendor.erp_experience||'-') + '</p></div>'
+    + '<div style="grid-column:1/-1;min-width:0">'
+    +   '<div style="font-size:0.7rem;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#9a8c78;margin-bottom:6px">Specializations</div>'
+    +   '<div class="tag-group" style="flex-wrap:wrap;gap:4px">'
+    +   (vendor.specializations||'').split(/[,;]/).filter(Boolean).map(function(s){
+          return '<span class="tag" style="white-space:normal;max-width:none;word-break:break-word;margin-bottom:2px">' + escHtml(s.trim()) + '</span>';
+        }).join('')
+    +   '</div>'
     + '</div>'
-    + '<div style="margin-bottom:1rem"><label>Specializations</label><div class="tag-group" style="margin-top:6px;flex-wrap:wrap;">'
-    + (vendor.specializations||'').split(',').filter(Boolean).map(function(s){
-        return '<span class="tag" style="white-space:normal;max-width:none;word-break:break-word">' + escHtml(s.trim()) + '</span>';
-      }).join('')
-    + '</div></div>'
-    + '<button class="btn-ghost" style="width:100%" onclick="closeModal()">Close</button>'
-  );
+    + field('Certifications', vendor.certifications, true)
+
+    // Section: Industry Experience
+    + sectionHead('Industry Experience')
+    + field('Experience Summary', vendor.erp_experience, true)
+    + field('Public Sector References', vendor.public_sector_refs, true)
+
+    + '</div>' // end grid
+
+    // ── Close button ──
+    + '<button class="btn-ghost" style="width:100%;margin-top:0.75rem" onclick="closeModal()">Close</button>';
+
+  showModal(html);
 }
 
 async function saveVendorEmail(vendorId) {

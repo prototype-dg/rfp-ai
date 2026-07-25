@@ -177,6 +177,13 @@ export async function initDb(db: D1Database) {
     `ALTER TABLE proposals ADD COLUMN updated_at TEXT`,
     // rfps.scoring_matrix — JSON array of evaluation criteria with weights, editable by procurement manager
     `ALTER TABLE rfps ADD COLUMN scoring_matrix TEXT`,
+    // vendors enrichment columns — v17
+    `ALTER TABLE vendors ADD COLUMN founded_year INTEGER`,
+    `ALTER TABLE vendors ADD COLUMN hq_city TEXT`,
+    `ALTER TABLE vendors ADD COLUMN website TEXT`,
+    `ALTER TABLE vendors ADD COLUMN public_sector_refs TEXT`,
+    `ALTER TABLE vendors ADD COLUMN platforms TEXT`,
+    `ALTER TABLE vendors ADD COLUMN annual_revenue_usd TEXT`,
   ]
   for (const sql of alterMigrations) {
     try {

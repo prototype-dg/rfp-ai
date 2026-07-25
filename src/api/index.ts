@@ -3,7 +3,7 @@ import { initDb, seedVendors } from '../db/seed'
 import type { Bindings } from '../types'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-07-25-v16'
+const WORKER_VERSION = '2026-07-25-v17'
 
 export const apiRouter = new Hono<{ Bindings: Bindings }>()
 
@@ -452,18 +452,45 @@ apiRouter.get('/vendors', async (c) => {
   return c.json(results)
 })
 
-// PUT /vendors/:id — update vendor contact email (and optionally contact name)
+// PUT /vendors/:id — update vendor fields (email required; all other fields optional)
 apiRouter.put('/vendors/:id', async (c) => {
   const id = c.req.param('id')
   try {
     const body = await c.req.json() as any
-    const { contact_email, contact_name } = body
+    const { contact_email, contact_name, website, hq_city, founded_year,
+            annual_revenue_usd, platforms, certifications, erp_experience,
+            public_sector_refs, specializations } = body
     if (!contact_email || !contact_email.includes('@')) {
       return c.json({ ok: false, error: 'Valid email address required' }, 400)
     }
-    await c.env.DB.prepare(
-      `UPDATE vendors SET contact_email=?, contact_name=COALESCE(?,contact_name) WHERE id=?`
-    ).bind(contact_email.trim().toLowerCase(), contact_name?.trim() || null, id).run()
+    await c.env.DB.prepare(`
+      UPDATE vendors SET
+        contact_email=?,
+        contact_name=COALESCE(?,contact_name),
+        website=COALESCE(?,website),
+        hq_city=COALESCE(?,hq_city),
+        founded_year=COALESCE(?,founded_year),
+        annual_revenue_usd=COALESCE(?,annual_revenue_usd),
+        platforms=COALESCE(?,platforms),
+        certifications=COALESCE(?,certifications),
+        erp_experience=COALESCE(?,erp_experience),
+        public_sector_refs=COALESCE(?,public_sector_refs),
+        specializations=COALESCE(?,specializations)
+      WHERE id=?`)
+      .bind(
+        contact_email.trim().toLowerCase(),
+        contact_name?.trim() || null,
+        website?.trim() || null,
+        hq_city?.trim() || null,
+        founded_year || null,
+        annual_revenue_usd?.trim() || null,
+        platforms?.trim() || null,
+        certifications?.trim() || null,
+        erp_experience?.trim() || null,
+        public_sector_refs?.trim() || null,
+        specializations?.trim() || null,
+        id
+      ).run()
     const updated = await c.env.DB.prepare('SELECT * FROM vendors WHERE id=?').bind(id).first()
     return c.json({ ok: true, vendor: updated })
   } catch(e: any) {
