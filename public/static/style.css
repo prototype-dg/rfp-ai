@@ -1,36 +1,44 @@
-h1 { font-family: Arial, Helvetica, sans-serif; }
+/* ─────────────────────────────────────────────────────────────
+   CPC BRAND SYSTEM — supplementary overrides & RFP doc styles
+   Primary tokens & component styles live in layout.ts <style>
+   ───────────────────────────────────────────────────────────── */
 
-/* Proposals page — file count badge (clickable cell) */
+/* File count badge — rebrand */
 .file-count-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 0.78rem;
-  font-weight: 600;
-  color: #1d4ed8;
-  background: #eff6ff;
-  border: 1px solid #bfdbfe;
-  border-radius: 20px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  color: #745B35;
+  background: #F5EFE3;
+  border: 1px solid #E9DCC4;
+  border-radius: 100px;
   padding: 3px 10px;
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s;
   user-select: none;
   white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
 }
 .file-count-badge:hover {
-  background: #dbeafe;
-  border-color: #93c5fd;
+  background: #E9DCC4;
+  border-color: #BA9765;
 }
-.file-count-badge i { font-size: 0.72rem; }
+.file-count-badge i { font-size: 10px; }
 
-/* Proposal side panel — section headings */
+/* Panel section title */
 .panel-section-title {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-weight: 700;
-  font-size: 0.84rem;
-  color: #1f2937;
-  margin-bottom: 0.5rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-weight: 500;
+  color: #745B35;
+  margin-bottom: 10px;
 }
-.panel-section-title i { font-size: 0.82rem; }
+.panel-section-title i { font-size: 10px; }

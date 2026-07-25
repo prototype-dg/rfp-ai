@@ -3,7 +3,7 @@ import { initDb, seedVendors } from '../db/seed'
 import type { Bindings } from '../types'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-07-25-v11'
+const WORKER_VERSION = '2026-07-25-v12'
 
 export const apiRouter = new Hono<{ Bindings: Bindings }>()
 
@@ -1502,6 +1502,9 @@ async function callLLM(systemPrompt: string, userPrompt: string, env: any, model
   const baseUrl = env?.OPENAI_BASE_URL || 'https://www.genspark.ai/api/llm_proxy/v1'
   if (!apiKey) throw new Error('OPENAI_API_KEY not configured')
 
+  // Use streaming to prevent Cloudflare Worker 30s subrequest timeout.
+  // With stream:true the LLM sends SSE chunks every few seconds, keeping the
+  // connection alive. We collect all chunks and return the assembled text.
   const res = await fetch(`${baseUrl}/chat/completions`, {
     method: 'POST',
     headers: {
@@ -1516,14 +1519,51 @@ async function callLLM(systemPrompt: string, userPrompt: string, env: any, model
       ],
       max_tokens: maxTokens,
       temperature: 0.3,
+      stream: true,
     }),
   })
   if (!res.ok) {
     const errText = await res.text().catch(() => 'unknown error')
     throw new Error(`LLM API error ${res.status}: ${errText}`)
   }
-  const data = await res.json() as any
-  return data.choices?.[0]?.message?.content || ''
+  if (!res.body) throw new Error('LLM returned no response body')
+
+  // Read SSE stream and collect delta content chunks
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let fullContent = ''
+  let buffer = ''
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    // Process complete SSE lines
+    const lines = buffer.split('\n')
+    buffer = lines.pop() ?? '' // keep incomplete last line in buffer
+    for (const line of lines) {
+      const trimmed = line.trim()
+      if (!trimmed || trimmed === 'data: [DONE]') continue
+      if (!trimmed.startsWith('data: ')) continue
+      try {
+        const json = JSON.parse(trimmed.slice(6))
+        const delta = json.choices?.[0]?.delta?.content
+        if (delta) fullContent += delta
+      } catch {
+        // skip malformed SSE lines
+      }
+    }
+  }
+  // Flush any remaining buffer
+  if (buffer.trim().startsWith('data: ') && buffer.trim() !== 'data: [DONE]') {
+    try {
+      const json = JSON.parse(buffer.trim().slice(6))
+      const delta = json.choices?.[0]?.delta?.content
+      if (delta) fullContent += delta
+    } catch { /* ignore */ }
+  }
+
+  return fullContent
 }
 
 async function generateRFPWithLLM(data: any, archDocText: string, brdDocText: string, env: any): Promise<string> {

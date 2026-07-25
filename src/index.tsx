@@ -8,6 +8,8 @@ import type { Bindings } from './types'
 import appJs from '../public/static/app.js?raw'
 import styleCss from '../public/static/style.css?raw'
 import submitJs from '../public/static/submit.js?raw'
+import patternSvg from '../public/static/pattern.svg?raw'
+import emblemPng from '../public/static/cpc-emblem.png?base64'
 
 const app = new Hono<{ Bindings: Bindings }>()
 
@@ -38,6 +40,23 @@ app.get('/static/submit.js', (c) => {
   return c.body(submitJs, 200, {
     'Content-Type': 'application/javascript; charset=utf-8',
     'Cache-Control': 'no-cache',
+  })
+})
+
+app.get('/static/pattern.svg', (c) => {
+  return c.body(patternSvg, 200, {
+    'Content-Type': 'image/svg+xml; charset=utf-8',
+    'Cache-Control': 'public, max-age=86400',
+  })
+})
+
+app.get('/static/cpc-emblem.png', (c) => {
+  const bin = atob(emblemPng)
+  const bytes = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+  return c.body(bytes, 200, {
+    'Content-Type': 'image/png',
+    'Cache-Control': 'public, max-age=86400',
   })
 })
 

@@ -70,7 +70,7 @@ function updateBellBadge() {
 
 function showNotifPopup(notif) {
   const icons = { email: 'fa-envelope', questions: 'fa-question-circle', proposal: 'fa-inbox', info: 'fa-info-circle', decline: 'fa-times-circle', stage: 'fa-flag' };
-  const colors = { email: '#7c3aed', questions: '#0f3460', proposal: '#c9a84c', info: '#6b7280', decline: '#dc2626', stage: '#16a34a' };
+  const colors = { email: '#BA9765', questions: '#745B35', proposal: '#BA9765', info: '#6b7280', decline: '#dc2626', stage: '#16a34a' };
   const icon = icons[notif.type] || 'fa-bell';
   const color = colors[notif.type] || '#6b7280';
   const popupId = 'notif-popup-' + notif.id;
@@ -163,11 +163,11 @@ function toggleNotifPanel() {
 function renderNotifPanel() {
   var panel = document.getElementById('notifPanel');
   if (!panel) return;
-  const typeColors = { email: '#7c3aed', questions: '#0f3460', proposal: '#c9a84c', info: '#6b7280', decline: '#dc2626', stage: '#16a34a' };
+  const typeColors = { email: '#BA9765', questions: '#745B35', proposal: '#BA9765', info: '#6b7280', decline: '#dc2626', stage: '#16a34a' };
   const typeIcons = { email: 'fa-envelope', questions: 'fa-question-circle', proposal: 'fa-inbox', info: 'fa-info-circle', decline: 'fa-times-circle', stage: 'fa-flag' };
   let html = '<div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid #f3f4f6">'
     + '<span style="font-weight:700;font-size:0.875rem;color:#1f2937"><i class="fas fa-bell mr-1"></i>Notifications</span>'
-    + '<button onclick="markAllNotifsRead();renderNotifPanel()" style="font-size:0.72rem;color:#7c3aed;background:none;border:none;cursor:pointer">Mark all read</button>'
+    + '<button onclick="markAllNotifsRead();renderNotifPanel()" style="font-size:0.72rem;color:var(--cpc-gold-deep);background:none;border:none;cursor:pointer">Mark all read</button>'
     + '</div>';
   if (appState.notifications.length === 0) {
     html += '<div style="padding:2rem;text-align:center;color:#9ca3af;font-size:0.82rem"><i class="fas fa-bell-slash" style="display:block;font-size:1.5rem;margin-bottom:0.5rem"></i>No notifications yet</div>';
@@ -177,7 +177,7 @@ function renderNotifPanel() {
       const color = typeColors[n.type] || '#6b7280';
       const icon = typeIcons[n.type] || 'fa-bell';
       const timeStr = n.time ? n.time.toLocaleTimeString('en-AE', { hour: '2-digit', minute: '2-digit' }) : '';
-      const unreadDot = !n.read ? '<span style="width:8px;height:8px;border-radius:50%;background:#7c3aed;display:inline-block;margin-left:4px"></span>' : '';
+      const unreadDot = !n.read ? '<span style="width:8px;height:8px;border-radius:50%;background:var(--cpc-gold);display:inline-block;margin-left:4px"></span>' : '';
       const clickable = (n.rfpId && n.tab) ? 'cursor:pointer' : '';
       html += '<div style="padding:10px 16px;border-bottom:1px solid #f9fafb;display:flex;gap:10px;align-items:flex-start;' + (n.read ? '' : 'background:#faf5ff;') + '" '
         + (n.rfpId && n.tab ? 'onclick="navigateFromNotif(' + n.id + ');toggleNotifPanel()" style="' + clickable + '"' : '') + '>'
@@ -240,7 +240,7 @@ function attachmentLabelText(label) {
 // Returns colour-coded pill HTML for an attachment label
 function attachmentLabelPill(label) {
   var colors = {
-    technical:  'background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe',
+    technical:  'background:#eff6ff;color:var(--cpc-ink);border:1px solid #bfdbfe',
     commercial: 'background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0',
     other:      'background:#f9fafb;color:#6b7280;border:1px solid #e5e7eb',
   };
@@ -457,7 +457,7 @@ function renderRfpTabs(activeTab, rfpId, qaBadge) {
     const isActive = tab.id === activeTab;
     const qaBadgeHtml = (tab.id === 'qa' && qaBadge) ? '<span style="background:#ef4444;color:white;border-radius:10px;padding:1px 6px;font-size:0.68rem;margin-left:4px">!</span>' : '';
     const emailBadgeCount = appState.unreadEmailCount || 0;
-    const emailBadgeHtml = (tab.id === 'emails' && emailBadgeCount > 0) ? '<span style="background:#7c3aed;color:white;border-radius:10px;padding:1px 6px;font-size:0.68rem;margin-left:4px">' + emailBadgeCount + '</span>' : '';
+    const emailBadgeHtml = (tab.id === 'emails' && emailBadgeCount > 0) ? '<span style="background:var(--cpc-gold);color:white;border-radius:10px;padding:1px 6px;font-size:0.68rem;margin-left:4px">' + emailBadgeCount + '</span>' : '';
     html += '<div class="rfp-tab' + (isActive ? ' active' : '') + '" onclick="switchRfpTab(\'' + tab.id + '\',' + rfpId + ')">';
     html += '<i class="fas ' + tab.icon + '"></i>' + escHtml(tab.label) + qaBadgeHtml + emailBadgeHtml;
     html += '</div>';
@@ -508,10 +508,10 @@ pages.dashboard = async function() {
 
   // KPI cards
   const kpis = [
-    { label:'Total RFPs',      value: stats.totalRfps || 0,      icon:'fa-layer-group',   color:'#0f3460', sub: (stats.activeRfps||0) + ' active' },
-    { label:'Win Rate',        value: (stats.winRate||0) + '%',  icon:'fa-trophy',        color:'#c9a84c', sub: (stats.awardedRfps||0) + ' awarded' },
+    { label:'Total RFPs',      value: stats.totalRfps || 0,      icon:'fa-layer-group',   color:'#745B35', sub: (stats.activeRfps||0) + ' active' },
+    { label:'Win Rate',        value: (stats.winRate||0) + '%',  icon:'fa-trophy',        color:'#BA9765', sub: (stats.awardedRfps||0) + ' awarded' },
     { label:'Avg Duration',    value: stats.avgDuration ? stats.avgDuration + 'd' : 'N/A', icon:'fa-clock', color:'#065f46', sub: 'per RFP cycle' },
-    { label:'Vendor Pool',     value: stats.totalVendors || 0,   icon:'fa-building',      color:'#7c3aed', sub: 'registered vendors' },
+    { label:'Vendor Pool',     value: stats.totalVendors || 0,   icon:'fa-building',      color:'#BA9765', sub: 'registered vendors' },
     { label:'Proposals',       value: stats.totalProposals || 0, icon:'fa-inbox',         color:'#dc6803', sub: 'total received' },
     { label:'Emails Sent',     value: stats.totalEmails || 0,    icon:'fa-envelope',      color:'#1d4ed8', sub: 'invitations & replies' },
   ];
@@ -619,18 +619,18 @@ pages.rfps = async function() {
       + '<div style="margin-left:1rem;text-align:right;flex-shrink:0">'
       + (isArchived
         ? '<div style="font-size:1.1rem;font-weight:700;color:#065f46"><i class="fas fa-trophy"></i></div><div style="font-size:0.7rem;color:#9ca3af">Completed</div>'
-        : '<div style="font-size:1.5rem;font-weight:700;color:var(--cpc-blue)">' + progress + '%</div><div style="font-size:0.7rem;color:#9ca3af">Complete</div>')
+        : '<div style="font-size:1.5rem;font-weight:700;color:var(--cpc-ink)">' + progress + '%</div><div style="font-size:0.7rem;color:#9ca3af">Complete</div>')
       + '</div>'
       + '</div>'
       + '<div style="margin-bottom:0.5rem">'
       + '<div style="height:4px;border-radius:2px;background:#e5e7eb;overflow:hidden">'
-      + '<div style="height:100%;background:' + (isArchived ? 'var(--cpc-gold)' : 'linear-gradient(90deg,var(--cpc-blue),var(--cpc-gold))') + ';width:100%;border-radius:2px"></div>'
+      + '<div style="height:100%;background:' + (isArchived ? 'var(--cpc-gold)' : 'linear-gradient(90deg,var(--cpc-ink),var(--cpc-gold))') + ';width:100%;border-radius:2px"></div>'
       + '</div></div>'
       + '<div style="display:flex;align-items:center;justify-content:space-between">'
       + '<div style="font-size:0.78rem;color:#9ca3af">'
       + (rfp.deadline ? '<i class="fas fa-calendar-alt" style="margin-right:4px"></i>Deadline: ' + new Date(rfp.deadline).toLocaleDateString('en-AE') : '<i class="fas fa-infinity" style="margin-right:4px"></i>No deadline set')
       + '</div>'
-      + '<div style="font-size:0.78rem;color:' + (isArchived ? '#065f46' : 'var(--cpc-blue)') + ';font-weight:600">Open <i class="fas fa-arrow-right" style="margin-left:4px"></i></div>'
+      + '<div style="font-size:0.78rem;color:' + (isArchived ? '#065f46' : 'var(--cpc-ink)') + ';font-weight:600">Open <i class="fas fa-arrow-right" style="margin-left:4px"></i></div>'
       + '</div>'
       + '</div>';
   }
@@ -892,35 +892,35 @@ function downloadRfpPdf(rfpId) {
     '.rfp-logo-text .rfp-org-name{font-size:9pt;font-weight:700;color:#1a1a1a;letter-spacing:2px;text-transform:uppercase;font-family:Arial,sans-serif;}',
     '.rfp-cover-divider{width:calc(100% - 72pt);height:0.5pt;background:#d1d5db;margin:0 36pt;}',
     '.rfp-cover-body{padding:36pt 36pt 24pt;}',
-    '.rfp-cover-body .rfp-doc-type{font-size:10pt;font-weight:700;letter-spacing:0.1em;color:#4BACED;text-transform:uppercase;margin-bottom:6pt;}',
+    '.rfp-cover-body .rfp-doc-type{font-size:10pt;font-weight:700;letter-spacing:0.1em;color:#BA9765;text-transform:uppercase;margin-bottom:6pt;}',
     '.rfp-cover-body .rfp-doc-title{font-size:22pt;font-weight:700;line-height:1.25;color:#1a1a1a;margin-bottom:12pt;}',
-    '.rfp-cover-body .rfp-doc-date{font-size:9pt;color:#215868;font-weight:600;}',
+    '.rfp-cover-body .rfp-doc-date{font-size:9pt;color:#745B35;font-weight:600;}',
     '.rfp-cover-footer-bar{display:none;}',
-    '.rfp-page-header{display:flex;align-items:center;justify-content:space-between;padding:4pt 24pt;border-bottom:1.5pt solid #4BACED;background:white;}',
-    '.rfp-page-header-logo{font-size:8pt;font-weight:700;color:#215868;}',
+    '.rfp-page-header{display:flex;align-items:center;justify-content:space-between;padding:4pt 24pt;border-bottom:1.5pt solid #BA9765;background:white;}',
+    '.rfp-page-header-logo{font-size:8pt;font-weight:700;color:#745B35;}',
     '.rfp-page-header-ref{font-size:7.5pt;color:#9ca3af;}',
     '.rfp-meta-table{width:100%;border-collapse:collapse;font-size:9pt;margin:8pt 0;}',
-    '.rfp-meta-table th{background:#215868;color:white;padding:6pt 10pt;font-weight:700;border:0.5pt solid #163d4e;}',
+    '.rfp-meta-table th{background:#745B35;color:white;padding:6pt 10pt;font-weight:700;border:0.5pt solid #E9DCC4;}',
     '.rfp-meta-table td{background:white;padding:6pt 10pt;border:0.5pt solid #d1d5db;vertical-align:top;}',
     '.rfp-toc{padding:14pt 24pt 10pt;}',
-    '.rfp-toc-title{font-size:13pt;font-weight:700;color:#4BACED;margin-bottom:8pt;border-bottom:1pt solid #4BACED;padding-bottom:4pt;}',
-    '.rfp-toc-item{display:flex;justify-content:space-between;padding:3pt 0;font-size:9pt;color:#215868;border-bottom:0.5pt dotted #d1d5db;}',
+    '.rfp-toc-title{font-size:13pt;font-weight:700;color:#BA9765;margin-bottom:8pt;border-bottom:1pt solid #BA9765;padding-bottom:4pt;}',
+    '.rfp-toc-item{display:flex;justify-content:space-between;padding:3pt 0;font-size:9pt;color:#745B35;border-bottom:0.5pt dotted #d1d5db;}',
     '.rfp-toc-item.bold{font-weight:700;}',
     '.rfp-toc-item.indent{padding-left:14pt;color:#374151;font-weight:400;}',
     '.rfp-section{padding:12pt 24pt;border-bottom:0.5pt solid #e5e7eb;}',
-    '.rfp-section-title{font-size:12pt;font-weight:700;color:#1a1a1a;margin-bottom:7pt;border-bottom:1.5pt solid #4BACED;padding-bottom:3pt;}',
-    '.rfp-section-num{display:inline-block;width:18pt;height:18pt;border-radius:50%;background:#4BACED;color:white;text-align:center;line-height:18pt;font-weight:700;font-size:8pt;margin-right:4pt;vertical-align:middle;}',
+    '.rfp-section-title{font-size:12pt;font-weight:700;color:#1a1a1a;margin-bottom:7pt;border-bottom:1.5pt solid #BA9765;padding-bottom:3pt;}',
+    '.rfp-section-num{display:inline-block;width:18pt;height:18pt;border-radius:50%;background:#BA9765;color:white;text-align:center;line-height:18pt;font-weight:700;font-size:8pt;margin-right:4pt;vertical-align:middle;}',
     '.rfp-section p{font-size:10pt;line-height:1.5;margin:0 0 6pt;}',
     '.rfp-section ul{margin:3pt 0 6pt 16pt;}',
     '.rfp-section li{font-size:9.5pt;line-height:1.5;margin-bottom:2pt;}',
     '.rfp-subsection{margin:9pt 0 4pt;}',
-    '.rfp-subsection-title{font-size:10pt;font-weight:700;color:#215868;margin-bottom:4pt;}',
-    '.rfp-deliverables{background:#f0f9ff;border-left:2.5pt solid #4BACED;padding:5pt 9pt;font-size:9pt;color:#374151;margin-top:4pt;line-height:1.5;}',
+    '.rfp-subsection-title{font-size:10pt;font-weight:700;color:#745B35;margin-bottom:4pt;}',
+    '.rfp-deliverables{background:var(--cpc-gold-tint);border-left:2.5pt solid #BA9765;padding:5pt 9pt;font-size:9pt;color:#374151;margin-top:4pt;line-height:1.5;}',
     '.rfp-spec-table{width:100%;border-collapse:collapse;margin:7pt 0;font-size:9pt;}',
-    '.rfp-spec-table th{background:#215868;color:white;padding:5pt 9pt;font-weight:700;border:0.5pt solid #163d4e;}',
+    '.rfp-spec-table th{background:#745B35;color:white;padding:5pt 9pt;font-weight:700;border:0.5pt solid #E9DCC4;}',
     '.rfp-spec-table td{padding:4.5pt 9pt;border:0.5pt solid #d1d5db;line-height:1.5;vertical-align:top;background:white;}',
-    '.rfp-spec-table tr:nth-child(even) td{background:#f0f9ff;}',
-    '.rfp-footer{background:#215868;color:white;padding:10pt 24pt;text-align:center;font-size:8pt;line-height:1.8;}',
+    '.rfp-spec-table tr:nth-child(even) td{background:var(--cpc-gold-tint);}',
+    '.rfp-footer{background:#745B35;color:white;padding:10pt 24pt;text-align:center;font-size:8pt;line-height:1.8;}',
     'table{border-collapse:collapse;}',
     'h1,h2,h3,h4{color:#1a1a1a;}',
   ].join('\n');
@@ -1054,7 +1054,7 @@ rfpTabs.vendors = async function(rfpId, rfp) {
     // Received emails count
     const rxCount = receivedMap[v.id] || 0;
     const rxBadge = rxCount > 0
-      ? '<span style="background:#ede9fe;color:#7c3aed;border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:600;margin-left:4px"><i class="fas fa-reply mr-1"></i>' + rxCount + ' replied</span>'
+      ? '<span style="background:#ede9fe;color:var(--cpc-gold-deep);border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:600;margin-left:4px"><i class="fas fa-reply mr-1"></i>' + rxCount + ' replied</span>'
       : '';
 
     // Communications button: disabled if declined
@@ -1063,7 +1063,7 @@ rfpTabs.vendors = async function(rfpId, rfp) {
       : '<button class="btn-ghost btn-sm" onclick="navigateToVendorComms(' + rfpId + ',' + v.id + ')" title="Open Communications"><i class="fas fa-comments"></i>Comms</button>';
 
     // Avatar background: red if declined
-    const avatarBg = isDeclined ? '#dc2626' : 'var(--cpc-blue)';
+    const avatarBg = isDeclined ? '#dc2626' : 'var(--cpc-ink)';
 
     // Participant code (only shown when vendor is shortlisted/invited)
     const participantCode = allowRemove ? 'RFP-' + rfpId + '-V' + v.id : '';
@@ -1074,7 +1074,7 @@ rfpTabs.vendors = async function(rfpId, rfp) {
       + (isDeclined ? '<i class="fas fa-times" style="font-size:0.75rem"></i>' : escHtml(v.name.charAt(0))) + '</div>'
       + '<div><div style="font-weight:600;font-size:0.875rem' + (isDeclined ? ';color:#991b1b' : '') + '">' + escHtml(v.name) + '</div>'
       + '<div style="font-size:0.72rem;color:#9ca3af">' + escHtml(v.country||'UAE') + ' &bull; ' + escHtml(v.size||'')
-      + (participantCode ? ' &bull; <span style="font-family:monospace;color:var(--cpc-blue);font-weight:600" title="Participant Reference">' + participantCode + '</span>' : '')
+      + (participantCode ? ' &bull; <span style="font-family:monospace;color:var(--cpc-ink);font-weight:600" title="Participant Reference">' + participantCode + '</span>' : '')
       + '</div>'
       + '</div></div></td>'
       + '<td><div>' + tags + '</div></td>'
@@ -1291,7 +1291,7 @@ rfpTabs.emails = async function(rfpId) {
         const dateStr = e.created_at ? new Date(e.created_at).toLocaleString('en-AE') : '-';
         const attachBadge = e.has_attachment
           ? '<span style="background:#fef3c7;color:#92400e;border-radius:4px;padding:2px 6px;font-size:0.7rem;font-weight:600"><i class="fas fa-paperclip mr-1"></i>Attachment</span>'
-          : (e.has_pdf ? '<span style="background:#ede9fe;color:#7c3aed;border-radius:4px;padding:2px 6px;font-size:0.7rem;font-weight:600"><i class="fas fa-file-pdf mr-1"></i>PDF</span>' : '');
+          : (e.has_pdf ? '<span style="background:#ede9fe;color:var(--cpc-gold-deep);border-radius:4px;padding:2px 6px;font-size:0.7rem;font-weight:600"><i class="fas fa-file-pdf mr-1"></i>PDF</span>' : '');
         const typeBadge = '<span style="background:#f3f4f6;color:#6b7280;border-radius:4px;padding:2px 6px;font-size:0.7rem">' + escHtml(e.email_type||'') + '</span>';
 
         const bodyCollapseId = 'email-body-' + e.id;
@@ -1301,17 +1301,17 @@ rfpTabs.emails = async function(rfpId) {
 
         threadEmails += '<div style="display:flex;gap:0.75rem;margin-bottom:0.875rem;flex-direction:' + (isInbound ? 'row' : 'row-reverse') + '">'
           // Avatar
-          + '<div style="width:32px;height:32px;border-radius:50%;background:' + (isInbound ? '#7c3aed' : 'var(--cpc-gold)') + ';display:flex;align-items:center;justify-content:center;flex-shrink:0">'
+          + '<div style="width:32px;height:32px;border-radius:50%;background:' + (isInbound ? '#BA9765' : 'var(--cpc-gold)') + ';display:flex;align-items:center;justify-content:center;flex-shrink:0">'
           + '<i class="fas ' + (isInbound ? 'fa-user' : 'fa-crown') + '" style="color:white;font-size:0.75rem"></i></div>'
           // Bubble
           + '<div style="flex:1;max-width:85%">'
           + '<div style="background:' + (isInbound ? '#f5f3ff' : '#fff7e6') + ';border:1px solid ' + (isInbound ? '#ede9fe' : '#fde68a') + ';border-radius:' + (isInbound ? '0 12px 12px 12px' : '12px 0 12px 12px') + ';padding:0.75rem 1rem">'
           + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.4rem;gap:0.5rem;flex-wrap:wrap">'
-          + '<span style="font-weight:600;font-size:0.8rem;color:' + (isInbound ? '#7c3aed' : '#b45309') + '">' + escHtml(isInbound ? (e.from_email||vdata.vendor_name) : 'CPC Procurement') + '</span>'
+          + '<span style="font-weight:600;font-size:0.8rem;color:' + (isInbound ? '#BA9765' : '#b45309') + '">' + escHtml(isInbound ? (e.from_email||vdata.vendor_name) : 'CPC Procurement') + '</span>'
           + '<div style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap">' + typeBadge + attachBadge + '<span style="font-size:0.7rem;color:#9ca3af">' + dateStr + '</span></div>'
           + '</div>'
           + '<div style="font-size:0.82rem;font-weight:600;color:#374151;margin-bottom:0.4rem">' + escHtml(e.subject||'(no subject)') + '</div>'
-          + '<button onclick="toggleInboundBody(\'' + bodyCollapseId + '\')" style="font-size:0.72rem;color:' + (isInbound ? '#7c3aed' : '#b45309') + ';background:none;border:none;cursor:pointer;padding:0;margin-bottom:0.4rem">'
+          + '<button onclick="toggleInboundBody(\'' + bodyCollapseId + '\')" style="font-size:0.72rem;color:' + (isInbound ? '#BA9765' : '#b45309') + ';background:none;border:none;cursor:pointer;padding:0;margin-bottom:0.4rem">'
           + '<i class="fas fa-chevron-down" id="chevron-' + bodyCollapseId + '"></i> View body</button>'
           + '<div id="' + bodyCollapseId + '" style="display:none;margin-top:0.5rem">' + bodyContent + '</div>'
           + (isInbound && e.has_attachment ? '<div style="margin-top:0.5rem;font-size:0.75rem;color:#92400e;background:#fef3c7;padding:4px 8px;border-radius:4px"><i class="fas fa-file-excel mr-1"></i>Attachment processed — see Q&A tab</div>' : '')
@@ -1338,12 +1338,12 @@ rfpTabs.emails = async function(rfpId) {
 
       vendorThreadsHtml += '<div class="card" style="padding:0;overflow:hidden;margin-bottom:0.875rem">'
         // Thread header
-        + '<div style="padding:0.875rem 1rem;background:linear-gradient(135deg,#1a1a2e0a,#4f46e508);display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #f3f4f6">'
+        + '<div style="padding:0.875rem 1rem;background:linear-gradient(135deg,#1B17120a,#4f46e508);display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #f3f4f6">'
         + '<div style="display:flex;align-items:center;gap:0.75rem">'
-        + '<div style="width:36px;height:36px;border-radius:8px;background:var(--cpc-blue);display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:0.85rem">' + escHtml((vdata.vendor_name||'?').charAt(0)) + '</div>'
+        + '<div style="width:36px;height:36px;border-radius:8px;background:var(--cpc-ink);display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:0.85rem">' + escHtml((vdata.vendor_name||'?').charAt(0)) + '</div>'
         + '<div>'
         + '<div style="font-weight:700;font-size:0.9rem;color:#1f2937">' + escHtml(vdata.vendor_name) + '</div>'
-        + '<div style="font-size:0.75rem;color:#9ca3af">' + vEmails.length + ' message(s)' + (vReceivedCount > 0 ? ' &bull; <span style="color:#7c3aed;font-weight:600">' + vReceivedCount + ' received</span>' : '') + '</div>'
+        + '<div style="font-size:0.75rem;color:#9ca3af">' + vEmails.length + ' message(s)' + (vReceivedCount > 0 ? ' &bull; <span style="color:var(--cpc-gold-deep);font-weight:600">' + vReceivedCount + ' received</span>' : '') + '</div>'
         + '</div>'
         + '</div>'
         + '<div style="display:flex;gap:0.5rem">'
@@ -1367,7 +1367,7 @@ rfpTabs.emails = async function(rfpId) {
     // Header
     + '<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:0.5rem">'
     + '<div>'
-    + '<h3 style="font-weight:700;font-size:0.95rem;color:#1f2937;margin:0"><i class="fas fa-comments mr-2" style="color:var(--cpc-blue)"></i>Email Correspondence</h3>'
+    + '<h3 style="font-weight:700;font-size:0.95rem;color:#1f2937;margin:0"><i class="fas fa-comments mr-2" style="color:var(--cpc-ink)"></i>Email Correspondence</h3>'
     + '<p style="font-size:0.8rem;color:#9ca3af;margin:0">'
     + totalVendors + ' vendor thread(s) &bull; '
     + '<div style="display:inline-flex;align-items:center;gap:4px"><div style="width:8px;height:8px;border-radius:50%;background:#22c55e;animation:pulse 2s infinite"></div>'
@@ -1597,7 +1597,7 @@ function pulseQATab() {
     if (t.textContent && t.textContent.includes('Q&A')) {
       t.style.animation = 'none';
       t.style.background = '#7c3aed22';
-      t.style.borderColor = '#7c3aed';
+      t.style.borderColor = '#BA9765';
       setTimeout(function() { t.style.background = ''; t.style.borderColor = ''; }, 3000);
     }
   });
@@ -1920,7 +1920,7 @@ rfpTabs.proposals = async function(rfpId) {
 
     rows += '<tr style="' + rowBg + '">'
       + '<td><div style="display:flex;align-items:center;gap:8px">'
-      + '<div style="width:32px;height:32px;border-radius:8px;background:var(--cpc-blue);display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:0.8rem;flex-shrink:0">' + escHtml((p.vendor_name||'?').charAt(0)) + '</div>'
+      + '<div style="width:32px;height:32px;border-radius:8px;background:var(--cpc-ink);display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:0.8rem;flex-shrink:0">' + escHtml((p.vendor_name||'?').charAt(0)) + '</div>'
       + '<div><div style="font-weight:600;font-size:0.87rem">' + escHtml(p.vendor_name||'Unknown') + '</div></div>'
       + '</div></td>'
       + '<td style="font-size:0.82rem;color:#6b7280">' + dateStr + '</td>'
@@ -2057,7 +2057,7 @@ function viewProposalDetail(id) {
   let techHtml = '';
   if (p.executive_summary) {
     techHtml = '<div style="margin-bottom:1.25rem">'
-      + '<div class="panel-section-title"><i class="fas fa-file-alt" style="color:var(--cpc-blue)"></i>Technical Approach</div>'
+      + '<div class="panel-section-title"><i class="fas fa-file-alt" style="color:var(--cpc-ink)"></i>Technical Approach</div>'
       + '<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:0.875rem;font-size:0.82rem;line-height:1.7;color:#1e3a5f">' + escHtml(p.executive_summary) + '</div>'
       + '</div>';
   } else if (p.technical_proposal) {
@@ -2098,7 +2098,7 @@ function viewProposalDetail(id) {
     var docItems = attachments.map(function(a) {
       var sizeStr = a.size_bytes > 0 ? (Math.round(a.size_bytes / 1024 / 1024 * 10) / 10) + ' MB' : '';
       var openBtn = a.url
-        ? '<a href="' + escHtml(a.url) + '" target="_blank" style="text-decoration:none;font-size:0.75rem;font-weight:600;color:#1d4ed8;padding:3px 8px;border:1px solid #bfdbfe;border-radius:5px;background:#eff6ff;display:inline-flex;align-items:center;gap:3px"><i class="fas fa-external-link-alt" style="font-size:0.6rem"></i>Open</a>' : '';
+        ? '<a href="' + escHtml(a.url) + '" target="_blank" style="text-decoration:none;font-size:0.75rem;font-weight:600;color:var(--cpc-ink);padding:3px 8px;border:1px solid #bfdbfe;border-radius:5px;background:#eff6ff;display:inline-flex;align-items:center;gap:3px"><i class="fas fa-external-link-alt" style="font-size:0.6rem"></i>Open</a>' : '';
       var dlBtn = a.url
         ? '<a href="' + escHtml(a.url) + '" download="' + escHtml(a.filename) + '" style="text-decoration:none;font-size:0.75rem;color:#6b7280;padding:3px 7px;border:1px solid #e5e7eb;border-radius:5px;background:#f9fafb;display:inline-flex;align-items:center;gap:3px"><i class="fas fa-download" style="font-size:0.6rem"></i>Save</a>' : '';
       return '<div style="display:flex;align-items:center;gap:0.625rem;padding:0.55rem 0.75rem;border-bottom:1px solid #f3f4f6">'
@@ -2118,7 +2118,7 @@ function viewProposalDetail(id) {
   } else if (p.pdf_attachment_url) {
     var singleOpen = p.pdf_attachment_url.startsWith('data:')
       ? '<button class="btn-secondary" onclick="downloadProposalPdf(' + p.id + ')"><i class="fas fa-download mr-1"></i>Download PDF</button>'
-      : '<a href="' + escHtml(p.pdf_attachment_url) + '" target="_blank" style="text-decoration:none;font-size:0.78rem;font-weight:600;color:#1d4ed8;padding:5px 12px;border:1px solid #bfdbfe;border-radius:6px;background:#eff6ff;display:inline-flex;align-items:center;gap:4px"><i class="fas fa-external-link-alt" style="font-size:0.65rem"></i>Open PDF</a>'
+      : '<a href="' + escHtml(p.pdf_attachment_url) + '" target="_blank" style="text-decoration:none;font-size:0.78rem;font-weight:600;color:var(--cpc-ink);padding:5px 12px;border:1px solid #bfdbfe;border-radius:6px;background:#eff6ff;display:inline-flex;align-items:center;gap:4px"><i class="fas fa-external-link-alt" style="font-size:0.65rem"></i>Open PDF</a>'
         + ' <a href="' + escHtml(p.pdf_attachment_url) + '" download="' + escHtml(p.pdf_filename||'proposal.pdf') + '" style="text-decoration:none;font-size:0.78rem;color:#6b7280;padding:5px 10px;border:1px solid #e5e7eb;border-radius:6px;background:#f9fafb;display:inline-flex;align-items:center;gap:4px;margin-left:4px"><i class="fas fa-download" style="font-size:0.65rem"></i>Save</a>';
     docsHtml = '<div style="margin-bottom:1.25rem">'
       + '<div class="panel-section-title"><i class="fas fa-paperclip" style="color:#6b7280"></i>Submitted Document</div>'
@@ -2145,7 +2145,7 @@ function viewProposalDetail(id) {
   panel.innerHTML =
     // ── Panel header ──────────────────────────────────────────────────────
     '<div style="position:sticky;top:0;z-index:10;background:#fff;border-bottom:1px solid #e5e7eb;padding:1rem 1.25rem;display:flex;align-items:center;gap:0.875rem">'
-    + '<div style="width:40px;height:40px;border-radius:10px;background:var(--cpc-blue);display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:1rem;flex-shrink:0">' + escHtml((p.vendor_name||'?').charAt(0)) + '</div>'
+    + '<div style="width:40px;height:40px;border-radius:10px;background:var(--cpc-ink);display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:1rem;flex-shrink:0">' + escHtml((p.vendor_name||'?').charAt(0)) + '</div>'
     + '<div style="flex:1;min-width:0">'
     + '<div style="font-weight:700;font-size:0.97rem;color:#1f2937;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + escHtml(p.vendor_name||'Unknown Vendor') + '</div>'
     + '<div style="font-size:0.75rem;color:#9ca3af">' + dateStr + '</div>'
@@ -2157,11 +2157,11 @@ function viewProposalDetail(id) {
     + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0;border-bottom:1px solid #e5e7eb">'
     + '<div style="padding:0.875rem 1.25rem;border-right:1px solid #e5e7eb">'
     + '<div style="font-size:0.68rem;color:#9ca3af;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:3px">Budget</div>'
-    + '<div style="font-size:1rem;font-weight:700;color:#0f3460">' + escHtml(fin) + '</div>'
+    + '<div style="font-size:1rem;font-weight:700;color:#745B35">' + escHtml(fin) + '</div>'
     + '</div>'
     + '<div style="padding:0.875rem 1.25rem;border-right:1px solid #e5e7eb">'
     + '<div style="font-size:0.68rem;color:#9ca3af;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:3px">Delivery Timeline</div>'
-    + '<div style="font-size:1rem;font-weight:700;color:#0f3460">' + escHtml(dur) + '</div>'
+    + '<div style="font-size:1rem;font-weight:700;color:#745B35">' + escHtml(dur) + '</div>'
     + '</div>'
     + '<div style="padding:0.875rem 1.25rem">'
     + '<div style="font-size:0.68rem;color:#9ca3af;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:3px">Status</div>'
@@ -2256,7 +2256,7 @@ pages.vendor_comms = async function(opts) {
       const hasAttach = e.has_attachment || e.has_pdf;
       let attachBadgeHtml = '';
       if (e.has_pdf) {
-        attachBadgeHtml = '<span style="background:#ede9fe;color:#7c3aed;border-radius:4px;padding:2px 6px;font-size:0.7rem;font-weight:600"><i class="fas fa-file-pdf mr-1"></i>PDF Proposal</span>';
+        attachBadgeHtml = '<span style="background:#ede9fe;color:var(--cpc-gold-deep);border-radius:4px;padding:2px 6px;font-size:0.7rem;font-weight:600"><i class="fas fa-file-pdf mr-1"></i>PDF Proposal</span>';
       } else if (e.has_attachment) {
         attachBadgeHtml = '<span style="background:#fef3c7;color:#92400e;border-radius:4px;padding:2px 6px;font-size:0.7rem;font-weight:600"><i class="fas fa-paperclip mr-1"></i>Attachment</span>';
       }
@@ -2274,8 +2274,8 @@ pages.vendor_comms = async function(opts) {
       const bubbleStyle = isInbound
         ? 'background:#f5f3ff;border:1px solid #ede9fe;border-radius:0 12px 12px 12px;padding:0.875rem 1rem'
         : 'background:#fff7e6;border:1px solid #fde68a;border-radius:12px 0 12px 12px;padding:0.875rem 1rem';
-      const nameColor = isInbound ? '#7c3aed' : '#b45309';
-      const avatarBg = isInbound ? '#7c3aed' : 'var(--cpc-gold)';
+      const nameColor = isInbound ? '#BA9765' : '#b45309';
+      const avatarBg = isInbound ? '#BA9765' : 'var(--cpc-gold)';
       const avatarIcon = isInbound ? 'fa-user' : 'fa-crown';
       const alignDir = isInbound ? 'row' : 'row-reverse';
       const displayName = isInbound ? escHtml(e.from_email || vendorName) : 'CPC Procurement';
@@ -2320,7 +2320,7 @@ pages.vendor_comms = async function(opts) {
       + '<button class="btn-ghost" onclick="navigateTo(\'rfp_detail\',{rfpId:' + rfpId + ',tab:\'vendors\'})"><i class="fas fa-arrow-left"></i>Back to RFP</button>'
       + '</div>'
     : '<div class="card" style="padding:1.25rem;margin-top:1rem">'
-      + '<h4 style="font-weight:700;font-size:0.875rem;color:#1f2937;margin:0 0 0.75rem"><i class="fas fa-reply mr-2" style="color:var(--cpc-blue)"></i>Reply to ' + escHtml(vendorName) + '</h4>'
+      + '<h4 style="font-weight:700;font-size:0.875rem;color:#1f2937;margin:0 0 0.75rem"><i class="fas fa-reply mr-2" style="color:var(--cpc-ink)"></i>Reply to ' + escHtml(vendorName) + '</h4>'
       + '<div class="form-group" style="margin-bottom:0.5rem">'
       + '<input id="vc-reply-subj" type="text" placeholder="Subject..." style="width:100%;padding:7px 10px;border:1px solid #e5e7eb;border-radius:6px;font-size:0.82rem;box-sizing:border-box">'
       + '</div>'
@@ -2348,12 +2348,12 @@ pages.vendor_comms = async function(opts) {
     // Header card
     + '<div class="card" style="padding:1rem 1.25rem;margin-bottom:1rem;display:flex;align-items:center;justify-content:space-between' + (vendorDeclined ? ';background:#fef2f2;border:1.5px solid #fca5a5' : '') + '">'
     + '<div style="display:flex;align-items:center;gap:0.875rem">'
-    + '<div style="width:44px;height:44px;border-radius:10px;background:' + (vendorDeclined ? '#dc2626' : 'var(--cpc-blue)') + ';display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:1.1rem">'
+    + '<div style="width:44px;height:44px;border-radius:10px;background:' + (vendorDeclined ? '#dc2626' : 'var(--cpc-ink)') + ';display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:1.1rem">'
     + (vendorDeclined ? '<i class="fas fa-times" style="font-size:1rem"></i>' : escHtml((vendorName||'?').charAt(0))) + '</div>'
     + '<div>'
     + '<div style="font-weight:700;font-size:0.95rem;color:' + (vendorDeclined ? '#991b1b' : '#1f2937') + '">' + escHtml(vendorName) + '</div>'
     + '<div style="font-size:0.78rem;color:#9ca3af">' + vendorEmails.length + ' message(s) in thread'
-    + ' &bull; <span style="font-family:monospace;color:var(--cpc-blue);font-weight:600" title="Participant Reference Code">RFP-' + rfpId + '-V' + vendorId + '</span>'
+    + ' &bull; <span style="font-family:monospace;color:var(--cpc-ink);font-weight:600" title="Participant Reference Code">RFP-' + rfpId + '-V' + vendorId + '</span>'
     + (vendorDeclined ? ' &bull; <span style="color:#dc2626;font-weight:600">DECLINED</span>' : '') + '</div>'
     + '</div></div>'
     + '<div style="display:flex;gap:0.5rem">'
@@ -2420,7 +2420,7 @@ pages.vendors = async function() {
 
     rows += '<tr>'
       + '<td><div style="display:flex;align-items:center;gap:0.75rem">'
-      + '<div style="width:34px;height:34px;border-radius:8px;background:var(--cpc-blue);display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:0.82rem;flex-shrink:0">' + escHtml(v.name.charAt(0)) + '</div>'
+      + '<div style="width:34px;height:34px;border-radius:8px;background:var(--cpc-ink);display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:0.82rem;flex-shrink:0">' + escHtml(v.name.charAt(0)) + '</div>'
       + '<div><div style="font-weight:600;font-size:0.875rem">' + escHtml(v.name) + '</div>'
       + '<div style="font-size:0.72rem;color:#9ca3af">' + escHtml(v.country||'UAE') + ' &bull; ' + escHtml(v.size||'') + '</div>'
       + '</div></div></td>'
@@ -2451,7 +2451,7 @@ function viewVendorDetail(id) {
   if (!vendor) return;
   showModal(
     '<div style="display:flex;align-items:center;gap:0.875rem;margin-bottom:1.25rem">'
-    + '<div style="width:48px;height:48px;border-radius:12px;background:var(--cpc-blue);display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:1.25rem">' + escHtml(vendor.name.charAt(0)) + '</div>'
+    + '<div style="width:48px;height:48px;border-radius:12px;background:var(--cpc-ink);display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:1.25rem">' + escHtml(vendor.name.charAt(0)) + '</div>'
     + '<div><h3 style="font-size:1rem;font-weight:700;margin:0">' + escHtml(vendor.name) + '</h3>'
     + '<p style="color:#6b7280;font-size:0.82rem;margin:0">' + escHtml(vendor.category||'') + '</p></div>'
     + '</div>'
@@ -2520,14 +2520,14 @@ pages.reports = async function() {
   setContent(
     '<div class="space-y-4">'
     + '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:0.875rem">'
-    + '<div class="stat-card"><div class="stat-label">Total RFPs</div><div class="stat-value" style="color:var(--cpc-blue)">' + (stats.totalRfps||0) + '</div></div>'
+    + '<div class="stat-card"><div class="stat-label">Total RFPs</div><div class="stat-value" style="color:var(--cpc-ink)">' + (stats.totalRfps||0) + '</div></div>'
     + '<div class="stat-card"><div class="stat-label">Win Rate</div><div class="stat-value" style="color:var(--cpc-gold)">' + (stats.winRate||0) + '%</div></div>'
     + '<div class="stat-card"><div class="stat-label">Avg RFP Duration</div><div class="stat-value" style="color:#065f46">' + (stats.avgDuration ? stats.avgDuration + 'd' : 'N/A') + '</div></div>'
-    + '<div class="stat-card"><div class="stat-label">Registered Vendors</div><div class="stat-value" style="color:#7c3aed">' + (stats.totalVendors||0) + '</div></div>'
+    + '<div class="stat-card"><div class="stat-label">Registered Vendors</div><div class="stat-value" style="color:var(--cpc-gold-deep)">' + (stats.totalVendors||0) + '</div></div>'
     + '</div>'
     + '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0.875rem">'
-    + '<div class="stat-card"><div class="stat-label">Total Proposals</div><div class="stat-value" style="color:#dc6803">' + (stats.totalProposals||0) + '</div></div>'
-    + '<div class="stat-card"><div class="stat-label">Emails Sent</div><div class="stat-value" style="color:#1d4ed8">' + (stats.totalEmails||0) + '</div></div>'
+    + '<div class="stat-card"><div class="stat-label">Total Proposals</div><div class="stat-value" style="color:var(--cpc-gold-deep)">' + (stats.totalProposals||0) + '</div></div>'
+    + '<div class="stat-card"><div class="stat-label">Emails Sent</div><div class="stat-value" style="color:var(--cpc-ink)">' + (stats.totalEmails||0) + '</div></div>'
     + '<div class="stat-card"><div class="stat-label">Awarded RFPs</div><div class="stat-value" style="color:#065f46">' + (stats.awardedRfps||0) + '</div></div>'
     + '</div>'
     + '</div>'
@@ -2568,8 +2568,8 @@ function showCreateRfpModal() {
     + '<label style="display:flex;align-items:center;gap:6px;font-size:0.82rem;font-weight:600;color:#374151;margin-bottom:0.5rem">'
     + '<i class="fas fa-file-pdf" style="color:#dc2626"></i>Supporting Documents'
     + '<span style="font-weight:400;color:#9ca3af;font-size:0.72rem;margin-left:4px">— Optional. AI will read these during generation.</span></label>'
-    + buildDocUploadSlot('doc0', 'Conceptual Solution Architecture', 'fa-sitemap', '#7c3aed')
-    + buildDocUploadSlot('doc1', 'Business Requirements Document', 'fa-clipboard-list', '#0f3460')
+    + buildDocUploadSlot('doc0', 'Conceptual Solution Architecture', 'fa-sitemap', '#BA9765')
+    + buildDocUploadSlot('doc1', 'Business Requirements Document', 'fa-clipboard-list', '#745B35')
     + '</div>'
 
     // Action buttons
