@@ -3,7 +3,7 @@ import { initDb, seedVendors } from '../db/seed'
 import type { Bindings } from '../types'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-07-24-v7'
+const WORKER_VERSION = '2026-07-25-v1'
 
 export const apiRouter = new Hono<{ Bindings: Bindings }>()
 
@@ -3679,28 +3679,38 @@ EVALUATION PRINCIPLES:
 - Cross-reference the proposal against the RFP scope, BRD requirements, and CPC Architecture vision. Flag gaps clearly.
 - The vendor's Q&A responses are part of their submission and contribute to the overall assessment.
 - Financial scores must reflect actual disclosed pricing. If no financial data is provided, score TCO and Commercial Terms as 0 and state this explicitly.
-- Scores must be internally consistent: if a criterion justification says "not addressed", the score must be low (0–30), not mid-range.
+- Scores must be internally consistent: if a criterion justification says "not addressed", the score must be low (0-30), not mid-range.
 
-Return a JSON object with EXACTLY this structure — no extra fields, no markdown:
+CRITICAL JSON OUTPUT RULES - YOU MUST FOLLOW THESE EXACTLY OR YOUR RESPONSE WILL BE REJECTED:
+1. Respond with ONLY a valid JSON object. No markdown, no code fences, no text before or after the JSON.
+2. All string values (justification, summary, name) must contain ONLY plain ASCII text.
+3. Do NOT use angle brackets < or > anywhere in your response — not even in descriptions.
+4. Do NOT use unescaped double quotes inside string values. Use single quotes or rephrase instead.
+5. Do NOT use backslashes inside string values.
+6. Do NOT use newlines or tab characters inside string values — write each justification as a single line.
+7. Keep each justification under 250 characters.
+8. The JSON must be directly parseable by JSON.parse() with zero preprocessing.
+
+Return a JSON object with EXACTLY this structure:
 {
   "scores": {
-    "business": <integer 0-100>,
-    "technical": <integer 0-100>,
-    "financial": <integer 0-100>,
-    "experience": <integer 0-100>
+    "business": 0,
+    "technical": 0,
+    "financial": 0,
+    "experience": 0
   },
   "criteria": [
-    {"name": "Solution Architecture & Methodology", "dimension": "Technical", "weight": 15, "score": <int 0-100>, "justification": "<2-3 sentences: what was proposed vs what RFP/BRD/Arch required; note any gaps>", "weighted": <weight*score/100 as float>},
-    {"name": "Implementation Approach & Timeline", "dimension": "Technical", "weight": 15, "score": <int 0-100>, "justification": "<2-3 sentences: milestone plan, phasing, risk mitigation; note missing elements>", "weighted": <float>},
-    {"name": "Technical Team Qualifications", "dimension": "Technical", "weight": 10, "score": <int 0-100>, "justification": "<2-3 sentences: named roles, certifications, UAE gov experience evidenced in proposal>", "weighted": <float>},
-    {"name": "Government Sector Experience", "dimension": "Business", "weight": 20, "score": <int 0-100>, "justification": "<2-3 sentences: UAE/Abu Dhabi government references stated in proposal; lack of evidence = low score>", "weighted": <float>},
-    {"name": "Training & Knowledge Transfer", "dimension": "Business", "weight": 10, "score": <int 0-100>, "justification": "<2-3 sentences: training plan, KT methodology, Arabic-language materials; note if absent>", "weighted": <float>},
-    {"name": "Total Cost of Ownership (TCO)", "dimension": "Commercial", "weight": 20, "score": <int 0-100>, "justification": "<2-3 sentences: stated price, breakdown, multi-year support cost; score 0 if no financial data submitted>", "weighted": <float>},
-    {"name": "Commercial Terms & Payment Structure", "dimension": "Commercial", "weight": 10, "score": <int 0-100>, "justification": "<2-3 sentences: payment milestones, warranty, liability; score 0 if not disclosed>", "weighted": <float>}
+    {"name": "Solution Architecture & Methodology", "dimension": "Technical", "weight": 15, "score": 0, "justification": "Write your 2-3 sentence plain-text assessment here. No special chars.", "weighted": 0.0},
+    {"name": "Implementation Approach & Timeline", "dimension": "Technical", "weight": 15, "score": 0, "justification": "Write your 2-3 sentence plain-text assessment here. No special chars.", "weighted": 0.0},
+    {"name": "Technical Team Qualifications", "dimension": "Technical", "weight": 10, "score": 0, "justification": "Write your 2-3 sentence plain-text assessment here. No special chars.", "weighted": 0.0},
+    {"name": "Government Sector Experience", "dimension": "Business", "weight": 20, "score": 0, "justification": "Write your 2-3 sentence plain-text assessment here. No special chars.", "weighted": 0.0},
+    {"name": "Training & Knowledge Transfer", "dimension": "Business", "weight": 10, "score": 0, "justification": "Write your 2-3 sentence plain-text assessment here. No special chars.", "weighted": 0.0},
+    {"name": "Total Cost of Ownership (TCO)", "dimension": "Commercial", "weight": 20, "score": 0, "justification": "Write your 2-3 sentence plain-text assessment here. No special chars.", "weighted": 0.0},
+    {"name": "Commercial Terms & Payment Structure", "dimension": "Commercial", "weight": 10, "score": 0, "justification": "Write your 2-3 sentence plain-text assessment here. No special chars.", "weighted": 0.0}
   ],
-  "summary": "<4-5 sentence evaluation: reference the actual RFP topic, the vendor's key strengths, identified gaps vs RFP/BRD requirements, financial position, and a clear recommendation>"
+  "summary": "Write your 4-5 sentence plain-text summary here. Reference actual RFP topic, vendor strengths, gaps vs RFP requirements, financial position, and recommendation. No special chars."
 }
-Return ONLY the JSON. No markdown code blocks, no commentary outside the JSON.`
+Replace the score values (currently 0) and the justification/summary placeholder text with your real evaluation. Return ONLY the JSON.`
 
   // ── Assemble user prompt with ALL reference documents (no caps) ───────────────────────────────
   const sections: string[] = []
@@ -3762,29 +3772,79 @@ ${cleanProposalText}`)
     if (jsonMatch) {
       let jsonStr = jsonMatch[0]
       let parsed: any
-      // First attempt: direct parse
+
+      // ── Stage 1: Direct parse ──────────────────────────────────────────────
       try {
         parsed = JSON.parse(jsonStr)
-      } catch (parseErr: any) {
-        // Second attempt: truncate at last valid closing brace.
-        // LLM sometimes emits a partially-escaped string that breaks at a specific position.
-        // Walk backwards from the end to find the last '}' that produces valid JSON.
-        console.warn(`[evaluateProposal] JSON parse failed (${parseErr.message}), attempting repair...`)
-        let repaired = false
-        for (let cut = jsonStr.length - 1; cut > jsonStr.length / 2; cut--) {
-          if (jsonStr[cut] === '}') {
-            try {
-              parsed = JSON.parse(jsonStr.slice(0, cut + 1))
-              console.warn(`[evaluateProposal] JSON repaired by truncating at position ${cut}`)
-              repaired = true
-              break
-            } catch (_) { /* keep searching */ }
+      } catch (parseErr1: any) {
+        console.warn(`[evaluateProposal] Stage1 parse failed (${parseErr1.message}), trying sanitize...`)
+
+        // ── Stage 2: Sanitize string values then re-parse ───────────────────
+        // The LLM sometimes embeds unescaped single-quotes, angle brackets, or
+        // stray control characters inside JSON string values.  We process the
+        // raw text character-by-character, staying aware of whether we are
+        // inside a JSON string, and escape/remove any character that would
+        // break the string literal.
+        try {
+          let sanitized = ''
+          let inString = false
+          let escaped = false
+          for (let i = 0; i < jsonStr.length; i++) {
+            const ch = jsonStr[i]
+            if (escaped) {
+              // Keep the character after a backslash as-is (already escaped)
+              sanitized += ch
+              escaped = false
+              continue
+            }
+            if (ch === '\\') {
+              escaped = true
+              sanitized += ch
+              continue
+            }
+            if (ch === '"') {
+              inString = !inString
+              sanitized += ch
+              continue
+            }
+            if (inString) {
+              // Inside a JSON string value — strip/replace chars that break JSON
+              if (ch === '\n' || ch === '\r') {
+                sanitized += ' '   // newlines inside strings → space
+              } else if (ch === '\t') {
+                sanitized += ' '   // tabs → space
+              } else if (ch.charCodeAt(0) < 0x20) {
+                // other control characters → strip
+              } else {
+                sanitized += ch
+              }
+            } else {
+              sanitized += ch
+            }
+          }
+          parsed = JSON.parse(sanitized)
+          console.warn(`[evaluateProposal] Stage2 sanitize+parse succeeded`)
+        } catch (parseErr2: any) {
+          console.warn(`[evaluateProposal] Stage2 failed (${parseErr2.message}), trying truncation repair...`)
+
+          // ── Stage 3: Walk backwards to find last valid closing brace ───────
+          let repaired = false
+          for (let cut = jsonStr.length - 1; cut > jsonStr.length / 2; cut--) {
+            if (jsonStr[cut] === '}') {
+              try {
+                parsed = JSON.parse(jsonStr.slice(0, cut + 1))
+                console.warn(`[evaluateProposal] Stage3 truncation repair succeeded at pos ${cut}`)
+                repaired = true
+                break
+              } catch (_) { /* keep searching */ }
+            }
+          }
+          if (!repaired) {
+            throw parseErr1  // propagate original error with original message
           }
         }
-        if (!repaired) {
-          throw parseErr  // propagate original error
-        }
       }
+
       // Use ?? 0 (nullish coalescing) not || so LLM-returned 0 is preserved, not replaced by fallback
       return {
         scores: {
