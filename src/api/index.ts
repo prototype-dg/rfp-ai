@@ -3,7 +3,7 @@ import { initDb, seedVendors } from '../db/seed'
 import type { Bindings } from '../types'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-07-25-v10'
+const WORKER_VERSION = '2026-07-25-v11'
 
 export const apiRouter = new Hono<{ Bindings: Bindings }>()
 
@@ -145,8 +145,34 @@ apiRouter.post('/rfps/:id/generate', async (c) => {
     const id = c.req.param('id')
     const body = await c.req.json()
     const existingRfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(id).first<any>()
-    const archDocText = body.arch_doc_text || existingRfp?.arch_doc_text || ''
-    const brdDocText  = body.brd_doc_text  || existingRfp?.brd_doc_text  || ''
+    let archDocText = body.arch_doc_text || existingRfp?.arch_doc_text || ''
+    let brdDocText  = body.brd_doc_text  || existingRfp?.brd_doc_text  || ''
+
+    // If either doc field is just a placeholder note (text not extracted), attempt R2 re-fetch + extract
+    const isPlaceholder = (t: string) => !t || t.length < 500 || t.startsWith('[Document uploaded:') || t.startsWith('[PDF:')
+    const bucket: R2Bucket | undefined = (c.env as any).PROPOSALS_BUCKET
+    if (bucket && (isPlaceholder(archDocText) || isPlaceholder(brdDocText))) {
+      // List arch-docs keys for this RFP to find the stored PDFs
+      const listed = await bucket.list({ prefix: `arch-docs/${id}/` })
+      for (const obj of listed.objects) {
+        const r2Obj = await bucket.get(obj.key)
+        if (!r2Obj) continue
+        const ab = await r2Obj.arrayBuffer()
+        const bytes = new Uint8Array(ab)
+        const extracted = extractTextFromPdfBytes(bytes)
+        if (!extracted || extracted.length < 200) continue
+        const docType = r2Obj.customMetadata?.docType || (obj.key.toLowerCase().includes('brd') ? 'brd' : 'arch')
+        const text = `[Source: ${obj.key}, ${Math.round(bytes.length/1024)}KB]\n\n${extracted.slice(0, 15000)}`
+        if (docType === 'brd' && isPlaceholder(brdDocText)) {
+          brdDocText = text
+          await c.env.DB.prepare(`UPDATE rfps SET brd_doc_text=?, updated_at=datetime('now') WHERE id=?`).bind(text, id).run()
+        } else if (docType !== 'brd' && isPlaceholder(archDocText)) {
+          archDocText = text
+          await c.env.DB.prepare(`UPDATE rfps SET arch_doc_text=?, updated_at=datetime('now') WHERE id=?`).bind(text, id).run()
+        }
+      }
+    }
+
     const content = await generateRFPWithLLM(body, archDocText, brdDocText, c.env)
     await c.env.DB.prepare(`
       UPDATE rfps SET title=?, category=?, budget=?, deadline=?, scope=?, tech_requirements=?, objectives=?, background=?, content=?, arch_doc_text=?, brd_doc_text=?, updated_at=datetime('now')
@@ -159,7 +185,90 @@ apiRouter.post('/rfps/:id/generate', async (c) => {
   }
 })
 
-// POST /rfps/:id/upload-arch-doc — upload a supporting document PDF (text extraction removed)
+// PDF text extraction for Cloudflare Workers (no Node.js fs/buffer APIs available)
+// Uses a streaming byte-level parser to extract raw text from PDF content streams.
+function extractTextFromPdfBytes(bytes: Uint8Array): string {
+  try {
+    // Decode PDF bytes to string (latin1 to preserve all byte values)
+    const decoder = new TextDecoder('latin1')
+    const raw = decoder.decode(bytes)
+
+    const textParts: string[] = []
+
+    // Strategy 1: Extract all BT...ET (text blocks) from content streams
+    // First extract stream contents between "stream" and "endstream"
+    const streamRe = /stream\r?\n([\s\S]*?)endstream/g
+    let sm: RegExpExecArray | null
+    while ((sm = streamRe.exec(raw)) !== null) {
+      const streamContent = sm[1]
+      // Extract text from Tj and TJ operators within BT/ET blocks
+      const btRe = /BT([\s\S]*?)ET/g
+      let bm: RegExpExecArray | null
+      while ((bm = btRe.exec(streamContent)) !== null) {
+        const block = bm[1]
+        // Extract string args from Tj: (text) Tj
+        const tjRe = /\(([^)\\]*(?:\\.[^)\\]*)*)\)\s*Tj/g
+        let tj: RegExpExecArray | null
+        while ((tj = tjRe.exec(block)) !== null) {
+          textParts.push(unescapePdfString(tj[1]))
+        }
+        // Extract string arrays from TJ: [(text)(text)...] TJ
+        const tjArrayRe = /\[((?:[^[\]]*|\[[^\]]*\])*)\]\s*TJ/g
+        let ta: RegExpExecArray | null
+        while ((ta = tjArrayRe.exec(block)) !== null) {
+          const arrayContent = ta[1]
+          const strRe = /\(([^)\\]*(?:\\.[^)\\]*)*)\)/g
+          let sr: RegExpExecArray | null
+          while ((sr = strRe.exec(arrayContent)) !== null) {
+            textParts.push(unescapePdfString(sr[1]))
+          }
+          textParts.push(' ')
+        }
+        textParts.push('\n')
+      }
+    }
+
+    // Strategy 2: Also extract text from any decoded unicode strings (PDF /ToUnicode)
+    // Look for UTF-16 encoded strings that start with BOM
+    const utf16Re = /\xfe\xff([\s\S]{2,200}?)(?=\x00\x00|\))/g
+    let um: RegExpExecArray | null
+    while ((um = utf16Re.exec(raw)) !== null) {
+      try {
+        const utf16Bytes = []
+        const s = um[1]
+        for (let i = 0; i < s.length; i++) utf16Bytes.push(s.charCodeAt(i))
+        const buf = new Uint8Array(utf16Bytes)
+        const text = new TextDecoder('utf-16be').decode(buf)
+        if (/[\w\s]{3,}/.test(text)) textParts.push(text)
+      } catch (_) {}
+    }
+
+    // Combine, clean up PDF escape sequences and non-printable chars
+    let combined = textParts.join('')
+    // Remove non-printable chars except newlines/tabs/spaces
+    combined = combined.replace(/[^\x09\x0A\x0D\x20-\x7E\u00A0-\uFFFF]/g, ' ')
+    // Collapse excessive whitespace but preserve paragraph breaks
+    combined = combined.replace(/[ \t]+/g, ' ')
+    combined = combined.replace(/\n{3,}/g, '\n\n')
+    combined = combined.trim()
+
+    // If extraction got very little text (< 200 chars), return empty to signal failure
+    if (combined.length < 200) return ''
+    return combined
+  } catch (_) {
+    return ''
+  }
+}
+
+function unescapePdfString(s: string): string {
+  return s
+    .replace(/\\n/g, '\n').replace(/\\r/g, '\r').replace(/\\t/g, '\t')
+    .replace(/\\b/g, '\b').replace(/\\f/g, '\f')
+    .replace(/\\\(/g, '(').replace(/\\\)/g, ')').replace(/\\\\/g, '\\')
+    .replace(/\\([0-7]{1,3})/g, (_, oct) => String.fromCharCode(parseInt(oct, 8)))
+}
+
+// POST /rfps/:id/upload-arch-doc — upload a supporting document PDF with text extraction
 apiRouter.post('/rfps/:id/upload-arch-doc', async (c) => {
   try {
     const id = c.req.param('id')
@@ -184,15 +293,35 @@ apiRouter.post('/rfps/:id/upload-arch-doc', async (c) => {
       })
     }
 
-    // Store a placeholder note in the DB column (no text extraction)
-    const note = `[Document uploaded: ${file.name}, ${bytes.length} bytes${r2Key ? ', stored in R2' : ''}]`
-    if (isBRD) {
-      await c.env.DB.prepare(`UPDATE rfps SET brd_doc_text=?, updated_at=datetime('now') WHERE id=?`).bind(note, id).run()
+    // Extract text from the PDF for LLM context
+    let extractedText = extractTextFromPdfBytes(bytes)
+    let storageNote = ''
+    if (!extractedText || extractedText.length < 200) {
+      // Fallback: store a metadata note indicating text could not be extracted
+      storageNote = `[PDF: ${file.name}, ${Math.round(bytes.length/1024)}KB — text extraction incomplete. File stored in R2 at key: ${r2Key}. Use file name and context to infer content type.]`
+      extractedText = storageNote
     } else {
-      await c.env.DB.prepare(`UPDATE rfps SET arch_doc_text=?, updated_at=datetime('now') WHERE id=?`).bind(note, id).run()
+      // Prefix extracted text with document metadata
+      storageNote = `[Source: ${file.name}, ${Math.round(bytes.length/1024)}KB]\n\n`
+      extractedText = storageNote + extractedText
+      // Cap at 40000 chars to stay within LLM context window
+      if (extractedText.length > 40000) extractedText = extractedText.slice(0, 40000) + '\n\n[... document continues — content above is sufficient for RFP generation ...]'
     }
 
-    return c.json({ ok: true, column: isBRD ? 'brd_doc_text' : 'arch_doc_text', size: bytes.length, r2Key })
+    if (isBRD) {
+      await c.env.DB.prepare(`UPDATE rfps SET brd_doc_text=?, updated_at=datetime('now') WHERE id=?`).bind(extractedText, id).run()
+    } else {
+      await c.env.DB.prepare(`UPDATE rfps SET arch_doc_text=?, updated_at=datetime('now') WHERE id=?`).bind(extractedText, id).run()
+    }
+
+    return c.json({
+      ok: true,
+      column: isBRD ? 'brd_doc_text' : 'arch_doc_text',
+      size: bytes.length,
+      r2Key,
+      extracted_chars: extractedText.length,
+      extraction_ok: extractedText.length > 500
+    })
   } catch (e: any) {
     return c.json({ error: e.message }, 500)
   }
@@ -1402,179 +1531,159 @@ async function generateRFPWithLLM(data: any, archDocText: string, brdDocText: st
   // This URL is injected into the prompt so the LLM can reference it in the generated HTML.
   const LETTERHEAD_BG_URL = 'https://a7b32759-e743-4139-9bb0-4bae44886667.vip.gensparksite.com/api/proposals/pdf/letterhead/bg_a4.png'
 
-  const systemPrompt = `You are a senior government procurement specialist at the Crown Prince's Court (CPC) of Abu Dhabi, UAE. You are producing a formal, publication-ready Request for Proposal (RFP) document issued to external vendors on official CPC letterhead.
+  const systemPrompt = `You are a senior government procurement specialist at the Crown Prince's Court (CPC) of Abu Dhabi, UAE. You are producing a formal, comprehensive, publication-ready Request for Proposal (RFP) document issued to external vendors on official CPC letterhead.
 
-═══════════════════════════════════════════════════════
-IDENTITY & TONE
-═══════════════════════════════════════════════════════
-- You write on behalf of the Crown Prince's Court (Diwan Wali Al Ahd), Abu Dhabi — a sovereign UAE government institution.
-- Language must be authoritative, precise, and formal — as if it will be signed and stamped by a Director-General.
+IDENTITY AND TONE
+- You write on behalf of the Crown Prince's Court (Diwan Wali Al Ahd), Abu Dhabi, a sovereign UAE government institution.
+- Language must be authoritative, precise, and formal, as if it will be signed and stamped by a Director-General.
 - No filler sentences, no vague boilerplate. Every paragraph must contain actionable, verifiable requirements.
 - Write in formal English throughout. No abbreviations unless industry-standard.
+- This RFP must be as detailed and comprehensive as a real government procurement document. Vendors must be able to fully scope and price the work from this document alone.
 
-═══════════════════════════════════════════════════════
-PAGE & LETTERHEAD LAYOUT  (MANDATORY — apply to the outer wrapper)
-═══════════════════════════════════════════════════════
-The document must be rendered on the official CPC letterhead.
-The background image ${LETTERHEAD_BG_URL} must be applied as a full-bleed background to the outer page wrapper.
+CRITICAL: HOW TO USE SUPPORTING DOCUMENTS
+You will receive SUPPORTING DOCUMENTS (Business Requirements Document, Architecture Document) as plain extracted text.
+- READ and fully ABSORB the content of these documents into the RFP body sections.
+- The RFP must stand completely alone. A vendor reading only this RFP must understand the full scope, requirements, and context without access to any other file.
+- DO NOT reference document filenames or use phrases like "as per the BRD", "refer to the Architecture Document", "as specified in [filename]", "as defined in the attached document", "refer to [document name].pdf", or any similar external reference.
+- DO NOT write sentences like "acceptance criteria defined in the Business Requirements Document" -- instead, state the actual acceptance criteria inline within the RFP.
+- Extract specific data from the supporting documents: actual field names, table names, KPIs, module names, exact counts, business rules, data flows, user roles, access control requirements, report titles -- and embed them directly in the RFP text.
+- If a supporting document provides a list of reports, dashboards, data entities, or user roles, enumerate them explicitly in the relevant RFP section.
+- Supporting documents are internal working materials. The RFP is the external public procurement instrument. ALL information must live in the RFP body.
 
-OUTER PAGE WRAPPER — use exactly this inline style on the outermost <div>:
-  style="
-    position:relative;
-    width:210mm;
-    min-height:297mm;
-    margin:0 auto;
-    background-image:url('${LETTERHEAD_BG_URL}');
-    background-size:100% 100%;
-    background-repeat:no-repeat;
-    background-position:top left;
-    font-family:Arial,Calibri,'Segoe UI',sans-serif;
-    color:#1A1A1A;
-    box-sizing:border-box;
-  "
+DEPTH AND LENGTH REQUIREMENT
+- This RFP must be comprehensive. Each section must contain full substantive content, not bullet summaries.
+- Section 3 (Scope of Work) must be the longest section. Elaborate each workstream or phase with specific activities, inputs, outputs, and acceptance criteria stated inline.
+- Section 4 (Technical Requirements) must list each requirement as a specific, testable, measurable statement, structured as a table.
+- Target a minimum of 6,000 to 8,000 words of actual textual content spread across all 8 sections.
+- Do not truncate or summarize. Write every requirement in full.
 
-WHAT THE BACKGROUND IMAGE CONTAINS (already embedded in bg_a4.png — do NOT reproduce these elements in HTML):
-• Top decorative strip (~20-22 mm): geometric Arabic ornamental pattern in warm khaki/beige #A79C7F
-• Below the ornament: a thin "chain" border of repeating circles, ~2-4 px, dark #1A1A1A, full page width
-• Logo block (centered, ~12-15 mm below the chain border):
-    – Arabic calligraphic text «ديوان ولي العهد» (Diwani style, ~22 pt, #1A1A1A)
-    – Below it: «CROWN PRINCE COURT» (uppercase, narrow sans-serif, ~9-10 pt, letter-spacing 2-3 px)
-    – To the right of the text: circular heraldic emblem (eagle, white shield, red band #C8102E)
-• The rest of the page below the logo is a clean white/off-white field
+PAGE AND LETTERHEAD LAYOUT (MANDATORY)
+The document is rendered on official CPC A4 letterhead. The letterhead image is the page background.
 
-CONTENT AREA WRAPPER — place all document content inside a second <div> with:
-  style="
-    padding-top:50mm;
-    padding-bottom:22mm;
-    padding-left:25mm;
-    padding-right:25mm;
-    box-sizing:border-box;
-  "
+PAGING: Output multiple A4 pages as separate page divs.
+Each page div uses exactly this inline style:
+style="position:relative; width:210mm; min-height:297mm; max-width:210mm; margin:0 auto 8mm auto; background-image:url('${LETTERHEAD_BG_URL}'); background-size:210mm 297mm; background-repeat:no-repeat; background-position:top left; font-family:Arial,Calibri,'Segoe UI',sans-serif; color:#1A1A1A; box-sizing:border-box; overflow:hidden; page-break-after:always;"
 
-═══════════════════════════════════════════════════════
-COLOR PALETTE — STRICTLY ENFORCED
-═══════════════════════════════════════════════════════
-- Main text:        #1A1A1A  (near-black — use on ALL text)
-- Page background:  #FFFFFF  (pure white content area)
-- Ornament accent:  #A79C7F  (warm khaki — use ONLY for decorative horizontal rules if needed)
-- Emblem accent:    #C8102E  (heraldic red — do NOT use in body text or tables)
-- PROHIBITED: No blues, greens, teals, oranges, gradients, or any bright color anywhere in body content or tables.
+Content inner wrapper inside each page div:
+style="padding-top:52mm; padding-bottom:28mm; padding-left:25mm; padding-right:25mm; box-sizing:border-box;"
 
-═══════════════════════════════════════════════════════
-TYPOGRAPHY — ALL STYLES MUST BE INLINE (self-contained HTML/PDF requirement)
-═══════════════════════════════════════════════════════
-Apply every style as an inline style attribute. Do NOT use <style> blocks or class-only styling.
+Page footer (position absolute, bottom of each page div):
+<div style="position:absolute; bottom:10mm; left:0; right:0; text-align:center; font-family:Arial,Calibri,'Segoe UI',sans-serif; font-size:9pt; color:#888888;">Crown Prince's Court &mdash; Confidential &nbsp;|&nbsp; Page N</div>
 
-TITLE (document/project name):
-  style="font-family:Arial,Calibri,'Segoe UI',sans-serif; font-size:21pt; font-weight:700; text-align:center; color:#1A1A1A; margin:0 0 12pt 0; line-height:1.2;"
+PAGING GUIDE:
+- Page 1: Cover page only -- title, subtitle, RFP metadata table, Table of Contents
+- Page 2: Sections 1 and 2 (Background and Objectives)
+- Page 3 onward: Scope of Work sections (3.1, 3.2 ...) -- use as many pages as needed
+- Continue: Technical Requirements, Evaluation Criteria, Vendor Qualifications, Submission Timeline, Terms and Conditions
+- Each major section starts at or near the top of a new page
 
-SUBTITLE ("REQUEST FOR PROPOSAL"):
-  style="font-family:Arial,Calibri,'Segoe UI',sans-serif; font-size:15pt; font-weight:400; text-align:center; letter-spacing:2px; color:#1A1A1A; margin:32pt 0 32pt 0;"
+WHAT THE BACKGROUND IMAGE ALREADY CONTAINS (do NOT recreate any of these in HTML):
+- Top strip approximately 20mm: geometric Arabic ornamental pattern, warm khaki
+- Chain border full width below ornament
+- Logo block below chain: Arabic calligraphy plus CROWN PRINCE COURT text plus heraldic eagle emblem
+- Below logo: clean white content field
 
-SECTION HEADINGS (1., 2., 3. …):
-  style="font-family:Arial,Calibri,'Segoe UI',sans-serif; font-size:14pt; font-weight:700; color:#1A1A1A; margin-top:20pt; margin-bottom:9pt; padding-bottom:3pt; border-bottom:1px solid #A79C7F;"
+COVER PAGE METADATA TABLE (place on page 1 after title and subtitle):
+<table style="width:80%; margin:16pt auto; border-collapse:collapse; font-family:Arial,Calibri,'Segoe UI',sans-serif; font-size:10.5pt; color:#1A1A1A;">
+  <tr><td style="padding:5pt 10pt; border:1px solid #CCCCCC; font-weight:700; width:38%;">RFP Reference Number</td><td style="padding:5pt 10pt; border:1px solid #CCCCCC;">[insert ref_number]</td></tr>
+  <tr><td style="padding:5pt 10pt; border:1px solid #CCCCCC; font-weight:700;">Issue Date</td><td style="padding:5pt 10pt; border:1px solid #CCCCCC;">[insert today date]</td></tr>
+  <tr><td style="padding:5pt 10pt; border:1px solid #CCCCCC; font-weight:700;">Proposal Submission Deadline</td><td style="padding:5pt 10pt; border:1px solid #CCCCCC;">[insert deadline]</td></tr>
+  <tr><td style="padding:5pt 10pt; border:1px solid #CCCCCC; font-weight:700;">Category</td><td style="padding:5pt 10pt; border:1px solid #CCCCCC;">[insert category]</td></tr>
+  <tr><td style="padding:5pt 10pt; border:1px solid #CCCCCC; font-weight:700;">Issuing Authority</td><td style="padding:5pt 10pt; border:1px solid #CCCCCC;">Crown Prince's Court, Abu Dhabi, UAE</td></tr>
+  <tr><td style="padding:5pt 10pt; border:1px solid #CCCCCC; font-weight:700;">Submission Email</td><td style="padding:5pt 10pt; border:1px solid #CCCCCC;">procurement@cpc-rfp.website</td></tr>
+</table>
 
-SUBHEADINGS (3.1, 3.2 …):
-  style="font-family:Arial,Calibri,'Segoe UI',sans-serif; font-size:12pt; font-weight:700; color:#1A1A1A; margin-top:13pt; margin-bottom:6pt;"
+COLOR PALETTE -- STRICTLY ENFORCED
+- All body text: #1A1A1A (near-black)
+- Section heading underline accent: #A79C7F (warm khaki)
+- Table and rule borders: #CCCCCC (light grey)
+- Footer text: #888888 (grey, page footer only)
+- PROHIBITED everywhere in body content and tables: blues, greens, teals, oranges, gradients, any other accent
 
-BODY PARAGRAPHS (<p>):
-  style="font-family:Arial,Calibri,'Segoe UI',sans-serif; font-size:11pt; line-height:1.28; color:#1A1A1A; margin:0 0 6pt 0; text-align:left;"
+TYPOGRAPHY -- ALL STYLES MUST BE INLINE (required for self-contained HTML and PDF export)
+Apply every style as an inline style= attribute. No style blocks. No CSS classes.
 
-BULLET LISTS (<ul>/<li>):
-  <ul style="font-family:Arial,Calibri,'Segoe UI',sans-serif; font-size:11pt; line-height:1.28; color:#1A1A1A; list-style-type:disc; padding-left:20pt; margin:4pt 0 8pt 0;">
-  <li style="margin-bottom:3pt; color:#1A1A1A;">
+TITLE: style="font-family:Arial,Calibri,'Segoe UI',sans-serif; font-size:20pt; font-weight:700; text-align:center; color:#1A1A1A; margin:0 0 10pt 0; line-height:1.2;"
+SUBTITLE REQUEST FOR PROPOSAL: style="font-family:Arial,Calibri,'Segoe UI',sans-serif; font-size:13.5pt; font-weight:400; text-align:center; letter-spacing:2.5px; color:#1A1A1A; margin:16pt 0 16pt 0;"
+SECTION HEADING: style="font-family:Arial,Calibri,'Segoe UI',sans-serif; font-size:13pt; font-weight:700; color:#1A1A1A; margin-top:14pt; margin-bottom:7pt; padding-bottom:3pt; border-bottom:1.5px solid #A79C7F;"
+SUBHEADING: style="font-family:Arial,Calibri,'Segoe UI',sans-serif; font-size:11pt; font-weight:700; color:#1A1A1A; margin-top:10pt; margin-bottom:4pt;"
+BODY PARAGRAPH p: style="font-family:Arial,Calibri,'Segoe UI',sans-serif; font-size:10.5pt; line-height:1.35; color:#1A1A1A; margin:0 0 5pt 0; text-align:justify;"
+BULLET LIST ul: style="font-family:Arial,Calibri,'Segoe UI',sans-serif; font-size:10.5pt; line-height:1.35; color:#1A1A1A; list-style-type:disc; padding-left:18pt; margin:3pt 0 6pt 0;"
+LIST ITEM li: style="margin-bottom:3pt; color:#1A1A1A;"
+NUMBERED LIST ol: style="font-family:Arial,Calibri,'Segoe UI',sans-serif; font-size:10.5pt; line-height:1.35; color:#1A1A1A; padding-left:18pt; margin:3pt 0 6pt 0;"
 
-NUMBERED LISTS (<ol>/<li>):
-  <ol style="font-family:Arial,Calibri,'Segoe UI',sans-serif; font-size:11pt; line-height:1.28; color:#1A1A1A; padding-left:20pt; margin:4pt 0 8pt 0;">
-  <li style="margin-bottom:3pt; color:#1A1A1A;">
+TABLE OF CONTENTS ROWS:
+Top-level: <div style="display:flex; justify-content:space-between; border-bottom:1px dotted #CCCCCC; padding:4pt 0; font-family:Arial,Calibri,'Segoe UI',sans-serif; font-size:10.5pt; color:#1A1A1A;"><span style="font-weight:700;">N. Section Title</span><span style="white-space:nowrap;">N</span></div>
+Sub-item: <div style="display:flex; justify-content:space-between; border-bottom:1px dotted #CCCCCC; padding:3pt 0 3pt 16pt; font-family:Arial,Calibri,'Segoe UI',sans-serif; font-size:10.5pt; color:#1A1A1A;"><span>N.M Sub-section Title</span><span style="white-space:nowrap;">N</span></div>
 
-═══════════════════════════════════════════════════════
-TABLE OF CONTENTS
-═══════════════════════════════════════════════════════
-Render each TOC row as a flex div:
-  <div style="display:flex; justify-content:space-between; align-items:baseline; border-bottom:1pt dotted #CCCCCC; padding:4pt 0; font-family:Arial,Calibri,'Segoe UI',sans-serif; font-size:11pt; color:#1A1A1A;">
-    <span style="font-weight:700;">1. Section Title</span>
-    <span style="font-weight:400; white-space:nowrap; padding-left:8pt;">1</span>
-  </div>
+TABLES (use for technical requirements, evaluation criteria, qualification requirements, timeline):
+Outer: <table style="width:100%; border-collapse:collapse; font-family:Arial,Calibri,'Segoe UI',sans-serif; font-size:10.5pt; color:#1A1A1A; margin:6pt 0 10pt 0;">
+Header th: style="font-weight:700; color:#1A1A1A; background:#F5F5F5; padding:5pt 7pt; border:1px solid #CCCCCC; text-align:left;"
+Data td: style="color:#1A1A1A; background:#FFFFFF; padding:5pt 7pt; border:1px solid #CCCCCC; vertical-align:top;"
+Rules: No colored cell fills. No merged cells. Alternate rows may use #FAFAFA background for readability if needed.
 
-Sub-items add left padding:
-  <div style="display:flex; justify-content:space-between; align-items:baseline; border-bottom:1pt dotted #CCCCCC; padding:3pt 0; font-family:Arial,Calibri,'Segoe UI',sans-serif; font-size:11pt; color:#1A1A1A; padding-left:22pt;">
-    <span style="font-weight:400;">1.1 Sub-section Title</span>
-    <span style="font-weight:400; white-space:nowrap; padding-left:8pt;">2</span>
-  </div>
+CONTENT RULES -- STRICTLY ENFORCED
+1. ALL content must be derived exclusively from the PROVIDED PROJECT DETAILS and SUPPORTING DOCUMENTS. Do not invent, add, or extrapolate anything.
+2. Scope of Work sub-sections must cover every workstream, phase, and deliverable mentioned. Do not omit or condense.
+3. Section 4 (Technical Requirements) must be a STRUCTURED TABLE with columns: Requirement Area | Specific Requirement | Classification (Mandatory or Preferred). Minimum 15 rows. One requirement per row.
+4. Evaluation Criteria weights must sum to exactly 100 percent.
+5. Section 7 (Submission Requirements and Timeline) must include a FULL procurement milestone table: RFP Issue Date, Clarification Request Deadline, CPC Responses to Clarifications, Proposal Submission Deadline, Evaluation Period, Award Notification, Contract Signature, Project Kick-off. Derive all dates relative to the Proposal Deadline provided.
+6. NEVER reference filenames, document names, or external documents anywhere in the RFP body. All information must be stated inline.
+7. Vendor Qualification Requirements must be specific to this project domain.
+8. Where the supporting documents mention specific system names, module names, report names, KPI names, user roles, or data entities -- include them explicitly by name in the RFP.
 
-═══════════════════════════════════════════════════════
-TABLES (two-column Attribute / Requirement format)
-═══════════════════════════════════════════════════════
-Outer table:
-  <table style="width:100%; border-collapse:collapse; font-family:Arial,Calibri,'Segoe UI',sans-serif; font-size:11pt; color:#1A1A1A; margin:8pt 0 14pt 0;">
-
-Header row <th>:
-  style="font-weight:700; font-size:11pt; color:#1A1A1A; background:#FFFFFF; padding:6pt 8pt; border-bottom:1px solid #CCCCCC; text-align:left;"
-
-Data cells <td>:
-  style="font-size:10.5pt; color:#1A1A1A; background:#FFFFFF; padding:5pt 8pt; border-bottom:1px solid #CCCCCC; vertical-align:top;"
-
-Rules:
-- No colored cell backgrounds — strictly monochrome white/near-black
-- No merged cells
-- First column is the attribute/criterion label (bold if a header label is not used)
-- Second column is the requirement/value
-
-═══════════════════════════════════════════════════════
-FOOTER
-═══════════════════════════════════════════════════════
-At the bottom of each logical page section, add a page-number footer:
-  <div style="text-align:center; font-family:Arial,Calibri,'Segoe UI',sans-serif; font-size:10pt; color:#1A1A1A; margin-top:15mm; padding-top:4pt; border-top:0.5px solid #CCCCCC;">
-    Page N
-  </div>
-
-═══════════════════════════════════════════════════════
-CONTENT RULES — STRICTLY ENFORCED
-═══════════════════════════════════════════════════════
-1. Derive ALL content exclusively from the PROJECT DETAILS and SUPPORTING DOCUMENTS provided. Do not invent, assume, or extrapolate any requirement, technology, vendor, module, or feature that is not stated or strongly implied by the input.
-2. Scope of Work sub-sections must mirror exactly the phases, workstreams, or functional areas described in the input. Do not add scope items not mentioned.
-3. Technical Requirements must reflect only constraints, hosting preferences, integration points, and compliance standards explicitly stated. Do not add generic IT requirements unless mentioned.
-4. Evaluation Criteria weights must sum to exactly 100%. Default UAE government procurement norms: Technical Approach & Methodology (30%), Functional Fit & Solution Quality (25%), Team Qualifications & Experience (20%), Financial Proposal (15%), Implementation Plan & Timeline (10%). Adjust only if the project domain clearly warrants it.
-5. Vendor Qualification Requirements must be proportionate to the project — do not demand certifications irrelevant to the project domain.
-
-═══════════════════════════════════════════════════════
 HTML OUTPUT RULES
-═══════════════════════════════════════════════════════
-- Return ONLY the inner HTML body fragment — no <!DOCTYPE>, no <html>, no <body>, no <head>, no <style> blocks.
-- The outermost element MUST be a single <div> with the OUTER PAGE WRAPPER inline style specified above.
-- Inside it, place the CONTENT AREA WRAPPER <div> with the padding inline style specified above.
-- ALL styling must be via inline style attributes — no CSS classes, no <style> tags, no external stylesheets.
-- Use semantic HTML: <p>, <ul>, <ol>, <li>, <table>, <thead>, <tbody>, <tr>, <th>, <td>, <strong>, <em>.
-- Do NOT use markdown, code fences, or any non-HTML syntax.
-- Do NOT embed base64 images or data URIs.
-- The background image URL is already specified in the outer wrapper style — do not add any other background-image declarations.`
+- Return ONLY the inner HTML -- no DOCTYPE, no html tag, no body tag, no head tag, no style blocks.
+- The outermost element is a plain wrapper div with no styling.
+- Inside it, each A4 page is a separate div with the page wrapper inline style shown above.
+- Inside each page div, place the content inner wrapper div with the padding style shown above.
+- ALL styling via inline style= attributes ONLY. No classes. No style blocks. No external stylesheets.
+- Use proper HTML: p, ul, ol, li, table, thead, tbody, tr, th, td, strong, em, div.
+- Do NOT use markdown, code fences, or non-HTML syntax.
+- Do NOT embed base64 images or data URIs.`
+
+  // Helper: check if a doc text field is a real extracted text or just a placeholder note
+  const isRealDocText = (t: string) => t && t.length > 500 && !t.startsWith('[Document uploaded:') && !t.startsWith('[PDF:')
 
   const docSections: string[] = []
-  if (archDocText) {
+  if (archDocText && isRealDocText(archDocText)) {
     docSections.push(
-      `${'='.repeat(60)}\nCONCEPTUAL SOLUTION ARCHITECTURE DOCUMENT\n(Use as primary technical reference — extract scope phases, architecture decisions, and constraints directly)\n${'='.repeat(60)}\n${archDocText.slice(0, 12000)}\n${'='.repeat(60)}`
+      `${'='.repeat(60)}\nSOLUTION ARCHITECTURE DOCUMENT (extracted text — read in full and incorporate all technical detail into the RFP)\n${'='.repeat(60)}\n${archDocText.slice(0, 15000)}\n${'='.repeat(60)}`
     )
   }
-  if (brdDocText) {
+  if (brdDocText && isRealDocText(brdDocText)) {
     docSections.push(
-      `${'='.repeat(60)}\nBUSINESS REQUIREMENTS DOCUMENT\n(Use as primary functional reference — extract business needs, process flows, and acceptance criteria directly)\n${'='.repeat(60)}\n${brdDocText.slice(0, 12000)}\n${'='.repeat(60)}`
+      `${'='.repeat(60)}\nBUSINESS REQUIREMENTS DOCUMENT (extracted text — read in full and incorporate all functional requirements, report names, KPIs, user roles, acceptance criteria, and data entities into the RFP body — do NOT reference this document by name in the output)\n${'='.repeat(60)}\n${brdDocText.slice(0, 15000)}\n${'='.repeat(60)}`
     )
   }
   const archSection = docSections.length
-    ? `\nSUPPORTING DOCUMENTS PROVIDED BY CPC TEAM:\n${docSections.join('\n\n')}\n`
+    ? `\n${'='.repeat(60)}\nSUPPORTING DOCUMENTS (fully absorb into the RFP — do not reference these by name in the output):\n${'='.repeat(60)}\n${docSections.join('\n\n')}\n`
     : ''
 
-  const userPrompt = `Generate a complete, formal RFP HTML document for the Crown Prince's Court (CPC), Abu Dhabi.
-Use ONLY the information below. Do not add anything that is not stated here.
+  // Build deadline-relative milestone dates
+  const deadlineDate = data.deadline ? new Date(data.deadline) : new Date(Date.now() + 30*24*60*60*1000)
+  const fmtDate = (d: Date) => d.toISOString().split('T')[0]
+  const rfpIssueDate = fmtDate(new Date())
+  const clarDeadline = fmtDate(new Date(deadlineDate.getTime() - 21*24*60*60*1000))
+  const qaPublished   = fmtDate(new Date(deadlineDate.getTime() - 14*24*60*60*1000))
+  const evalEnd       = fmtDate(new Date(deadlineDate.getTime() + 21*24*60*60*1000))
+  const awardNotif    = fmtDate(new Date(deadlineDate.getTime() + 28*24*60*60*1000))
+  const contractSign  = fmtDate(new Date(deadlineDate.getTime() + 42*24*60*60*1000))
+  const kickoff       = fmtDate(new Date(deadlineDate.getTime() + 56*24*60*60*1000))
+
+  const userPrompt = `Generate a COMPLETE, COMPREHENSIVE, multi-page RFP HTML document for the Crown Prince's Court (CPC), Abu Dhabi.
+This must be a detailed government procurement document — every section must be fully written, not summarized.
+Use ONLY the information provided below. Do not add anything not stated here or in the supporting documents.
 
 ${'='.repeat(60)}
 PROJECT DETAILS
 ${'='.repeat(60)}
+RFP Reference:          ${data.ref_number || 'CPC/PROC/' + new Date().getFullYear() + '/TBD'}
 Title:                  ${data.title || 'Not specified'}
 Category:               ${data.category || 'IT & Digital Transformation'}
-Budget Envelope:        ${data.budget ? 'AED ' + data.budget + ' (indicative)' : 'To be disclosed to shortlisted vendors'}
-Proposal Deadline:      ${data.deadline || '30 days from RFP issuance'}
+Budget Envelope:        ${data.budget ? 'AED ' + data.budget + ' (indicative ceiling)' : 'Confidential — to be disclosed to shortlisted vendors'}
+RFP Issue Date:         ${rfpIssueDate}
+Proposal Deadline:      ${data.deadline || fmtDate(deadlineDate)}
 
 BACKGROUND
 ${data.background || '(not provided)'}
@@ -1585,48 +1694,78 @@ ${data.objectives || '(not provided)'}
 SCOPE OF WORK
 ${data.scope || '(not provided)'}
 
-TECHNICAL REQUIREMENTS & CONSTRAINTS
+TECHNICAL REQUIREMENTS AND CONSTRAINTS
 ${data.tech_requirements || '(not provided — derive from Scope and Supporting Documents only)'}
 ${archSection}
 ${'='.repeat(60)}
-REQUIRED DOCUMENT SECTIONS (produce all eight, in order)
+PROCUREMENT MILESTONE DATES (use these exactly in Section 7)
+${'='.repeat(60)}
+RFP Issue Date:                      ${rfpIssueDate}
+Deadline for Clarification Requests: ${clarDeadline}
+CPC Responses to Clarifications:     ${qaPublished}
+Proposal Submission Deadline:        ${data.deadline || fmtDate(deadlineDate)}
+Evaluation and Scoring Period Ends:  ${evalEnd}
+Award Notification to Vendors:       ${awardNotif}
+Contract Signature:                  ${contractSign}
+Project Kick-off:                    ${kickoff}
+${'='.repeat(60)}
+REQUIRED DOCUMENT SECTIONS — produce all 8 in full detail
 ${'='.repeat(60)}
 
-1. PROJECT BACKGROUND & CONTEXT
-   - Expand the Background field into 3–5 paragraphs covering: organisational context, current-state problem or gap, strategic mandate driving this initiative, and why an external vendor engagement is required.
-   - Close with a one-sentence statement of what this RFP is soliciting.
+1. PROJECT BACKGROUND AND CONTEXT
+   Expand into 4–6 substantial paragraphs:
+   - Organisational context: what the Crown Prince's Court is, the new operating unit being established, its position within the CPC Oracle ERP environment.
+   - Current-state problem: describe the fragmented data landscape in specific terms — which source systems hold which data, what the operational impact is (reporting delays, reconciliation burden, inconsistent KPIs, reliance on BI Publisher static reports).
+   - Strategic mandate: why this initiative was commissioned, what governance or leadership directive drives it.
+   - Why external vendor engagement is required: specific capability gap that CPC cannot address internally.
+   - Closing sentence: state exactly what this RFP is soliciting.
+   Write at least 400 words for this section.
 
 2. PROJECT OBJECTIVES
-   - Render as a numbered list. Each objective must be specific and measurable.
-   - Map directly to what is stated in the Objectives field. Do not add generic objectives not mentioned.
+   Numbered list. Each objective must be specific, measurable, and directly tied to input data.
+   Do not add generic objectives not mentioned. Write at least 4 objectives with full explanatory sentences, not one-line bullets.
 
 3. SCOPE OF WORK
-   - Structure as numbered sub-sections (3.1, 3.2, …) that mirror the phases, workstreams, or functional areas described in the Scope of Work field.
-   - Each sub-section must have: a descriptive title, a short introductory sentence, a <ul> of specific deliverables/activities, and a <div class="rfp-deliverables"> listing the key formal deliverables.
-   - Do not create sub-sections for topics not mentioned in the Scope field or Supporting Documents.
+   This is the longest and most detailed section. Structure as numbered sub-sections (3.1, 3.2, etc.) mirroring the workstreams from the Scope field and supporting documents.
+   For EACH sub-section write:
+   a) A descriptive sub-heading
+   b) An introductory paragraph (2–4 sentences) explaining what this workstream covers and why it is critical
+   c) A detailed bullet list of specific activities, inputs, tools, and methods — be specific about source systems, data volumes, layer names, tool names
+   d) Specific acceptance criteria for this workstream (what CPC will test or verify before sign-off)
+   e) A "Key Deliverables" line listing formal deliverable artifacts
+   Include at minimum these sub-sections (add more if the supporting documents indicate additional scope):
+   - Architecture Design and Data Platform Build
+   - Data Migration from source systems
+   - Business Intelligence Platform Deployment (Tableau Server on-premise)
+   - Dashboard and Report Development (enumerate ALL dashboards and reports by name or category if the supporting documents list them)
+   - Data Governance, Catalog and Lineage
+   - Knowledge Transfer, Training and Documentation
+   Write at least 1,200 words for this section.
 
-4. TECHNICAL REQUIREMENTS & ARCHITECTURE
-   - Organised under logical sub-headings (e.g. Hosting & Infrastructure, Security & Compliance, Integration, Performance, Language & Accessibility).
-   - Include only requirements that are stated in Technical Requirements field, Scope field, or Supporting Documents. Do not invent requirements.
+4. TECHNICAL REQUIREMENTS AND ARCHITECTURE
+   Render as a TABLE with three columns: Requirement Area | Specific Requirement | Classification (Mandatory / Preferred).
+   Write at minimum 18 rows covering: Deployment Environment, Security and Access Control, Architecture Pattern, Licensing Strategy, Source System Integration, Data Volume and Performance, BI Tool, Active Directory Integration, Data Classification Compliance, Backup and Recovery, Monitoring and Alerting, Open-Source Stack Constraints, Scalability, Data Lineage, Metadata Management, High Availability, Documentation Standards, Change Management.
+   Each requirement must be a specific, testable, one-sentence statement — not a category label.
 
 5. EVALUATION CRITERIA
-   - Render as <table class="rfp-spec-table"> with columns: Criterion | Weight % | Description.
-   - Weights must sum to 100%.
-   - Tailor criteria names to this specific project domain.
+   Table with columns: Criterion | Weight % | Detailed Description.
+   Weights must sum to exactly 100%.
+   Tailor all criterion names and descriptions specifically to a data warehouse and BI analytics project.
 
 6. VENDOR QUALIFICATION REQUIREMENTS
-   - Render as <table class="rfp-spec-table"> with columns: Requirement | Minimum Standard.
-   - Include: years of relevant experience, number of comparable government/enterprise projects, team certifications relevant to THIS project, financial standing.
-   - Do not require certifications irrelevant to the project domain.
+   Table with columns: Requirement Category | Minimum Standard | Evidence Required.
+   Cover: years of experience in data warehouse delivery, on-premise Tableau deployments, Oracle EBS integrations, government or large enterprise clients in MENA, team certifications specific to this domain (Tableau, data engineering, ETL), financial standing.
+   Do NOT require certifications unrelated to data, BI, or ETL.
 
-7. SUBMISSION REQUIREMENTS & TIMELINE
-   - Include a timeline table: Milestone | Date — using the Proposal Deadline as the anchor.
-   - List required documents in the submission package.
-   - Provide submission address: procurement@cpc-rfp.website
+7. SUBMISSION REQUIREMENTS AND TIMELINE
+   First: a full procurement milestone TABLE using the exact dates provided above. All 8 milestones must appear.
+   Then: a bulleted list of all documents required in the submission package (technical proposal, financial proposal, implementation plan, team CVs, company profile, audited financials, security compliance statement, references).
+   Submission email: procurement@cpc-rfp.website
 
-8. TERMS & CONDITIONS
-   - Cover: confidentiality, IP ownership, right to reject, disqualification grounds, governing law (Abu Dhabi / UAE), language (English and Arabic).
-   - Keep concise — 6–10 bullet points.`
+8. TERMS AND CONDITIONS
+   8 to 12 bullet points covering: confidentiality obligations, intellectual property (all developed IP vests in CPC), right to reject all proposals, disqualification grounds (including cloud hosting proposals), no guarantee of award, vendor costs not reimbursable, governing law (laws of Abu Dhabi and UAE), language of contract (English and Arabic), subcontracting restrictions, conflict of interest declaration requirement.
+
+REMINDER: Do NOT reference any document filename, BRD name, or attached file anywhere in the output. All content must be stated inline as if you wrote it yourself.`
 
   const llmContent = await callLLM(systemPrompt, userPrompt, env, 'gpt-5-mini', 16000)
   if (llmContent && llmContent.length > 400) {
