@@ -17,7 +17,7 @@ let appState = {
   receivedEmails: [],
   currentRfp: null,
   previousPage: null,
-  unreadQA: false,
+  unreadQA: 0,         // count of unanswered questions (> 0 shows badge on Q&A tab)
   notifications: [],
   unreadNotifications: 0,
 };
@@ -455,7 +455,7 @@ function renderRfpTabs(activeTab, rfpId, qaBadge) {
   let html = '<div class="rfp-tabs">';
   RFP_TABS.forEach(function(tab) {
     const isActive = tab.id === activeTab;
-    const qaBadgeHtml = (tab.id === 'qa' && qaBadge) ? '<span style="background:#ef4444;color:white;border-radius:10px;padding:1px 6px;font-size:0.68rem;margin-left:4px">!</span>' : '';
+    const qaBadgeHtml = (tab.id === 'qa' && qaBadge) ? '<span style="background:#ef4444;color:white;border-radius:10px;padding:1px 6px;font-size:0.68rem;margin-left:4px;font-weight:700">' + (typeof qaBadge === 'number' && qaBadge > 0 ? qaBadge : '!') + '</span>' : '';
     const emailBadgeCount = appState.unreadEmailCount || 0;
     const emailBadgeHtml = (tab.id === 'emails' && emailBadgeCount > 0) ? '<span style="background:var(--cpc-gold);color:white;border-radius:10px;padding:1px 6px;font-size:0.68rem;margin-left:4px">' + emailBadgeCount + '</span>' : '';
     html += '<div class="rfp-tab' + (isActive ? ' active' : '') + '" onclick="switchRfpTab(\'' + tab.id + '\',' + rfpId + ')">';
@@ -471,7 +471,7 @@ function switchRfpTab(tab, rfpId) {
   appState.currentRfpTab = tab;
   // Clear Q&A unread badge when user navigates to the Q&A tab
   if (tab === 'qa' && appState.unreadQA) {
-    appState.unreadQA = false;
+    appState.unreadQA = 0;   // clear badge when user navigates to Q&A
   }
   renderRfpTabs(tab, rfpId, appState.unreadQA);
   const rfp = appState.currentRfp;
@@ -1112,10 +1112,12 @@ async function generateRfpPdfBlob(rfpId) {
   // pages — we set a large height and remove overflow:hidden so every page div
   // gets real layout metrics even though the iframe is off-screen.
   var iframe = document.createElement('iframe');
+  // Start with a generous initial height — we will resize to the real content height
+  // after the document loads so every page div gets correct layout metrics.
   iframe.style.cssText = [
     'position:fixed', 'top:0', 'left:0',
     'width:' + PAGE_W_PX + 'px',
-    'height:12000px',   // tall enough for ~10 A4 pages; clipped by viewport but layout is computed
+    'height:' + (PAGE_H_PX * 2) + 'px',   // initial placeholder; resized after load
     'opacity:0', 'pointer-events:none', 'border:none', 'z-index:-9999',
   ].join(';');
   document.body.appendChild(iframe);
@@ -1141,7 +1143,15 @@ async function generateRfpPdfBlob(rfpId) {
     iframe.contentWindow.addEventListener('load', resolve);
     setTimeout(resolve, 4000);
   });
-  await new Promise(function(r) { setTimeout(r, 1000); }); // extra paint tick
+  await new Promise(function(r) { setTimeout(r, 500); }); // initial paint tick
+
+  // ── Resize iframe to actual content height so ALL page divs get real layout ──
+  // scrollHeight gives the full rendered height regardless of viewport clip.
+  var contentH = iframeDoc.body ? iframeDoc.body.scrollHeight : 0;
+  if (contentH < PAGE_H_PX) contentH = PAGE_H_PX; // minimum one page
+  iframe.style.height = contentH + 'px';
+  // Allow one more paint tick for the browser to reflow after resize
+  await new Promise(function(r) { setTimeout(r, 500); });
 
   try {
     // Collect all A4 page divs — the LLM wraps everything in <div class="rfp-doc">
@@ -1960,21 +1970,25 @@ async function silentCheckInbox(rfpId) {
 
     } else if (isQuestionsEmail) {
       var questions = await apiCall('GET', '/rfps/' + rfpId + '/questions').catch(function(){ return []; });
+      var unanswered = questions.filter(function(q){ return !q.published; }).length;
       var emailQs = questions.filter(function(q){ return q.source === 'email'; }).length;
 
-      appState.unreadQA = true;
+      // Increment badge count — only cleared when user opens Q&A tab
+      appState.unreadQA = unanswered > 0 ? unanswered : (appState.unreadQA || 0) + newEmails.length;
       pulseQATab();
       addNotification('questions',
-        '📋 Questions ready in Q&A tab',
+        '📋 New vendor question(s) — Q&A tab',
         (emailQs > 0 ? emailQs + ' question(s)' : 'Questions') + ' from ' + senderName + ' added automatically.',
         rfpId, 'qa', null
       );
       addNotification('email', '📨 New Email from ' + senderName,
         (newest.subject || 'No Subject') + attachBadge, rfpId, null, newestVendorId);
+      // Show a visible toast so the user is aware of incoming questions
+      showToast('📋 ' + (emailQs > 0 ? emailQs : 'New') + ' vendor question(s) from ' + senderName + ' — check Q&A tab', 'info', 7000);
 
+      // Update the tab bar badge but do NOT switch tabs (that would clear the badge)
       if (appState.currentRfpId && String(appState.currentRfpId) === String(rfpId)) {
-        renderRfpTabs('qa', rfpId, true);
-        rfpTabs.qa(rfpId);
+        renderRfpTabs(appState.currentRfpTab, rfpId, appState.unreadQA);
       }
 
     } else if (isProposalEmail) {
@@ -2029,13 +2043,14 @@ async function checkInboxForQA(rfpId) {
     const emailQs = questions.filter(function(q){ return q.source === 'email'; }).length;
 
     if (received.length > prev) {
-      appState.unreadQA = true;
-      renderRfpTabs(appState.currentRfpTab, rfpId, true);
+      appState.unreadQA = emailQs > 0 ? emailQs : (received.length - prev);
+      renderRfpTabs(appState.currentRfpTab, rfpId, appState.unreadQA);
       pulseQATab();
       const newCount = received.length - prev;
       addNotification('email', 'New Email(s) Received', newCount + ' new vendor email(s). ' + emailQs + ' question(s) extracted.', rfpId, 'emails');
       if (emailQs > 0) {
         addNotification('questions', 'Questions Extracted', emailQs + ' vendor question(s) ready for Q&A tab', rfpId, 'qa');
+        showToast('📋 ' + emailQs + ' vendor question(s) extracted — check Q&A tab', 'info', 7000);
       }
     } else if (received.length > 0) {
       showToast('Inbox up to date — ' + received.length + ' email(s), ' + emailQs + ' question(s) extracted.', 'info');
@@ -2052,8 +2067,8 @@ async function checkInboxForQA(rfpId) {
 
 // --- TAB: Q&A ---
 rfpTabs.qa = async function(rfpId) {
-  appState.unreadQA = false;
-  renderRfpTabs('qa', rfpId, false);
+  appState.unreadQA = 0;   // opening the Q&A tab clears the badge
+  renderRfpTabs('qa', rfpId, 0);
 
   const questions = await apiCall('GET', '/rfps/' + rfpId + '/questions').catch(function(){ return []; });
   appState.questions = questions;
@@ -2212,13 +2227,31 @@ async function saveQAnswer(rfpId, qId) {
 
 async function publishAllQAnswers(rfpId) {
   try {
-    await apiCall('POST', '/rfps/' + rfpId + '/questions/publish-all', {});
+    // Guard: check for answered + approved (answer set, not yet published, not needs_manual)
+    var qs = appState.questions || [];
+    var readyToPublish = qs.filter(function(q) {
+      return q.answer && q.answer.trim() !== '' && !q.published && !q.needs_manual;
+    });
+    if (readyToPublish.length === 0) {
+      var unanswered = qs.filter(function(q){ return !q.published && (!q.answer || q.answer.trim() === ''); }).length;
+      if (unanswered > 0) {
+        showToast('⚠️ No approved answers to publish yet. Use "AI Answer All" to draft answers, then approve them first.', 'warning', 8000);
+      } else if (qs.length === 0) {
+        showToast('⚠️ No questions in Q&A yet. Nothing to publish.', 'warning', 6000);
+      } else {
+        showToast('⚠️ All questions are already published or still awaiting answers. Nothing new to send.', 'info', 6000);
+      }
+      return; // do NOT call the API — no emails sent
+    }
+
+    var result = await apiCall('POST', '/rfps/' + rfpId + '/questions/publish-all', {});
     // NOTE: Publish All Approved does NOT advance stage — use "Close Q&A" button for that
-    showToast('\u2705 Q&A answers published and sent to all vendors!', 'success', 5000);
-    addNotification('info', '\u2705 Answers Published', 'All approved Q&A answers sent to vendors.', rfpId, 'qa', null);
+    var sentCount = result && result.vendorCount ? result.vendorCount : 0;
+    showToast('\u2705 ' + readyToPublish.length + ' answer(s) published and sent to ' + sentCount + ' vendor(s)!', 'success', 5000);
+    addNotification('info', '\u2705 Answers Published', readyToPublish.length + ' approved Q&A answer(s) sent to ' + sentCount + ' vendor(s).', rfpId, 'qa', null);
     // Stay on Q&A tab, clear badge
-    appState.unreadQA = false;
-    renderRfpTabs('qa', rfpId, false);
+    appState.unreadQA = 0;
+    renderRfpTabs('qa', rfpId, 0);
     rfpTabs.qa(rfpId);
   } catch(e) {
     showToast('Publish failed: ' + e.message, 'error');
