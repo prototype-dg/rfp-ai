@@ -204,9 +204,18 @@ export function getSubmitPage(rfpId: string, participantCode: string): string {
     .rfp-card {}
     .rfp-meta {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-      gap: 16px;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0;
+      border: 1px solid var(--cpc-line);
+      border-radius: 4px;
+      overflow: hidden;
+      margin-top: 16px;
     }
+    .rfp-meta-item {
+      padding: 12px 16px;
+      border-right: 1px solid var(--cpc-line);
+    }
+    .rfp-meta-item:last-child { border-right: none; }
     .rfp-meta-item .label {
       font-family: var(--font-mono);
       font-size: 0.6rem;
@@ -243,9 +252,14 @@ export function getSubmitPage(rfpId: string, participantCode: string): string {
       font-size: 0.83rem;
       color: var(--cpc-ink-mid);
       line-height: 1.7;
-      max-height: 120px;
-      overflow-y: auto;
       white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .sec-body.collapsed {
+      display: -webkit-box;
+      -webkit-line-clamp: 4;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
     }
     .expand-btn {
       font-family: var(--font-mono);
@@ -254,9 +268,12 @@ export function getSubmitPage(rfpId: string, participantCode: string): string {
       cursor: pointer;
       border: none;
       background: none;
-      margin-top: 4px;
+      margin-top: 6px;
       padding: 0;
       letter-spacing: 0.05em;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
     }
     .expand-btn:hover { color: var(--cpc-gold-deep); }
 

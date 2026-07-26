@@ -751,33 +751,36 @@ function renderScoringMatrixSummary(matrix) {
 function renderScoringMatrixEditor(matrix) {
   var total = matrix.reduce(function(s, r){ return s + (Number(r.weight)||0); }, 0);
   var totalColor = total === 100 ? '#065f46' : '#dc2626';
+  var taStyle = 'width:100%;border:none;background:transparent;font-family:inherit;outline:none;color:var(--cpc-ink);resize:none;overflow:hidden;line-height:1.45;padding:0';
   var rows = matrix.map(function(r, i){
     return '<tr>'
-      + '<td style="padding:8px 12px;border:1px solid var(--cpc-line);width:32%">'
-      + '<input id="sm_crit_' + i + '" value="' + escHtml(r.criterion) + '" '
-      + 'style="width:100%;border:none;background:transparent;font-size:13px;font-family:inherit;outline:none;color:var(--cpc-ink)" '
-      + 'placeholder="Criterion name" oninput="updateScoringMatrixRow(' + i + ')">'
+      + '<td style="padding:8px 12px;border:1px solid var(--cpc-line);vertical-align:top;width:28%">'
+      + '<textarea id="sm_crit_' + i + '" rows="2" '
+      + 'style="' + taStyle + ';font-size:13px;font-weight:500" '
+      + 'placeholder="Criterion name" oninput="autoResizeSMTA(this);updateScoringMatrixRow(' + i + ')">'
+      + escHtml(r.criterion) + '</textarea>'
       + '</td>'
-      + '<td style="padding:6px 10px;border:1px solid var(--cpc-line);width:80px;text-align:center">'
-      + '<div style="display:flex;align-items:center;justify-content:center;gap:2px">'
+      + '<td style="padding:6px 10px;border:1px solid var(--cpc-line);width:86px;text-align:center;vertical-align:top">'
+      + '<div style="display:flex;align-items:center;justify-content:center;gap:2px;padding-top:2px">'
       + '<input id="sm_wt_' + i + '" type="text" inputmode="numeric" value="' + (r.weight||0) + '" '
       + 'style="width:46px;border:1px solid var(--cpc-line);border-radius:4px;background:var(--cpc-paper);font-size:14px;font-family:\'JetBrains Mono\',monospace;text-align:center;padding:3px 4px;color:var(--cpc-ink);font-weight:700" '
       + 'oninput="validateScoringWeight(' + i + ')" onblur="updateScoringMatrixRow(' + i + ')">'
       + '<span style="font-size:12px;color:#6b7280;font-weight:600">%</span>'
       + '</div>'
       + '</td>'
-      + '<td style="padding:8px 12px;border:1px solid var(--cpc-line)">'
-      + '<input id="sm_desc_' + i + '" value="' + escHtml(r.description||'') + '" '
-      + 'style="width:100%;border:none;background:transparent;font-size:12px;font-family:inherit;outline:none;color:#4b5563" '
-      + 'placeholder="Describe what this criterion evaluates..." oninput="updateScoringMatrixRow(' + i + ')">'
+      + '<td style="padding:8px 12px;border:1px solid var(--cpc-line);vertical-align:top">'
+      + '<textarea id="sm_desc_' + i + '" rows="2" '
+      + 'style="' + taStyle + ';font-size:12px;color:#4b5563" '
+      + 'placeholder="Describe what this criterion evaluates..." oninput="autoResizeSMTA(this);updateScoringMatrixRow(' + i + ')">'
+      + escHtml(r.description||'') + '</textarea>'
       + '</td>'
-      + '<td style="padding:4px 6px;border:1px solid var(--cpc-line);width:36px;text-align:center">'
-      + '<button onclick="removeScoringMatrixRow(' + i + ')" class="btn-ghost btn-sm" style="padding:4px 7px;color:#dc2626" title="Remove"><i class="fas fa-times"></i></button>'
+      + '<td style="padding:4px 6px;border:1px solid var(--cpc-line);width:36px;text-align:center;vertical-align:top">'
+      + '<button onclick="removeScoringMatrixRow(' + i + ')" class="btn-ghost btn-sm" style="padding:4px 7px;color:#dc2626;margin-top:2px" title="Remove"><i class="fas fa-times"></i></button>'
       + '</td>'
       + '</tr>';
   }).join('');
   return '<table style="width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed">'
-    + '<colgroup><col style="width:auto"><col style="width:90px"><col style="width:auto"><col style="width:36px"></colgroup>'
+    + '<colgroup><col style="width:28%"><col style="width:86px"><col style="width:auto"><col style="width:36px"></colgroup>'
     + '<thead><tr style="background:var(--cpc-gold-tint)">'
     + '<th style="padding:9px 12px;text-align:left;font-family:\'JetBrains Mono\',monospace;font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:var(--cpc-gold-deep);border-bottom:2px solid var(--cpc-line)">Criterion</th>'
     + '<th style="padding:9px 10px;text-align:center;font-family:\'JetBrains Mono\',monospace;font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:var(--cpc-gold-deep);border-bottom:2px solid var(--cpc-line)">Weight</th>'
@@ -813,6 +816,8 @@ function openScoringMatrixModal(rfpId) {
     + '<button class="btn-primary" onclick="saveScoringMatrixAndClose(' + rfpId + ')"><i class="fas fa-save"></i>Save Matrix</button>'
     + '</div>'
   );
+  // auto-size textareas after modal DOM is painted
+  setTimeout(initScoringMatrixTextareas, 0);
 }
 
 // Save from modal and close, refreshing the inline summary
@@ -829,6 +834,17 @@ async function saveScoringMatrixAndClose(rfpId) {
     showToast('Scoring matrix saved.', 'success');
     closeModal();
   } catch(e) { /* apiCall shows error toast */ }
+}
+
+function autoResizeSMTA(el) {
+  el.style.height = 'auto';
+  el.style.height = el.scrollHeight + 'px';
+}
+
+function initScoringMatrixTextareas() {
+  // auto-size all textareas in the scoring matrix editor after render
+  var tas = document.querySelectorAll('#scoringMatrixEditor textarea');
+  tas.forEach(function(ta) { autoResizeSMTA(ta); });
 }
 
 function validateScoringWeight(i) {
@@ -869,7 +885,8 @@ function addScoringMatrixRow() {
   window._currentScoringMatrix = matrix;
   var smDiv = document.getElementById('scoringMatrixEditor');
   if (smDiv) smDiv.innerHTML = renderScoringMatrixEditor(matrix);
-  // focus new criterion input
+  setTimeout(initScoringMatrixTextareas, 0);
+  // focus new criterion textarea
   var newInput = document.getElementById('sm_crit_' + (matrix.length - 1));
   if (newInput) { newInput.focus(); newInput.select(); }
 }
@@ -880,6 +897,7 @@ function removeScoringMatrixRow(i) {
   window._currentScoringMatrix = matrix;
   var smDiv = document.getElementById('scoringMatrixEditor');
   if (smDiv) smDiv.innerHTML = renderScoringMatrixEditor(matrix);
+  setTimeout(initScoringMatrixTextareas, 0);
 }
 
 // Legacy save (kept for compatibility — modal path now uses saveScoringMatrixAndClose)

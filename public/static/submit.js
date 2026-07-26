@@ -53,35 +53,26 @@
       : '\u2014';
 
     var sections = '';
-    if (rfp.background)        sections += sectionBlock('Project Background',      rfp.background,        'fa-info-circle',         '#745B35');
-    if (rfp.scope)             sections += sectionBlock('Scope of Work',           rfp.scope,             'fa-list-alt',            '#745B35');
-    if (rfp.tech_requirements) sections += sectionBlock('Technical Requirements',  rfp.tech_requirements, 'fa-microchip',           '#745B35');
-    if (rfp.objectives)        sections += sectionBlock('Objectives',              rfp.objectives,        'fa-bullseye',            '#166534');
+    if (rfp.background)        sections += sectionBlock('Project Background',      rfp.background,        'fa-info-circle',  '#745B35');
+    if (rfp.objectives)        sections += sectionBlock('Objectives',              rfp.objectives,        'fa-bullseye',     '#166534');
+    if (rfp.scope)             sections += sectionBlock('Scope of Work',           rfp.scope,             'fa-list-alt',     '#745B35');
+    if (rfp.tech_requirements) sections += sectionBlock('Technical Requirements',  rfp.tech_requirements, 'fa-microchip',    '#745B35');
 
     var html = '';
 
-    // Top row: ref + deadline badge
-    html += '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap">';
-    var metaLabel = 'font-family:JetBrains Mono,monospace;font-size:0.6rem;font-weight:600;color:#7A6E62;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:4px';
-    var metaValue = 'font-size:0.88rem;font-weight:600;color:#1B1712';
+    // Ref eyebrow
+    html += '<div style="font-family:JetBrains Mono,monospace;font-size:0.6rem;font-weight:600;color:#7A6E62;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:8px">';
+    html += '<i class="fas fa-hashtag" style="margin-right:4px;color:#BA9765"></i>' + esc(rfp.ref_number || '\u2014') + '</div>';
 
-    html += '<div style="display:flex;font-family:JetBrains Mono,monospace">';
-    html += '<div style="flex:1"><div style="' + metaLabel + '">RFP Reference</div><div style="' + metaValue + '">' + esc(rfp.ref_number || '\u2014') + '</div></div>';
-    html += '<div style="text-align:right"><span style="background:#F5EFE3;color:#745B35;border:1px solid #E9DCC4;border-radius:100px;padding:4px 14px;font-family:JetBrains Mono,monospace;font-size:0.62rem;font-weight:600;letter-spacing:0.08em">';
-    html += '<i class="fas fa-clock" style="margin-right:4px"></i>DEADLINE&nbsp;&nbsp;' + deadline + '</span></div>';
-    html += '</div>';
+    // Title
+    html += '<div style="font-family:Cormorant Garamond,Georgia,serif;font-size:1.35rem;font-weight:600;color:#1B1712;line-height:1.25;margin-bottom:16px">';
+    html += esc(rfp.title || '') + '</div>';
 
-    // Title row
-    html += '<div style="margin-top:12px">';
-    html += '<div style="font-family:Cormorant Garamond,Georgia,serif;font-size:1.3rem;font-weight:600;color:#1B1712;line-height:1.25">' + esc(rfp.title || '') + '</div>';
-    html += '<div style="font-family:JetBrains Mono,monospace;font-size:0.65rem;color:#7A6E62;margin-top:5px;letter-spacing:0.06em">' + esc(rfp.category || '') + ' &nbsp;·&nbsp; Crown Prince\u2019s Court, Abu Dhabi</div>';
-    html += '</div>';
-
-    // Meta grid
-    html += '<div class="rfp-meta" style="margin-top:16px;padding-top:14px;border-top:1px solid #E7DFCE">';
+    // Meta grid: Issuing Entity | Category | Submission Deadline
+    html += '<div class="rfp-meta">';
     html += '<div class="rfp-meta-item"><div class="label">Issuing Entity</div><div class="value">Crown Prince\u2019s Court (CPC)</div></div>';
     html += '<div class="rfp-meta-item"><div class="label">Category</div><div class="value">' + esc(rfp.category || '\u2014') + '</div></div>';
-    html += '<div class="rfp-meta-item"><div class="label">Submission Deadline</div><div class="value" style="color:#8B2020">' + deadline + '</div></div>';
+    html += '<div class="rfp-meta-item"><div class="label">Submission Deadline</div><div class="value" style="color:#8B2020;font-variant-numeric:tabular-nums">' + deadline + '</div></div>';
     html += '</div>';
 
     // Expandable sections
@@ -91,29 +82,36 @@
   }
 
   /* ── Expandable section block ─────────────────────────────── */
-  var _expandMap = {};
+  // Threshold: ~4 lines ≈ 300 chars is a reasonable collapse point
+  var COLLAPSE_THRESHOLD = 300;
 
   function sectionBlock(title, text, icon, color) {
     var id = 'sec_' + Math.random().toString(36).slice(2);
-    var truncated = text.length > 280;
-    var display = truncated ? text.slice(0, 280) + '\u2026' : text;
-    _expandMap[id] = text;
+    var needsCollapse = text.length > COLLAPSE_THRESHOLD;
 
     var html = '<div class="rfp-section-block">';
     html += '<div class="sec-title"><i class="fas ' + icon + '" style="color:' + color + '"></i>' + esc(title) + '</div>';
-    html += '<div class="sec-body" id="' + id + '">' + esc(display) + '</div>';
-    if (truncated) {
-      html += '<button class="expand-btn" data-secid="' + id + '" onclick="expandSection(this)">Show more</button>';
+    // Apply CSS line-clamp via class; full text always in DOM — no scrollable overflow
+    html += '<div class="sec-body' + (needsCollapse ? ' collapsed' : '') + '" id="' + id + '">' + esc(text) + '</div>';
+    if (needsCollapse) {
+      html += '<button class="expand-btn" id="btn_' + id + '" onclick="expandSection(\'' + id + '\')">'
+            + '<i class="fas fa-chevron-down" style="font-size:0.55rem"></i>Show more</button>';
     }
     html += '</div>';
     return html;
   }
 
-  function expandSection(btn) {
-    var id = btn.getAttribute('data-secid');
-    if (id && _expandMap[id]) {
-      document.getElementById(id).textContent = _expandMap[id];
-      btn.style.display = 'none';
+  function expandSection(id) {
+    var body = document.getElementById(id);
+    var btn  = document.getElementById('btn_' + id);
+    if (!body) return;
+    var isCollapsed = body.classList.contains('collapsed');
+    if (isCollapsed) {
+      body.classList.remove('collapsed');
+      if (btn) btn.innerHTML = '<i class="fas fa-chevron-up" style="font-size:0.55rem"></i>Show less';
+    } else {
+      body.classList.add('collapsed');
+      if (btn) btn.innerHTML = '<i class="fas fa-chevron-down" style="font-size:0.55rem"></i>Show more';
     }
   }
 
