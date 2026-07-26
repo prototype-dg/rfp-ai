@@ -69,6 +69,9 @@ var I18N = {
     btn_invite:      'Send Invitations',
     btn_evaluate:    'Evaluate All',
     btn_award:       'Award Contract',
+    btn_add:         'Add',
+    btn_remove:      'Remove',
+    btn_comms:       'Comms',
     lbl_loading:     'Loading…',
     lbl_no_data:     'No data yet',
     lbl_search:      'Search…',
@@ -179,6 +182,46 @@ var I18N = {
     th_fit_score:       'AI Fit Score',
     th_participation:   'Participation Status',
     th_shortlist:       'Shortlist',
+    // Vendor registry page
+    vpage_heading:      'Global Vendor Registry',
+    vpage_registered:   'registered vendors',
+    vpage_th_vendor:    'Vendor',
+    vpage_th_category:  'Category',
+    vpage_th_specs:     'Specializations',
+    // Vendor detail — section headers
+    vsec_company:       'Company',
+    vsec_contact:       'Contact',
+    vsec_tech_profile:  'Technical Profile',
+    vsec_industry:      'Industry Experience',
+    // Vendor detail — field labels
+    vfld_country:       'Country',
+    vfld_hq:            'Headquarters',
+    vfld_website:       'Website',
+    vfld_revenue:       'Annual Revenue',
+    vfld_contact_name:  'Contact Name',
+    vfld_contact_email: 'Contact Email',
+    vfld_email_editable:'(editable)',
+    vfld_platforms:     'Platforms & Technologies',
+    vfld_specializations:'Specializations',
+    vfld_certifications:'Certifications',
+    vfld_exp_summary:   'Experience Summary',
+    vfld_pub_sector:    'Public Sector References',
+    vfld_est:           'Est.',
+    // Vendor categories (DB values)
+    vcat_it_consulting: 'IT Consulting',
+    vcat_it_digital:    'IT & Digital Transformation',
+    // Vendor size labels (DB values)
+    vsize_large:        'Large',
+    vsize_medium:       'Medium',
+    // Vendor country labels (DB values)
+    vcountry_uae:       'UAE',
+    // Vendor invitation / participation status badges
+    vstatus_not_invited:'Not Invited',
+    vstatus_invited:    'Invited',
+    vstatus_simulated:  'Simulated',
+    vstatus_declined:   'Declined',
+    vstatus_replied:    'replied',
+    vstatus_no_comms:   'No Comms',
   },
   ar: {
     // Sidebar
@@ -239,6 +282,9 @@ var I18N = {
     btn_invite:      'إرسال الدعوات',
     btn_evaluate:    'تقييم الجميع',
     btn_award:       'ترسية العقد',
+    btn_add:         'إضافة',
+    btn_remove:      'إزالة',
+    btn_comms:       'مراسلة',
     lbl_loading:     'جاري التحميل…',
     lbl_no_data:     'لا توجد بيانات',
     lbl_search:      'بحث…',
@@ -349,6 +395,46 @@ var I18N = {
     th_fit_score:       'مدى الملاءمة',
     th_participation:   'حالة المشاركة',
     th_shortlist:       'القائمة المختصرة',
+    // Vendor registry page
+    vpage_heading:      'سجل الموردين العالمي',
+    vpage_registered:   'مورد مسجل',
+    vpage_th_vendor:    'المورد',
+    vpage_th_category:  'الفئة',
+    vpage_th_specs:     'التخصصات',
+    // Vendor detail — section headers
+    vsec_company:       'بيانات الشركة',
+    vsec_contact:       'جهة الاتصال',
+    vsec_tech_profile:  'الملف التقني',
+    vsec_industry:      'الخبرة القطاعية',
+    // Vendor detail — field labels
+    vfld_country:       'البلد',
+    vfld_hq:            'المقر الرئيسي',
+    vfld_website:       'الموقع الإلكتروني',
+    vfld_revenue:       'الإيرادات السنوية',
+    vfld_contact_name:  'اسم جهة الاتصال',
+    vfld_contact_email: 'البريد الإلكتروني',
+    vfld_email_editable:'(قابل للتعديل)',
+    vfld_platforms:     'المنصات والتقنيات',
+    vfld_specializations:'التخصصات',
+    vfld_certifications:'الشهادات والاعتمادات',
+    vfld_exp_summary:   'ملخص الخبرة',
+    vfld_pub_sector:    'مراجع القطاع الحكومي',
+    vfld_est:           'تأسست',
+    // Vendor categories (DB values)
+    vcat_it_consulting: 'استشارات تقنية المعلومات',
+    vcat_it_digital:    'تقنية المعلومات والتحول الرقمي',
+    // Vendor size labels (DB values)
+    vsize_large:        'كبيرة',
+    vsize_medium:       'متوسطة',
+    // Vendor country labels (DB values)
+    vcountry_uae:       'الإمارات',
+    // Vendor invitation / participation status badges
+    vstatus_not_invited:'غير مدعو',
+    vstatus_invited:    'مدعو',
+    vstatus_simulated:  'محاكى',
+    vstatus_declined:   'رفض',
+    vstatus_replied:    'رد',
+    vstatus_no_comms:   'بلا تواصل',
   }
 };
 
@@ -356,6 +442,95 @@ function t(key) {
   var lang = _currentLang;
   return (I18N[lang] && I18N[lang][key]) || (I18N['en'] && I18N['en'][key]) || key;
 }
+
+// ── Vendor field translation helpers ────────────────────────────────────────
+// Specialization tag translation map  (English → Arabic)
+var SPEC_MAP_AR = {
+  'Custom software development':      'تطوير البرمجيات المخصصة',
+  'Oracle EBS Implementation':        'تطبيق Oracle EBS',
+  'ERP (Oracle EBS R12)':             'تخطيط الموارد (Oracle EBS R12)',
+  'CRM development':                  'تطوير أنظمة إدارة علاقات العملاء',
+  'AI/ML development':                'تطوير الذكاء الاصطناعي/التعلم الآلي',
+  'AI & data platforms':              'منصات الذكاء الاصطناعي والبيانات',
+  'Data warehouse':                   'مستودعات البيانات',
+  'ETL':                              'ETL',
+  'Tableau':                          'Tableau',
+  'Data engineering':                 'هندسة البيانات',
+  'Cloud migration':                  'هجرة الخدمات السحابية',
+  'IT transformation':                'التحول التقني',
+  'Digital transformation':           'التحول الرقمي',
+  'Managed services':                 'الخدمات المُدارة',
+  'IT staff augmentation':            'توفير كوادر تقنية',
+  'Government solutions':             'حلول القطاع الحكومي',
+  'Cloud infrastructure':             'البنية التحتية السحابية',
+  'HCM':                              'إدارة رأس المال البشري',
+  'SCM':                              'إدارة سلاسل التوريد',
+  'SAP ERP':                          'SAP ERP',
+  'Hybrid cloud':                     'السحابة الهجينة',
+  'Managed IT services':              'خدمات تقنية المعلومات المُدارة',
+  'Enterprise application management':'إدارة تطبيقات المؤسسات',
+  'Security':                         'الأمن المعلوماتي',
+  'Application development':          'تطوير التطبيقات',
+  'IT consulting':                    'استشارات تقنية المعلومات',
+  'Staff augmentation':               'توسيع الفرق التقنية',
+  'Azure cloud':                      'سحابة Azure',
+  'Dynamics 365 ERP':                 'Dynamics 365 ERP',
+  'Power Platform':                   'Power Platform',
+  'Intelligent automation':           'الأتمتة الذكية',
+  'Engineering services':             'الخدمات الهندسية',
+  'Cybersecurity':                    'الأمن السيبراني',
+  'Application modernization':        'تحديث التطبيقات',
+  'Network solutions':                'حلول الشبكات',
+  'IT outsourcing':                   'الاستعانة بمصادر تقنية خارجية',
+  'Business applications':            'تطبيقات الأعمال',
+  'ERP support':                      'دعم أنظمة تخطيط الموارد',
+  'ISO 9001':                         'ISO 9001',
+  'ISO 27001':                        'ISO 27001',
+  'CMMI Level 3':                     'CMMI المستوى 3',
+  'CMMI Level 5':                     'CMMI المستوى 5',
+  'Oracle Gold Partner':              'شريك Oracle الذهبي',
+};
+
+// Translate a single specialization/platform tag
+function tSpec(tag) {
+  if (_currentLang !== 'ar') return tag;
+  return SPEC_MAP_AR[tag.trim()] || tag;
+}
+
+// Translate a vendor category string stored in DB
+function tVendorCat(cat) {
+  if (!cat) return '';
+  if (_currentLang !== 'ar') return cat;
+  var map = { 'IT Consulting': t('vcat_it_consulting'), 'IT & Digital Transformation': t('vcat_it_digital') };
+  return map[cat] || cat;
+}
+
+// Translate a vendor size string stored in DB
+function tVendorSize(size) {
+  if (!size) return '';
+  if (_currentLang !== 'ar') return size;
+  var map = { 'Large': t('vsize_large'), 'Medium': t('vsize_medium') };
+  return map[size] || size;
+}
+
+// Translate a vendor country string stored in DB
+function tVendorCountry(country) {
+  if (!country) return '';
+  if (_currentLang !== 'ar') return country;
+  var map = { 'UAE': t('vcountry_uae') };
+  return map[country] || country;
+}
+
+// Render a semicolon-separated or comma-separated tag list with translation
+function tSpecTagList(str, separator) {
+  if (!str) return '<span style="font-size:0.84rem;color:#9a8c78">–</span>';
+  var sep = separator || /[,;]/;
+  return str.split(sep).filter(Boolean).map(function(s) {
+    return '<span class="tag" style="white-space:normal;max-width:none;word-break:break-word;margin-bottom:2px">'
+      + escHtml(tSpec(s.trim())) + '</span>';
+  }).join('');
+}
+// ── End vendor helpers ───────────────────────────────────────────────────────
 
 function applyTranslations() {
   var isAr = _currentLang === 'ar';
@@ -1969,46 +2144,46 @@ rfpTabs.vendors = async function(rfpId, rfp) {
     const fitCls = score >= 75 ? 'perf-high' : score >= 50 ? 'perf-mid' : 'perf-low';
     // Show first 3 tags; clicking the cell opens full vendor detail with all specs
     var allSpecs = (v.specializations||'').split(',').filter(Boolean);
-    var visibleTags = allSpecs.slice(0,3).map(function(s){ return '<span class="tag">' + escHtml(s.trim()) + '</span>'; }).join('');
+    var visibleTags = allSpecs.slice(0,3).map(function(s){ return '<span class="tag">' + escHtml(tSpec(s.trim())) + '</span>'; }).join('');
     var moreCount = allSpecs.length - 3;
-    var moreHint = moreCount > 0 ? '<span style="cursor:pointer;font-size:0.75rem;color:var(--cpc-gold-deep);text-decoration:underline;margin-left:3px">+' + moreCount + ' more</span>' : '';
+    var moreHint = moreCount > 0 ? '<span style="cursor:pointer;font-size:0.75rem;color:var(--cpc-gold-deep);text-decoration:underline;margin-left:3px">+' + moreCount + '</span>' : '';
     const tags = visibleTags + moreHint;
 
     // Row background: RED tint if declined
     const rowStyle = isDeclined ? ' style="background:#fef2f2;opacity:0.85"' : '';
 
     const actionBtn = isDeclined
-      ? '<span style="font-size:0.72rem;color:#dc2626;font-weight:600;padding:2px 8px">Declined</span>'
+      ? '<span style="font-size:0.72rem;color:#dc2626;font-weight:600;padding:2px 8px">' + t('vstatus_declined') + '</span>'
       : allowRemove
-        ? '<button class="btn-danger btn-sm" onclick="toggleVendorShortlist(' + rfpId + ',' + v.id + ',false)"><i class="fas fa-minus"></i>Remove</button>'
-        : '<button class="btn-secondary btn-sm" onclick="toggleVendorShortlist(' + rfpId + ',' + v.id + ',true)"><i class="fas fa-plus"></i>Add</button>';
+        ? '<button class="btn-danger btn-sm" onclick="toggleVendorShortlist(' + rfpId + ',' + v.id + ',false)"><i class="fas fa-minus"></i>' + t('btn_remove') + '</button>'
+        : '<button class="btn-secondary btn-sm" onclick="toggleVendorShortlist(' + rfpId + ',' + v.id + ',true)"><i class="fas fa-plus"></i>' + t('btn_add') + '</button>';
 
     // Participation status badge — declined overrides invitation badge
     let invBadge = '';
     if (isDeclined) {
       invBadge = '<span style="background:#fee2e2;color:#991b1b;border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:700;border:1px solid #fca5a5">'
-        + '<i class="fas fa-times-circle mr-1"></i>Declined</span>';
+        + '<i class="fas fa-times-circle mr-1"></i>' + t('vstatus_declined') + '</span>';
     } else {
       const inv = invitationMap[v.id];
       if (!inv) {
-        invBadge = '<span style="background:#f3f4f6;color:#6b7280;border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:500">Not Invited</span>';
+        invBadge = '<span style="background:#f3f4f6;color:#6b7280;border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:500">' + t('vstatus_not_invited') + '</span>';
       } else if (inv.status === 'sent') {
-        invBadge = '<span style="background:#d1fae5;color:#065f46;border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:600"><i class="fas fa-check-circle mr-1"></i>Invited</span>';
+        invBadge = '<span style="background:#d1fae5;color:#065f46;border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:600"><i class="fas fa-check-circle mr-1"></i>' + t('vstatus_invited') + '</span>';
       } else {
-        invBadge = '<span style="background:#ede9fe;color:#5b21b6;border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:500"><i class="fas fa-flask mr-1"></i>Simulated</span>';
+        invBadge = '<span style="background:#ede9fe;color:#5b21b6;border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:500"><i class="fas fa-flask mr-1"></i>' + t('vstatus_simulated') + '</span>';
       }
     }
 
     // Received emails count
     const rxCount = receivedMap[v.id] || 0;
     const rxBadge = rxCount > 0
-      ? '<span style="background:#ede9fe;color:var(--cpc-gold-deep);border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:600;margin-left:4px"><i class="fas fa-reply mr-1"></i>' + rxCount + ' replied</span>'
+      ? '<span style="background:#ede9fe;color:var(--cpc-gold-deep);border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:600;margin-left:4px"><i class="fas fa-reply mr-1"></i>' + rxCount + ' ' + t('vstatus_replied') + '</span>'
       : '';
 
     // Communications button: disabled if declined
     const commBtn = isDeclined
-      ? '<button class="btn-ghost btn-sm" disabled title="Communications prohibited — vendor declined" style="opacity:0.4;cursor:not-allowed"><i class="fas fa-ban"></i>No Comms</button>'
-      : '<button class="btn-ghost btn-sm" onclick="navigateToVendorComms(' + rfpId + ',' + v.id + ')" title="Open Communications"><i class="fas fa-comments"></i>Comms</button>';
+      ? '<button class="btn-ghost btn-sm" disabled title="Communications prohibited — vendor declined" style="opacity:0.4;cursor:not-allowed"><i class="fas fa-ban"></i>' + t('vstatus_no_comms') + '</button>'
+      : '<button class="btn-ghost btn-sm" onclick="navigateToVendorComms(' + rfpId + ',' + v.id + ')" title="Open Communications"><i class="fas fa-comments"></i>' + t('btn_comms') + '</button>';
 
     // Avatar background: red if declined
     const avatarBg = isDeclined ? '#dc2626' : 'var(--cpc-ink)';
@@ -2021,7 +2196,7 @@ rfpTabs.vendors = async function(rfpId, rfp) {
       + '<div style="width:36px;height:36px;border-radius:8px;background:' + avatarBg + ';display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:0.9rem;flex-shrink:0">'
       + (isDeclined ? '<i class="fas fa-times" style="font-size:0.8rem"></i>' : escHtml(v.name.charAt(0))) + '</div>'
       + '<div><div style="font-weight:600;font-size:0.95rem' + (isDeclined ? ';color:#991b1b' : '') + '">' + escHtml(v.name) + '</div>'
-      + '<div style="font-size:0.78rem;color:#9ca3af">' + escHtml(v.country||'UAE') + ' &bull; ' + escHtml(v.size||'')
+      + '<div style="font-size:0.78rem;color:#9ca3af">' + escHtml(tVendorCountry(v.country||'UAE')) + ' &bull; ' + escHtml(tVendorSize(v.size||''))
       + (participantCode ? ' &bull; <span style="font-family:monospace;color:var(--cpc-ink);font-weight:600" title="Participant Reference">' + participantCode + '</span>' : '')
       + '</div>'
       + '</div></div></td>'
@@ -3786,18 +3961,18 @@ pages.vendors = async function() {
   let rows = '';
   vendors.forEach(function(v) {
     var allSpecs2 = (v.specializations||'').split(',').filter(Boolean);
-    var visTags2 = allSpecs2.slice(0,3).map(function(s){ return '<span class="tag">' + escHtml(s.trim()) + '</span>'; }).join('');
+    var visTags2 = allSpecs2.slice(0,3).map(function(s){ return '<span class="tag">' + escHtml(tSpec(s.trim())) + '</span>'; }).join('');
     var more2 = allSpecs2.length - 3;
-    var moreBadge2 = more2 > 0 ? '<span style="font-size:0.75rem;color:var(--cpc-gold-deep);text-decoration:underline;margin-left:3px">+' + more2 + ' more</span>' : '';
+    var moreBadge2 = more2 > 0 ? '<span style="font-size:0.75rem;color:var(--cpc-gold-deep);text-decoration:underline;margin-left:3px">+' + more2 + '</span>' : '';
     const tags = visTags2 + moreBadge2;
 
     rows += '<tr>'
       + '<td><div style="display:flex;align-items:center;gap:0.75rem">'
       + '<div style="width:36px;height:36px;border-radius:8px;background:var(--cpc-ink);display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:0.9rem;flex-shrink:0">' + escHtml(v.name.charAt(0)) + '</div>'
       + '<div><div style="font-weight:600;font-size:0.95rem">' + escHtml(v.name) + '</div>'
-      + '<div style="font-size:0.78rem;color:#9ca3af">' + escHtml(v.country||'UAE') + ' &bull; ' + escHtml(v.size||'') + '</div>'
+      + '<div style="font-size:0.78rem;color:#9ca3af">' + escHtml(tVendorCountry(v.country||'UAE')) + ' &bull; ' + escHtml(tVendorSize(v.size||'')) + '</div>'
       + '</div></div></td>'
-      + '<td>' + escHtml(v.category||'') + '</td>'
+      + '<td>' + escHtml(tVendorCat(v.category||'')) + '</td>'
       + '<td onclick="viewVendorDetail(' + v.id + ')" style="cursor:pointer" title="Click to see all specializations"><div class="tag-group">' + tags + '</div></td>'
       + '<td><button class="btn-ghost btn-sm" onclick="viewVendorDetail(' + v.id + ')"><i class="fas fa-eye"></i></button></td>'
       + '</tr>';
@@ -3806,11 +3981,11 @@ pages.vendors = async function() {
   setContent(
     '<div class="space-y-4">'
     + '<div style="display:flex;align-items:center;justify-content:space-between">'
-    + '<div><h3 style="font-weight:700;font-size:0.95rem;color:#1f2937;margin:0">Global Vendor Registry</h3>'
-    + '<p style="font-size:0.8rem;color:#9ca3af;margin:0">' + vendors.length + ' registered vendors</p></div>'
+    + '<div><h3 style="font-weight:700;font-size:0.95rem;color:#1f2937;margin:0">' + t('vpage_heading') + '</h3>'
+    + '<p style="font-size:0.8rem;color:#9ca3af;margin:0">' + vendors.length + ' ' + t('vpage_registered') + '</p></div>'
     + '</div>'
     + '<div class="card"><div style="overflow-x:auto"><table>'
-    + '<thead><tr><th>Vendor</th><th>Category</th><th>Specializations</th><th></th></tr></thead>'
+    + '<thead><tr><th>' + t('vpage_th_vendor') + '</th><th>' + t('vpage_th_category') + '</th><th>' + t('vpage_th_specs') + '</th><th></th></tr></thead>'
     + '<tbody>' + rows + '</tbody>'
     + '</table></div></div>'
     + '</div>'
@@ -3839,11 +4014,12 @@ function viewVendorDetail(id) {
       + '</div>';
   }
 
-  // Render semi-colon-separated items as tag pills
-  function tagList(str) {
+  // Render semi-colon-separated items as tag pills (with optional spec translation)
+  function tagList(str, translateTags) {
     if (!str) return '<span style="font-size:0.84rem;color:#9a8c78">–</span>';
     return str.split(';').filter(Boolean).map(function(s){
-      return '<span class="tag" style="white-space:normal;max-width:none;word-break:break-word;margin-bottom:2px">' + escHtml(s.trim()) + '</span>';
+      var label = translateTags ? tSpec(s.trim()) : s.trim();
+      return '<span class="tag" style="white-space:normal;max-width:none;word-break:break-word;margin-bottom:2px">' + escHtml(label) + '</span>';
     }).join('');
   }
 
@@ -3854,7 +4030,7 @@ function viewVendorDetail(id) {
     : '<span style="font-size:0.84rem;color:#9a8c78">–</span>';
 
   var websiteFieldHtml = '<div style="min-width:0">'
-    + '<div style="font-size:0.7rem;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#9a8c78;margin-bottom:2px">Website</div>'
+    + '<div style="font-size:0.7rem;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#9a8c78;margin-bottom:2px">' + t('vfld_website') + '</div>'
     + websiteHtml + '</div>';
 
   // Founded badge
@@ -3867,9 +4043,9 @@ function viewVendorDetail(id) {
     +   '<div style="min-width:0">'
     +     '<h3 style="font-size:1.05rem;font-weight:700;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + escHtml(vendor.name) + '</h3>'
     +     '<div style="display:flex;align-items:center;gap:8px;margin-top:3px;flex-wrap:wrap">'
-    +       '<span style="font-size:0.78rem;color:#6b7280">' + escHtml(vendor.category||'') + '</span>'
-    +       (vendor.founded_year ? '<span style="font-size:0.72rem;background:var(--cpc-ivory);border:1px solid var(--cpc-line);border-radius:4px;padding:1px 7px;color:#74635a">Est. ' + foundedStr + '</span>' : '')
-    +       (vendor.size ? '<span style="font-size:0.72rem;background:var(--cpc-ivory);border:1px solid var(--cpc-line);border-radius:4px;padding:1px 7px;color:#74635a">' + escHtml(vendor.size) + '</span>' : '')
+    +       '<span style="font-size:0.78rem;color:#6b7280">' + escHtml(tVendorCat(vendor.category||'')) + '</span>'
+    +       (vendor.founded_year ? '<span style="font-size:0.72rem;background:var(--cpc-ivory);border:1px solid var(--cpc-line);border-radius:4px;padding:1px 7px;color:#74635a">' + t('vfld_est') + ' ' + foundedStr + '</span>' : '')
+    +       (vendor.size ? '<span style="font-size:0.72rem;background:var(--cpc-ivory);border:1px solid var(--cpc-line);border-radius:4px;padding:1px 7px;color:#74635a">' + escHtml(tVendorSize(vendor.size)) + '</span>' : '')
     +     '</div>'
     +   '</div>'
     + '</div>'
@@ -3878,17 +4054,17 @@ function viewVendorDetail(id) {
     + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem 1.25rem;font-size:0.85rem;margin-bottom:0.5rem">'
 
     // Section: Company
-    + sectionHead('Company')
-    + field('Country', vendor.country)
-    + field('Headquarters', vendor.hq_city)
+    + sectionHead(t('vsec_company'))
+    + field(t('vfld_country'), tVendorCountry(vendor.country))
+    + field(t('vfld_hq'), vendor.hq_city)
     + websiteFieldHtml
-    + field('Annual Revenue', vendor.annual_revenue_usd)
+    + field(t('vfld_revenue'), vendor.annual_revenue_usd)
 
     // Section: Contact
-    + sectionHead('Contact')
-    + field('Contact Name', vendor.contact_name)
+    + sectionHead(t('vsec_contact'))
+    + field(t('vfld_contact_name'), vendor.contact_name)
     + '<div style="min-width:0">'
-    +   '<div style="font-size:0.7rem;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#9a8c78;margin-bottom:2px">Contact Email <span style="font-size:0.68rem;color:#b8a898;font-weight:400;text-transform:none;letter-spacing:0">(editable)</span></div>'
+    +   '<div style="font-size:0.7rem;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#9a8c78;margin-bottom:2px">' + t('vfld_contact_email') + ' <span style="font-size:0.68rem;color:#b8a898;font-weight:400;text-transform:none;letter-spacing:0">' + t('vfld_email_editable') + '</span></div>'
     +   '<div style="display:flex;gap:6px;align-items:center">'
     +     '<input id="vendorEmailInput_' + id + '" type="email" value="' + escHtml(vendor.contact_email||'') + '" '
     +     'style="flex:1;border:1px solid #d1d5db;border-radius:6px;padding:5px 8px;font-size:0.82rem;min-width:0" '
@@ -3899,25 +4075,25 @@ function viewVendorDetail(id) {
     + '</div>'
 
     // Section: Technical Profile
-    + sectionHead('Technical Profile')
+    + sectionHead(t('vsec_tech_profile'))
     + '<div style="grid-column:1/-1;min-width:0">'
-    +   '<div style="font-size:0.7rem;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#9a8c78;margin-bottom:6px">Platforms &amp; Technologies</div>'
-    +   '<div class="tag-group" style="flex-wrap:wrap;gap:4px">' + tagList(vendor.platforms) + '</div>'
+    +   '<div style="font-size:0.7rem;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#9a8c78;margin-bottom:6px">' + t('vfld_platforms') + '</div>'
+    +   '<div class="tag-group" style="flex-wrap:wrap;gap:4px">' + tagList(vendor.platforms, true) + '</div>'
     + '</div>'
     + '<div style="grid-column:1/-1;min-width:0">'
-    +   '<div style="font-size:0.7rem;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#9a8c78;margin-bottom:6px">Specializations</div>'
+    +   '<div style="font-size:0.7rem;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#9a8c78;margin-bottom:6px">' + t('vfld_specializations') + '</div>'
     +   '<div class="tag-group" style="flex-wrap:wrap;gap:4px">'
     +   (vendor.specializations||'').split(/[,;]/).filter(Boolean).map(function(s){
-          return '<span class="tag" style="white-space:normal;max-width:none;word-break:break-word;margin-bottom:2px">' + escHtml(s.trim()) + '</span>';
+          return '<span class="tag" style="white-space:normal;max-width:none;word-break:break-word;margin-bottom:2px">' + escHtml(tSpec(s.trim())) + '</span>';
         }).join('')
     +   '</div>'
     + '</div>'
-    + field('Certifications', vendor.certifications, true)
+    + field(t('vfld_certifications'), vendor.certifications, true)
 
     // Section: Industry Experience
-    + sectionHead('Industry Experience')
-    + field('Experience Summary', vendor.erp_experience, true)
-    + field('Public Sector References', vendor.public_sector_refs, true)
+    + sectionHead(t('vsec_industry'))
+    + field(t('vfld_exp_summary'), vendor.erp_experience, true)
+    + field(t('vfld_pub_sector'), vendor.public_sector_refs, true)
 
     + '</div>' // end grid
 
