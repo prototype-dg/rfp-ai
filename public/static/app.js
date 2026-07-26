@@ -72,6 +72,138 @@ var I18N = {
     btn_add:         'Add',
     btn_remove:      'Remove',
     btn_comms:       'Comms',
+    // RFP Generate tab labels
+    gen_rfp_params:       'RFP Parameters',
+    gen_scoring_matrix:   'Evaluation Scoring Matrix',
+    gen_edit_matrix:      'Edit Matrix',
+    gen_save_matrix:      'Save Matrix',
+    gen_rfp_preview:      'RFP Preview',
+    gen_generate_ai:      'Generate with AI',
+    gen_matrix_hint:      'Define criteria and weights used in AI generation and vendor evaluation. Weights must sum to 100%.',
+    // Scoring matrix table headers + footer
+    sm_th_criterion:    'Criterion',
+    sm_th_weight:       'Weight',
+    sm_th_description:  'Description',
+    sm_add_criterion:   'Add Criterion',
+    sm_total:           'Total',
+    sm_must_100:        '⚠ must be 100%',
+    sm_ok:              '✓',
+    sm_weights_error:   'Weights must sum to 100%. Current total:',
+    sm_saved:           'Scoring matrix saved.',
+    // Scoring matrix default criteria (display only — kept EN in generated docs)
+    sm_crit_technical:  'Technical Approach & Methodology',
+    sm_crit_functional: 'Functional Fit & Solution Quality',
+    sm_crit_team:       'Team Qualifications & Experience',
+    sm_crit_financial:  'Financial Proposal',
+    sm_crit_impl:       'Implementation Plan & Timeline',
+    // Vendors tab header buttons
+    vendors_ai_suggest:   'AI Suggested Vendors',
+    vendors_send_inv:     'Send Invitations',
+    vendors_section_title:'Vendor Shortlist & Participation',
+    inv_send_pdf_btn:     'Send Invitations + PDF',
+    inv_modal_title:      'Send RFP Invitations',
+    inv_sending_to:       'Sending to',
+    inv_shortlisted:      'shortlisted vendors.',
+    inv_real_email:       'A real email will be sent to',
+    inv_all_simulated:    'All emails will be simulated.',
+    inv_others_simulated: 'All others are simulated.',
+    // Q&A tab
+    qa_no_questions_title:'No vendor questions yet',
+    qa_no_questions_sub:  'Vendors submit questions by replying to the RFP invitation email with an Excel attachment.',
+    qa_no_questions_hint: 'If you received an email but questions are not showing, try',
+    qa_re_extract_link:   'Re-extract Questions',
+    qa_re_extract_btn:    'Re-extract',
+    qa_re_extract_full:   'Re-extract Questions from Emails',
+    qa_ai_answer_all:     'AI Answer All',
+    qa_publish_approved:  'Publish All Approved',
+    qa_close_qa:          'Close Q&A',
+    qa_closed_label:      'Q&A Closed',
+    qa_manual_required:   'Manual Required',
+    qa_awaiting_approval: 'Awaiting Approval',
+    qa_unanswered:        'Unanswered',
+    qa_via_email:         'Via Email',
+    qa_ai_draft_btn:      'AI Draft',
+    qa_manual_edit_btn:   'Manual Edit',
+    qa_approve_send_btn:  'Approve & Send',
+    qa_approve_btn:       'Approve',
+    qa_ai_draft_label:    'AI Draft Answer',
+    qa_ai_no_answer:      'AI could not generate an answer',
+    qa_manual_input_msg:  'This question requires manual input. Please edit and provide an answer before publishing.',
+    qa_manual_warning_hd: 'question(s) require manual answers',
+    qa_manual_warning_sub:'AI could not generate answers for highlighted questions. Please provide manual answers before publishing.',
+    qa_blocked_title:     'Blocked:',
+    qa_need_manual_answers:'question(s) need manual answers',
+    qa_answering:         'AI Answering...',
+    qa_re_extracting:     'Re-extracting...',
+    // Proposals tab
+    prop_vendors_submit:  'Vendors submit proposals via the secure submission portal link included in their invitation email.',
+    prop_evaluate_ai:     'Evaluate with AI',
+    prop_evaluating:      'Evaluating…',
+    prop_view_btn:        'View',
+    prop_award_btn:       'Award',
+    prop_awarded_badge:   'Awarded',
+    prop_recommended:     'Recommended',
+    prop_not_awarded:     'Not Awarded',
+    prop_submitted:       'Submitted',
+    prop_review_badge:    'Review',
+    prop_files:           'file',
+    prop_files_pl:        'files',
+    prop_no_docs:         'No documents attached',
+    // Proposal panel tabs
+    panel_tab_summary:    'Summary',
+    panel_tab_compliance: 'Compliance',
+    panel_tab_scoring:    'Scoring',
+    panel_tab_verdict:    'AI Verdict',
+    // Proposal panel — summary tab
+    panel_budget_lbl:       'Budget',
+    panel_timeline_lbl:     'Timeline',
+    panel_tech_summary:     'Technical Summary',
+    panel_key_strengths:    'Key Strengths',
+    panel_docs_submitted:   'Submitted Documents',
+    panel_no_docs:          'No documents',
+    panel_budget_manual_hd: 'Budget not auto-extracted — manual entry required',
+    panel_budget_manual_sub:'The AI could not find a clear "Total" line in the proposal. Enter the total budget to unlock full commercial scoring.',
+    panel_save_reevaluate:  'Save & Re-evaluate',
+    panel_low_confidence:   'Low confidence — verify manually',
+    // Proposal panel — compliance tab
+    panel_comp_disq:        '🚨 Mandatory Requirement(s) Not Met — Proposal Automatically Disqualified',
+    panel_comp_th_req:      'Requirement',
+    panel_comp_th_mand:     'Mandatory',
+    panel_comp_th_met:      'Met?',
+    panel_comp_th_depth:    'AI Depth',
+    panel_comp_th_just:     'Justification',
+    panel_comp_must:        'MUST',
+    panel_comp_should:      'should',
+    panel_comp_no_data:     'No compliance data yet',
+    panel_comp_no_data_sub: 'Run AI evaluation to generate the compliance matrix.',
+    // Proposal panel — scoring tab
+    panel_score_overall:    'Overall AI Score',
+    panel_score_compliance: 'Compliance Score',
+    panel_score_quality:    'Quality Score',
+    panel_score_commercial: 'Commercial Score',
+    panel_score_comp_desc:  'Mandatory + optional requirement coverage',
+    panel_score_qual_desc:  'AI-assessed depth, clarity & feasibility',
+    panel_score_comm_desc:  'Budget vs. RFP ceiling ratio',
+    panel_score_pending:    'Commercial score excluded — budget needs manual entry (see Executive Summary tab)',
+    panel_score_validated:  'Budget manually validated and included in scoring',
+    panel_score_no_data:    'No scoring data yet',
+    panel_score_no_data_sub:'Run AI evaluation to see the detailed scoring breakdown.',
+    // Proposal panel — verdict tab
+    panel_verdict_reasoning:'Reasoning',
+    panel_verdict_strong:   'Strong Points',
+    panel_verdict_risks:    'Risks & Weak Points',
+    panel_verdict_orig_att: 'Original Attachments',
+    panel_verdict_no_docs:  'No documents',
+    panel_verdict_no_data:  'No AI verdict yet',
+    panel_verdict_no_data_sub:'Run an evaluation to get the AI recommendation, compliance matrix, and full scoring breakdown.',
+    panel_eval_single_btn:  'Evaluate this Proposal',
+    panel_eval_footer_btn:  'Evaluate with AI',
+    panel_score_score_lbl:  'Score:',
+    panel_manual_validated: 'Budget manually validated and included in scoring',
+    // Q&A badge labels (Published already exists as qa_published)
+    badge_published:        'Published',
+    badge_awaiting:         'Awaiting Approval',
+    badge_unanswered:       'Unanswered',
     lbl_loading:     'Loading…',
     lbl_no_data:     'No data yet',
     lbl_search:      'Search…',
@@ -285,6 +417,138 @@ var I18N = {
     btn_add:         'إضافة',
     btn_remove:      'إزالة',
     btn_comms:       'مراسلة',
+    // RFP Generate tab labels
+    gen_rfp_params:       'معايير طلب العرض',
+    gen_scoring_matrix:   'مصفوفة التقييم',
+    gen_edit_matrix:      'تعديل المصفوفة',
+    gen_save_matrix:      'حفظ المصفوفة',
+    gen_rfp_preview:      'معاينة الطلب',
+    gen_generate_ai:      'إنشاء بالذكاء الاصطناعي',
+    gen_matrix_hint:      'حدد المعايير والأوزان المستخدمة في الإنشاء والتقييم. يجب أن تكون مجموع الأوزان 100%.',
+    // Scoring matrix table headers + footer
+    sm_th_criterion:    'المعيار',
+    sm_th_weight:       'الوزن',
+    sm_th_description:  'الوصف',
+    sm_add_criterion:   'إضافة معيار',
+    sm_total:           'المجموع',
+    sm_must_100:        '⚠ يجب أن يكون 100%',
+    sm_ok:              '✓',
+    sm_weights_error:   'يجب أن يكون مجموع الأوزان 100%. المجموع الحالي:',
+    sm_saved:           'تم حفظ مصفوفة التقييم.',
+    // Scoring matrix default criteria (EN kept in generated docs — Arabic for UI display)
+    sm_crit_technical:  'المنهجية والمقاربة التقنية',
+    sm_crit_functional: 'الملاءمة الوظيفية وجودة الحل',
+    sm_crit_team:       'مؤهلات الفريق وخبرته',
+    sm_crit_financial:  'العرض المالي',
+    sm_crit_impl:       'خطة التنفيذ والجدول الزمني',
+    // Vendors tab header buttons
+    vendors_ai_suggest:   'الموردون المقترحون بالذكاء الاصطناعي',
+    vendors_send_inv:     'إرسال الدعوات',
+    vendors_section_title:'قائمة الموردين والمشاركة',
+    inv_send_pdf_btn:     'إرسال الدعوات + PDF',
+    inv_modal_title:      'إرسال دعوات طلب العرض',
+    inv_sending_to:       'إرسال إلى',
+    inv_shortlisted:      'مورد مختار.',
+    inv_real_email:       'سيُرسل بريد إلكتروني حقيقي إلى',
+    inv_all_simulated:    'جميع الرسائل ستُحاكى.',
+    inv_others_simulated: 'جميع الآخرين محاكاة.',
+    // Q&A tab
+    qa_no_questions_title:'لا توجد أسئلة من الموردين بعد',
+    qa_no_questions_sub:  'يرسل الموردون أسئلتهم بالرد على بريد دعوة طلب العرض مع مرفق Excel.',
+    qa_no_questions_hint: 'إذا استلمت بريدًا إلكترونيًا ولا تظهر الأسئلة، جرّب',
+    qa_re_extract_link:   'إعادة استخراج الأسئلة',
+    qa_re_extract_btn:    'إعادة استخراج',
+    qa_re_extract_full:   'إعادة استخراج الأسئلة من الرسائل',
+    qa_ai_answer_all:     'إجابة الكل بالذكاء الاصطناعي',
+    qa_publish_approved:  'نشر جميع الموافق عليها',
+    qa_close_qa:          'إغلاق الأسئلة',
+    qa_closed_label:      'الأسئلة مغلقة',
+    qa_manual_required:   'يتطلب إدخالاً يدوياً',
+    qa_awaiting_approval: 'بانتظار الموافقة',
+    qa_unanswered:        'بدون إجابة',
+    qa_via_email:         'عبر البريد الإلكتروني',
+    qa_ai_draft_btn:      'مسودة ذكاء اصطناعي',
+    qa_manual_edit_btn:   'تعديل يدوي',
+    qa_approve_send_btn:  'موافقة وإرسال',
+    qa_approve_btn:       'موافقة',
+    qa_ai_draft_label:    'مسودة إجابة الذكاء الاصطناعي',
+    qa_ai_no_answer:      'تعذّر على الذكاء الاصطناعي توليد إجابة',
+    qa_manual_input_msg:  'يتطلب هذا السؤال إدخالاً يدوياً. يرجى التعديل وإضافة إجابة قبل النشر.',
+    qa_manual_warning_hd: 'سؤال(أسئلة) تتطلب إجابات يدوية',
+    qa_manual_warning_sub:'تعذّر على الذكاء الاصطناعي توليد إجابات للأسئلة المميزة. يرجى إدخالها يدوياً قبل النشر.',
+    qa_blocked_title:     'محظور:',
+    qa_need_manual_answers:'سؤال(أسئلة) تحتاج إجابات يدوية',
+    qa_answering:         'جارٍ الإجابة...',
+    qa_re_extracting:     'جارٍ إعادة الاستخراج...',
+    // Proposals tab
+    prop_vendors_submit:  'يرسل الموردون عروضهم عبر رابط بوابة التقديم المؤمّن المُدرج في بريد الدعوة.',
+    prop_evaluate_ai:     'تقييم بالذكاء الاصطناعي',
+    prop_evaluating:      'جارٍ التقييم…',
+    prop_view_btn:        'عرض',
+    prop_award_btn:       'ترسية',
+    prop_awarded_badge:   'مُرسى',
+    prop_recommended:     'موصى به',
+    prop_not_awarded:     'غير مُرسى',
+    prop_submitted:       'مقدَّم',
+    prop_review_badge:    'مراجعة',
+    prop_files:           'ملف',
+    prop_files_pl:        'ملفات',
+    prop_no_docs:         'لا توجد مستندات مرفقة',
+    // Proposal panel tabs
+    panel_tab_summary:    'الملخص',
+    panel_tab_compliance: 'الامتثال',
+    panel_tab_scoring:    'التقييم',
+    panel_tab_verdict:    'حكم الذكاء الاصطناعي',
+    // Proposal panel — summary tab
+    panel_budget_lbl:       'الميزانية',
+    panel_timeline_lbl:     'الجدول الزمني',
+    panel_tech_summary:     'الملخص التقني',
+    panel_key_strengths:    'نقاط القوة الرئيسية',
+    panel_docs_submitted:   'المستندات المقدمة',
+    panel_no_docs:          'لا توجد مستندات',
+    panel_budget_manual_hd: 'لم تُستخرج الميزانية تلقائيًا — يلزم الإدخال اليدوي',
+    panel_budget_manual_sub:'تعذّر على الذكاء الاصطناعي إيجاد سطر "الإجمالي" في العرض. أدخل الميزانية الإجمالية لفتح التقييم التجاري الكامل.',
+    panel_save_reevaluate:  'حفظ وإعادة التقييم',
+    panel_low_confidence:   'ثقة منخفضة — تحقق يدوياً',
+    // Proposal panel — compliance tab
+    panel_comp_disq:        '🚨 متطلب(ات) إلزامية غير مستوفاة — العرض مستبعد تلقائيًا',
+    panel_comp_th_req:      'المتطلب',
+    panel_comp_th_mand:     'إلزامي',
+    panel_comp_th_met:      'مستوفى؟',
+    panel_comp_th_depth:    'عمق الذكاء الاصطناعي',
+    panel_comp_th_just:     'المبرر',
+    panel_comp_must:        'لازم',
+    panel_comp_should:      'مفضّل',
+    panel_comp_no_data:     'لا توجد بيانات امتثال بعد',
+    panel_comp_no_data_sub: 'شغّل تقييم الذكاء الاصطناعي لإنشاء مصفوفة الامتثال.',
+    // Proposal panel — scoring tab
+    panel_score_overall:    'النتيجة الإجمالية للذكاء الاصطناعي',
+    panel_score_compliance: 'نتيجة الامتثال',
+    panel_score_quality:    'نتيجة الجودة',
+    panel_score_commercial: 'النتيجة التجارية',
+    panel_score_comp_desc:  'تغطية المتطلبات الإلزامية والاختيارية',
+    panel_score_qual_desc:  'العمق والوضوح والجدوى بتقييم الذكاء الاصطناعي',
+    panel_score_comm_desc:  'نسبة الميزانية إلى سقف طلب العرض',
+    panel_score_pending:    'النتيجة التجارية مستبعدة — الميزانية تحتاج إدخالاً يدوياً (انظر تبويب الملخص)',
+    panel_score_validated:  'الميزانية مُتحققة يدوياً ومدرجة في التقييم',
+    panel_score_no_data:    'لا توجد بيانات تقييم بعد',
+    panel_score_no_data_sub:'شغّل تقييم الذكاء الاصطناعي للاطلاع على تفاصيل التقييم.',
+    // Proposal panel — verdict tab
+    panel_verdict_reasoning:'المبررات',
+    panel_verdict_strong:   'نقاط القوة',
+    panel_verdict_risks:    'المخاطر ونقاط الضعف',
+    panel_verdict_orig_att: 'المرفقات الأصلية',
+    panel_verdict_no_docs:  'لا توجد مستندات',
+    panel_verdict_no_data:  'لا يوجد حكم ذكاء اصطناعي بعد',
+    panel_verdict_no_data_sub:'شغّل التقييم للحصول على توصية الذكاء الاصطناعي ومصفوفة الامتثال وتفاصيل التقييم.',
+    panel_eval_single_btn:  'تقييم هذا العرض',
+    panel_eval_footer_btn:  'تقييم بالذكاء الاصطناعي',
+    panel_score_score_lbl:  'النتيجة:',
+    panel_manual_validated: 'الميزانية مُتحققة يدوياً ومدرجة في التقييم',
+    // Q&A badge labels
+    badge_published:        'منشور',
+    badge_awaiting:         'بانتظار الموافقة',
+    badge_unanswered:       'بدون إجابة',
     lbl_loading:     'جاري التحميل…',
     lbl_no_data:     'لا توجد بيانات',
     lbl_search:      'بحث…',
@@ -1333,13 +1597,26 @@ function getScoringMatrix(rfp) {
   return JSON.parse(JSON.stringify(DEFAULT_SCORING_MATRIX));
 }
 
+// Translate a known default criterion name for UI display (EN preserved in data for AI docs)
+var MATRIX_CRITERION_KEYS = {
+  'Technical Approach & Methodology': 'sm_crit_technical',
+  'Functional Fit & Solution Quality': 'sm_crit_functional',
+  'Team Qualifications & Experience':  'sm_crit_team',
+  'Financial Proposal':                'sm_crit_financial',
+  'Implementation Plan & Timeline':    'sm_crit_impl',
+};
+function tMatrixCriterion(criterion) {
+  var key = MATRIX_CRITERION_KEYS[criterion];
+  return key ? t(key) : criterion;
+}
+
 // Render the compact READ-ONLY summary shown inline on the Generate tab
 function renderScoringMatrixSummary(matrix) {
   var total = matrix.reduce(function(s, r){ return s + (Number(r.weight)||0); }, 0);
   var totalOk = total === 100;
   var rows = matrix.map(function(r){
     return '<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 10px;border-bottom:1px solid var(--cpc-line)">'
-      + '<span style="font-size:0.82rem;color:var(--cpc-ink);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding-right:8px">' + escHtml(r.criterion||'') + '</span>'
+      + '<span style="font-size:0.82rem;color:var(--cpc-ink);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding-right:8px">' + escHtml(tMatrixCriterion(r.criterion||'')) + '</span>'
       + '<span style="font-family:\'JetBrains Mono\',monospace;font-size:0.8rem;font-weight:700;color:var(--cpc-gold-deep);background:var(--cpc-gold-tint);border:1px solid var(--cpc-line);border-radius:5px;padding:2px 8px;flex-shrink:0">' + (r.weight||0) + '%</span>'
       + '</div>';
   }).join('');
@@ -1347,7 +1624,7 @@ function renderScoringMatrixSummary(matrix) {
     + rows
     + '<div style="padding:6px 10px;display:flex;align-items:center;justify-content:space-between;background:var(--cpc-ivory)">'
     + '<span style="font-family:\'JetBrains Mono\',monospace;font-size:11px;font-weight:700;color:' + (totalOk ? '#065f46' : '#dc2626') + '">'
-    + 'Total: ' + total + '%' + (totalOk ? ' ✓' : ' ⚠') + '</span>'
+    + t('sm_total') + ': ' + total + '%' + (totalOk ? ' ' + t('sm_ok') : ' ' + t('sm_must_100').split(' ')[0]) + '</span>'
     + '</div>'
     + '</div>';
 }
@@ -1387,16 +1664,16 @@ function renderScoringMatrixEditor(matrix) {
   return '<table style="width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed">'
     + '<colgroup><col style="width:28%"><col style="width:86px"><col style="width:auto"><col style="width:36px"></colgroup>'
     + '<thead><tr style="background:var(--cpc-gold-tint)">'
-    + '<th style="padding:9px 12px;text-align:left;font-family:\'JetBrains Mono\',monospace;font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:var(--cpc-gold-deep);border-bottom:2px solid var(--cpc-line)">Criterion</th>'
-    + '<th style="padding:9px 10px;text-align:center;font-family:\'JetBrains Mono\',monospace;font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:var(--cpc-gold-deep);border-bottom:2px solid var(--cpc-line)">Weight</th>'
-    + '<th style="padding:9px 12px;text-align:left;font-family:\'JetBrains Mono\',monospace;font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:var(--cpc-gold-deep);border-bottom:2px solid var(--cpc-line)">Description</th>'
+    + '<th style="padding:9px 12px;text-align:left;font-family:\'JetBrains Mono\',monospace;font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:var(--cpc-gold-deep);border-bottom:2px solid var(--cpc-line)">' + t('sm_th_criterion') + '</th>'
+    + '<th style="padding:9px 10px;text-align:center;font-family:\'JetBrains Mono\',monospace;font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:var(--cpc-gold-deep);border-bottom:2px solid var(--cpc-line)">' + t('sm_th_weight') + '</th>'
+    + '<th style="padding:9px 12px;text-align:left;font-family:\'JetBrains Mono\',monospace;font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:var(--cpc-gold-deep);border-bottom:2px solid var(--cpc-line)">' + t('sm_th_description') + '</th>'
     + '<th style="border-bottom:2px solid var(--cpc-line)"></th>'
     + '</tr></thead>'
     + '<tbody>' + rows + '</tbody>'
     + '</table>'
     + '<div style="padding:8px 12px;display:flex;align-items:center;justify-content:space-between;background:var(--cpc-ivory);border-top:1px solid var(--cpc-line)">'
-    + '<button onclick="addScoringMatrixRow()" class="btn-ghost btn-sm" style="font-size:12px"><i class="fas fa-plus"></i>Add Criterion</button>'
-    + '<span id="smTotal" style="font-family:\'JetBrains Mono\',monospace;font-size:12px;font-weight:700;color:' + totalColor + '">Total: ' + total + '%' + (total !== 100 ? ' ⚠ must be 100%' : ' ✓') + '</span>'
+    + '<button onclick="addScoringMatrixRow()" class="btn-ghost btn-sm" style="font-size:12px"><i class="fas fa-plus"></i>' + t('sm_add_criterion') + '</button>'
+    + '<span id="smTotal" style="font-family:\'JetBrains Mono\',monospace;font-size:12px;font-weight:700;color:' + totalColor + '">' + t('sm_total') + ': ' + total + '%' + (total !== 100 ? ' ' + t('sm_must_100') : ' ' + t('sm_ok')) + '</span>'
     + '</div>';
 }
 
@@ -1409,16 +1686,16 @@ function openScoringMatrixModal(rfpId) {
   showModal(
     '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">'
     + '<div>'
-    + '<h3 style="font-size:1rem;font-weight:700;margin:0"><i class="fas fa-balance-scale cpc-gold" style="margin-right:8px"></i>Evaluation Scoring Matrix</h3>'
-    + '<p style="font-size:0.75rem;color:#9ca3af;margin:4px 0 0 0">Define criteria and weights used in AI generation and vendor evaluation. Weights must sum to 100%.</p>'
+    + '<h3 style="font-size:1rem;font-weight:700;margin:0"><i class="fas fa-balance-scale cpc-gold" style="margin-right:8px"></i>' + t('gen_scoring_matrix') + '</h3>'
+    + '<p style="font-size:0.75rem;color:#9ca3af;margin:4px 0 0 0">' + t('gen_matrix_hint') + '</p>'
     + '</div>'
     + '</div>'
     + '<div style="border:1px solid var(--cpc-line);border-radius:6px;overflow:hidden;margin-bottom:1rem" id="scoringMatrixEditor">'
     + renderScoringMatrixEditor(window._currentScoringMatrix)
     + '</div>'
     + '<div style="display:flex;gap:8px;justify-content:flex-end">'
-    + '<button class="btn-ghost" onclick="closeModal()">Cancel</button>'
-    + '<button class="btn-primary" onclick="saveScoringMatrixAndClose(' + rfpId + ')"><i class="fas fa-save"></i>Save Matrix</button>'
+    + '<button class="btn-ghost" onclick="closeModal()">' + t('btn_cancel') + '</button>'
+    + '<button class="btn-primary" onclick="saveScoringMatrixAndClose(' + rfpId + ')"><i class="fas fa-save"></i>' + t('gen_save_matrix') + '</button>'
     + '</div>'
   );
   // auto-size textareas after modal DOM is painted
@@ -1429,14 +1706,14 @@ function openScoringMatrixModal(rfpId) {
 async function saveScoringMatrixAndClose(rfpId) {
   var matrix = window._currentScoringMatrix || getScoringMatrix(appState.currentRfp);
   var total = matrix.reduce(function(s,r){ return s+(Number(r.weight)||0); }, 0);
-  if (total !== 100) { showToast('Weights must sum to 100%. Current total: ' + total + '%.', 'error'); return; }
+  if (total !== 100) { showToast(t('sm_weights_error') + ' ' + total + '%.', 'error'); return; }
   try {
     await apiCall('POST', '/rfps/' + rfpId + '/scoring-matrix', { matrix: matrix });
     if (appState.currentRfp) appState.currentRfp.scoring_matrix = JSON.stringify(matrix);
     // Refresh inline summary
     var summaryDiv = document.getElementById('scoringMatrixSummary');
     if (summaryDiv) summaryDiv.innerHTML = renderScoringMatrixSummary(matrix);
-    showToast('Scoring matrix saved.', 'success');
+    showToast(t('sm_saved'), 'success');
     closeModal();
   } catch(e) { /* apiCall shows error toast */ }
 }
@@ -1480,7 +1757,7 @@ function updateScoringMatrixRow(i) {
   var el = document.getElementById('smTotal');
   if (el) {
     el.style.color = total === 100 ? '#065f46' : '#dc2626';
-    el.textContent = 'Total: ' + total + '%' + (total !== 100 ? ' ⚠ must be 100%' : ' ✓');
+    el.textContent = t('sm_total') + ': ' + total + '%' + (total !== 100 ? ' ' + t('sm_must_100') : ' ' + t('sm_ok'));
   }
 }
 
@@ -1509,7 +1786,7 @@ function removeScoringMatrixRow(i) {
 async function saveScoringMatrix(rfpId) {
   var matrix = window._currentScoringMatrix || getScoringMatrix(appState.currentRfp);
   var total = matrix.reduce(function(s,r){ return s+(Number(r.weight)||0); }, 0);
-  if (total !== 100) { showToast('Weights must sum to 100%. Current total: ' + total + '%.', 'error'); return; }
+  if (total !== 100) { showToast(t('sm_weights_error') + ' ' + total + '%.', 'error'); return; }
   try {
     await apiCall('POST', '/rfps/' + rfpId + '/scoring-matrix', { matrix: matrix });
     if (appState.currentRfp) appState.currentRfp.scoring_matrix = JSON.stringify(matrix);
@@ -1545,7 +1822,7 @@ rfpTabs.generate = function(rfpId, rfp) {
     '<div style="display:grid;grid-template-columns:460px 1fr;gap:1.25rem;height:calc(100vh - 240px)">'
     // LEFT: form
     + '<div class="card" style="padding:1.25rem;overflow-y:auto;display:flex;flex-direction:column;gap:0.875rem">'
-    + '<h3 style="font-weight:700;color:#1f2937;font-size:0.9rem;margin:0"><i class="fas fa-magic cpc-gold" style="margin-right:6px"></i>RFP Parameters</h3>'
+    + '<h3 style="font-weight:700;color:#1f2937;font-size:0.9rem;margin:0"><i class="fas fa-magic cpc-gold" style="margin-right:6px"></i>' + t('gen_rfp_params') + '</h3>'
     + '<div class="form-group"><label>' + t('form_project_title') + ' *</label><input id="rfpTitle" placeholder="e.g. New Oracle ERP Setup, Data Warehouse and Data Visualization" value="' + escHtml(titleVal) + '"></div>'
     + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem">'
     + '<div class="form-group"><label>' + t('form_category') + '</label><select id="rfpCategory">'
@@ -1567,14 +1844,14 @@ rfpTabs.generate = function(rfpId, rfp) {
     // SCORING MATRIX SECTION — read-only summary + Edit Matrix modal button
     + '<div style="border-top:1px solid var(--cpc-line);padding-top:0.875rem;margin-top:0.25rem">'
     + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">'
-    + '<label style="margin:0;font-weight:600;color:var(--cpc-ink);font-size:0.82rem"><i class="fas fa-balance-scale cpc-gold" style="margin-right:6px"></i>Evaluation Scoring Matrix</label>'
-    + '<button onclick="openScoringMatrixModal(' + rfpId + ')" class="btn-ghost btn-sm" style="font-size:11px;display:flex;align-items:center;gap:4px"><i class="fas fa-edit"></i>Edit Matrix</button>'
+    + '<label style="margin:0;font-weight:600;color:var(--cpc-ink);font-size:0.82rem"><i class="fas fa-balance-scale cpc-gold" style="margin-right:6px"></i>' + t('gen_scoring_matrix') + '</label>'
+    + '<button onclick="openScoringMatrixModal(' + rfpId + ')" class="btn-ghost btn-sm" style="font-size:11px;display:flex;align-items:center;gap:4px"><i class="fas fa-edit"></i>' + t('gen_edit_matrix') + '</button>'
     + '</div>'
     + '<div id="scoringMatrixSummary">' + renderScoringMatrixSummary(window._currentScoringMatrix) + '</div>'
     + '</div>'
     // END SCORING MATRIX SECTION
     + '<div style="display:flex;gap:0.5rem;padding-top:0.25rem">'
-    + '<button class="btn-primary" id="genBtn" style="flex:1" onclick="generateRfpDoc(' + rfpId + ')"><i class="fas fa-robot"></i>Generate with AI</button>'
+    + '<button class="btn-primary" id="genBtn" style="flex:1" onclick="generateRfpDoc(' + rfpId + ')"><i class="fas fa-robot"></i>' + t('gen_generate_ai') + '</button>'
     + '<button class="btn-secondary" onclick="saveRfpFields(' + rfpId + ')"><i class="fas fa-save"></i>Save</button>'
     + '</div>'
     + '<div id="genActionButtons" style="' + (hasContent ? 'display:flex' : 'display:none') + ';gap:0.5rem">'
@@ -1585,7 +1862,7 @@ rfpTabs.generate = function(rfpId, rfp) {
     // RIGHT: preview
     + '<div class="card" style="overflow-y:auto;padding:0">'
     + '<div style="padding:0.875rem 1.25rem;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between;background:#f9fafb">'
-    + '<span style="font-weight:600;color:#374151;font-size:0.88rem"><i class="fas fa-eye cpc-gold" style="margin-right:6px"></i>RFP Preview</span>'
+    + '<span style="font-weight:600;color:#374151;font-size:0.88rem"><i class="fas fa-eye cpc-gold" style="margin-right:6px"></i>' + t('gen_rfp_preview') + '</span>'
     + '<button id="genPreviewPdfBtn" class="btn-ghost btn-sm" onclick="downloadRfpPdf(' + rfpId + ')" style="' + (hasContent ? '' : 'display:none') + '"><i class="fas fa-download"></i>PDF</button>'
     + '</div>'
     + '<div id="rfpPreviewArea" style="padding:0">' + previewHtml + '</div>'
@@ -2224,12 +2501,12 @@ rfpTabs.vendors = async function(rfpId, rfp) {
     // Header with actions
     + '<div style="display:flex;align-items:center;justify-content:space-between">'
     + '<div>'
-    + '<h3 style="font-weight:700;font-size:0.95rem;color:#1f2937;margin:0">Vendor Shortlist & Participation</h3>'
+    + '<h3 style="font-weight:700;font-size:0.95rem;color:#1f2937;margin:0">' + t('vendors_section_title') + '</h3>'
     + '<p style="font-size:0.8rem;color:#9ca3af;margin:0">' + shortlistedCount + ' ' + t('vendors_shortlisted') + ' &bull; ' + t('vendors_inv_status') + '</p>'
     + '</div>'
     + '<div style="display:flex;gap:0.5rem">'
-    + '<button class="btn-secondary" id="aiShortlistBtn" onclick="aiShortlistVendors(' + rfpId + ')"><i class="fas fa-robot"></i>AI Suggested Vendors</button>'
-    + '<button class="btn-primary" onclick="sendRfpInvitations(' + rfpId + ')"><i class="fas fa-paper-plane"></i>Send Invitations</button>'
+    + '<button class="btn-secondary" id="aiShortlistBtn" onclick="aiShortlistVendors(' + rfpId + ')"><i class="fas fa-robot"></i>' + t('vendors_ai_suggest') + '</button>'
+    + '<button class="btn-primary" onclick="sendRfpInvitations(' + rfpId + ')"><i class="fas fa-paper-plane"></i>' + t('vendors_send_inv') + '</button>'
     + '</div>'
     + '</div>'
 
@@ -2298,15 +2575,15 @@ async function sendRfpInvitations(rfpId) {
   // Collect real email for Andersen
   const andersen = shortlisted.find(function(v){ return v.contact_email && v.contact_email.includes('andersenlab.com'); });
   showModal(
-    '<h3 style="font-size:1rem;font-weight:700;margin-bottom:1rem"><i class="fas fa-paper-plane cpc-gold mr-2"></i>Send RFP Invitations</h3>'
-    + '<p style="color:#6b7280;font-size:0.875rem;margin-bottom:1rem">Sending to <strong>' + shortlisted.length + '</strong> shortlisted vendors. '
-    + (andersen ? 'A <strong>real email</strong> will be sent to ' + escHtml(andersen.contact_email) + '. All others are simulated.' : 'All emails will be simulated.')
+    '<h3 style="font-size:1rem;font-weight:700;margin-bottom:1rem"><i class="fas fa-paper-plane cpc-gold mr-2"></i>' + t('inv_modal_title') + '</h3>'
+    + '<p style="color:#6b7280;font-size:0.875rem;margin-bottom:1rem">' + t('inv_sending_to') + ' <strong>' + shortlisted.length + '</strong> ' + t('inv_shortlisted') + ' '
+    + (andersen ? t('inv_real_email') + ' ' + escHtml(andersen.contact_email) + '. ' + t('inv_others_simulated') : t('inv_all_simulated'))
     + '</p>'
     + '<div class="form-group"><label>' + t('invite_q_deadline') + '</label><input type="date" id="invQDeadline" value="' + getDateOffset(14) + '"></div>'
     + '<div class="form-group"><label>' + t('invite_s_deadline') + '</label><input type="date" id="invSDeadline" value="' + (rfp && rfp.deadline ? rfp.deadline : getDateOffset(30)) + '"></div>'
     + '<div class="form-group"><label>' + t('invite_notes') + '</label><textarea id="invNotes" rows="2" placeholder="' + t('invite_notes_ph') + '"></textarea></div>'
     + '<div style="display:flex;gap:0.75rem;margin-top:1rem">'
-    + '<button class="btn-primary" id="sendInvBtn" onclick="confirmSendInvitations(' + rfpId + ')"><i class="fas fa-send"></i>Send Invitations + PDF</button>'
+    + '<button class="btn-primary" id="sendInvBtn" onclick="confirmSendInvitations(' + rfpId + ')"><i class="fas fa-send"></i>' + t('inv_send_pdf_btn') + '</button>'
     + '<button class="btn-ghost" onclick="closeModal()">Cancel</button>'
     + '</div>'
   );
@@ -2875,10 +3152,10 @@ rfpTabs.qa = async function(rfpId) {
   if (questions.length === 0) {
     qCards = '<div class="card" style="padding:2.5rem;text-align:center;color:#9ca3af">'
       + '<i class="fas fa-comments" style="font-size:2.5rem;display:block;margin-bottom:1rem;color:#d1d5db"></i>'
-      + '<p style="margin-bottom:0.5rem;font-weight:600;color:#374151">No vendor questions yet</p>'
-      + '<p style="margin-bottom:1rem;font-size:0.85rem">Vendors submit questions by replying to the RFP invitation email with an Excel attachment.<br>If you received an email but questions are not showing, try <strong>Re-extract Questions</strong> below.</p>'
+      + '<p style="margin-bottom:0.5rem;font-weight:600;color:#374151">' + t('qa_no_questions_title') + '</p>'
+      + '<p style="margin-bottom:1rem;font-size:0.85rem">' + t('qa_no_questions_sub') + '<br>' + t('qa_no_questions_hint') + ' <strong>' + t('qa_re_extract_link') + '</strong>.</p>'
       + '<div style="display:flex;gap:0.75rem;justify-content:center;flex-wrap:wrap">'
-      + '<button class="btn-secondary" id="reprocessQBtn" onclick="reprocessQuestions(' + rfpId + ')"><i class="fas fa-sync"></i>Re-extract Questions from Emails</button>'
+      + '<button class="btn-secondary" id="reprocessQBtn" onclick="reprocessQuestions(' + rfpId + ')"><i class="fas fa-sync"></i>' + t('qa_re_extract_full') + '</button>'
       // Load Demo Questions button removed (v9)
       + '</div>'
       + '</div>';
@@ -2888,35 +3165,35 @@ rfpTabs.qa = async function(rfpId) {
       const cardBg = needsManual ? 'background:#fff5f5;border:1.5px solid #fca5a5' : '';
 
       const badgeHtml = q.published
-        ? '<span class="stage-badge stage-published">Published</span>'
+        ? '<span class="stage-badge stage-published">' + t('badge_published') + '</span>'
         : needsManual
-        ? '<span style="background:#fee2e2;color:#991b1b;border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:700"><i class="fas fa-exclamation-triangle mr-1"></i>Manual Required</span>'
+        ? '<span style="background:#fee2e2;color:#991b1b;border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:700"><i class="fas fa-exclamation-triangle mr-1"></i>' + t('qa_manual_required') + '</span>'
         : q.answer
-        ? '<span class="stage-badge stage-submissions_closed">Awaiting Approval</span>'
-        : '<span class="stage-badge stage-draft">Unanswered</span>';
+        ? '<span class="stage-badge stage-submissions_closed">' + t('badge_awaiting') + '</span>'
+        : '<span class="stage-badge stage-draft">' + t('badge_unanswered') + '</span>'
 
       let answerBlock = '';
       if (needsManual && !q.answer) {
         answerBlock = '<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:8px;padding:0.75rem;margin-top:0.75rem">'
-          + '<div style="font-size:0.72rem;font-weight:700;color:#991b1b;margin-bottom:4px"><i class="fas fa-robot mr-1"></i>AI could not generate an answer</div>'
-          + '<p style="font-size:0.82rem;color:#7f1d1d;margin:0">This question requires manual input. Please edit and provide an answer before publishing.</p>'
+          + '<div style="font-size:0.72rem;font-weight:700;color:#991b1b;margin-bottom:4px"><i class="fas fa-robot mr-1"></i>' + t('qa_ai_no_answer') + '</div>'
+          + '<p style="font-size:0.82rem;color:#7f1d1d;margin:0">' + t('qa_manual_input_msg') + '</p>'
           + '</div>';
       } else if (q.answer) {
         answerBlock = '<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:0.75rem;margin-top:0.75rem">'
-          + '<div style="font-size:0.72rem;font-weight:700;color:#92400e;margin-bottom:4px"><i class="fas fa-robot mr-1"></i>AI Draft Answer</div>'
+          + '<div style="font-size:0.72rem;font-weight:700;color:#92400e;margin-bottom:4px"><i class="fas fa-robot mr-1"></i>' + t('qa_ai_draft_label') + '</div>'
           + '<p style="font-size:0.875rem;color:#374151;margin:0">' + escHtml(q.answer) + '</p>'
           + '</div>';
       }
 
       const isFromEmail = q.source === 'email';
       const btns = (!q.answer || needsManual
-        ? '<button class="btn-secondary btn-sm" onclick="draftOneAnswer(' + rfpId + ',' + q.id + ')"><i class="fas fa-robot"></i>AI Draft</button>'
-          + '<button class="btn-ghost btn-sm" onclick="editQAnswer(' + q.id + ')"><i class="fas fa-edit"></i>Manual Edit</button>'
+        ? '<button class="btn-secondary btn-sm" onclick="draftOneAnswer(' + rfpId + ',' + q.id + ')"><i class="fas fa-robot"></i>' + t('qa_ai_draft_btn') + '</button>'
+          + '<button class="btn-ghost btn-sm" onclick="editQAnswer(' + q.id + ')"><i class="fas fa-edit"></i>' + t('qa_manual_edit_btn') + '</button>'
         : '') + (q.answer && !q.published && !needsManual
-        ? '<button class="btn-primary btn-sm" onclick="approveQAnswer(' + rfpId + ',' + q.id + ')"><i class="fas fa-check"></i>Approve & Send</button>'
-          + '<button class="btn-ghost btn-sm" onclick="editQAnswer(' + q.id + ')"><i class="fas fa-edit"></i>Edit</button>'
+        ? '<button class="btn-primary btn-sm" onclick="approveQAnswer(' + rfpId + ',' + q.id + ')"><i class="fas fa-check"></i>' + t('qa_approve_send_btn') + '</button>'
+          + '<button class="btn-ghost btn-sm" onclick="editQAnswer(' + q.id + ')"><i class="fas fa-edit"></i>' + t('btn_edit') + '</button>'
         : '') + (q.answer && !q.published && needsManual
-        ? '<button class="btn-primary btn-sm" onclick="approveQAnswer(' + rfpId + ',' + q.id + ')"><i class="fas fa-check"></i>Approve</button>'
+        ? '<button class="btn-primary btn-sm" onclick="approveQAnswer(' + rfpId + ',' + q.id + ')"><i class="fas fa-check"></i>' + t('qa_approve_btn') + '</button>'
         : '');
 
       qCards += '<div class="card" style="padding:1rem;' + cardBg + '" id="q-' + q.id + '">'
@@ -2925,7 +3202,7 @@ rfpTabs.qa = async function(rfpId) {
         + '<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.5rem;flex-wrap:wrap">'
         + '<span style="font-size:0.72rem;font-weight:600;color:#9ca3af">Q' + q.id + ' &bull; ' + escHtml(q.vendor_name||'Anonymous') + '</span>'
         + badgeHtml
-        + (isFromEmail ? '<span class="tag" style="background:#ede9fe;color:#6d28d9"><i class="fas fa-envelope mr-1"></i>Via Email</span>' : '')
+        + (isFromEmail ? '<span class="tag" style="background:#ede9fe;color:#6d28d9"><i class="fas fa-envelope mr-1"></i>' + t('qa_via_email') + '</span>' : '')
         + '</div>'
         + '<p style="font-weight:500;color:#1f2937;margin:0">' + escHtml(q.question) + '</p>'
         + answerBlock
@@ -2938,8 +3215,8 @@ rfpTabs.qa = async function(rfpId) {
   const manualWarning = manualNeeded > 0
     ? '<div style="background:#fee2e2;border:1.5px solid #fca5a5;border-radius:8px;padding:0.75rem 1rem;display:flex;align-items:center;gap:0.75rem">'
       + '<i class="fas fa-exclamation-triangle" style="color:#dc2626;font-size:1.1rem;flex-shrink:0"></i>'
-      + '<div><div style="font-weight:700;font-size:0.85rem;color:#991b1b">' + manualNeeded + ' question(s) require manual answers</div>'
-      + '<div style="font-size:0.78rem;color:#7f1d1d">AI could not generate answers for highlighted questions. Please provide manual answers before publishing.</div></div>'
+      + '<div><div style="font-weight:700;font-size:0.85rem;color:#991b1b">' + manualNeeded + ' ' + t('qa_manual_warning_hd') + '</div>'
+      + '<div style="font-size:0.78rem;color:#7f1d1d">' + t('qa_manual_warning_sub') + '</div></div>'
       + '</div>'
     : '';
 
@@ -2953,13 +3230,13 @@ rfpTabs.qa = async function(rfpId) {
     + (manualNeeded > 0 ? '<span style="font-size:0.82rem;color:#dc2626;font-weight:600"><strong>' + manualNeeded + '</strong> ' + t('qa_need_manual') + '</span>' : '')
     + '</div>'
     + '<div style="display:flex;gap:0.5rem;flex-wrap:wrap">'
-    + '<button class="btn-ghost btn-sm" id="reprocessQBtn" onclick="reprocessQuestions(' + rfpId + ')" title="Re-extract questions from received emails"><i class="fas fa-sync"></i>Re-extract</button>'
-    + '<button class="btn-secondary" id="draftAllBtn" onclick="draftAllQAnswers(' + rfpId + ')"><i class="fas fa-robot"></i>AI Answer All</button>'
-    + '<button class="btn-primary" onclick="publishAllQAnswers(' + rfpId + ')" ' + (manualNeeded > 0 ? 'title="Blocked: ' + manualNeeded + ' question(s) need manual answers" style="opacity:0.6"' : '') + '><i class="fas fa-paper-plane"></i>Publish All Approved</button>'
+    + '<button class="btn-ghost btn-sm" id="reprocessQBtn" onclick="reprocessQuestions(' + rfpId + ')" title="Re-extract questions from received emails"><i class="fas fa-sync"></i>' + t('qa_re_extract_btn') + '</button>'
+    + '<button class="btn-secondary" id="draftAllBtn" onclick="draftAllQAnswers(' + rfpId + ')"><i class="fas fa-robot"></i>' + t('qa_ai_answer_all') + '</button>'
+    + '<button class="btn-primary" onclick="publishAllQAnswers(' + rfpId + ')" ' + (manualNeeded > 0 ? 'title="' + t('qa_blocked_title') + ' ' + manualNeeded + ' ' + t('qa_need_manual_answers') + '" style="opacity:0.6"' : '') + '><i class="fas fa-paper-plane"></i>' + t('qa_publish_approved') + '</button>'
     + (appState.currentRfp && appState.currentRfp.stage === 'qa_open'
-        ? '<button class="btn-danger" onclick="closeQA(' + rfpId + ')" title="Stop accepting vendor questions and mark Q&amp;A stage as complete" style="background:#dc2626;color:#fff;border:none;padding:0.35rem 0.75rem;border-radius:6px;font-size:0.82rem;cursor:pointer;display:flex;align-items:center;gap:0.35rem"><i class="fas fa-lock"></i>Close Q&amp;A</button>'
+        ? '<button class="btn-danger" onclick="closeQA(' + rfpId + ')" title="Stop accepting vendor questions and mark Q&amp;A stage as complete" style="background:#dc2626;color:#fff;border:none;padding:0.35rem 0.75rem;border-radius:6px;font-size:0.82rem;cursor:pointer;display:flex;align-items:center;gap:0.35rem"><i class="fas fa-lock"></i>' + t('qa_close_qa') + '</button>'
         : (appState.currentRfp && ['submissions_closed','evaluation','awarded'].includes(appState.currentRfp.stage)
-            ? '<span style="font-size:0.78rem;color:#065f46;font-weight:600;display:flex;align-items:center;gap:0.35rem;padding:0.35rem 0.5rem"><i class="fas fa-lock mr-1"></i>Q&amp;A Closed</span>'
+            ? '<span style="font-size:0.78rem;color:#065f46;font-weight:600;display:flex;align-items:center;gap:0.35rem;padding:0.35rem 0.5rem"><i class="fas fa-lock mr-1"></i>' + t('qa_closed_label') + '</span>'
             : ''))
     + '</div>'
     + '</div>'
@@ -3082,7 +3359,7 @@ async function loadSampleQs(rfpId) {
 
 async function reprocessQuestions(rfpId) {
   var btn = document.getElementById('reprocessQBtn');
-  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>Re-extracting...'; }
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>' + t('qa_re_extracting'); }
   try {
     const result = await apiCall('POST', '/rfps/' + rfpId + '/emails/reprocess-questions', {});
     if (result.totalNew > 0) {
@@ -3094,7 +3371,7 @@ async function reprocessQuestions(rfpId) {
     rfpTabs.qa(rfpId);
   } catch(e) {
     showToast('Re-extraction failed: ' + e.message, 'error');
-    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-sync"></i>Re-extract'; }
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-sync"></i>' + t('qa_re_extract_btn'); }
   }
 }
 
@@ -3119,17 +3396,17 @@ rfpTabs.proposals = async function(rfpId) {
 
   function statusBadge(p) {
     const s = p.status || 'submitted';
-    if (s === 'awarded') return '<span style="background:#d1fae5;color:#065f46;border-radius:20px;padding:3px 10px;font-size:0.73rem;font-weight:700"><i class="fas fa-trophy mr-1"></i>Awarded</span>';
-    if (s === 'recommended') return '<span style="background:#fef3c7;color:#92400e;border-radius:20px;padding:3px 10px;font-size:0.73rem;font-weight:700"><i class="fas fa-star mr-1"></i>Recommended</span>';
-    if (s === 'not_awarded') return '<span style="background:#f3f4f6;color:#6b7280;border-radius:20px;padding:3px 10px;font-size:0.73rem;font-weight:500">Not Awarded</span>';
-    return '<span style="background:#e0f2fe;color:#0369a1;border-radius:20px;padding:3px 10px;font-size:0.73rem;font-weight:500">Submitted</span>';
+    if (s === 'awarded') return '<span style="background:#d1fae5;color:#065f46;border-radius:20px;padding:3px 10px;font-size:0.73rem;font-weight:700"><i class="fas fa-trophy mr-1"></i>' + t('prop_awarded_badge') + '</span>';
+    if (s === 'recommended') return '<span style="background:#fef3c7;color:#92400e;border-radius:20px;padding:3px 10px;font-size:0.73rem;font-weight:700"><i class="fas fa-star mr-1"></i>' + t('prop_recommended') + '</span>';
+    if (s === 'not_awarded') return '<span style="background:#f3f4f6;color:#6b7280;border-radius:20px;padding:3px 10px;font-size:0.73rem;font-weight:500">' + t('prop_not_awarded') + '</span>';
+    return '<span style="background:#e0f2fe;color:#0369a1;border-radius:20px;padding:3px 10px;font-size:0.73rem;font-weight:500">' + t('prop_submitted') + '</span>';
   }
 
   function aiBadge(p) {
     if (!p.ai_recommendation) return '<span style="color:#9ca3af;font-size:0.75rem">—</span>';
     var score = p.ai_total_score != null ? Math.round(p.ai_total_score) : '?';
     var vs = p.ai_validation_status || '';
-    if (vs === 'PENDING_MANUAL_REVIEW') return '<span style="background:#fef3c7;color:#92400e;border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:600" title="Budget not auto-extracted — manual review needed"><i class="fas fa-clock mr-1"></i>' + score + '/100 · Review</span>';
+    if (vs === 'PENDING_MANUAL_REVIEW') return '<span style="background:#fef3c7;color:#92400e;border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:600" title="Budget not auto-extracted — manual review needed"><i class="fas fa-clock mr-1"></i>' + score + '/100 · ' + t('prop_review_badge') + '</span>';
     var rec = p.ai_recommendation;
     if (rec === 'RECOMMENDED') return '<span style="background:#d1fae5;color:#065f46;border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:700"><i class="fas fa-check-circle mr-1"></i>' + score + '/100</span>';
     if (rec === 'CONDITIONAL') return '<span style="background:#fef3c7;color:#92400e;border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:700"><i class="fas fa-exclamation-circle mr-1"></i>' + score + '/100</span>';
@@ -3165,19 +3442,19 @@ rfpTabs.proposals = async function(rfpId) {
 
     var filesCell = attachCount > 0
       ? '<span class="file-count-badge" onclick="viewProposalDetail(' + p.id + ')" title="Click to view &amp; download ' + attachCount + ' file(s)">'
-        + '<i class="fas fa-paperclip"></i>' + attachCount + ' file' + (attachCount !== 1 ? 's' : '') + '</span>'
+        + '<i class="fas fa-paperclip"></i>' + attachCount + ' ' + (attachCount !== 1 ? t('prop_files_pl') : t('prop_files')) + '</span>'
       : '<span style="color:#9ca3af;font-size:0.8rem">—</span>';
 
     // Award button — gold, prominent, shown only if not yet awarded; locked if another was awarded
     var rfpAwarded = proposals.some(function(pp){ return pp.status === 'awarded'; });
     var awardBtn = '';
     if (isAwarded) {
-      awardBtn = '<span style="background:linear-gradient(135deg,#d4a017,#f5c842);color:#1a1a1a;border-radius:6px;padding:0.3rem 0.7rem;font-size:0.78rem;font-weight:700;display:inline-flex;align-items:center;gap:4px"><i class="fas fa-trophy"></i>Awarded</span>';
+      awardBtn = '<span style="background:linear-gradient(135deg,#d4a017,#f5c842);color:#1a1a1a;border-radius:6px;padding:0.3rem 0.7rem;font-size:0.78rem;font-weight:700;display:inline-flex;align-items:center;gap:4px"><i class="fas fa-trophy"></i>' + t('prop_awarded_badge') + '</span>';
     } else if (!rfpAwarded) {
       awardBtn = '<button onclick="awardProposal(' + rfpId + ',' + p.id + ',\'' + escHtml(p.vendor_name||'this vendor') + '\')" '
         + 'style="background:linear-gradient(135deg,#d4a017,#f5c842);color:#1a1a1a;border:none;border-radius:6px;padding:0.3rem 0.7rem;font-size:0.78rem;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:4px;box-shadow:0 2px 6px rgba(212,160,23,0.45);transition:opacity 0.15s" '
         + 'title="Award contract to ' + escHtml(p.vendor_name||'vendor') + '">'
-        + '<i class="fas fa-trophy"></i>Award</button>';
+        + '<i class="fas fa-trophy"></i>' + t('prop_award_btn') + '</button>';
     }
 
     rows += '<tr style="' + rowBg + '">'
@@ -3192,7 +3469,7 @@ rfpTabs.proposals = async function(rfpId) {
       + '<td>' + aiBadge(p) + '</td>'
       + '<td>' + statusBadge(p) + '</td>'
       + '<td style="white-space:nowrap">'
-      + '<button class="btn-ghost btn-sm" onclick="viewProposalDetail(' + p.id + ')" style="margin-right:4px" title="View details"><i class="fas fa-eye"></i>View</button>'
+      + '<button class="btn-ghost btn-sm" onclick="viewProposalDetail(' + p.id + ')" style="margin-right:4px" title="View details"><i class="fas fa-eye"></i>' + t('prop_view_btn') + '</button>'
       + awardBtn
       + '</td>'
       + '</tr>';
@@ -3200,7 +3477,7 @@ rfpTabs.proposals = async function(rfpId) {
 
   var evaluated = proposals.filter(function(p){ return p.ai_recommendation; }).length;
   var evalBtn = proposals.length > 0
-    ? '<button class="btn-primary" id="evaluateAllBtn" onclick="evaluateAllProposals(' + rfpId + ')" style="background:linear-gradient(135deg,var(--cpc-gold-deep),var(--cpc-gold));border:none"><i class="fas fa-robot"></i>Evaluate with AI</button>'
+    ? '<button class="btn-primary" id="evaluateAllBtn" onclick="evaluateAllProposals(' + rfpId + ')" style="background:linear-gradient(135deg,var(--cpc-gold-deep),var(--cpc-gold));border:none"><i class="fas fa-robot"></i>' + t('prop_evaluate_ai') + '</button>'
     : '';
 
   setContent(
@@ -3216,7 +3493,7 @@ rfpTabs.proposals = async function(rfpId) {
     + (proposals.length === 0
       ? '<div style="padding:3rem;text-align:center;color:#9ca3af"><i class="fas fa-inbox" style="font-size:2.5rem;display:block;margin-bottom:1rem;color:#d1d5db"></i>'
         + '<p style="margin-bottom:0.5rem">' + t('proposals_none') + '</p>'
-        + '<p style="font-size:0.8rem;color:#c4b5fd;margin:0"><i class="fas fa-link" style="margin-right:4px"></i>Vendors submit proposals via the secure submission portal link included in their invitation email.</p></div>'
+        + '<p style="font-size:0.8rem;color:#c4b5fd;margin:0"><i class="fas fa-link" style="margin-right:4px"></i>' + t('prop_vendors_submit') + '</p></div>'
       : '<div style="overflow-x:auto"><table>'
         + '<thead><tr>'
         + '<th>' + t('th_vendor') + '</th><th>' + t('th_date') + '</th><th>' + t('th_budget') + '</th><th>' + t('th_duration') + '</th>'
@@ -3233,7 +3510,7 @@ rfpTabs.proposals = async function(rfpId) {
 // ── Evaluate all proposals with AI ────────────────────────────────────────────
 async function evaluateAllProposals(rfpId) {
   var btn = document.getElementById('evaluateAllBtn');
-  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>Evaluating…'; }
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>' + t('prop_evaluating'); }
   try {
     showToast('🤖 AI evaluation started — this may take 1–2 minutes for all proposals…', 'info', 10000);
     var result = await apiCall('POST', '/rfps/' + rfpId + '/proposals/evaluate-all', {});
@@ -3243,7 +3520,7 @@ async function evaluateAllProposals(rfpId) {
     rfpTabs.proposals(rfpId);
   } catch(e) {
     showToast('Evaluation failed: ' + (e.message || e), 'error');
-    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-robot"></i>Evaluate with AI'; }
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-robot"></i>' + t('prop_evaluate_ai'); }
   }
 }
 
@@ -3477,7 +3754,7 @@ function _renderProposalPanel(p, evalData) {
         : '<span style="color:#9ca3af;font-size:0.75rem">—</span>';
       return '<tr style="border-bottom:1px solid #f3f4f6">'
         + '<td style="padding:0.5rem 0.75rem;font-size:0.78rem;color:#374151;max-width:280px;word-break:break-word">' + escHtml(r.requirement_text || r.id) + '</td>'
-        + '<td style="padding:0.5rem 0.75rem;text-align:center">' + (r.mandatory ? '<span style="background:#fee2e2;color:#991b1b;border-radius:4px;padding:2px 6px;font-size:0.68rem;font-weight:700">MUST</span>' : '<span style="background:#f3f4f6;color:#6b7280;border-radius:4px;padding:2px 6px;font-size:0.68rem">should</span>') + '</td>'
+        + '<td style="padding:0.5rem 0.75rem;text-align:center">' + (r.mandatory ? '<span style="background:#fee2e2;color:#991b1b;border-radius:4px;padding:2px 6px;font-size:0.68rem;font-weight:700">' + t('panel_comp_must') + '</span>' : '<span style="background:#f3f4f6;color:#6b7280;border-radius:4px;padding:2px 6px;font-size:0.68rem">' + t('panel_comp_should') + '</span>') + '</td>'
         + '<td style="padding:0.5rem 0.75rem;text-align:center">' + metIcon + '</td>'
         + '<td style="padding:0.5rem 0.75rem">' + scoreCell + '</td>'
         + '<td style="padding:0.5rem 0.75rem;font-size:0.72rem;color:#6b7280;max-width:220px">' + escHtml(r.justification || '') + '</td>'
@@ -3517,15 +3794,15 @@ function _renderProposalPanel(p, evalData) {
     }
 
     var scoringRows = [
-      { label: 'Compliance Score', weight: '40%', score: compScore, color: '#3b82f6', desc: 'Mandatory + optional requirement coverage' },
-      { label: 'Quality Score',    weight: '60%', score: qualScore, color: '#8b5cf6', desc: 'AI-assessed depth, clarity & feasibility' },
+      { label: t('panel_score_compliance'), weight: '40%', score: compScore, color: '#3b82f6', desc: t('panel_score_comp_desc') },
+      { label: t('panel_score_quality'),    weight: '60%', score: qualScore, color: '#8b5cf6', desc: t('panel_score_qual_desc') },
     ];
     if (commScore != null) {
-      scoringRows.push({ label: 'Commercial Score', weight: 'bonus', score: commScore, color: '#059669', desc: 'Budget vs. RFP ceiling ratio' });
+      scoringRows.push({ label: t('panel_score_commercial'), weight: 'bonus', score: commScore, color: '#059669', desc: t('panel_score_comm_desc') });
     }
 
     tabScoringHtml = '<div style="margin-bottom:1.25rem;background:linear-gradient(135deg,var(--cpc-ink),#2d2519);border-radius:12px;padding:1.25rem;color:white;display:flex;align-items:center;justify-content:space-between">'
-      + '<div><div style="font-size:0.75rem;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:rgba(255,255,255,0.6);margin-bottom:4px">Overall AI Score</div>'
+      + '<div><div style="font-size:0.75rem;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:rgba(255,255,255,0.6);margin-bottom:4px">' + t('panel_score_overall') + '</div>'
       + '<div style="font-size:2.5rem;font-weight:800;line-height:1;color:' + (totalScore >= 80 ? '#4ade80' : totalScore >= 60 ? '#fbbf24' : '#f87171') + '">' + Math.round(totalScore) + '<span style="font-size:1.2rem;font-weight:500;color:rgba(255,255,255,0.4)">/100</span></div>'
       + '</div>'
       + '<div style="width:72px;height:72px;border-radius:50%;border:4px solid ' + (totalScore >= 80 ? '#4ade80' : totalScore >= 60 ? '#fbbf24' : '#f87171') + ';display:flex;align-items:center;justify-content:center">'
@@ -3544,13 +3821,13 @@ function _renderProposalPanel(p, evalData) {
             + '</div>';
         }).join('')
       + '</div>'
-      + (evalData.validation_status === 'PENDING_MANUAL_REVIEW' ? '<div style="margin-top:0.75rem;background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;padding:0.75rem;font-size:0.78rem;color:#92400e"><i class="fas fa-clock mr-1"></i>Commercial score excluded — budget needs manual entry (see Executive Summary tab)</div>' : '')
-      + (evalData.validation_status === 'MANUALLY_VALIDATED' ? '<div style="margin-top:0.75rem;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:0.75rem;font-size:0.78rem;color:#065f46"><i class="fas fa-user-check mr-1"></i>Budget manually validated and included in scoring</div>' : '');
+      + (evalData.validation_status === 'PENDING_MANUAL_REVIEW' ? '<div style="margin-top:0.75rem;background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;padding:0.75rem;font-size:0.78rem;color:#92400e"><i class="fas fa-clock mr-1"></i>' + t('panel_score_pending') + '</div>' : '')
+      + (evalData.validation_status === 'MANUALLY_VALIDATED' ? '<div style="margin-top:0.75rem;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:0.75rem;font-size:0.78rem;color:#065f46"><i class="fas fa-user-check mr-1"></i>' + t('panel_score_validated') + '</div>' : '');
   } else {
     tabScoringHtml = '<div style="padding:2.5rem;text-align:center;color:#9ca3af">'
       + '<i class="fas fa-chart-bar" style="font-size:2rem;display:block;margin-bottom:0.75rem;color:#d1d5db"></i>'
-      + '<div style="font-weight:600;margin-bottom:0.4rem">No scoring data yet</div>'
-      + '<div style="font-size:0.8rem">Run AI evaluation to see the detailed scoring breakdown.</div>'
+      + '<div style="font-weight:600;margin-bottom:0.4rem">' + t('panel_score_no_data') + '</div>'
+      + '<div style="font-size:0.8rem">' + t('panel_score_no_data_sub') + '</div>'
       + '</div>';
   }
 
@@ -3567,29 +3844,29 @@ function _renderProposalPanel(p, evalData) {
     tabVerdictHtml = '<div style="text-align:center;padding:1.25rem;background:' + recBg + ';border-radius:12px;margin-bottom:1.25rem">'
       + '<i class="fas ' + recIcon + '" style="font-size:2.5rem;color:' + recColor + ';display:block;margin-bottom:0.5rem"></i>'
       + '<div style="font-size:1.5rem;font-weight:800;color:' + recColor + '">' + escHtml(rec) + '</div>'
-      + (evalData.total_score != null ? '<div style="font-size:0.85rem;color:' + recColor + ';opacity:0.75;margin-top:4px">Score: ' + Math.round(evalData.total_score) + ' / 100</div>' : '')
+      + (evalData.total_score != null ? '<div style="font-size:0.85rem;color:' + recColor + ';opacity:0.75;margin-top:4px">' + t('panel_score_score_lbl') + ' ' + Math.round(evalData.total_score) + ' / 100</div>' : '')
       + '</div>'
-      + (evalData.recommendation_reasoning ? '<div style="margin-bottom:1.25rem"><div class="panel-section-title"><i class="fas fa-gavel" style="color:var(--cpc-ink)"></i>Reasoning</div>'
+      + (evalData.recommendation_reasoning ? '<div style="margin-bottom:1.25rem"><div class="panel-section-title"><i class="fas fa-gavel" style="color:var(--cpc-ink)"></i>' + t('panel_verdict_reasoning') + '</div>'
         + '<div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:0.875rem;font-size:0.82rem;line-height:1.7;color:#374151">' + escHtml(evalData.recommendation_reasoning) + '</div></div>' : '')
-      + (strengthLines.length > 0 ? '<div style="margin-bottom:1.25rem"><div class="panel-section-title"><i class="fas fa-thumbs-up" style="color:#059669"></i>Strong Points</div>'
+      + (strengthLines.length > 0 ? '<div style="margin-bottom:1.25rem"><div class="panel-section-title"><i class="fas fa-thumbs-up" style="color:#059669"></i>' + t('panel_verdict_strong') + '</div>'
         + '<ul style="margin:0;padding-left:1.25rem;font-size:0.82rem;line-height:1.8;color:#374151">'
         + strengthLines.map(function(l){ return '<li><i class="fas fa-check" style="color:#059669;margin-right:4px"></i>' + escHtml(l) + '</li>'; }).join('')
         + '</ul></div>' : '')
-      + (weakLines.length > 0 ? '<div style="margin-bottom:1.25rem"><div class="panel-section-title"><i class="fas fa-exclamation-triangle" style="color:#d97706"></i>Risks &amp; Weak Points</div>'
+      + (weakLines.length > 0 ? '<div style="margin-bottom:1.25rem"><div class="panel-section-title"><i class="fas fa-exclamation-triangle" style="color:#d97706"></i>' + t('panel_verdict_risks') + '</div>'
         + '<ul style="margin:0;padding-left:1.25rem;font-size:0.82rem;line-height:1.8;color:#374151">'
         + weakLines.map(function(l){ return '<li><i class="fas fa-exclamation-triangle" style="color:#d97706;margin-right:4px"></i>' + escHtml(l) + '</li>'; }).join('')
         + '</ul></div>' : '')
       + '<details style="margin-top:0.75rem;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden">'
-      + '<summary style="padding:0.75rem 1rem;cursor:pointer;font-size:0.82rem;font-weight:600;background:#f9fafb;list-style:none;display:flex;align-items:center;gap:0.5rem"><i class="fas fa-paperclip" style="color:#6b7280"></i>Original Attachments (' + (attachments.length || (p.pdf_attachment_url ? 1 : 0)) + ')</summary>'
-      + '<div>' + (attachHtml || '<div style="padding:0.75rem;text-align:center;color:#9ca3af;font-size:0.82rem">No documents</div>') + '</div>'
+      + '<summary style="padding:0.75rem 1rem;cursor:pointer;font-size:0.82rem;font-weight:600;background:#f9fafb;list-style:none;display:flex;align-items:center;gap:0.5rem"><i class="fas fa-paperclip" style="color:#6b7280"></i>' + t('panel_verdict_orig_att') + ' (' + (attachments.length || (p.pdf_attachment_url ? 1 : 0)) + ')</summary>'
+      + '<div>' + (attachHtml || '<div style="padding:0.75rem;text-align:center;color:#9ca3af;font-size:0.82rem">' + t('panel_verdict_no_docs') + '</div>') + '</div>'
       + '</details>';
   } else {
     var hasEvaluated = p.ai_evaluated_at;
     tabVerdictHtml = '<div style="padding:2.5rem;text-align:center;color:#9ca3af">'
       + '<i class="fas fa-robot" style="font-size:2.5rem;display:block;margin-bottom:0.75rem;color:#d1d5db"></i>'
-      + '<div style="font-weight:600;font-size:0.95rem;margin-bottom:0.5rem">No AI verdict yet</div>'
-      + '<div style="font-size:0.8rem;margin-bottom:1.25rem">Run an evaluation to get the AI recommendation, compliance matrix, and full scoring breakdown.</div>'
-      + '<button onclick="evaluateSingleProposal(' + rfpId + ',' + p.id + ')" style="background:linear-gradient(135deg,var(--cpc-gold-deep),var(--cpc-gold));color:white;border:none;border-radius:8px;padding:0.6rem 1.5rem;font-size:0.85rem;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:0.5rem" id="evalSingleBtn_' + p.id + '"><i class="fas fa-robot"></i>Evaluate this Proposal</button>'
+      + '<div style="font-weight:600;font-size:0.95rem;margin-bottom:0.5rem">' + t('panel_verdict_no_data') + '</div>'
+      + '<div style="font-size:0.8rem;margin-bottom:1.25rem">' + t('panel_verdict_no_data_sub') + '</div>'
+      + '<button onclick="evaluateSingleProposal(' + rfpId + ',' + p.id + ')" style="background:linear-gradient(135deg,var(--cpc-gold-deep),var(--cpc-gold));color:white;border:none;border-radius:8px;padding:0.6rem 1.5rem;font-size:0.85rem;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:0.5rem" id="evalSingleBtn_' + p.id + '"><i class="fas fa-robot"></i>' + t('panel_eval_single_btn') + '</button>'
       + '</div>';
   }
 
@@ -3636,8 +3913,8 @@ function _renderProposalPanel(p, evalData) {
 
     // ── Footer ─────────────────────────────────────────────────────────────
     + '<div style="position:sticky;bottom:0;background:#fff;border-top:1px solid #e5e7eb;padding:0.75rem 1.25rem;display:flex;gap:0.5rem;justify-content:flex-end;flex-shrink:0">'
-    + (!evalData ? '<button onclick="evaluateSingleProposal(' + rfpId + ',' + p.id + ')" id="evalSingleBtnFooter_' + p.id + '" style="background:linear-gradient(135deg,var(--cpc-gold-deep),var(--cpc-gold));color:white;border:none;border-radius:7px;padding:0.45rem 1.1rem;font-size:0.82rem;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:0.4rem"><i class="fas fa-robot"></i>Evaluate with AI</button>' : '')
-    + '<button class="btn-ghost" onclick="closeProposalPanel()" style="padding:0.45rem 1.1rem">Close</button>'
+    + (!evalData ? '<button onclick="evaluateSingleProposal(' + rfpId + ',' + p.id + ')" id="evalSingleBtnFooter_' + p.id + '" style="background:linear-gradient(135deg,var(--cpc-gold-deep),var(--cpc-gold));color:white;border:none;border-radius:7px;padding:0.45rem 1.1rem;font-size:0.82rem;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:0.4rem"><i class="fas fa-robot"></i>' + t('panel_eval_footer_btn') + '</button>' : '')
+    + '<button class="btn-ghost" onclick="closeProposalPanel()" style="padding:0.45rem 1.1rem">' + t('btn_cancel') + '</button>'
     + '</div>';
 
   document.body.appendChild(overlay);
@@ -3669,7 +3946,7 @@ async function evaluateSingleProposal(rfpId, proposalId) {
   // Disable any trigger buttons inside the panel
   ['evalSingleBtn_' + proposalId, 'evalSingleBtnFooter_' + proposalId].forEach(function(id) {
     var btn = document.getElementById(id);
-    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Evaluating…'; }
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> ' + t('prop_evaluating'); }
   });
   try {
     showToast('🤖 AI evaluation running for this proposal — please wait…', 'info', 12000);
@@ -3693,7 +3970,7 @@ async function evaluateSingleProposal(rfpId, proposalId) {
     showToast('Evaluation failed: ' + (e.message || e), 'error');
     ['evalSingleBtn_' + proposalId, 'evalSingleBtnFooter_' + proposalId].forEach(function(id) {
       var btn = document.getElementById(id);
-      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-robot"></i> Evaluate with AI'; }
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-robot"></i> ' + t('panel_eval_footer_btn'); }
     });
   }
 }
