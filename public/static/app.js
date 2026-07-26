@@ -2958,6 +2958,7 @@ function startGlobalInboxPolling(rfpId) {
     // Skip if the tab-scoped poller is already running (avoids double calls)
     if (_inboxPollTimer && appState.currentRfpTab === 'emails') return;
     silentCheckInbox(rfpId);
+    silentCheckProposals(rfpId); // always poll proposals independently — portal submissions bypass email
   }, 5000);
 }
 
@@ -2995,6 +2996,9 @@ async function silentCheckInbox(rfpId) {
         renderLifecycleBar(rfpNow);
       }
     }
+
+    // Always check for portal-submitted proposals even when there are no emails
+    await silentCheckProposals(rfpId);
 
     if (!received || received.length === 0) return;
 
@@ -3086,11 +3090,6 @@ async function silentCheckInbox(rfpId) {
         renderRfpTabs(appState.currentRfpTab, rfpId, appState.unreadQA);
       }
     }
-
-    // ── Vendor-portal proposal detection ──────────────────────────────────
-    // Proposals submitted via the vendor portal bypass email entirely,
-    // so we poll the proposals list separately to detect new submissions.
-    await silentCheckProposals(rfpId);
 
   } catch(e) {}
 }
