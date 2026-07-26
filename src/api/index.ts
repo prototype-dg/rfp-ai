@@ -3,7 +3,43 @@ import { initDb, seedVendors } from '../db/seed'
 import type { Bindings } from '../types'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-07-25-v27'
+const WORKER_VERSION = '2026-07-26-v28'
+
+// ── PDF Sidecar ────────────────────────────────────────────────────────────────
+// Calls the Python/pdfplumber sidecar running at api.cpc-rfp.website.
+// The sidecar fetches the PDF from the given URL and returns extracted text.
+// Requires env.PDF_SIDECAR_URL and env.PDF_SIDECAR_SECRET to be set as Worker secrets.
+async function callSidecar(
+  pdfUrl: string,
+  env: any,
+  maxPages = 100
+): Promise<{ text: string; pages_total: number; pages_extracted: number; chars: number; truncated: boolean } | null> {
+  const sidecarUrl = env?.PDF_SIDECAR_URL || (globalThis as any).PDF_SIDECAR_URL || ''
+  const sidecarSecret = env?.PDF_SIDECAR_SECRET || (globalThis as any).PDF_SIDECAR_SECRET || ''
+  if (!sidecarUrl || !sidecarSecret) {
+    console.warn('[sidecar] PDF_SIDECAR_URL or PDF_SIDECAR_SECRET not configured — skipping extraction')
+    return null
+  }
+  try {
+    const res = await fetch(`${sidecarUrl}/extract-pdf`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${sidecarSecret}`,
+      },
+      body: JSON.stringify({ pdf_url: pdfUrl, max_pages: maxPages }),
+    })
+    if (!res.ok) {
+      const err = await res.text().catch(() => '')
+      console.error(`[sidecar] HTTP ${res.status}: ${err.slice(0, 200)}`)
+      return null
+    }
+    return await res.json() as any
+  } catch (e: any) {
+    console.error('[sidecar] fetch error:', e.message)
+    return null
+  }
+}
 
 export const apiRouter = new Hono<{ Bindings: Bindings }>()
 
@@ -275,16 +311,26 @@ apiRouter.post('/rfps/:id/generate', async (c) => {
     try {
       const listed = await bucket.list({ prefix: `arch-docs/${id}/` })
       for (const obj of listed.objects) {
-        const r2Obj = await bucket.get(obj.key)
-        if (!r2Obj) continue
-        const ab = await r2Obj.arrayBuffer()
-        const bytes = new Uint8Array(ab)
-        // Cap PDF at 200KB before regex extraction to bound CPU time
-        const sliced = bytes.length > 204800 ? bytes.slice(0, 204800) : bytes
-        const extracted = extractTextFromPdfBytes(sliced)
-        if (!extracted || extracted.length < 200) continue
-        const docType = r2Obj.customMetadata?.docType || (obj.key.toLowerCase().includes('brd') ? 'brd' : 'arch')
-        const text = `[Source: ${obj.key}, ${Math.round(bytes.length/1024)}KB]\n\n${extracted.slice(0, 12000)}`
+        const docType = (obj.customHttpMetadata as any)?.docType
+          || obj.key.toLowerCase().includes('brd') ? 'brd' : 'arch'
+        if (docType === 'brd' && !isPlaceholder(brdDocText)) continue
+        if (docType !== 'brd' && !isPlaceholder(archDocText)) continue
+
+        // Generate a signed URL so the sidecar can fetch the PDF directly from R2
+        const signedUrl = await (bucket as any).createSignedUrl
+          ? await (bucket as any).createSignedUrl(obj.key, { expiresIn: 300 })
+          : null
+
+        // Fallback: build a proxied URL through our own /api/proposals/pdf/:key endpoint
+        const pdfUrl = signedUrl
+          || `https://a7b32759-e743-4139-9bb0-4bae44886667.vip.gensparksite.com/api/proposals/pdf/${encodeURIComponent(obj.key)}`
+
+        const result = await callSidecar(pdfUrl, c.env, 100)
+        if (!result || result.chars < 200) continue
+
+        const sizeKb = Math.round((obj.size || 0) / 1024)
+        const text = `[Source: ${obj.key}, ${sizeKb}KB, ${result.pages_extracted}/${result.pages_total} pages${result.truncated ? ' — truncated' : ''}]\n\n${result.text.slice(0, 30000)}`
+
         if (docType === 'brd' && isPlaceholder(brdDocText)) {
           brdDocText = text
           c.env.DB.prepare(`UPDATE rfps SET brd_doc_text=?, updated_at=datetime('now') WHERE id=?`).bind(text, id).run().catch(() => {})
@@ -511,19 +557,24 @@ apiRouter.post('/rfps/:id/upload-arch-doc', async (c) => {
       })
     }
 
-    // Extract text from the PDF for LLM context
-    let extractedText = extractTextFromPdfBytes(bytes)
-    let storageNote = ''
-    if (!extractedText || extractedText.length < 200) {
-      // Fallback: store a metadata note indicating text could not be extracted
-      storageNote = `[PDF: ${file.name}, ${Math.round(bytes.length/1024)}KB — text extraction incomplete. File stored in R2 at key: ${r2Key}. Use file name and context to infer content type.]`
-      extractedText = storageNote
-    } else {
-      // Prefix extracted text with document metadata
-      storageNote = `[Source: ${file.name}, ${Math.round(bytes.length/1024)}KB]\n\n`
-      extractedText = storageNote + extractedText
-      // Cap at 40000 chars to stay within LLM context window
-      if (extractedText.length > 40000) extractedText = extractedText.slice(0, 40000) + '\n\n[... document continues — content above is sufficient for RFP generation ...]'
+    // Extract text via Python sidecar (pdfplumber) — far more reliable than JS regex
+    const sizeKb = Math.round(bytes.length / 1024)
+    let extractedText = ''
+    let extractionOk = false
+
+    if (r2Key) {
+      // Build proxied URL through our own PDF endpoint so sidecar can fetch it
+      const pdfProxyUrl = `https://a7b32759-e743-4139-9bb0-4bae44886667.vip.gensparksite.com/api/proposals/pdf/${encodeURIComponent(r2Key)}`
+      const sidecarResult = await callSidecar(pdfProxyUrl, c.env, 100)
+      if (sidecarResult && sidecarResult.chars >= 200) {
+        extractedText = `[Source: ${file.name}, ${sizeKb}KB, ${sidecarResult.pages_extracted}/${sidecarResult.pages_total} pages${sidecarResult.truncated ? ' — truncated' : ''}]\n\n${sidecarResult.text}`
+        if (extractedText.length > 40000) extractedText = extractedText.slice(0, 40000) + '\n\n[... document continues — content above is sufficient for RFP generation ...]'
+        extractionOk = true
+      }
+    }
+
+    if (!extractionOk) {
+      extractedText = `[PDF: ${file.name}, ${sizeKb}KB — text extraction incomplete. File stored in R2 at key: ${r2Key}. Use file name and context to infer content type.]`
     }
 
     if (isBRD) {
@@ -538,7 +589,7 @@ apiRouter.post('/rfps/:id/upload-arch-doc', async (c) => {
       size: bytes.length,
       r2Key,
       extracted_chars: extractedText.length,
-      extraction_ok: extractedText.length > 500
+      extraction_ok: extractionOk
     })
   } catch (e: any) {
     return c.json({ error: e.message }, 500)
@@ -1708,7 +1759,41 @@ function parseLLMScore(raw: string): { score: number; justification: string } {
 // ── Core evaluation function ──────────────────────────────────────────────────
 
 async function evaluateProposal(proposal: any, rfp: any, env: any): Promise<any> {
-  const proposalText = extractProposalText(proposal)
+  // Step 1: Try to get text from DB fields (fast path — already extracted at upload time)
+  let proposalText = extractProposalText(proposal)
+
+  // Step 2: If DB text fields are empty, fetch PDFs from R2 via the sidecar
+  if (proposalText.length < 200) {
+    const textParts: string[] = []
+    try {
+      const atts: any[] = JSON.parse(proposal.proposal_attachments || '[]')
+      for (const att of atts) {
+        if (!att.r2_key) continue
+        const pdfUrl = `https://a7b32759-e743-4139-9bb0-4bae44886667.vip.gensparksite.com/api/proposals/pdf/${encodeURIComponent(att.r2_key)}`
+        // Andersen technical PDF is 15.5MB — cap at 80 pages to stay within 50MB sidecar limit
+        const maxPages = att.label === 'technical' ? 80 : 50
+        const result = await callSidecar(pdfUrl, env, maxPages)
+        if (result && result.chars >= 100) {
+          textParts.push(`[${att.label || att.filename}, ${result.pages_extracted}/${result.pages_total} pages]\n${result.text}`)
+        }
+      }
+    } catch (_) {}
+
+    // Also try legacy single pdf_attachment_url field
+    if (!textParts.length && proposal.pdf_attachment_url) {
+      const pdfKey = proposal.pdf_attachment_url.replace(/^\//, '')
+      const pdfUrl = `https://a7b32759-e743-4139-9bb0-4bae44886667.vip.gensparksite.com/api/proposals/pdf/${encodeURIComponent(pdfKey)}`
+      const result = await callSidecar(pdfUrl, env, 80)
+      if (result && result.chars >= 100) {
+        textParts.push(`[${proposal.pdf_filename || 'proposal.pdf'}, ${result.pages_extracted}/${result.pages_total} pages]\n${result.text}`)
+      }
+    }
+
+    if (textParts.length) {
+      proposalText = textParts.join('\n\n---\n\n').slice(0, 40000)
+    }
+  }
+
   const chunks = chunkText(proposalText)
 
   // Parse scoring matrix
