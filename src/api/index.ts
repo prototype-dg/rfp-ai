@@ -3741,3 +3741,77 @@ function buildVendorProposal(v: any, isAndersen: boolean, isEPAM: boolean): any 
     status: 'submitted',
   }
 }
+
+// ============================================================
+// SETTINGS — GET/PUT categories and procurement email
+// ============================================================
+apiRouter.get('/settings', async (c) => {
+  try {
+    await c.env.DB.prepare(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)`).run()
+    const rows = await c.env.DB.prepare(`SELECT key, value FROM settings`).all()
+    const out: Record<string,string> = {}
+    for (const r of (rows.results||[])) { out[(r as any).key] = (r as any).value }
+    return c.json(out)
+  } catch(e:any) { return c.json({}, 200) }
+})
+
+apiRouter.put('/settings', async (c) => {
+  try {
+    await c.env.DB.prepare(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)`).run()
+    const body = await c.req.json()
+    for (const [k, v] of Object.entries(body)) {
+      await c.env.DB.prepare(`INSERT INTO settings (key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`).bind(k, String(v)).run()
+    }
+    return c.json({ ok: true })
+  } catch(e:any) { return c.json({ error: e.message }, 500) }
+})
+
+apiRouter.get('/settings/categories', async (c) => {
+  try {
+    await c.env.DB.prepare(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)`).run()
+    const row = await c.env.DB.prepare(`SELECT value FROM settings WHERE key='categories'`).first<any>()
+    const cats = row ? JSON.parse(row.value) : ['IT & Technology','Construction','Professional Services','Healthcare','Facilities','Legal','Finance','Other']
+    return c.json(cats)
+  } catch(e:any) { return c.json(['IT & Technology','Construction','Professional Services','Healthcare','Facilities','Legal','Finance','Other'], 200) }
+})
+
+apiRouter.put('/settings/categories', async (c) => {
+  try {
+    await c.env.DB.prepare(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)`).run()
+    const cats = await c.req.json()
+    await c.env.DB.prepare(`INSERT INTO settings (key,value) VALUES('categories',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`).bind(JSON.stringify(cats)).run()
+    return c.json({ ok: true })
+  } catch(e:any) { return c.json({ error: e.message }, 500) }
+})
+
+// ============================================================
+// VENDOR PROCUREMENT HISTORY
+// ============================================================
+apiRouter.get('/vendors/:id/history', async (c) => {
+  try {
+    const id = c.req.param('id')
+    const rows = await c.env.DB.prepare(
+      `SELECT r.id, r.title, r.ref_number, r.stage, rp.submitted_at, rp.awarded_at
+       FROM rfp_vendors rv
+       JOIN rfps r ON r.id = rv.rfp_id
+       LEFT JOIN rfp_proposals rp ON rp.rfp_id=rv.rfp_id AND rp.vendor_id=rv.vendor_id
+       WHERE rv.vendor_id=? ORDER BY r.created_at DESC LIMIT 50`
+    ).bind(id).all()
+    return c.json(rows.results||[])
+  } catch(e:any) { return c.json([], 200) }
+})
+
+// ============================================================
+// CONFIRMATION EMAIL ON SUBMISSION
+// ============================================================
+apiRouter.post('/submit/:rfpId/confirmation', async (c) => {
+  try {
+    const rfpId = c.req.param('rfpId')
+    const { vendor_email, vendor_name } = await c.req.json()
+    const rfp = await c.env.DB.prepare('SELECT title, ref_number FROM rfps WHERE id=?').bind(rfpId).first<any>()
+    if (!rfp) return c.json({ error: 'RFP not found' }, 404)
+    // Log confirmation (email would be sent via Mailgun/SendGrid in production)
+    console.log(`Confirmation: ${vendor_name} <${vendor_email}> submitted proposal for ${rfp.ref_number} - ${rfp.title}`)
+    return c.json({ ok: true, message: 'Confirmation noted' })
+  } catch(e:any) { return c.json({ error: e.message }, 500) }
+})

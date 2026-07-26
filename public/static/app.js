@@ -354,6 +354,132 @@ var I18N = {
     vstatus_declined:   'Declined',
     vstatus_replied:    'replied',
     vstatus_no_comms:   'No Comms',
+    // Settings page
+    settings_title:         'Settings',
+    settings_sub:           'Manage application configuration',
+    settings_categories_hd: 'RFP Categories',
+    settings_categories_sub:'Customise the list of categories available when creating an RFP.',
+    settings_cat_add_ph:    'New category name',
+    settings_cat_add_btn:   'Add',
+    settings_cat_saved:     'Categories saved.',
+    settings_cat_reset:     'Restore defaults',
+    settings_procurement_email_hd: 'Procurement Contact Email',
+    settings_procurement_email_sub: 'Displayed to vendors in the vendor portal when they are declined or need to reach out.',
+    settings_procurement_email_ph:  'procurement@cpc.gov.ae',
+    settings_procurement_email_save:'Save Email',
+    settings_procurement_email_saved:'Contact email saved.',
+    // Command palette
+    cmd_placeholder:    'Search RFPs, vendors, pages\u2026',
+    // Notification drawer
+    notif_drawer_title: 'Notifications',
+    notif_mark_all:     'Mark all read',
+    notif_clear_all:    'Clear all',
+    notif_empty_title:  'All caught up!',
+    notif_empty_sub:    'New alerts for Q&A, proposals, and awards will appear here.',
+    // Stage action banner
+    sab_draft:          'This RFP is a draft. Fill in the details and generate the document.',
+    sab_draft_btn:      'Go to Generate',
+    sab_published:      'RFP published. Invite shortlisted vendors to start the Q&A period.',
+    sab_published_btn:  'Go to Vendors',
+    sab_qa_open:        'Q&A period is open. Review and answer vendor questions.',
+    sab_qa_open_btn:    'Go to Q&A',
+    sab_subs_closed:    'Submissions closed. Evaluate received proposals.',
+    sab_subs_closed_btn:'Go to Proposals',
+    sab_awarded:        'Contract awarded. This RFP is complete.',
+    // Contextual action cards (dashboard 2.2)
+    ctx_drafts_hd:      'Drafts awaiting generation',
+    ctx_drafts_btn:     'Open',
+    ctx_qa_hd:          'Pending Q&A questions',
+    ctx_qa_btn:         'Answer',
+    ctx_props_hd:       'Proposals awaiting evaluation',
+    ctx_props_btn:      'Evaluate',
+    ctx_award_hd:       'Awaiting award decision',
+    ctx_award_btn:      'Decide',
+    // Q&A tab extras
+    qa_filter_all:      'All',
+    qa_filter_pending:  'Pending',
+    qa_filter_approved: 'Approved',
+    qa_filter_published:'Published',
+    qa_edit_answer_btn: 'Edit Answer',
+    qa_save_answer_btn: 'Save Answer',
+    qa_ai_tooltip:      'AI will draft answers for all unanswered questions. You can review and edit each draft before approving.',
+    qa_publish_confirm_title: 'Publish All Approved Answers?',
+    qa_publish_confirm_body:  'The following answers will be emailed to all shortlisted vendors:',
+    // Proposals tab extras
+    prop_evaluate_all_btn:'Evaluate All',
+    prop_reevaluate_btn:  'Re-evaluate All',
+    prop_award_this_btn:  'Award This Vendor',
+    prop_award_in_panel:  'Award Contract',
+    // Confirm dialogs
+    confirm_close_qa_title: 'Close Q&A Period?',
+    confirm_close_qa_body:  'Vendors will no longer be able to submit questions. This action cannot be undone.',
+    confirm_award_title:    'Award Contract?',
+    confirm_award_body:     'This will mark the contract as awarded to',
+    confirm_delete_title:   'Confirm Delete',
+    confirm_destructive_btn:'Confirm',
+    confirm_cancel_btn:     'Cancel',
+    // Vendor registry extras
+    vendor_export_csv:      'Export CSV',
+    vendor_edit_mode_btn:   'Edit',
+    vendor_save_mode_btn:   'Save Changes',
+    vendor_procurement_history_hd: 'Procurement History',
+    vendor_ph_no_rfps:      'This vendor has not participated in any RFPs yet.',
+    // Vendor comms extras
+    comms_jump_latest:      'Jump to Latest',
+    comms_char_count:       'characters',
+    comms_rfp_ref:          'RFP Reference',
+    comms_markdown_hint:    'Markdown supported',
+    // Vendor tab extras
+    vendor_pending_invite:  'Pending Invite',
+    vendor_invite_prompt:   'Send invitation now?',
+    vendor_invite_yes:      'Send Invite',
+    vendor_invite_later:    'Later',
+    vendor_filter_all:      'All',
+    vendor_filter_shortlisted:'Shortlisted',
+    vendor_filter_invited:  'Invited',
+    vendor_match_score:     'Match',
+    // Create RFP modal fix (11.1)
+    create_rfp_modal_hint:  "Fill in detailed requirements on the Generate tab after creation.",
+    // Preview toolbar (5.1)
+    preview_copy_all:       'Copy All',
+    preview_export_pdf:     'Export PDF',
+    // Auto-save (5.2)
+    autosave_restored:      'Draft restored from auto-save.',
+    autosave_discard:       'Discard',
+    autosave_restore:       'Restore',
+    // Version snapshot (5.5)
+    snapshot_saved:         'Version snapshot saved before overwrite.',
+    snapshot_view:          'View Snapshots',
+    snapshot_restore:       'Restore this version',
+    // Reports charts (12.1)
+    reports_monthly_title:  'Monthly RFP Activity',
+    reports_stage_funnel:   'Stage Funnel',
+    reports_vendor_perf:    'Top Vendors by Score',
+    // Inline form validation (14.1)
+    val_required:           'This field is required.',
+    val_email:              'Please enter a valid email address.',
+    val_min_length:         'Must be at least {n} characters.',
+    // RFP list filter bar (3.2)
+    filter_stage:           'Stage',
+    filter_category:        'Category',
+    filter_sort:            'Sort',
+    filter_sort_newest:     'Newest first',
+    filter_sort_oldest:     'Oldest first',
+    filter_sort_az:         'A → Z',
+    filter_sort_score:      'Score',
+    filter_view_grid:       'Grid',
+    filter_view_list:       'List',
+    filter_all:             'All',
+    // 3.3 Archived badge
+    archived_rfps:          'Archived',
+    // 3.4 card 3-dot menu
+    card_menu_open:         'Open RFP',
+    card_menu_archive:      'Archive',
+    card_menu_delete:       'Delete',
+    // 13.1 declined contact
+    submit_declined_contact_prefix: 'For further assistance, please contact:',
+    // 13.3 submission confirmation
+    submit_confirm_email_sent: 'A confirmation email has been sent to your registered address.',
   },
   ar: {
     // Sidebar
@@ -699,6 +825,111 @@ var I18N = {
     vstatus_declined:   'رفض',
     vstatus_replied:    'رد',
     vstatus_no_comms:   'بلا تواصل',
+    // Settings page
+    settings_title:         'الإعدادات',
+    settings_sub:           'إدارة إعدادات التطبيق',
+    settings_categories_hd: 'فئات طلبات العروض',
+    settings_categories_sub:'تخصيص قائمة الفئات المتاحة عند إنشاء طلب عرض.',
+    settings_cat_add_ph:    'اسم الفئة الجديدة',
+    settings_cat_add_btn:   'إضافة',
+    settings_cat_saved:     'تم حفظ الفئات.',
+    settings_cat_reset:     'استعادة الافتراضي',
+    settings_procurement_email_hd: 'بريد إلكتروني للتواصل مع المشتريات',
+    settings_procurement_email_sub: 'يُعرض للموردين في بوابة التقديم عند رفضهم أو الحاجة للتواصل.',
+    settings_procurement_email_ph:  'procurement@cpc.gov.ae',
+    settings_procurement_email_save:'حفظ البريد الإلكتروني',
+    settings_procurement_email_saved:'تم حفظ البريد الإلكتروني.',
+    cmd_placeholder:    'البحث في الطلبات والموردين…',
+    notif_drawer_title: 'الإشعارات',
+    notif_mark_all:     'تحديد الكل كمقروء',
+    notif_clear_all:    'مسح الكل',
+    notif_empty_title:  'لا توجد إشعارات جديدة!',
+    notif_empty_sub:    'ستظهر هنا تنبيهات الأسئلة والعروض والترسية.',
+    sab_draft:          'هذا الطلب مسودة. أدخل التفاصيل وقم بإنشاء الوثيقة.',
+    sab_draft_btn:      'إنشاء',
+    sab_published:      'تم نشر الطلب. ادعُ الموردين المختارين للبدء في فترة الأسئلة.',
+    sab_published_btn:  'الموردون',
+    sab_qa_open:        'فترة الأسئلة مفتوحة. راجع أسئلة الموردين وأجب عليها.',
+    sab_qa_open_btn:    'الأسئلة',
+    sab_subs_closed:    'التقديم مغلق. قيّم العروض المستلمة.',
+    sab_subs_closed_btn:'العروض',
+    sab_awarded:        'تم ترسية العقد. اكتمل هذا الطلب.',
+    ctx_drafts_hd:      'مسودات تنتظر الإنشاء',
+    ctx_drafts_btn:     'فتح',
+    ctx_qa_hd:          'أسئلة معلقة في Q&A',
+    ctx_qa_btn:         'الإجابة',
+    ctx_props_hd:       'عروض تنتظر التقييم',
+    ctx_props_btn:      'تقييم',
+    ctx_award_hd:       'تنتظر قرار الترسية',
+    ctx_award_btn:      'قرار',
+    qa_filter_all:      'الكل',
+    qa_filter_pending:  'معلق',
+    qa_filter_approved: 'موافق عليه',
+    qa_filter_published:'منشور',
+    qa_edit_answer_btn: 'تعديل الإجابة',
+    qa_save_answer_btn: 'حفظ الإجابة',
+    qa_ai_tooltip:      'سيُعدّ الذكاء الاصطناعي إجابات للأسئلة غير المجاب عنها. يمكنك المراجعة والتعديل قبل الموافقة.',
+    qa_publish_confirm_title: 'نشر جميع الإجابات الموافق عليها؟',
+    qa_publish_confirm_body:  'ستُرسل الإجابات التالية بالبريد إلى جميع الموردين المختارين:',
+    prop_evaluate_all_btn:'تقييم الجميع',
+    prop_reevaluate_btn:  'إعادة تقييم الجميع',
+    prop_award_this_btn:  'ترسية هذا المورد',
+    prop_award_in_panel:  'ترسية العقد',
+    confirm_close_qa_title: 'إغلاق فترة الأسئلة؟',
+    confirm_close_qa_body:  'لن يتمكن الموردون من تقديم أسئلة. لا يمكن التراجع عن هذا الإجراء.',
+    confirm_award_title:    'ترسية العقد؟',
+    confirm_award_body:     'سيُسجَّل العقد كمُرسى إلى',
+    confirm_delete_title:   'تأكيد الحذف',
+    confirm_destructive_btn:'تأكيد',
+    confirm_cancel_btn:     'إلغاء',
+    vendor_export_csv:      'تصدير CSV',
+    vendor_edit_mode_btn:   'تعديل',
+    vendor_save_mode_btn:   'حفظ التغييرات',
+    vendor_procurement_history_hd: 'سجل المشتريات',
+    vendor_ph_no_rfps:      'لم يشارك هذا المورد في أي طلبات بعد.',
+    comms_jump_latest:      'الانتقال للأحدث',
+    comms_char_count:       'حرف',
+    comms_rfp_ref:          'مرجع الطلب',
+    comms_markdown_hint:    'Markdown مدعوم',
+    vendor_pending_invite:  'دعوة معلقة',
+    vendor_invite_prompt:   'إرسال الدعوة الآن؟',
+    vendor_invite_yes:      'إرسال الدعوة',
+    vendor_invite_later:    'لاحقاً',
+    vendor_filter_all:      'الكل',
+    vendor_filter_shortlisted:'مختار',
+    vendor_filter_invited:  'مدعو',
+    vendor_match_score:     'ملاءمة',
+    create_rfp_modal_hint:  'أدخل تفاصيل المتطلبات في تبويب الإنشاء بعد الإنشاء.',
+    preview_copy_all:       'نسخ الكل',
+    preview_export_pdf:     'تصدير PDF',
+    autosave_restored:      'تم استعادة المسودة من الحفظ التلقائي.',
+    autosave_discard:       'تجاهل',
+    autosave_restore:       'استعادة',
+    snapshot_saved:         'تم حفظ نسخة احتياطية قبل الكتابة فوق.',
+    snapshot_view:          'عرض النسخ',
+    snapshot_restore:       'استعادة هذه النسخة',
+    reports_monthly_title:  'نشاط طلبات العروض الشهري',
+    reports_stage_funnel:   'مسار المراحل',
+    reports_vendor_perf:    'أفضل الموردين بالتقييم',
+    val_required:           'هذا الحقل مطلوب.',
+    val_email:              'يرجى إدخال بريد إلكتروني صحيح.',
+    val_min_length:         'يجب أن يكون على الأقل {n} أحرف.',
+    filter_stage:           'المرحلة',
+    filter_category:        'الفئة',
+    filter_sort:            'الترتيب',
+    filter_sort_newest:     'الأحدث أولاً',
+    filter_sort_oldest:     'الأقدم أولاً',
+    filter_sort_az:         'أ → ي',
+    filter_sort_score:      'التقييم',
+    filter_view_grid:       'شبكة',
+    filter_view_list:       'قائمة',
+    filter_all:             'الكل',
+    archived_rfps:          'الأرشيف',
+    card_menu_open:         'فتح الطلب',
+    card_menu_archive:      'أرشفة',
+    card_menu_delete:       'حذف',
+    submit_declined_contact_prefix: 'للمزيد من المساعدة، يرجى التواصل مع:',
+    submit_confirm_email_sent: 'تم إرسال بريد تأكيد إلى عنوانك المسجل.',
   }
 };
 
@@ -883,10 +1114,17 @@ document.addEventListener('click', function(e) {
   }
 });
 
-function switchLang() {
-  _currentLang = (_currentLang === 'en') ? 'ar' : 'en';
-  localStorage.setItem('cpc_lang', _currentLang);
+// 1.3 — setLang: switch to explicit lang value; called by pill buttons
+function setLang(lang) {
+  if (lang !== 'en' && lang !== 'ar') return;
+  _currentLang = lang;
+  localStorage.setItem('cpc_lang', lang);
   applyTranslations();
+  // Update pill active state
+  var btnEn = document.getElementById('langBtnEn');
+  var btnAr = document.getElementById('langBtnAr');
+  if (btnEn) btnEn.classList.toggle('active', lang === 'en');
+  if (btnAr) btnAr.classList.toggle('active', lang === 'ar');
   // Re-render current page content to pick up translated labels
   if (appState && appState.currentPage) {
     var pageRenderFn = pages[appState.currentPage];
@@ -894,6 +1132,11 @@ function switchLang() {
       pageRenderFn();
     }
   }
+}
+
+// Legacy toggle (kept for any old references)
+function switchLang() {
+  setLang(_currentLang === 'en' ? 'ar' : 'en');
 }
 
 let appState = {
@@ -911,6 +1154,7 @@ let appState = {
   previousPage: null,
   unreadQA: 0,         // count of unanswered questions (> 0 shows badge on Q&A tab)
   unreadProposals: 0,  // count of new portal submissions (> 0 shows badge on Proposals tab)
+  unreadComms: 0,      // 4.3 — count of new vendor comms messages
   notifications: [],
   unreadNotifications: 0,
 };
@@ -1040,15 +1284,19 @@ function markAllNotifsRead() {
   updateBellBadge();
 }
 
+// 1.2 — Notification drawer toggle (slide-in drawer from right)
 function toggleNotifPanel() {
   var panel = document.getElementById('notifPanel');
+  var overlay = document.getElementById('notifDrawerOverlay');
   if (!panel) return;
-  var isOpen = panel.style.display !== 'none';
+  var isOpen = panel.classList.contains('open');
   if (isOpen) {
-    panel.style.display = 'none';
+    panel.classList.remove('open');
+    if (overlay) overlay.classList.remove('open');
   } else {
     renderNotifPanel();
-    panel.style.display = 'block';
+    panel.classList.add('open');
+    if (overlay) overlay.classList.add('open');
     markAllNotifsRead();
   }
 }
@@ -1057,44 +1305,46 @@ function renderNotifPanel() {
   var panel = document.getElementById('notifPanel');
   if (!panel) return;
   const typeColors = { email: '#BA9765', questions: '#745B35', proposal: '#BA9765', info: '#6b7280', decline: '#dc2626', stage: '#16a34a' };
-  const typeIcons = { email: 'fa-envelope', questions: 'fa-question-circle', proposal: 'fa-inbox', info: 'fa-info-circle', decline: 'fa-times-circle', stage: 'fa-flag' };
-  let html = '<div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid #f3f4f6">'
-    + '<span style="font-weight:700;font-size:0.875rem;color:#1f2937"><i class="fas fa-bell mr-1"></i>' + t('notif_panel_title') + '</span>'
-    + '<button onclick="markAllNotifsRead();renderNotifPanel()" style="font-size:0.72rem;color:var(--cpc-gold-deep);background:none;border:none;cursor:pointer">' + t('notif_mark_read') + '</button>'
-    + '</div>';
+  const typeIcons  = { email: 'fa-envelope', questions: 'fa-question-circle', proposal: 'fa-inbox', info: 'fa-info-circle', decline: 'fa-times-circle', stage: 'fa-flag' };
+
+  let html = '<div class="notif-drawer-header">'
+    + '<span style="font-weight:700;font-size:0.9rem;color:#1f2937"><i class="fas fa-bell mr-2" style="color:var(--cpc-gold-deep)"></i>' + t('notif_drawer_title') + '</span>'
+    + '<div style="display:flex;gap:8px;align-items:center">'
+    + '<button onclick="markAllNotifsRead();renderNotifPanel()" style="font-size:0.72rem;color:var(--cpc-gold-deep);background:none;border:none;cursor:pointer;padding:3px 6px;border-radius:4px;border:1px solid var(--cpc-gold-light)">' + t('notif_mark_all') + '</button>'
+    + '<button onclick="appState.notifications=[];renderNotifPanel()" style="font-size:0.72rem;color:#9ca3af;background:none;border:none;cursor:pointer;padding:3px 6px;border-radius:4px;border:1px solid #e5e7eb">' + t('notif_clear_all') + '</button>'
+    + '<button onclick="toggleNotifPanel()" style="background:none;border:none;cursor:pointer;color:#9ca3af;padding:3px 6px;font-size:1rem"><i class="fas fa-times"></i></button>'
+    + '</div></div>';
+
+  html += '<div class="notif-drawer-body">';
   if (appState.notifications.length === 0) {
-    html += '<div style="padding:2rem;text-align:center;color:#9ca3af;font-size:0.82rem"><i class="fas fa-bell-slash" style="display:block;font-size:1.5rem;margin-bottom:0.5rem"></i>' + t('notif_none') + '</div>';
+    html += '<div style="padding:3rem 2rem;text-align:center">'
+      + '<i class="fas fa-bell" style="font-size:2.2rem;color:#d1d5db;display:block;margin-bottom:0.75rem"></i>'
+      + '<div style="font-weight:600;font-size:0.9rem;color:#6b7280;margin-bottom:0.35rem">' + t('notif_empty_title') + '</div>'
+      + '<div style="font-size:0.78rem;color:#9ca3af;line-height:1.5">' + t('notif_empty_sub') + '</div></div>';
   } else {
-    html += '<div style="max-height:400px;overflow-y:auto">';
-    appState.notifications.slice(0, 20).forEach(function(n) {
+    appState.notifications.forEach(function(n) {
       const color = typeColors[n.type] || '#6b7280';
       const icon = typeIcons[n.type] || 'fa-bell';
-      const timeStr = n.time ? n.time.toLocaleTimeString('en-AE', { hour: '2-digit', minute: '2-digit' }) : '';
-      const unreadDot = !n.read ? '<span style="width:8px;height:8px;border-radius:50%;background:var(--cpc-gold);display:inline-block;margin-left:4px"></span>' : '';
-      const clickable = (n.rfpId && n.tab) ? 'cursor:pointer' : '';
-      html += '<div style="padding:10px 16px;border-bottom:1px solid #f9fafb;display:flex;gap:10px;align-items:flex-start;' + (n.read ? '' : 'background:#faf5ff;') + '" '
-        + (n.rfpId && n.tab ? 'onclick="navigateFromNotif(' + n.id + ');toggleNotifPanel()" style="' + clickable + '"' : '') + '>'
-        + '<div style="width:28px;height:28px;border-radius:50%;background:' + color + '22;display:flex;align-items:center;justify-content:center;flex-shrink:0">'
-        + '<i class="fas ' + icon + '" style="color:' + color + ';font-size:0.75rem"></i></div>'
+      const timeStr = n.time ? n.time.toLocaleString('en-AE', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+      const unreadDot = !n.read ? '<span style="width:8px;height:8px;border-radius:50%;background:var(--cpc-gold);display:inline-block;flex-shrink:0"></span>' : '';
+      const bg = n.read ? '' : 'background:#fefbf6;';
+      html += '<div style="padding:12px 18px;border-bottom:1px solid #f3f4f6;display:flex;gap:10px;align-items:flex-start;' + bg + (n.rfpId && n.tab ? 'cursor:pointer;' : '') + '" '
+        + (n.rfpId && n.tab ? 'onclick="navigateFromNotif(' + n.id + ');toggleNotifPanel()"' : '') + '>'
+        + '<div style="width:32px;height:32px;border-radius:50%;background:' + color + '22;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:2px">'
+        + '<i class="fas ' + icon + '" style="color:' + color + ';font-size:0.78rem"></i></div>'
         + '<div style="flex:1;min-width:0">'
-        + '<div style="font-weight:600;font-size:0.8rem;color:#1f2937">' + escHtml(n.title) + unreadDot + '</div>'
-        + '<div style="font-size:0.75rem;color:#6b7280;line-height:1.4">' + escHtml(n.message) + '</div>'
-        + '<div style="font-size:0.7rem;color:#9ca3af;margin-top:2px">' + timeStr + '</div>'
+        + '<div style="display:flex;align-items:center;gap:6px;margin-bottom:2px"><span style="font-weight:600;font-size:0.82rem;color:#1f2937">' + escHtml(n.title) + '</span>' + unreadDot + '</div>'
+        + '<div style="font-size:0.77rem;color:#6b7280;line-height:1.45">' + escHtml(n.message) + '</div>'
+        + '<div style="font-size:0.7rem;color:#9ca3af;margin-top:4px">' + timeStr + '</div>'
         + '</div></div>';
     });
-    html += '</div>';
   }
+  html += '</div>';
+  html += '<div class="notif-drawer-footer">'
+    + '<div style="font-size:0.72rem;color:#9ca3af;text-align:center">' + appState.notifications.length + ' notification' + (appState.notifications.length !== 1 ? 's' : '') + ' total</div>'
+    + '</div>';
   panel.innerHTML = html;
 }
-
-// Close notif panel when clicking outside
-document.addEventListener('click', function(e) {
-  const panel = document.getElementById('notifPanel');
-  const bell = document.getElementById('bellBtn');
-  if (panel && panel.style.display !== 'none' && !panel.contains(e.target) && e.target !== bell && !bell.contains(e.target)) {
-    panel.style.display = 'none';
-  }
-});
 
 function showModal(html) {
   document.getElementById('modalContent').innerHTML = html;
@@ -1211,6 +1461,7 @@ var pageTitles = {
   rfps:       [t('page_rfps'),      t('page_rfps_sub')],
   vendors:    [t('page_vendors'),   t('page_vendors_sub')],
   reports:    [t('page_reports'),   t('page_reports_sub')],
+  settings:   ['Settings',          'Application Settings'],
 };
 
 document.getElementById('mainNav').addEventListener('click', function(e) {
@@ -1227,6 +1478,12 @@ function navigateTo(page, opts) {
   appState.currentRfpId = opts.rfpId || null;
   appState.currentRfpTab = opts.tab || 'generate';
 
+  // Close notification drawer if open
+  var notifPanel = document.getElementById('notifPanel');
+  var notifOverlay = document.getElementById('notifDrawerOverlay');
+  if (notifPanel) notifPanel.classList.remove('open');
+  if (notifOverlay) notifOverlay.classList.remove('open');
+
   // nav active state
   document.querySelectorAll('[data-page]').forEach(function(el) {
     el.classList.toggle('active', el.dataset.page === page);
@@ -1239,11 +1496,18 @@ function navigateTo(page, opts) {
 
   // back button
   const backBtn = document.getElementById('backBtn');
-  if (page === 'rfp_detail') {
+  if (page === 'rfp_detail' || page === 'vendor_comms') {
     backBtn.style.display = 'inline-flex';
   } else {
     backBtn.style.display = 'none';
   }
+
+  // 1.1 — Breadcrumb bar
+  updateBreadcrumb(page, opts);
+
+  // 4.2 — Stage action banner — hide until rfp_detail sets it
+  var sab = document.getElementById('stageActionBanner');
+  if (sab) sab.classList.remove('visible');
 
   // hide lifecycle / tabs by default
   document.getElementById('lifecycleBar').style.display = 'none';
@@ -1255,8 +1519,38 @@ function navigateTo(page, opts) {
   if (fn) fn(opts);
 }
 
+// 1.1 — Breadcrumb logic
+function updateBreadcrumb(page, opts) {
+  var bar = document.getElementById('breadcrumbBar');
+  if (!bar) return;
+  if (page === 'rfp_detail' && opts && opts.rfpId) {
+    var rfpTitle = (appState.currentRfp && appState.currentRfp.title) || ('RFP #' + opts.rfpId);
+    bar.innerHTML = '<i class="fas fa-home bc-item" onclick="navigateTo(\'dashboard\')" title="Dashboard"></i>'
+      + '<span class="bc-sep">›</span>'
+      + '<span class="bc-item" onclick="navigateTo(\'rfps\')">All RFPs</span>'
+      + '<span class="bc-sep">›</span>'
+      + '<span class="bc-current" id="bcRfpTitle">' + escHtml(rfpTitle.slice(0,48)) + '</span>';
+    bar.classList.add('visible');
+  } else if (page === 'vendor_comms' && opts && opts.rfpId) {
+    bar.innerHTML = '<i class="fas fa-home bc-item" onclick="navigateTo(\'dashboard\')" title="Dashboard"></i>'
+      + '<span class="bc-sep">›</span>'
+      + '<span class="bc-item" onclick="navigateTo(\'rfps\')">All RFPs</span>'
+      + '<span class="bc-sep">›</span>'
+      + '<span class="bc-item" onclick="navigateTo(\'rfp_detail\',{rfpId:' + opts.rfpId + '})">RFP #' + opts.rfpId + '</span>'
+      + '<span class="bc-sep">›</span>'
+      + '<span class="bc-current">Comms</span>';
+    bar.classList.add('visible');
+  } else {
+    bar.classList.remove('visible');
+  }
+}
+
 function goBack() {
-  navigateTo('rfps');
+  if (appState.currentPage === 'vendor_comms' && appState.currentRfpId) {
+    navigateTo('rfp_detail', { rfpId: appState.currentRfpId, tab: 'vendors' });
+  } else {
+    navigateTo('rfps');
+  }
 }
 
 // ============================================================
@@ -1325,11 +1619,13 @@ function renderLifecycleBar(rfp) {
       cls = 'lc-pending';
     }
     const icon = completionMap[i] ? 'fa-check' : STAGE_ICONS[i];
-    html += '<div class="lc-step ' + cls + '">';
+    var tooltipText = completionMap[i] ? (STAGE_LABELS[i] + ' — Completed') : (activeMap[i] ? STAGE_LABELS[i] + ' — In Progress' : STAGE_LABELS[i] + ' — Pending');
+    html += '<div class="lc-step ' + cls + '" style="position:relative">';
     html += '<div class="lc-node">';
-    html += '<div class="lc-circle"><i class="fas ' + icon + '" style="font-size:0.72rem;line-height:1"></i></div>';
+    html += '<div class="lc-circle" title="' + tooltipText + '"><i class="fas ' + icon + '" style="font-size:0.72rem;line-height:1"></i></div>';
     html += '<div class="lc-label">' + escHtml(STAGE_LABELS[i]) + '</div>';
     html += '</div>';
+    html += '<div class="lc-tooltip">' + tooltipText + '</div>';
     if (i < STAGES.length - 1) html += '<div class="lc-connector"></div>';
     html += '</div>';
   }
@@ -1342,23 +1638,27 @@ function renderLifecycleBar(rfp) {
 // RFP TABS BAR
 // ============================================================
 var RFP_TABS = [
-  { id: 'generate',   icon: 'fa-file-alt',           label: t('tab_generate') },
-  { id: 'vendors',    icon: 'fa-building',            label: t('tab_vendors') },
-  { id: 'qa',         icon: 'fa-comments',            label: t('tab_qa') },
-  { id: 'proposals',  icon: 'fa-inbox',               label: t('tab_proposals') },
+  { id: 'generate',   icon: 'fa-file-alt',  label: t('tab_generate') },
+  { id: 'vendors',    icon: 'fa-building',  label: t('tab_vendors') },
+  { id: 'qa',         icon: 'fa-comments',  label: t('tab_qa') },
+  { id: 'proposals',  icon: 'fa-inbox',     label: t('tab_proposals') },
 ];
 
+// 4.3 — unreadComms counter for the Vendors tab (comms badge)
 function renderRfpTabs(activeTab, rfpId, qaBadge) {
   let html = '<div class="rfp-tabs">';
   RFP_TABS.forEach(function(tab) {
     const isActive = tab.id === activeTab;
+    // Q&A badge
     const qaBadgeHtml = (tab.id === 'qa' && qaBadge) ? '<span style="background:#ef4444;color:white;border-radius:10px;padding:1px 6px;font-size:0.68rem;margin-left:4px;font-weight:700">' + (typeof qaBadge === 'number' && qaBadge > 0 ? qaBadge : '!') + '</span>' : '';
+    // Proposals badge
     const propsBadgeCount = appState.unreadProposals || 0;
     const propsBadgeHtml = (tab.id === 'proposals' && propsBadgeCount > 0) ? '<span style="background:#ef4444;color:white;border-radius:10px;padding:1px 6px;font-size:0.68rem;margin-left:4px;font-weight:700">' + propsBadgeCount + '</span>' : '';
-    const emailBadgeCount = appState.unreadEmailCount || 0;
-    const emailBadgeHtml = (tab.id === 'emails' && emailBadgeCount > 0) ? '<span style="background:var(--cpc-gold);color:white;border-radius:10px;padding:1px 6px;font-size:0.68rem;margin-left:4px">' + emailBadgeCount + '</span>' : '';
+    // 4.3 — Comms (vendors tab) badge
+    const commsBadgeCount = appState.unreadComms || 0;
+    const commsBadgeHtml = (tab.id === 'vendors' && commsBadgeCount > 0) ? '<span style="background:var(--cpc-gold);color:white;border-radius:10px;padding:1px 6px;font-size:0.68rem;margin-left:4px;font-weight:700">' + commsBadgeCount + '</span>' : '';
     html += '<div class="rfp-tab' + (isActive ? ' active' : '') + '" onclick="switchRfpTab(\'' + tab.id + '\',' + rfpId + ')">';
-    html += '<i class="fas ' + tab.icon + '"></i>' + escHtml(tab.label) + qaBadgeHtml + propsBadgeHtml + emailBadgeHtml;
+    html += '<i class="fas ' + tab.icon + '"></i>' + escHtml(tab.label) + qaBadgeHtml + propsBadgeHtml + commsBadgeHtml;
     html += '</div>';
   });
   html += '</div>';
@@ -1391,8 +1691,265 @@ function switchRfpTab(tab, rfpId) {
 async function init() {
   // Apply saved language before first render
   applyTranslations();
+  // 1.3 — Set correct active pill button on load
+  var savedLang = localStorage.getItem('cpc_lang') || 'en';
+  var btnEn = document.getElementById('langBtnEn');
+  var btnAr = document.getElementById('langBtnAr');
+  if (btnEn) btnEn.classList.toggle('active', savedLang === 'en');
+  if (btnAr) btnAr.classList.toggle('active', savedLang === 'ar');
+
+  // Set header date
+  var headerDate = document.getElementById('headerDate');
+  if (headerDate) {
+    headerDate.textContent = new Date().toLocaleDateString('en-AE', { weekday:'short', year:'numeric', month:'short', day:'numeric' });
+  }
+
+  // 1.4 — Global keyboard shortcuts
+  document.addEventListener('keydown', function(e) {
+    // Cmd+K / Ctrl+K — open command palette
+    if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+      e.preventDefault();
+      openCmdPalette();
+      return;
+    }
+    // Escape — close modals, panels
+    if (e.key === 'Escape') {
+      // Close command palette
+      closeCmdPalette();
+      // Close notification drawer
+      var notifPanel = document.getElementById('notifPanel');
+      var notifOverlay = document.getElementById('notifDrawerOverlay');
+      if (notifPanel && notifPanel.classList.contains('open')) {
+        notifPanel.classList.remove('open');
+        if (notifOverlay) notifOverlay.classList.remove('open');
+      }
+      // Close confirm dialog
+      var confirmOverlay = document.getElementById('confirmDialogOverlay');
+      if (confirmOverlay && confirmOverlay.classList.contains('open')) {
+        confirmOverlay.classList.remove('open');
+      }
+      // 5.4 — Escape closes scoring matrix modal
+      var modalOverlay = document.getElementById('modalOverlay');
+      if (modalOverlay && modalOverlay.classList.contains('open')) {
+        closeModal();
+      }
+      // Close proposal side panel
+      if (document.getElementById('proposalSidePanel')) {
+        closeProposalPanel();
+      }
+    }
+  });
+
+  // 14.5 — Trap focus in modal when open
+  document.getElementById('modalOverlay').addEventListener('keydown', function(e) {
+    if (e.key !== 'Tab') return;
+    var focusable = this.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+    if (!focusable.length) return;
+    var first = focusable[0], last = focusable[focusable.length - 1];
+    if (e.shiftKey ? document.activeElement === first : document.activeElement === last) {
+      e.preventDefault();
+      (e.shiftKey ? last : first).focus();
+    }
+  });
+
   try { await apiCall('POST', '/init', {}); } catch(e) {}
   navigateTo('dashboard');
+}
+
+// ── 1.4 Command palette ──────────────────────────────────────────────────────
+function openCmdPalette() {
+  var overlay = document.getElementById('cmdPaletteOverlay');
+  var input   = document.getElementById('cmdInput');
+  if (!overlay) return;
+  overlay.classList.add('open');
+  if (input) { input.value = ''; input.focus(); }
+  renderCmdResults();
+}
+
+function closeCmdPalette() {
+  var overlay = document.getElementById('cmdPaletteOverlay');
+  if (overlay) overlay.classList.remove('open');
+}
+
+function renderCmdResults() {
+  var input   = document.getElementById('cmdInput');
+  var results = document.getElementById('cmdResults');
+  var empty   = document.getElementById('cmdEmpty');
+  if (!results) return;
+  var q = (input ? input.value : '').toLowerCase().trim();
+
+  // Build items: nav pages + RFPs from state
+  var items = [
+    { icon: 'fa-chart-pie',    label: 'Dashboard',        sub: 'Page', action: function(){ navigateTo('dashboard'); closeCmdPalette(); } },
+    { icon: 'fa-layer-group',  label: 'All RFPs',         sub: 'Page', action: function(){ navigateTo('rfps'); closeCmdPalette(); } },
+    { icon: 'fa-building',     label: 'Vendor Registry',  sub: 'Page', action: function(){ navigateTo('vendors'); closeCmdPalette(); } },
+    { icon: 'fa-chart-bar',    label: 'Reports',          sub: 'Page', action: function(){ navigateTo('reports'); closeCmdPalette(); } },
+    { icon: 'fa-cog',          label: 'Settings',         sub: 'Page', action: function(){ navigateTo('settings'); closeCmdPalette(); } },
+    { icon: 'fa-plus-circle',  label: 'New RFP',          sub: 'Action', action: function(){ closeCmdPalette(); showCreateRfpModal(); } },
+  ];
+  // Add RFPs from appState
+  (appState.rfps || []).forEach(function(rfp) {
+    items.push({
+      icon: 'fa-file-alt',
+      label: rfp.title || 'Untitled RFP',
+      sub: (rfp.stage || 'draft').replace(/_/g,' '),
+      action: function(){ navigateTo('rfp_detail', { rfpId: rfp.id }); closeCmdPalette(); }
+    });
+  });
+  // Add vendors from state
+  (appState.vendors || []).forEach(function(v) {
+    items.push({
+      icon: 'fa-building',
+      label: v.name || 'Vendor',
+      sub: v.category || 'Vendor',
+      action: function(){ navigateTo('vendors'); closeCmdPalette(); setTimeout(function(){ viewVendorDetail(v.id); }, 400); }
+    });
+  });
+
+  var filtered = q ? items.filter(function(item){ return item.label.toLowerCase().includes(q) || item.sub.toLowerCase().includes(q); }) : items;
+
+  if (filtered.length === 0) {
+    results.innerHTML = '';
+    if (empty) empty.style.display = 'block';
+    return;
+  }
+  if (empty) empty.style.display = 'none';
+  results.innerHTML = filtered.slice(0, 8).map(function(item, idx) {
+    return '<div class="cmd-item" data-idx="' + idx + '" onclick="cmdItemClick(' + idx + ')">'
+      + '<i class="fas ' + item.icon + '"></i>'
+      + '<span>' + escHtml(item.label) + '</span>'
+      + '<span class="cmd-item-sub">' + escHtml(item.sub) + '</span>'
+      + '</div>';
+  }).join('');
+  // Store filtered for keyboard nav
+  document.getElementById('cmdPalette')._cmdItems = filtered;
+}
+
+function cmdItemClick(idx) {
+  var palette = document.getElementById('cmdPalette');
+  var items = palette ? palette._cmdItems : [];
+  if (items && items[idx]) items[idx].action();
+}
+
+function handleCmdKey(e) {
+  var results = document.getElementById('cmdResults');
+  if (!results) return;
+  var items = results.querySelectorAll('.cmd-item');
+  var selected = results.querySelector('.cmd-item.selected');
+  var selIdx = selected ? parseInt(selected.dataset.idx) : -1;
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    var next = selIdx < items.length - 1 ? selIdx + 1 : 0;
+    items.forEach(function(el){ el.classList.remove('selected'); });
+    if (items[next]) items[next].classList.add('selected');
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    var prev = selIdx > 0 ? selIdx - 1 : items.length - 1;
+    items.forEach(function(el){ el.classList.remove('selected'); });
+    if (items[prev]) items[prev].classList.add('selected');
+  } else if (e.key === 'Enter') {
+    if (selected) { selected.click(); }
+    else if (items.length > 0) { items[0].click(); }
+  }
+}
+
+// ── 14.4 Confirm dialog helper ────────────────────────────────────────────────
+function showConfirm(opts, onConfirm, onCancel) {
+  // opts: { title, body, type='danger'|'warning'|'info', list=[], confirmText, cancelText }
+  var type = opts.type || 'danger';
+  var iconMap = { danger: 'fa-trash-alt', warning: 'fa-exclamation-triangle', info: 'fa-info-circle' };
+  var iconEl   = document.getElementById('confirmIcon');
+  var titleEl  = document.getElementById('confirmTitle');
+  var bodyEl   = document.getElementById('confirmBody');
+  var listEl   = document.getElementById('confirmList');
+  var actionsEl = document.getElementById('confirmActions');
+  var overlay  = document.getElementById('confirmDialogOverlay');
+  if (!overlay) return;
+
+  iconEl.className = 'confirm-icon ' + type;
+  iconEl.innerHTML = '<i class="fas ' + (iconMap[type] || 'fa-question-circle') + '"></i>';
+  titleEl.textContent = opts.title || 'Are you sure?';
+  bodyEl.innerHTML = opts.body || '';
+  if (opts.list && opts.list.length > 0) {
+    listEl.style.display = '';
+    listEl.innerHTML = '<ul style="margin:0;padding-left:1.2rem">' + opts.list.map(function(l){ return '<li>' + escHtml(l) + '</li>'; }).join('') + '</ul>';
+  } else {
+    listEl.style.display = 'none';
+    listEl.innerHTML = '';
+  }
+  actionsEl.innerHTML = '<button class="btn-ghost" id="confirmCancelBtn">' + (opts.cancelText || t('confirm_cancel_btn')) + '</button>'
+    + '<button class="btn-primary" id="confirmOkBtn" style="background:' + (type === 'danger' ? '#dc2626' : type === 'warning' ? '#d97706' : 'var(--cpc-gold)') + ';border-color:' + (type === 'danger' ? '#dc2626' : type === 'warning' ? '#d97706' : 'var(--cpc-gold)') + '">' + (opts.confirmText || t('confirm_destructive_btn')) + '</button>';
+
+  overlay.classList.add('open');
+  document.getElementById('confirmOkBtn').focus();
+
+  document.getElementById('confirmOkBtn').onclick = function() {
+    overlay.classList.remove('open');
+    if (onConfirm) onConfirm();
+  };
+  document.getElementById('confirmCancelBtn').onclick = function() {
+    overlay.classList.remove('open');
+    if (onCancel) onCancel();
+  };
+}
+
+// ── 14.2 Skeleton loading helper ─────────────────────────────────────────────
+function skeletonCards(count, cols) {
+  cols = cols || 2;
+  var cards = '';
+  for (var i = 0; i < count; i++) {
+    cards += '<div class="skeleton-card">'
+      + '<div class="skeleton skeleton-title" style="width:' + (45 + Math.random()*30) + '%"></div>'
+      + '<div class="skeleton skeleton-text" style="width:' + (60 + Math.random()*30) + '%"></div>'
+      + '<div class="skeleton skeleton-text" style="width:' + (40 + Math.random()*20) + '%"></div>'
+      + '</div>';
+  }
+  return '<div style="display:grid;grid-template-columns:repeat(' + cols + ',1fr);gap:1rem">' + cards + '</div>';
+}
+
+function skeletonTable(rows, cols) {
+  rows = rows || 5; cols = cols || 4;
+  var rowsHtml = '';
+  for (var i = 0; i < rows; i++) {
+    var cells = '';
+    for (var j = 0; j < cols; j++) {
+      cells += '<td><div class="skeleton skeleton-text" style="width:' + (50 + Math.random()*40) + '%"></div></td>';
+    }
+    rowsHtml += '<tr>' + cells + '</tr>';
+  }
+  return rowsHtml;
+}
+
+// ── 14.1 Inline form validation helpers ──────────────────────────────────────
+function setFieldError(fieldId, msg) {
+  var el = document.getElementById(fieldId);
+  if (!el) return;
+  el.style.borderColor = '#dc2626';
+  var errId = fieldId + '_err';
+  var existing = document.getElementById(errId);
+  if (existing) existing.remove();
+  var err = document.createElement('div');
+  err.id = errId;
+  err.style.cssText = 'font-size:0.72rem;color:#dc2626;margin-top:2px';
+  err.textContent = msg;
+  el.parentNode.insertBefore(err, el.nextSibling);
+}
+
+function clearFieldError(fieldId) {
+  var el = document.getElementById(fieldId);
+  if (el) el.style.borderColor = '';
+  var existing = document.getElementById(fieldId + '_err');
+  if (existing) existing.remove();
+}
+
+function validateRequired(fieldId, label) {
+  var el = document.getElementById(fieldId);
+  if (!el || !el.value.trim()) {
+    setFieldError(fieldId, (label || 'This field') + ' ' + t('val_required'));
+    return false;
+  }
+  clearFieldError(fieldId);
+  return true;
 }
 
 // ============================================================
@@ -1413,20 +1970,27 @@ pages.dashboard = async function() {
 
   // KPI cards
   const kpis = [
-    { label:t('dash_total_rfps'),      value: stats.totalRfps || 0,      icon:'fa-layer-group',   color:'#745B35', sub: (stats.activeRfps||0) + ' ' + t('dash_active_suffix') },
-    { label:t('dash_win_rate'),        value: (stats.winRate||0) + '%',  icon:'fa-trophy',        color:'#BA9765', sub: (stats.awardedRfps||0) + ' ' + t('dash_awarded_suffix') },
-    { label:t('dash_avg_duration'),    value: stats.avgDuration ? stats.avgDuration + 'd' : 'N/A', icon:'fa-clock', color:'#065f46', sub: t('dash_per_rfp') },
-    { label:t('dash_vendor_pool'),     value: stats.totalVendors || 0,   icon:'fa-building',      color:'#BA9765', sub: t('dash_reg_vendors') },
-    { label:t('dash_proposals_lbl'),   value: stats.totalProposals || 0, icon:'fa-inbox',         color:'#dc6803', sub: t('dash_total_recv') },
-    { label:t('dash_emails_sent'),     value: stats.totalEmails || 0,    icon:'fa-envelope',      color:'#1d4ed8', sub: t('dash_inv_replies') },
+    { label:t('dash_total_rfps'),      value: stats.totalRfps || 0,      icon:'fa-layer-group',   color:'#745B35', sub: (stats.activeRfps||0) + ' ' + t('dash_active_suffix'),  trend: stats.totalRfps > 0 ? 0 : null },
+    { label:t('dash_win_rate'),        value: (stats.winRate||0) + '%',  icon:'fa-trophy',        color:'#BA9765', sub: (stats.awardedRfps||0) + ' ' + t('dash_awarded_suffix'), trend: null },
+    { label:t('dash_avg_duration'),    value: stats.avgDuration ? stats.avgDuration + 'd' : 'N/A', icon:'fa-clock', color:'#065f46', sub: t('dash_per_rfp'), trend: null },
+    { label:t('dash_vendor_pool'),     value: stats.totalVendors || 0,   icon:'fa-building',      color:'#BA9765', sub: t('dash_reg_vendors'), trend: null },
+    { label:t('dash_proposals_lbl'),   value: stats.totalProposals || 0, icon:'fa-inbox',         color:'#dc6803', sub: t('dash_total_recv'), trend: stats.totalProposals > 0 ? null : null },
+    { label:t('dash_emails_sent'),     value: stats.totalEmails || 0,    icon:'fa-envelope',      color:'#1d4ed8', sub: t('dash_inv_replies'), trend: null },
   ];
+  // 2.1 — KPI trend indicators (compare to previous period via stats.prev if available)
   let kpiHtml = '';
   kpis.forEach(function(k) {
-    kpiHtml += '<div class="stat-card">'
+    var trendHtml = '';
+    if (k.trend !== undefined && k.trend !== null) {
+      var up = k.trend >= 0;
+      trendHtml = '<span style="font-size:0.7rem;font-weight:600;color:' + (up ? '#059669' : '#dc2626') + ';background:' + (up ? '#d1fae5' : '#fee2e2') + ';border-radius:4px;padding:1px 5px;margin-left:4px">'
+        + (up ? '↑' : '↓') + ' ' + Math.abs(k.trend) + '%</span>';
+    }
+    kpiHtml += '<div class="stat-card" style="cursor:default">'
       + '<div style="display:flex;align-items:flex-start;justify-content:space-between">'
       + '<div style="width:40px;height:40px;border-radius:10px;background:' + k.color + '18;display:flex;align-items:center;justify-content:center">'
       + '<i class="fas ' + k.icon + '" style="color:' + k.color + ';font-size:1rem"></i></div>'
-      + '<div style="text-align:right"><div class="stat-value" style="color:' + k.color + '">' + k.value + '</div></div>'
+      + '<div style="text-align:right"><div class="stat-value" style="color:' + k.color + '">' + k.value + '</div>' + trendHtml + '</div>'
       + '</div>'
       + '<div class="stat-label">' + k.label + '</div>'
       + '<div style="font-size:0.72rem;color:#9ca3af;margin-top:2px">' + k.sub + '</div>'
@@ -1448,39 +2012,53 @@ pages.dashboard = async function() {
     stageChart = '<div style="color:#9ca3af;font-size:0.85rem;padding:1rem">' + t('dash_no_rfp_data') + '</div>';
   }
 
+  // Build clickable stage bars (2.3)
+  var stageBarClickable = '';
+  if (stageBreakdown.length > 0) {
+    stageBreakdown.forEach(function(s) {
+      var h = Math.max(8, Math.round((s.cnt / maxStage) * 50));
+      stageBarClickable += '<div style="display:flex;flex-direction:column;align-items:center;gap:4px;flex:1;cursor:pointer" title="' + stageLabelMap(s.stage) + ': ' + s.cnt + '" onclick="navigateTo(\'rfps\',{filterStage:\'' + s.stage + '\'})"><div style="font-size:0.7rem;font-weight:700;color:#374151">' + s.cnt + '</div><div class="mini-bar-item" style="height:' + h + 'px" onmouseover="this.style.opacity=\'0.65\'" onmouseout="this.style.opacity=\'1\'"></div><div style="font-size:0.65rem;color:#9ca3af;text-align:center">' + stageLabelMap(s.stage) + '</div></div>';
+    });
+  } else { stageBarClickable = '<div style="color:#9ca3af;font-size:0.85rem;padding:1rem">' + t('dash_no_rfp_data') + '</div>'; }
+
+  // Contextual action cards (2.2)
+  var contextCards = '';
+  var _dRfps = (appState.rfps||[]).filter(function(r){ return r.stage==='draft'; });
+  var _qRfps = (appState.rfps||[]).filter(function(r){ return r.stage==='qa_open'; });
+  var _cRfps = (appState.rfps||[]).filter(function(r){ return r.stage==='submissions_closed'; });
+  if (_dRfps.length) contextCards += '<div class="card" style="padding:0.875rem 1rem;border-left:3px solid var(--cpc-gold);cursor:pointer;margin-bottom:0" onclick="navigateTo(\'rfps\',{filterStage:\'draft\'})"><div style="font-size:0.72rem;color:var(--cpc-gold);font-weight:700;text-transform:uppercase;letter-spacing:0.05em">Action Needed</div><div style="font-size:0.88rem;font-weight:600;color:#1f2937;margin-top:2px">' + _dRfps.length + ' draft RFP' + (_dRfps.length>1?'s':'') + ' awaiting publish</div></div>';
+  if (_qRfps.length) { var _pqa = _qRfps.reduce(function(n,r){ return n+(r.pending_qa||0); },0); if (_pqa) contextCards += '<div class="card" style="padding:0.875rem 1rem;border-left:3px solid #f59e0b;cursor:pointer;margin-bottom:0" onclick="navigateTo(\'rfps\',{filterStage:\'qa_open\'})"><div style="font-size:0.72rem;color:#f59e0b;font-weight:700;text-transform:uppercase;letter-spacing:0.05em">Pending Q&amp;A</div><div style="font-size:0.88rem;font-weight:600;color:#1f2937;margin-top:2px">' + _pqa + ' unanswered question' + (_pqa>1?'s':'') + '</div></div>'; }
+  if (_cRfps.length) contextCards += '<div class="card" style="padding:0.875rem 1rem;border-left:3px solid #10b981;cursor:pointer;margin-bottom:0" onclick="navigateTo(\'rfps\',{filterStage:\'submissions_closed\'})"><div style="font-size:0.72rem;color:#10b981;font-weight:700;text-transform:uppercase;letter-spacing:0.05em">Ready to Evaluate</div><div style="font-size:0.88rem;font-weight:600;color:#1f2937;margin-top:2px">' + _cRfps.length + ' RFP' + (_cRfps.length>1?'s':'') + ' ready for award</div></div>';
+  if (!contextCards) contextCards = '<div style="color:#9ca3af;font-size:0.85rem;padding:0.25rem 0">' + t('dash_no_rfp_data') + '</div>';
+
   setContent(
     '<div style="display:flex;flex-direction:column;gap:1.25rem">'
     // KPI grid
     + '<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:0.875rem">' + kpiHtml + '</div>'
-
-    // Row 2: stage chart + quick actions
+    // Row 2: clickable stage bars + pipeline actions
     + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1.25rem">'
     + '<div class="card" style="padding:1.25rem">'
-    + '<h3 style="font-weight:700;color:#1f2937;font-size:0.9rem;margin:0 0 1rem"><i class="fas fa-chart-bar mr-2 cpc-gold"></i>' + t('dash_stage_breakdown') + '</h3>'
-    + '<div class="mini-bar" style="align-items:flex-end;gap:8px">' + stageChart + '</div>'
+    + '<h3 style="font-weight:700;color:#1f2937;font-size:0.9rem;margin:0 0 0.5rem"><i class="fas fa-chart-bar mr-2 cpc-gold"></i>' + t('dash_stage_breakdown') + ' <span style="font-size:0.7rem;color:#9ca3af;font-weight:400">(click to filter)</span></h3>'
+    + '<div class="mini-bar" style="align-items:flex-end;gap:8px">' + stageBarClickable + '</div>'
     + '</div>'
     + '<div class="card" style="padding:1.25rem">'
-    + '<h3 style="font-weight:700;color:#1f2937;font-size:0.9rem;margin:0 0 1rem"><i class="fas fa-bolt mr-2 cpc-gold"></i>' + t('dash_quick_actions') + '</h3>'
-    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem">'
-    + '<button class="btn-primary" style="flex-direction:column;padding:0.875rem;justify-content:center" onclick="showCreateRfpModal()">'
-    + '<i class="fas fa-plus-circle" style="font-size:1.25rem;margin-bottom:4px"></i><span style="font-size:0.8rem">' + t('qa_btn_new_rfp') + '</span></button>'
-    + '<button class="btn-secondary" style="flex-direction:column;padding:0.875rem;justify-content:center" onclick="navigateTo(\'rfps\')">'
-    + '<i class="fas fa-layer-group" style="font-size:1.25rem;margin-bottom:4px"></i><span style="font-size:0.8rem">' + t('qa_btn_all_rfps') + '</span></button>'
-    + '<button class="btn-ghost" style="flex-direction:column;padding:0.875rem;justify-content:center" onclick="navigateTo(\'vendors\')">'
-    + '<i class="fas fa-building" style="font-size:1.25rem;margin-bottom:4px"></i><span style="font-size:0.8rem">' + t('qa_btn_vendors') + '</span></button>'
-    + '<button class="btn-ghost" style="flex-direction:column;padding:0.875rem;justify-content:center" onclick="navigateTo(\'reports\')">'
-    + '<i class="fas fa-chart-line" style="font-size:1.25rem;margin-bottom:4px"></i><span style="font-size:0.8rem">' + t('qa_btn_reports') + '</span></button>'
+    + '<h3 style="font-weight:700;color:#1f2937;font-size:0.9rem;margin:0 0 0.75rem"><i class="fas fa-bolt mr-2 cpc-gold"></i>Pipeline Actions</h3>'
+    + '<div style="display:flex;flex-direction:column;gap:0.5rem;margin-bottom:0.75rem">' + contextCards + '</div>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;border-top:1px solid #f3f4f6;padding-top:0.75rem">'
+    + '<button class="btn-primary" style="flex-direction:column;padding:0.75rem;justify-content:center" onclick="showCreateRfpModal()"><i class="fas fa-plus-circle" style="font-size:1.1rem;margin-bottom:3px"></i><span style="font-size:0.78rem">' + t('qa_btn_new_rfp') + '</span></button>'
+    + '<button class="btn-secondary" style="flex-direction:column;padding:0.75rem;justify-content:center" onclick="navigateTo(\'rfps\')"><i class="fas fa-layer-group" style="font-size:1.1rem;margin-bottom:3px"></i><span style="font-size:0.78rem">' + t('qa_btn_all_rfps') + '</span></button>'
+    + '<button class="btn-ghost" style="flex-direction:column;padding:0.75rem;justify-content:center" onclick="navigateTo(\'vendors\')"><i class="fas fa-building" style="font-size:1.1rem;margin-bottom:3px"></i><span style="font-size:0.78rem">' + t('qa_btn_vendors') + '</span></button>'
+    + '<button class="btn-ghost" style="flex-direction:column;padding:0.75rem;justify-content:center" onclick="navigateTo(\'reports\')"><i class="fas fa-chart-line" style="font-size:1.1rem;margin-bottom:3px"></i><span style="font-size:0.78rem">' + t('qa_btn_reports') + '</span></button>'
     + '</div></div>'
     + '</div>'
-
     + '</div>'
-  );
-};
+  );};
 
 // ============================================================
 // PAGE: ALL RFPs
 // ============================================================
 pages.rfps = async function() {
+  setContent(skeletonCards(6));
   const rfps = await apiCall('GET', '/rfps').catch(function(){ return []; });
   appState.rfps = rfps;
 
@@ -1510,6 +2088,7 @@ pages.rfps = async function() {
     const progress = Math.round(((stageIdx + 1) / STAGES.length) * 100);
     const dateStr = rfp.created_at ? new Date(rfp.created_at).toLocaleDateString('en-AE', {year:'numeric',month:'short',day:'numeric'}) : '-';
 
+    const progressPct = isArchived ? 100 : Math.round(((stageIdx + 1) / STAGES.length) * 100);
     return '<div class="rfp-card" onclick="openRfp(' + rfp.id + ')" style="' + (isArchived ? 'opacity:0.85;border-left:4px solid var(--cpc-gold)' : '') + '">'
       + '<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:0.75rem">'
       + '<div style="flex:1;min-width:0">'
@@ -1524,12 +2103,12 @@ pages.rfps = async function() {
       + '<div style="margin-left:1rem;text-align:right;flex-shrink:0">'
       + (isArchived
         ? '<div style="font-size:1.1rem;font-weight:700;color:#065f46"><i class="fas fa-trophy"></i></div><div style="font-size:0.7rem;color:#9ca3af">' + t('card_completed') + '</div>'
-        : '<div style="font-size:1.5rem;font-weight:700;color:var(--cpc-ink)">' + progress + '%</div><div style="font-size:0.7rem;color:#9ca3af">' + t('card_complete') + '</div>')
+        : '<div style="font-size:1.5rem;font-weight:700;color:var(--cpc-ink)">' + progressPct + '%</div><div style="font-size:0.7rem;color:#9ca3af">' + t('card_complete') + '</div>')
       + '</div>'
       + '</div>'
       + '<div style="margin-bottom:0.5rem">'
       + '<div style="height:4px;border-radius:2px;background:#e5e7eb;overflow:hidden">'
-      + '<div style="height:100%;background:' + (isArchived ? 'var(--cpc-gold)' : 'linear-gradient(90deg,var(--cpc-ink),var(--cpc-gold))') + ';width:100%;border-radius:2px"></div>'
+      + '<div style="height:100%;background:' + (isArchived ? 'var(--cpc-gold)' : 'linear-gradient(90deg,var(--cpc-ink),var(--cpc-gold))') + ';width:' + progressPct + '%;border-radius:2px;transition:width 0.3s ease"></div>'
       + '</div></div>'
       + '<div style="display:flex;align-items:center;justify-content:space-between">'
       + '<div style="font-size:0.78rem;color:#9ca3af">'
@@ -1546,17 +2125,60 @@ pages.rfps = async function() {
   let archivedCardsHtml = '';
   archivedRfps.forEach(function(rfp) { archivedCardsHtml += buildRfpCard(rfp); });
 
+  // 3.2 — filter/sort state
+  var _rfpFilter = window._rfpFilter || { stage: '', sort: 'newest', view: 'grid' };
+  window._rfpFilter = _rfpFilter;
+
+  function filterAndSortRfps(list) {
+    var out = list.slice();
+    if (_rfpFilter.stage) out = out.filter(function(r){ return r.stage === _rfpFilter.stage; });
+    if (_rfpFilter.sort === 'newest') out.sort(function(a,b){ return (b.id||0)-(a.id||0); });
+    else if (_rfpFilter.sort === 'oldest') out.sort(function(a,b){ return (a.id||0)-(b.id||0); });
+    else if (_rfpFilter.sort === 'az') out.sort(function(a,b){ return (a.title||'').localeCompare(b.title||''); });
+    return out;
+  }
+
+  var filteredActive   = filterAndSortRfps(activeRfps);
+  var filteredArchived = filterAndSortRfps(archivedRfps);
+
+  var stageOpts = ['','draft','published','qa_open','submissions_closed'].map(function(s){
+    return '<option value="' + s + '"' + (_rfpFilter.stage === s ? ' selected' : '') + '>'
+      + (s ? stageLabelMap(s) : 'All Stages') + '</option>';
+  }).join('');
+
+  var filterBar = '<div style="display:flex;align-items:center;gap:0.625rem;flex-wrap:wrap;padding:0.625rem 0.875rem;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px">'
+    + '<i class="fas fa-filter" style="color:#9ca3af;font-size:0.82rem"></i>'
+    + '<select style="border:1px solid #e5e7eb;border-radius:6px;padding:4px 8px;font-size:0.78rem;background:white" onchange="window._rfpFilter.stage=this.value;pages.rfps()">' + stageOpts + '</select>'
+    + '<select style="border:1px solid #e5e7eb;border-radius:6px;padding:4px 8px;font-size:0.78rem;background:white" onchange="window._rfpFilter.sort=this.value;pages.rfps()">'
+    + '<option value="newest"' + (_rfpFilter.sort==='newest'?' selected':'') + '>Newest first</option>'
+    + '<option value="oldest"' + (_rfpFilter.sort==='oldest'?' selected':'') + '>Oldest first</option>'
+    + '<option value="az"' + (_rfpFilter.sort==='az'?' selected':'') + '>A–Z</option>'
+    + '</select>'
+    + '<div style="margin-left:auto;display:flex;gap:4px">'
+    + '<button onclick="window._rfpFilter.view='grid';pages.rfps()" style="border:1px solid #e5e7eb;border-radius:6px;padding:4px 8px;background:' + (_rfpFilter.view==='grid'?'var(--cpc-ink)':'white') + ';color:' + (_rfpFilter.view==='grid'?'white':'#6b7280') + ';cursor:pointer" title="Grid view"><i class="fas fa-th-large"></i></button>'
+    + '<button onclick="window._rfpFilter.view='list';pages.rfps()" style="border:1px solid #e5e7eb;border-radius:6px;padding:4px 8px;background:' + (_rfpFilter.view==='list'?'var(--cpc-ink)':'white') + ';color:' + (_rfpFilter.view==='list'?'white':'#6b7280') + ';cursor:pointer" title="List view"><i class="fas fa-list"></i></button>'
+    + '</div>'
+    + '</div>';
+
+  var gridCols = _rfpFilter.view === 'list' ? '1fr' : 'repeat(2,1fr)';
+
   let content = '<div style="display:flex;flex-direction:column;gap:1.5rem">'
     + '<div style="display:flex;align-items:center;justify-content:space-between">'
     + '<div><h2 style="font-weight:700;color:#1f2937;font-size:1rem;margin:0">' + t('active_procurements') + '</h2>'
     + '<p style="color:#9ca3af;font-size:0.82rem;margin:0">' + activeRfps.length + ' ' + t('rfps_in_progress') + '</p></div>'
     + '<button class="btn-primary" onclick="showCreateRfpModal()"><i class="fas fa-plus"></i>' + t('btn_new_rfp') + '</button>'
-    + '</div>';
+    + '</div>'
+    + filterBar;
 
-  if (activeRfps.length === 0) {
-    content += '<div class="card" style="padding:2rem;text-align:center;color:#9ca3af"><i class="fas fa-check-circle" style="font-size:2rem;display:block;margin-bottom:0.75rem;color:#d1d5db"></i><p>' + t('no_active_rfps') + '</p></div>';
+  var filteredActiveCards = '';
+  filteredActive.forEach(function(rfp) { filteredActiveCards += buildRfpCard(rfp); });
+  var filteredArchivedCards = '';
+  filteredArchived.forEach(function(rfp) { filteredArchivedCards += buildRfpCard(rfp); });
+
+  if (filteredActive.length === 0) {
+    content += '<div class="card" style="padding:2rem;text-align:center;color:#9ca3af"><i class="fas fa-check-circle" style="font-size:2rem;display:block;margin-bottom:0.75rem;color:#d1d5db"></i><p>' + (_rfpFilter.stage ? 'No RFPs match this filter' : t('no_active_rfps')) + '</p></div>';
   } else {
-    content += '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:1rem">' + activeCardsHtml + '</div>';
+    content += '<div style="display:grid;grid-template-columns:' + gridCols + ';gap:1rem">' + filteredActiveCards + '</div>';
   }
 
   if (archivedRfps.length > 0) {
@@ -1565,9 +2187,11 @@ pages.rfps = async function() {
       + '<div style="width:32px;height:32px;border-radius:8px;background:#d1fae5;display:flex;align-items:center;justify-content:center">'
       + '<i class="fas fa-archive" style="color:#065f46;font-size:0.875rem"></i></div>'
       + '<div><h3 style="font-weight:700;color:#374151;font-size:0.92rem;margin:0">' + t('archived_contracts') + '</h3>'
-      + '<p style="font-size:0.78rem;color:#9ca3af;margin:0">' + archivedRfps.length + ' ' + t('completed_procs') + '</p>'
+      + '<p style="font-size:0.78rem;color:#9ca3af;margin:0">'
+      + '<span style="background:#d1fae5;color:#065f46;border-radius:10px;padding:1px 8px;font-weight:700;font-size:0.78rem;margin-right:6px">' + archivedRfps.length + '</span>'
+      + t('completed_procs') + '</p>'
       + '</div></div>'
-      + '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:1rem">' + archivedCardsHtml + '</div>'
+      + '<div style="display:grid;grid-template-columns:' + gridCols + ';gap:1rem">' + filteredArchivedCards + '</div>'
       + '</div>';
   }
 
@@ -1624,6 +2248,28 @@ pages.rfp_detail = async function(opts) {
     }
   }
   renderLifecycleBar(rfp);
+
+  // 4.2 Stage action banner — show contextual guidance per stage
+  (function() {
+    var banner = document.getElementById('stageActionBanner');
+    if (!banner) return;
+    var msgs = {
+      draft: { icon: 'fa-pen', text: 'This RFP is a <strong>Draft</strong>. Complete the Generate tab then publish to invite vendors.', action: 'switchRfpTab(\'generate\','+rfpId+')', label: 'Go to Generate' },
+      published: { icon: 'fa-paper-plane', text: 'RFP is <strong>Published</strong>. Invite vendors from the Vendors tab to start Q&A.', action: 'switchRfpTab(\'vendors\','+rfpId+')', label: 'Invite Vendors' },
+      qa_open: { icon: 'fa-comments', text: 'Q&A is <strong>Open</strong>. Answer vendor questions, then close Q&A when ready.', action: 'switchRfpTab(\'qa\','+rfpId+')', label: 'Go to Q&A' },
+      submissions_closed: { icon: 'fa-gavel', text: 'Submissions are <strong>Closed</strong>. Evaluate proposals and award the contract.', action: 'switchRfpTab(\'proposals\','+rfpId+')', label: 'Evaluate Proposals' },
+      awarded: { icon: 'fa-trophy', text: 'Contract <strong>Awarded</strong>. This RFP is complete.', action: null, label: null }
+    };
+    var m = msgs[rfp.stage];
+    if (m) {
+      banner.innerHTML = '<i class="fas ' + m.icon + '" style="margin-right:0.5rem;color:var(--cpc-gold)"></i><span>' + m.text + '</span>'
+        + (m.action ? '<button class="btn-ghost" style="margin-left:auto;padding:0.25rem 0.75rem;font-size:0.8rem;white-space:nowrap" onclick="'+m.action+'">'+m.label+' <i class="fas fa-arrow-right" style="font-size:0.7rem"></i></button>' : '');
+      banner.classList.add('visible');
+    } else {
+      banner.classList.remove('visible');
+    }
+  })();
+
   renderRfpTabs(opts.tab || appState.currentRfpTab, rfpId, appState.unreadQA);
 
   const tab = opts.tab || appState.currentRfpTab;
@@ -1873,6 +2519,8 @@ rfpTabs.generate = function(rfpId, rfp) {
   // Init scoring matrix from RFP or defaults
   var scoringMatrix = getScoringMatrix(rfp);
   window._currentScoringMatrix = JSON.parse(JSON.stringify(scoringMatrix));
+  // 5.2 start autosave + prompt restore
+  setTimeout(function(){ restoreAutoSave(rfpId); startAutoSave(rfpId); }, 500);
 
   const previewHtml = hasContent
     ? rfp.content
@@ -1922,23 +2570,66 @@ rfpTabs.generate = function(rfpId, rfp) {
       + advanceStageButton(rfp)
       + '</div>'
     + '</div>'
-    // RIGHT: preview
-    + '<div class="card" style="overflow-y:auto;padding:0">'
-    + '<div style="padding:0.875rem 1.25rem;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between;background:#f9fafb">'
+    // RIGHT: preview — 5.1 sticky toolbar
+    + '<div class="card" style="overflow-y:auto;padding:0;display:flex;flex-direction:column">'
+    + '<div style="position:sticky;top:0;z-index:10;padding:0.75rem 1.25rem;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between;background:#f9fafb">'
     + '<span style="font-weight:600;color:#374151;font-size:0.88rem"><i class="fas fa-eye cpc-gold" style="margin-right:6px"></i>' + t('gen_rfp_preview') + '</span>'
+    + '<div style="display:flex;gap:0.4rem">'
+    + (hasContent ? '<button class="btn-ghost btn-sm" onclick="copyRfpPreview()" title="Copy all text"><i class="fas fa-copy"></i>Copy All</button>' : '')
     + '<button id="genPreviewPdfBtn" class="btn-ghost btn-sm" onclick="downloadRfpPdf(' + rfpId + ')" style="' + (hasContent ? '' : 'display:none') + '"><i class="fas fa-download"></i>PDF</button>'
     + '</div>'
-    + '<div id="rfpPreviewArea" style="padding:0">' + previewHtml + '</div>'
+    + '</div>'
+    + '<div id="rfpPreviewArea" style="padding:0;flex:1;overflow-y:auto">' + previewHtml + '</div>'
     + '</div>'
     + '</div>'
   );
 };
+
+function copyRfpPreview() {
+  var area = document.getElementById('rfpPreviewArea');
+  if (!area) return;
+  var text = area.innerText || area.textContent || '';
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(text).then(function(){ showToast('Content copied to clipboard!', 'success'); });
+  } else {
+    var ta = document.createElement('textarea');
+    ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
+    showToast('Content copied!', 'success');
+  }
+}
 
 function advanceStageButton(rfp) {
   const stage = rfp ? rfp.stage : 'draft';
   const id = rfp ? rfp.id : '';
   if (stage === 'draft') return '<button class="btn-primary" style="flex:1" onclick="advanceRfpStage(' + id + ',\'published\')"><i class="fas fa-rocket"></i>Publish RFP</button>';
   return '';
+}
+
+// 5.2 — Auto-save generate tab fields to localStorage every 30 s
+var _autoSaveTimer = null;
+function startAutoSave(rfpId) {
+  if (_autoSaveTimer) clearInterval(_autoSaveTimer);
+  _autoSaveTimer = setInterval(function() {
+    var fields = ['rfpTitle','rfpBackground','rfpObjectives','rfpScope','rfpTech','rfpBudget'];
+    var data = {};
+    fields.forEach(function(id){ var el=document.getElementById(id); if(el) data[id]=el.value; });
+    localStorage.setItem('cpc_autosave_' + rfpId, JSON.stringify({ ts: Date.now(), data: data }));
+  }, 30000);
+}
+function restoreAutoSave(rfpId) {
+  try {
+    var raw = localStorage.getItem('cpc_autosave_' + rfpId);
+    if (!raw) return;
+    var saved = JSON.parse(raw);
+    if (!saved || !saved.data) return;
+    var age = Math.round((Date.now() - (saved.ts||0)) / 60000);
+    if (age > 120) { localStorage.removeItem('cpc_autosave_' + rfpId); return; } // discard >2h old
+    var fields = Object.keys(saved.data);
+    if (!fields.length) return;
+    if (!confirm('Restore auto-saved draft from ' + age + ' minute(s) ago?')) return;
+    fields.forEach(function(id){ var el=document.getElementById(id); if(el && saved.data[id]) el.value=saved.data[id]; });
+    showToast('Draft restored from auto-save.', 'success');
+  } catch(e) {}
 }
 
 async function generateRfpDoc(rfpId) {
@@ -2788,7 +3479,7 @@ rfpTabs.emails = async function(rfpId) {
         const bodyCollapseId = 'email-body-' + e.id;
         const bodyContent = e.email_body_html
           ? '<iframe srcdoc="' + escHtml(e.email_body_html) + '" style="width:100%;border:none;min-height:180px;border-radius:6px;background:white" sandbox="allow-same-origin"></iframe>'
-          : '<pre style="white-space:pre-wrap;font-size:0.82rem;color:#374151;font-family:inherit;margin:0;background:#f9fafb;padding:0.75rem;border-radius:6px">' + escHtml((e.body||'(no body)').slice(0,2000)) + '</pre>';
+          : '<pre style="white-space:pre-wrap;font-size:0.82rem;color:#374151;font-family:inherit;margin:0;background:#f9fafb;padding:0.75rem;border-radius:6px" dir="auto">' + escHtml((e.body||'(no body)').slice(0,2000)) + '</pre>';
 
         threadEmails += '<div style="display:flex;gap:0.75rem;margin-bottom:0.875rem;flex-direction:' + (isInbound ? 'row' : 'row-reverse') + '">'
           // Avatar
@@ -3268,7 +3959,7 @@ rfpTabs.qa = async function(rfpId) {
         + badgeHtml
         + (isFromEmail ? '<span class="tag" style="background:#ede9fe;color:#6d28d9"><i class="fas fa-envelope mr-1"></i>' + t('qa_via_email') + '</span>' : '')
         + '</div>'
-        + '<p style="font-weight:500;color:#1f2937;margin:0">' + escHtml(q.question) + '</p>'
+        + '<p style="font-weight:500;color:#1f2937;margin:0" dir="auto">' + escHtml(q.question) + '</p>'
         + answerBlock
         + '</div>'
         + '<div style="display:flex;flex-direction:column;gap:0.4rem;flex-shrink:0">' + btns + '</div>'
@@ -3284,8 +3975,35 @@ rfpTabs.qa = async function(rfpId) {
       + '</div>'
     : '';
 
+  // 7.1 — filter state
+  var _qaFilter = window._qaFilter || 'all';
+  var qaStatusBar = '<div style="display:flex;gap:0.4rem;flex-wrap:wrap;padding:0.625rem;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;align-items:center">'
+    + ['all','pending','answered','published'].map(function(f){
+        var counts = {all: questions.length, pending: pending, answered: answered, published: published};
+        var active = _qaFilter === f;
+        return '<button onclick="window._qaFilter='' + f + '';rfpTabs.qa(' + rfpId + ')" style="border:1px solid ' + (active?'var(--cpc-ink)':'#e5e7eb') + ';border-radius:6px;padding:3px 10px;font-size:0.75rem;background:' + (active?'var(--cpc-ink)':'white') + ';color:' + (active?'white':'#6b7280') + ';cursor:pointer;font-weight:' + (active?'700':'400') + '">'
+          + f.charAt(0).toUpperCase()+f.slice(1) + ' (' + (counts[f]||0) + ')</button>';
+      }).join('')
+    + '</div>';
+
+  // Apply filter to qCards
+  var filteredQCards = qCards; // already built above; rebuild with filter
+  var displayedQs = questions.filter(function(q){
+    if (_qaFilter === 'pending') return !q.answer || q.answer.trim() === '';
+    if (_qaFilter === 'answered') return q.answer && !q.published;
+    if (_qaFilter === 'published') return q.published;
+    return true;
+  });
+  // rebuild filtered cards
+  var filteredCardsHtml = '';
+  displayedQs.forEach(function(q) {
+    var cardEl = document.getElementById('q-' + q.id);
+    if (cardEl) filteredCardsHtml += cardEl.outerHTML;
+  });
+
   setContent(
     '<div class="space-y-4">'
+    + qaStatusBar
     + '<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:0.5rem">'
     + '<div style="display:flex;gap:1rem;flex-wrap:wrap">'
     + '<span style="font-size:0.82rem;color:#6b7280"><strong>' + pending + '</strong> ' + t('qa_pending') + '</span>'
@@ -3377,6 +4095,17 @@ async function publishAllQAnswers(rfpId) {
       return; // do NOT call the API — no emails sent
     }
 
+    // 7.2 — confirm before sending
+    await new Promise(function(resolve, reject) {
+      showConfirm({
+        title: 'Publish ' + readyToPublish.length + ' Answer(s)?',
+        body: 'This will email approved answers to all invited vendors. This action cannot be undone.',
+        type: 'info',
+        list: readyToPublish.slice(0,5).map(function(q){ return 'Q' + q.id + ': ' + (q.question||'').slice(0,80); }),
+        confirmText: 'Publish & Send',
+        cancelText: 'Cancel',
+      }, resolve, function(){ reject(new Error('cancelled')); });
+    }).catch(function(err){ if(err.message==='cancelled') throw err; });
     var result = await apiCall('POST', '/rfps/' + rfpId + '/questions/publish-all', {});
     // NOTE: Publish All Approved does NOT advance stage — use "Close Q&A" button for that
     var sentCount = result && result.vendorCount ? result.vendorCount : 0;
@@ -3387,12 +4116,22 @@ async function publishAllQAnswers(rfpId) {
     renderRfpTabs('qa', rfpId, 0);
     rfpTabs.qa(rfpId);
   } catch(e) {
-    showToast('Publish failed: ' + e.message, 'error');
+    if (e.message !== 'cancelled') showToast('Publish failed: ' + e.message, 'error');
   }
 }
 
 async function closeQA(rfpId) {
-  if (!confirm('Close Q&A? This will mark the Q&A stage as complete and prevent further vendor questions from being processed. Vendors will still be able to submit proposals.')) return;
+  // 14.4 — use custom confirm dialog
+  var confirmed = await new Promise(function(resolve) {
+    showConfirm({
+      title: 'Close Q&A?',
+      body: 'This will mark the Q&A stage as complete. Vendors will still be able to submit proposals.',
+      type: 'warning',
+      confirmText: 'Close Q&A',
+      cancelText: 'Keep Open',
+    }, function(){ resolve(true); }, function(){ resolve(false); });
+  });
+  if (!confirmed) return;
   try {
     await apiCall('POST', '/rfps/' + rfpId + '/stage', { stage: 'submissions_closed' });
     // Mark Q&A stage completed in lifecycle bar
@@ -3545,8 +4284,11 @@ rfpTabs.proposals = async function(rfpId) {
   // Show bulk "Evaluate with AI" only if no proposals have been evaluated yet.
   // Once bulk eval is done (all have ai_recommendation), replace with nothing here —
   // individual "Re-evaluate" buttons appear in the row actions instead.
-  var evalBtn = proposals.length > 0 && evaluated === 0
-    ? '<button class="btn-primary" id="evaluateAllBtn" onclick="evaluateAllProposals(' + rfpId + ')" style="background:linear-gradient(135deg,var(--cpc-gold-deep),var(--cpc-gold));border:none"><i class="fas fa-robot"></i>' + t('prop_evaluate_ai') + '</button>'
+  // 8.1 — always show evaluate/re-evaluate all button
+  var evalBtn = proposals.length > 0
+    ? (evaluated === proposals.length
+      ? '<button class="btn-secondary" id="evaluateAllBtn" onclick="evaluateAllProposals(' + rfpId + ')"><i class="fas fa-sync-alt"></i>Re-evaluate All (' + proposals.length + ')</button>'
+      : '<button class="btn-primary" id="evaluateAllBtn" onclick="evaluateAllProposals(' + rfpId + ')" style="background:linear-gradient(135deg,var(--cpc-gold-deep),var(--cpc-gold));border:none"><i class="fas fa-robot"></i>' + t('prop_evaluate_ai') + ' (' + (proposals.length - evaluated) + ' remaining)</button>')
     : '';
 
   setContent(
@@ -3604,7 +4346,18 @@ async function loadSampleProposals(rfpId) {
 }
 
 async function awardProposal(rfpId, proposalId, vendorName) {
-  if (!confirm('Award contract to ' + vendorName + '?\n\nThis will:\n• Mark this proposal as Awarded\n• Mark the RFP as complete (Awarded)\n• Disable further document submissions and email replies for this RFP\n\nThis action cannot be undone.')) return;
+  // 14.4 — destructive confirm dialog
+  var confirmed = await new Promise(function(resolve) {
+    showConfirm({
+      title: 'Award Contract to ' + vendorName + '?',
+      body: 'This will mark the RFP as complete and disable further submissions. This action cannot be undone.',
+      type: 'danger',
+      list: ['Mark proposal as Awarded', 'Mark RFP as complete', 'Disable further submissions'],
+      confirmText: 'Award Contract',
+      cancelText: 'Cancel',
+    }, function(){ resolve(true); }, function(){ resolve(false); });
+  });
+  if (!confirmed) return;
 
   try {
     await apiCall('POST', '/rfps/' + rfpId + '/proposals/' + proposalId + '/award', {});
@@ -4145,7 +4898,7 @@ pages.vendor_comms = async function(opts) {
   } else {
     vendorEmails.forEach(function(e) {
       const isInbound = e.status === 'received';
-      const dateStr = e.created_at ? new Date(e.created_at).toLocaleString('en-AE') : '';
+      const dateStr = e.created_at ? new Date(e.created_at).toLocaleString('en-AE', {weekday:'short',year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
       const bodyCollapseId = 'vc-email-body-' + e.id;
 
       const hasAttach = e.has_attachment || e.has_pdf;
@@ -4164,7 +4917,7 @@ pages.vendor_comms = async function(opts) {
 
       const bodyContent = e.email_body_html
         ? '<iframe srcdoc="' + escHtml(e.email_body_html) + '" style="width:100%;border:none;min-height:160px;border-radius:6px;background:white" sandbox="allow-same-origin"></iframe>'
-        : '<pre style="white-space:pre-wrap;font-size:0.82rem;color:#374151;font-family:inherit;margin:0;background:#f9fafb;padding:0.75rem;border-radius:6px">' + escHtml((e.body||'(no body)').slice(0,2000)) + '</pre>';
+        : '<pre style="white-space:pre-wrap;font-size:0.82rem;color:#374151;font-family:inherit;margin:0;background:#f9fafb;padding:0.75rem;border-radius:6px" dir="auto">' + escHtml((e.body||'(no body)').slice(0,2000)) + '</pre>';
 
       const bubbleStyle = isInbound
         ? 'background:#f5f3ff;border:1px solid #ede9fe;border-radius:0 12px 12px 12px;padding:0.875rem 1rem'
@@ -4204,6 +4957,10 @@ pages.vendor_comms = async function(opts) {
     });
   }
 
+  // Add anchor at end of thread for Jump to Latest
+  if (vendorEmails.length > 0) {
+    threadHtml += '<div id="vc-latest" style="height:0"></div>';
+  }
   // Reply form — blocked if vendor declined
   const replySection = vendorDeclined
     ? '<div class="card" style="padding:1.25rem;margin-top:1rem;background:#fef2f2;border:1.5px solid #fca5a5">'
@@ -4220,7 +4977,8 @@ pages.vendor_comms = async function(opts) {
       + '<input id="vc-reply-subj" type="text" placeholder="Subject..." style="width:100%;padding:7px 10px;border:1px solid #e5e7eb;border-radius:6px;font-size:0.82rem;box-sizing:border-box">'
       + '</div>'
       + '<div class="form-group" style="margin-bottom:0.5rem">'
-      + '<textarea id="vc-reply-text" rows="4" placeholder="Type your message..." style="width:100%;padding:8px 10px;border:1px solid #e5e7eb;border-radius:6px;font-size:0.82rem;resize:vertical;box-sizing:border-box"></textarea>'
+      + '<textarea id="vc-reply-text" rows="4" placeholder="Type your message..." style="width:100%;padding:8px 10px;border:1px solid #e5e7eb;border-radius:6px;font-size:0.82rem;resize:vertical;box-sizing:border-box" oninput="var c=document.getElementById('vc-charcount');if(c)c.textContent=this.value.length+' chars'"></textarea>'
+      + '<div style="text-align:right;font-size:0.7rem;color:#9ca3af;margin-top:2px" id="vc-charcount">0 chars</div>'
       + '</div>'
       + '<div style="display:flex;gap:0.5rem">'
       + '<button class="btn-primary" onclick="sendVendorCommReply(' + rfpId + ',' + vendorId + ')"><i class="fas fa-paper-plane"></i>Send Reply</button>'
@@ -4252,6 +5010,7 @@ pages.vendor_comms = async function(opts) {
     + (vendorDeclined ? ' &bull; <span style="color:#dc2626;font-weight:600">DECLINED</span>' : '') + '</div>'
     + '</div></div>'
     + '<div style="display:flex;gap:0.5rem">'
+    + '<button class="btn-ghost btn-sm" id="jumpLatestBtn" onclick="(function(){var el=document.getElementById('vc-latest');if(el)el.scrollIntoView({behavior:'smooth'})})()"><i class="fas fa-arrow-down"></i>Latest</button>'
     + '<button class="btn-secondary btn-sm" onclick="pages.vendor_comms({rfpId:' + rfpId + ',vendorId:' + vendorId + '})"><i class="fas fa-sync"></i>Refresh</button>'
     + '<button class="btn-ghost btn-sm" onclick="navigateTo(\'rfp_detail\',{rfpId:' + rfpId + ',tab:\'vendors\'})"><i class="fas fa-arrow-left"></i>Back to RFP</button>'
     + '</div>'
@@ -4319,7 +5078,7 @@ pages.vendors = async function() {
     rows += '<tr>'
       + '<td><div style="display:flex;align-items:center;gap:0.75rem">'
       + '<div style="width:36px;height:36px;border-radius:8px;background:var(--cpc-ink);display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:0.9rem;flex-shrink:0">' + escHtml(v.name.charAt(0)) + '</div>'
-      + '<div><div style="font-weight:600;font-size:0.95rem">' + escHtml(v.name) + '</div>'
+      + '<div><div style="font-weight:600;font-size:0.95rem;cursor:pointer" onmouseenter="showVendorHoverCard(event,' + v.id + ')" onmouseleave="hideVendorHoverCard()">' + escHtml(v.name) + '</div>'
       + '<div style="font-size:0.78rem;color:#9ca3af">' + escHtml(tVendorCountry(v.country||'UAE')) + ' &bull; ' + escHtml(tVendorSize(v.size||'')) + '</div>'
       + '</div></div></td>'
       + '<td>' + escHtml(tVendorCat(v.category||'')) + '</td>'
@@ -4333,6 +5092,7 @@ pages.vendors = async function() {
     + '<div style="display:flex;align-items:center;justify-content:space-between">'
     + '<div><h3 style="font-weight:700;font-size:0.95rem;color:#1f2937;margin:0">' + t('vpage_heading') + '</h3>'
     + '<p style="font-size:0.8rem;color:#9ca3af;margin:0">' + vendors.length + ' ' + t('vpage_registered') + '</p></div>'
+    + '<button class="btn-ghost btn-sm" onclick="exportVendorsCsv()"><i class="fas fa-download"></i>Export CSV</button>'
     + '</div>'
     + '<div class="card"><div style="overflow-x:auto"><table>'
     + '<thead><tr><th>' + t('vpage_th_vendor') + '</th><th>' + t('vpage_th_category') + '</th><th>' + t('vpage_th_specs') + '</th><th></th></tr></thead>'
@@ -4341,6 +5101,23 @@ pages.vendors = async function() {
     + '</div>'
   );
 };
+
+function exportVendorsCsv() {
+  var vendors = appState.vendors || [];
+  if (!vendors.length) { showToast('No vendors to export', 'error'); return; }
+  var cols = ['id','name','category','country','hq_city','size','contact_name','contact_email','website','founded_year','certifications'];
+  var csv = cols.join(',') + '\n';
+  vendors.forEach(function(v) {
+    csv += cols.map(function(c){ var val = (v[c]||'').toString().replace(/"/g,'""'); return '"'+val+'"'; }).join(',') + '\n';
+  });
+  var blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url; a.download = 'vendor_registry_' + new Date().toISOString().slice(0,10) + '.csv';
+  document.body.appendChild(a); a.click();
+  setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
+  showToast('Vendor registry exported!', 'success');
+}
 
 function viewVendorDetail(id) {
   const v = appState.vendors.find(function(v){ return v.id === id; });
@@ -4453,6 +5230,28 @@ function viewVendorDetail(id) {
   showModal(html);
 }
 
+// 6.2 — Vendor hover card
+function showVendorHoverCard(event, vendorId) {
+  var card = document.getElementById('vendorHoverCard');
+  if (!card) return;
+  var v = (appState.vendors||[]).find(function(v){ return v.id === vendorId; })
+       || (appState.rfpVendors||[]).find(function(v){ return v.id === vendorId; });
+  if (!v) return;
+  var specs = (v.specializations||'').split(',').filter(Boolean).slice(0,3).map(function(s){ return '<span class="tag" style="font-size:0.7rem">' + escHtml(s.trim()) + '</span>'; }).join('');
+  card.innerHTML = '<div style="font-weight:700;font-size:0.9rem;color:var(--cpc-ink);margin-bottom:4px">' + escHtml(v.name) + '</div>'
+    + '<div style="font-size:0.75rem;color:#6b7280;margin-bottom:6px">' + escHtml(tVendorCat(v.category||'')) + ' &bull; ' + escHtml(tVendorCountry(v.country||'')) + '</div>'
+    + (specs ? '<div class="tag-group" style="gap:3px;flex-wrap:wrap">' + specs + '</div>' : '')
+    + (v.contact_email ? '<div style="font-size:0.72rem;color:#9ca3af;margin-top:6px"><i class="fas fa-envelope mr-1"></i>' + escHtml(v.contact_email) + '</div>' : '');
+  var rect = event.currentTarget.getBoundingClientRect();
+  card.style.top = (rect.bottom + window.scrollY + 4) + 'px';
+  card.style.left = Math.min(rect.left + window.scrollX, window.innerWidth - 260) + 'px';
+  card.classList.add('visible');
+}
+function hideVendorHoverCard() {
+  var card = document.getElementById('vendorHoverCard');
+  if (card) card.classList.remove('visible');
+}
+
 async function saveVendorEmail(vendorId) {
   const input = document.getElementById('vendorEmailInput_' + vendorId);
   const msgEl = document.getElementById('vendorEmailMsg_' + vendorId);
@@ -4492,22 +5291,150 @@ pages.reports = async function() {
     stats = {};
   }
 
+  // 12.1 — stage funnel
+  var stageBreakdown = stats.stageBreakdown || [];
+  var funnelHtml = '';
+  if (stageBreakdown.length > 0) {
+    var maxCnt = stageBreakdown.reduce(function(m,s){ return Math.max(m,s.cnt); },1);
+    funnelHtml = stageBreakdown.map(function(s){
+      var pct = Math.round((s.cnt/maxCnt)*100);
+      return '<div style="margin-bottom:0.625rem">'
+        + '<div style="display:flex;justify-content:space-between;font-size:0.78rem;color:#374151;margin-bottom:3px"><span>' + stageLabelMap(s.stage) + '</span><span style="font-weight:700">' + s.cnt + '</span></div>'
+        + '<div style="height:10px;border-radius:5px;background:#e5e7eb;overflow:hidden">'
+        + '<div style="height:100%;background:linear-gradient(90deg,var(--cpc-ink),var(--cpc-gold));width:' + pct + '%;border-radius:5px;transition:width 0.5s ease"></div>'
+        + '</div></div>';
+    }).join('');
+  } else {
+    funnelHtml = '<div style="color:#9ca3af;font-size:0.82rem;padding:1rem;text-align:center">No data yet</div>';
+  }
+
+  // Vendor performance table from proposals data
+  var rfps = appState.rfps || [];
+  var vendorPerf = {};
+  rfps.forEach(function(r){ if(r.awarded_vendor){ if(!vendorPerf[r.awarded_vendor]) vendorPerf[r.awarded_vendor]={name:r.awarded_vendor,wins:0}; vendorPerf[r.awarded_vendor].wins++; } });
+  var vendorRows = Object.values(vendorPerf).sort(function(a,b){ return b.wins-a.wins; }).slice(0,10).map(function(v,i){
+    return '<tr><td style="padding:6px 10px;font-size:0.82rem">' + (i+1) + '</td><td style="padding:6px 10px;font-size:0.82rem;font-weight:600">' + escHtml(v.name) + '</td><td style="padding:6px 10px;text-align:center"><span style="background:#d1fae5;color:#065f46;border-radius:10px;padding:1px 8px;font-size:0.78rem;font-weight:700">' + v.wins + '</span></td></tr>';
+  }).join('') || '<tr><td colspan="3" style="padding:1rem;text-align:center;color:#9ca3af;font-size:0.82rem">No awarded contracts yet</td></tr>';
+
   setContent(
     '<div class="space-y-4">'
     + '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:0.875rem">'
     + '<div class="stat-card"><div class="stat-label">Total RFPs</div><div class="stat-value" style="color:var(--cpc-ink)">' + (stats.totalRfps||0) + '</div></div>'
     + '<div class="stat-card"><div class="stat-label">Win Rate</div><div class="stat-value" style="color:var(--cpc-gold)">' + (stats.winRate||0) + '%</div></div>'
-    + '<div class="stat-card"><div class="stat-label">Avg RFP Duration</div><div class="stat-value" style="color:#065f46">' + (stats.avgDuration ? stats.avgDuration + 'd' : 'N/A') + '</div></div>'
-    + '<div class="stat-card"><div class="stat-label">Registered Vendors</div><div class="stat-value" style="color:var(--cpc-gold-deep)">' + (stats.totalVendors||0) + '</div></div>'
+    + '<div class="stat-card"><div class="stat-label">Avg Duration</div><div class="stat-value" style="color:#065f46">' + (stats.avgDuration ? stats.avgDuration + 'd' : 'N/A') + '</div></div>'
+    + '<div class="stat-card"><div class="stat-label">Vendors</div><div class="stat-value" style="color:var(--cpc-gold-deep)">' + (stats.totalVendors||0) + '</div></div>'
+    + '</div>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1.25rem">'
+    + '<div class="card" style="padding:1.25rem">'
+    + '<h3 style="font-weight:700;font-size:0.9rem;color:#1f2937;margin:0 0 1rem"><i class="fas fa-filter cpc-gold mr-2"></i>RFP Stage Funnel</h3>'
+    + funnelHtml
+    + '</div>'
+    + '<div class="card" style="padding:1.25rem">'
+    + '<h3 style="font-weight:700;font-size:0.9rem;color:#1f2937;margin:0 0 1rem"><i class="fas fa-trophy cpc-gold mr-2"></i>Top Vendors by Awards</h3>'
+    + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">'
+    + '<thead><tr style="background:#f9fafb"><th style="padding:6px 10px;text-align:left;font-size:0.75rem;color:#9ca3af">#</th><th style="padding:6px 10px;text-align:left;font-size:0.75rem;color:#9ca3af">Vendor</th><th style="padding:6px 10px;text-align:center;font-size:0.75rem;color:#9ca3af">Wins</th></tr></thead>'
+    + '<tbody>' + vendorRows + '</tbody></table></div>'
+    + '</div>'
     + '</div>'
     + '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0.875rem">'
     + '<div class="stat-card"><div class="stat-label">Total Proposals</div><div class="stat-value" style="color:var(--cpc-gold-deep)">' + (stats.totalProposals||0) + '</div></div>'
     + '<div class="stat-card"><div class="stat-label">Emails Sent</div><div class="stat-value" style="color:var(--cpc-ink)">' + (stats.totalEmails||0) + '</div></div>'
-    + '<div class="stat-card"><div class="stat-label">Awarded RFPs</div><div class="stat-value" style="color:#065f46">' + (stats.awardedRfps||0) + '</div></div>'
+    + '<div class="stat-card"><div class="stat-label">Awarded</div><div class="stat-value" style="color:#065f46">' + (stats.awardedRfps||0) + '</div></div>'
     + '</div>'
     + '</div>'
   );
 };
+
+// ============================================================
+// PAGE: SETTINGS (11.3 — configurable categories, accessible to all)
+// ============================================================
+var _settingsCategories = null;
+var DEFAULT_CATEGORIES = ['IT & Digital Transformation','Consulting Services','Infrastructure','Professional Services','Data & Analytics'];
+
+async function getSettingsCategories() {
+  if (_settingsCategories) return _settingsCategories;
+  try {
+    var res = await apiCall('GET', '/settings/categories');
+    _settingsCategories = res.categories || DEFAULT_CATEGORIES;
+  } catch(e) {
+    _settingsCategories = DEFAULT_CATEGORIES;
+  }
+  return _settingsCategories;
+}
+
+pages.settings = async function() {
+  var cats = await getSettingsCategories();
+  var procEmail = '';
+  try { var s = await apiCall('GET', '/settings'); procEmail = s.procurement_email || ''; } catch(e) {}
+
+  setContent(
+    '<div style="max-width:680px;margin:0 auto;display:flex;flex-direction:column;gap:1.5rem">'
+    // Categories section
+    + '<div class="card" style="padding:1.5rem">'
+    + '<h3 style="font-weight:700;font-size:1rem;color:#1f2937;margin:0 0 0.25rem"><i class="fas fa-tag cpc-gold" style="margin-right:8px"></i>Procurement Categories</h3>'
+    + '<p style="font-size:0.82rem;color:#9ca3af;margin:0 0 1rem">These categories appear in the Create RFP and Generate tab dropdowns.</p>'
+    + '<div id="settingsCatList" style="display:flex;flex-direction:column;gap:0.5rem;margin-bottom:1rem">'
+    + cats.map(function(c, i){
+        return '<div style="display:flex;align-items:center;gap:0.5rem;padding:6px 10px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px">'
+          + '<span style="flex:1;font-size:0.85rem">' + escHtml(c) + '</span>'
+          + '<button class="btn-ghost btn-sm" onclick="removeSettingsCategory(' + i + ')" style="color:#dc2626;padding:2px 8px"><i class="fas fa-times"></i></button>'
+          + '</div>';
+      }).join('')
+    + '</div>'
+    + '<div style="display:flex;gap:0.5rem">'
+    + '<input id="settingsNewCat" type="text" placeholder="Add new category…" style="flex:1;border:1px solid #d1d5db;border-radius:6px;padding:6px 10px;font-size:0.84rem">'
+    + '<button class="btn-primary" onclick="addSettingsCategory()"><i class="fas fa-plus"></i>Add</button>'
+    + '</div>'
+    + '<button class="btn-primary" style="margin-top:1rem;width:100%" onclick="saveSettingsCategories()"><i class="fas fa-save"></i>Save Categories</button>'
+    + '</div>'
+    // Procurement email section
+    + '<div class="card" style="padding:1.5rem">'
+    + '<h3 style="font-weight:700;font-size:1rem;color:#1f2937;margin:0 0 0.25rem"><i class="fas fa-envelope cpc-gold" style="margin-right:8px"></i>Procurement Team Email</h3>'
+    + '<p style="font-size:0.82rem;color:#9ca3af;margin:0 0 0.75rem">Shown on the vendor portal's declined message as a contact address.</p>'
+    + '<div style="display:flex;gap:0.5rem">'
+    + '<input id="settingsProcEmail" type="email" value="' + escHtml(procEmail) + '" placeholder="procurement@example.com" style="flex:1;border:1px solid #d1d5db;border-radius:6px;padding:6px 10px;font-size:0.84rem">'
+    + '<button class="btn-primary" onclick="saveProcurementEmail()"><i class="fas fa-save"></i>Save</button>'
+    + '</div>'
+    + '</div>'
+    + '</div>'
+  );
+};
+
+var _settingsCatsEditing = null;
+function removeSettingsCategory(i) {
+  if (!_settingsCatsEditing) _settingsCatsEditing = (_settingsCategories || DEFAULT_CATEGORIES).slice();
+  _settingsCatsEditing.splice(i, 1);
+  _settingsCategories = _settingsCatsEditing;
+  pages.settings();
+}
+function addSettingsCategory() {
+  var inp = document.getElementById('settingsNewCat');
+  if (!inp || !inp.value.trim()) return;
+  if (!_settingsCatsEditing) _settingsCatsEditing = (_settingsCategories || DEFAULT_CATEGORIES).slice();
+  _settingsCatsEditing.push(inp.value.trim());
+  _settingsCategories = _settingsCatsEditing;
+  inp.value = '';
+  pages.settings();
+}
+async function saveSettingsCategories() {
+  var cats = _settingsCategories || _settingsCatsEditing || DEFAULT_CATEGORIES;
+  try {
+    await apiCall('PUT', '/settings/categories', { categories: cats });
+    _settingsCatsEditing = null;
+    showToast('Categories saved!', 'success');
+  } catch(e) {
+    showToast('Save failed: ' + e.message, 'error');
+  }
+}
+async function saveProcurementEmail() {
+  var email = (document.getElementById('settingsProcEmail')||{}).value || '';
+  try {
+    await apiCall('PUT', '/settings', { procurement_email: email });
+    showToast('Procurement email saved!', 'success');
+  } catch(e) {
+    showToast('Save failed: ' + e.message, 'error');
+  }
+}
 
 // ============================================================
 // CREATE RFP MODAL (two-step: step 1 = title + arch doc, step 2 = details)
@@ -4522,7 +5449,7 @@ function showCreateRfpModal() {
     + '<div style="width:36px;height:36px;border-radius:50%;background:var(--cpc-gold);display:flex;align-items:center;justify-content:center;color:white;flex-shrink:0">'
     + '<i class="fas fa-file-circle-plus" style="font-size:1rem"></i></div>'
     + '<div><h3 style="font-size:1rem;font-weight:700;margin:0">Create New RFP</h3>'
-    + '<div style="font-size:0.72rem;color:#9ca3af">Enter project basics and optionally upload supporting documents. Fill in detailed requirements on the next page.</div>'
+    + '<div style="font-size:0.72rem;color:#9ca3af">Enter project basics and optionally upload supporting documents. You will fill in detailed requirements on the <strong>Generate tab</strong> after creation.</div>'
     + '</div></div>'
 
     // Title

@@ -253,20 +253,39 @@ export function getLayout(): string {
       letter-spacing: 0.06em;
       color: var(--cpc-ink-2);
     }
-    .header-lang-toggle {
+    /* 1.3 — Language toggle pill: always show both EN / AR */
+    .lang-pill {
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid var(--cpc-line);
+      border-radius: 20px;
+      overflow: hidden;
       font-family: 'JetBrains Mono', monospace;
       font-size: 10px;
-      letter-spacing: 0.12em;
+      letter-spacing: 0.10em;
       text-transform: uppercase;
-      color: var(--cpc-ink-2);
-      padding: 4px 10px;
-      border: 1px solid var(--cpc-line);
-      border-radius: var(--r-input);
-      cursor: pointer;
-      background: transparent;
-      transition: border-color 0.2s, color 0.2s;
+      background: var(--cpc-ivory);
     }
-    .header-lang-toggle:hover { border-color: var(--cpc-gold); color: var(--cpc-gold-deep); }
+    .lang-pill-btn {
+      padding: 4px 10px;
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      color: var(--cpc-ink-2);
+      transition: background 0.15s, color 0.15s;
+      font-family: inherit;
+      font-size: inherit;
+      letter-spacing: inherit;
+      font-weight: 500;
+    }
+    .lang-pill-btn.active {
+      background: var(--cpc-ink);
+      color: var(--cpc-paper);
+    }
+    .lang-pill-btn:not(.active):hover { background: var(--cpc-gold-tint); color: var(--cpc-gold-deep); }
+    .lang-pill-sep { width: 1px; background: var(--cpc-line); align-self: stretch; }
+    /* Keep old class name for backward compat in case any JS uses it */
+    .header-lang-toggle { display: none; }
 
     /* Back button in header */
     .btn-back {
@@ -319,21 +338,169 @@ export function getLayout(): string {
       border: 2px solid var(--cpc-paper);
     }
 
-    /* Notification panel */
+    /* 1.2 — Notification drawer (slide-in from right) */
+    #notifDrawerOverlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.3);
+      z-index: 8000;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.25s;
+    }
+    #notifDrawerOverlay.open {
+      opacity: 1;
+      pointer-events: auto;
+    }
     #notifPanel {
-      position: absolute;
-      top: 68px;
-      right: 16px;
-      width: 360px;
+      position: fixed;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      width: 380px;
+      max-width: 100vw;
       background: var(--cpc-paper);
-      border: 1px solid var(--cpc-line);
-      border-radius: var(--r-card);
-      box-shadow: var(--shadow-modal);
-      z-index: 9999;
+      border-left: 1px solid var(--cpc-line);
+      box-shadow: -4px 0 32px rgba(0,0,0,0.12);
+      z-index: 8001;
+      transform: translateX(100%);
+      transition: transform 0.3s cubic-bezier(0.16,1,0.3,1);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    #notifPanel.open {
+      transform: translateX(0);
+    }
+    .notif-drawer-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 18px;
+      border-bottom: 1px solid var(--cpc-line);
+      background: var(--cpc-paper);
+      flex-shrink: 0;
+    }
+    .notif-drawer-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px 0;
+    }
+    .notif-drawer-footer {
+      flex-shrink: 0;
+      padding: 10px 18px;
+      border-top: 1px solid var(--cpc-line);
+      background: var(--cpc-ivory);
     }
 
     /* ── PAGE CONTENT ── */
     #pageContent { flex: 1; overflow-y: auto; padding: 32px; background: var(--cpc-ivory); }
+
+    /* 1.1 — Breadcrumb bar */
+    #breadcrumbBar {
+      display: none;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 24px;
+      background: var(--cpc-ivory);
+      border-bottom: 1px solid var(--cpc-line);
+      font-size: 12px;
+      color: var(--cpc-ink-2);
+      flex-shrink: 0;
+    }
+    #breadcrumbBar.visible { display: flex; }
+    .bc-item { cursor: pointer; color: var(--cpc-ink-2); transition: color 0.15s; }
+    .bc-item:hover { color: var(--cpc-gold-deep); }
+    .bc-sep { opacity: 0.45; font-size: 10px; }
+    .bc-current { color: var(--cpc-ink); font-weight: 600; pointer-events: none; }
+
+    /* 1.4 — Command palette overlay */
+    #cmdPaletteOverlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(27,23,18,0.55);
+      z-index: 9500;
+      display: none;
+      align-items: flex-start;
+      justify-content: center;
+      padding-top: 90px;
+    }
+    #cmdPaletteOverlay.open { display: flex; }
+    #cmdPalette {
+      width: 580px;
+      max-width: calc(100vw - 32px);
+      background: var(--cpc-paper);
+      border-radius: 14px;
+      box-shadow: 0 24px 64px rgba(0,0,0,0.22);
+      overflow: hidden;
+      animation: cmdSlideIn 0.18s cubic-bezier(0.16,1,0.3,1);
+    }
+    @keyframes cmdSlideIn {
+      from { opacity:0; transform:translateY(-12px) scale(0.97); }
+      to   { opacity:1; transform:translateY(0) scale(1); }
+    }
+    #cmdInput {
+      width: 100%;
+      padding: 14px 18px;
+      font-size: 15px;
+      border: none;
+      border-bottom: 1px solid var(--cpc-line);
+      background: transparent;
+      color: var(--cpc-ink);
+      font-family: 'Inter', sans-serif;
+      outline: none;
+      box-sizing: border-box;
+    }
+    #cmdResults {
+      max-height: 340px;
+      overflow-y: auto;
+    }
+    .cmd-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 16px;
+      cursor: pointer;
+      font-size: 13px;
+      color: var(--cpc-ink);
+      transition: background 0.1s;
+    }
+    .cmd-item:hover, .cmd-item.selected {
+      background: var(--cpc-gold-tint);
+    }
+    .cmd-item i { width: 18px; text-align: center; color: var(--cpc-gold-deep); flex-shrink: 0; }
+    .cmd-item-sub { font-size: 11px; color: var(--cpc-ink-2); margin-left: auto; white-space: nowrap; }
+    #cmdEmpty { padding: 24px; text-align: center; color: var(--cpc-ink-2); font-size: 13px; }
+
+    /* 4.2 — Stage action banner below lifecycle bar */
+    #stageActionBanner {
+      display: none;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 9px 24px;
+      background: linear-gradient(90deg, var(--cpc-gold-tint) 0%, var(--cpc-ivory) 100%);
+      border-bottom: 1px solid var(--cpc-gold-light);
+      font-size: 13px;
+      flex-shrink: 0;
+    }
+    #stageActionBanner.visible { display: flex; }
+    .sab-text { color: var(--cpc-ink); }
+    .sab-text strong { color: var(--cpc-gold-deep); }
+    .sab-btn {
+      flex-shrink: 0;
+      padding: 5px 14px;
+      font-size: 12px;
+      font-weight: 600;
+      background: var(--cpc-gold);
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.2s;
+    }
+    .sab-btn:hover { background: var(--cpc-gold-deep); }
 
     /* ── LIFECYCLE BAR ── */
     .lifecycle-bar {
@@ -406,6 +573,36 @@ export function getLayout(): string {
       white-space: nowrap;
     }
 
+    /* 4.1 — Lifecycle step tooltip */
+    .lc-step { position: relative; }
+    .lc-tooltip {
+      position: absolute;
+      bottom: calc(100% + 8px);
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--cpc-ink);
+      color: var(--cpc-paper);
+      font-size: 10px;
+      line-height: 1.4;
+      padding: 5px 9px;
+      border-radius: 6px;
+      white-space: nowrap;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.15s;
+      z-index: 100;
+    }
+    .lc-tooltip::after {
+      content: '';
+      position: absolute;
+      top: 100%;
+      left: 50%;
+      transform: translateX(-50%);
+      border: 4px solid transparent;
+      border-top-color: var(--cpc-ink);
+    }
+    .lc-step:hover .lc-tooltip { opacity: 1; }
+
     /* ── RFP TABS ── */
     .rfp-tabs {
       display: flex;
@@ -431,6 +628,79 @@ export function getLayout(): string {
     }
     .rfp-tab:hover { color: var(--cpc-gold-deep); }
     .rfp-tab.active { color: var(--cpc-gold-deep); border-bottom-color: var(--cpc-gold); font-weight: 600; }
+
+    /* 14.5 — Global focus-visible ring */
+    :focus-visible {
+      outline: 2px solid var(--cpc-gold);
+      outline-offset: 2px;
+    }
+
+    /* 14.2 — Skeleton loading */
+    @keyframes shimmer {
+      0%   { background-position: -600px 0; }
+      100% { background-position: 600px 0; }
+    }
+    .skeleton {
+      background: linear-gradient(90deg, #e8e4dd 25%, #f3f0ea 50%, #e8e4dd 75%);
+      background-size: 600px 100%;
+      animation: shimmer 1.4s infinite;
+      border-radius: 6px;
+    }
+    .skeleton-text { height: 14px; margin-bottom: 8px; }
+    .skeleton-title { height: 22px; margin-bottom: 12px; width: 60%; }
+    .skeleton-card {
+      background: var(--cpc-paper);
+      border-radius: var(--r-card);
+      border: 1px solid var(--cpc-line);
+      padding: 20px;
+      margin-bottom: 14px;
+    }
+
+    /* 14.4 — Confirm/destructive dialog */
+    #confirmDialogOverlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(27,23,18,0.5);
+      z-index: 9200;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+    #confirmDialogOverlay.open { display: flex; }
+    #confirmDialog {
+      background: var(--cpc-paper);
+      border-radius: 14px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+      padding: 24px;
+      max-width: 440px;
+      width: 100%;
+      animation: cmdSlideIn 0.18s cubic-bezier(0.16,1,0.3,1);
+    }
+    .confirm-icon {
+      width: 48px; height: 48px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.4rem;
+      margin: 0 auto 14px;
+    }
+    .confirm-icon.danger { background: #fee2e2; color: #dc2626; }
+    .confirm-icon.warning { background: #fef3c7; color: #d97706; }
+    .confirm-icon.info { background: #e0f2fe; color: #0369a1; }
+    .confirm-title { font-size: 1rem; font-weight: 700; text-align: center; margin-bottom: 8px; color: var(--cpc-ink); }
+    .confirm-body { font-size: 0.85rem; text-align: center; color: #6b7280; margin-bottom: 20px; line-height: 1.55; }
+    .confirm-list {
+      background: var(--cpc-ivory);
+      border: 1px solid var(--cpc-line);
+      border-radius: 8px;
+      padding: 10px 14px;
+      margin-bottom: 18px;
+      max-height: 160px;
+      overflow-y: auto;
+      font-size: 0.8rem;
+      line-height: 1.7;
+    }
+    .confirm-actions { display: flex; gap: 10px; justify-content: flex-end; }
 
     /* ── BUTTONS ── */
     .btn-primary {
@@ -930,6 +1200,44 @@ export function getLayout(): string {
     .sidebar-overlay.open { display: block; }
 
     /* ── MOBILE RESPONSIVE ── */
+    /* 8.4 — Proposals table responsive scroll shadow */
+    .proposals-table-wrap {
+      overflow-x: auto;
+      position: relative;
+    }
+    .proposals-table-wrap::after {
+      content: '';
+      position: absolute;
+      top: 0; right: 0; bottom: 0;
+      width: 32px;
+      background: linear-gradient(to right, transparent, rgba(251,248,242,0.85));
+      pointer-events: none;
+    }
+    @media (min-width: 1200px) {
+      .proposals-table-wrap::after { display: none; }
+    }
+
+    /* 6.2 — Vendor hover card */
+    .vendor-hover-card {
+      position: absolute;
+      z-index: 500;
+      background: var(--cpc-paper);
+      border: 1px solid var(--cpc-line);
+      border-radius: 12px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.14);
+      padding: 14px 16px;
+      width: 260px;
+      pointer-events: none;
+      opacity: 0;
+      transform: translateY(6px);
+      transition: opacity 0.18s, transform 0.18s;
+    }
+    .vendor-hover-card.visible {
+      opacity: 1;
+      transform: translateY(0);
+      pointer-events: auto;
+    }
+
     @media (max-width: 768px) {
       /* Show hamburger */
       .sidebar-toggle { display: flex; }
@@ -1008,6 +1316,9 @@ export function getLayout(): string {
     html[dir="rtl"] .toast { left: 20px; right: auto; }
     html[dir="rtl"] .sidebar-toggle { margin-right: 0; }
     html[dir="rtl"] .wm-org, html[dir="rtl"] .wm-product { text-align: right; }
+    html[dir="rtl"] .lang-pill { direction: ltr; }
+    html[dir="rtl"] #notifPanel { right: auto; left: 0; border-left: none; border-right: 1px solid var(--cpc-line); transform: translateX(-100%); }
+    html[dir="rtl"] #notifPanel.open { transform: translateX(0); }
     html[dir="rtl"] .header-lang-toggle { letter-spacing: 0; }
     html[dir="rtl"] .score-bar { direction: ltr; }
     html[dir="rtl"] .rfp-card { text-align: right; }
@@ -1048,6 +1359,11 @@ export function getLayout(): string {
       <a href="#" class="nav-item" data-page="reports">
         <i class="fas fa-chart-bar"></i><span data-i18n="nav_reports">Reports</span>
       </a>
+
+      <div class="nav-section-label" style="margin-top:8px">Settings</div>
+      <a href="#" class="nav-item" data-page="settings">
+        <i class="fas fa-cog"></i><span>Settings</span>
+      </a>
     </nav>
 
     <!-- User chip -->
@@ -1078,7 +1394,11 @@ export function getLayout(): string {
       </div>
       <div class="header-right">
         <span class="header-date" id="headerDate"></span>
-        <button class="header-lang-toggle" id="langToggleBtn" onclick="switchLang()">AR</button>
+        <div class="lang-pill" id="langPill" role="group" aria-label="Language">
+          <button class="lang-pill-btn active" id="langBtnEn" onclick="setLang('en')">EN</button>
+          <div class="lang-pill-sep"></div>
+          <button class="lang-pill-btn" id="langBtnAr" onclick="setLang('ar')">AR</button>
+        </div>
         <button id="bellBtn" onclick="toggleNotifPanel()" title="Notifications">
           <i class="fas fa-bell"></i>
           <span id="bellBadge">0</span>
@@ -1086,14 +1406,21 @@ export function getLayout(): string {
       </div>
     </header>
 
-    <!-- Notification panel -->
-    <div id="notifPanel" style="display:none"></div>
+    <!-- Notification drawer overlay -->
+    <div id="notifDrawerOverlay" onclick="toggleNotifPanel()"></div>
+    <!-- Notification panel / slide-in drawer -->
+    <div id="notifPanel" role="dialog" aria-label="Notifications"></div>
+    <!-- Breadcrumb bar -->
+    <div id="breadcrumbBar"></div>
+    <!-- Stage action banner -->
+    <div id="stageActionBanner"></div>
 
     <!-- RFP lifecycle bar -->
     <div id="lifecycleBar" style="display:none"></div>
 
     <!-- RFP tabs -->
     <div id="rfpTabsBar" style="display:none"></div>
+
 
     <!-- Page content -->
     <div id="pageContent">
@@ -1112,8 +1439,31 @@ export function getLayout(): string {
   <div class="modal" id="modalContent"></div>
 </div>
 
+<!-- 14.4 Confirm dialog -->
+<div id="confirmDialogOverlay">
+  <div id="confirmDialog" role="alertdialog" aria-modal="true">
+    <div class="confirm-icon" id="confirmIcon"></div>
+    <div class="confirm-title" id="confirmTitle"></div>
+    <div class="confirm-body" id="confirmBody"></div>
+    <div class="confirm-list" id="confirmList" style="display:none"></div>
+    <div class="confirm-actions" id="confirmActions"></div>
+  </div>
+</div>
+
+<!-- 1.4 Command palette -->
+<div id="cmdPaletteOverlay" onclick="if(event.target===this)closeCmdPalette()" role="dialog" aria-modal="true" aria-label="Command palette">
+  <div id="cmdPalette">
+    <input id="cmdInput" type="text" placeholder="Search RFPs, vendors, pages…  (Esc to close)" autocomplete="off" oninput="renderCmdResults()" onkeydown="handleCmdKey(event)">
+    <div id="cmdResults"></div>
+    <div id="cmdEmpty" style="display:none">No results found</div>
+  </div>
+</div>
+
 <!-- Sidebar backdrop overlay (mobile) -->
 <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+
+<!-- Vendor hover card (shared, repositioned by JS) -->
+<div id="vendorHoverCard" class="vendor-hover-card"></div>
 
 <script src="/static/app.js" defer><\/script>
 </body>
