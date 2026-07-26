@@ -1,9 +1,10 @@
 import { Hono } from 'hono'
 import { initDb, seedVendors } from '../db/seed'
 import type { Bindings } from '../types'
+import { emblemPngBase64 } from '../emblem-data'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-07-26-v39'
+const WORKER_VERSION = '2026-07-26-v40'
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.cpc-rfp.website.
@@ -1146,6 +1147,13 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
           'unable to participate', 'cannot participate', 'regret to inform',
           'pass on this opportunity', 'withdraw from', 'will not be submitting',
           'no thank you', 'not in a position', 'unable to bid',
+          'not going to participate', 'not participate', 'will not participate',
+          'unable to submit', 'cannot submit', 'not able to participate',
+          'not able to submit', 'not in a position to participate',
+          'unable to respond', 'cannot respond', 'will not be responding',
+          'not bidding', 'not tendering', 'unable to tender',
+          'respectfully decline', 'must decline', 'have to decline',
+          'choosing not to participate', 'opted not to participate',
         ]
         if (declineKeywords.some(kw => bodyLower.includes(kw))) emailCategory = 'decline'
       }
@@ -3385,8 +3393,7 @@ async function sendRealEmail(
           <table width="100%" cellpadding="0" cellspacing="0" border="0">
             <tr>
               <td style="padding-right:16px;vertical-align:middle;width:60px">
-                <!-- CPC emblem placeholder (inline SVG crown) -->
-                <div style="width:52px;height:52px;background:#F5EFE3;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:26px;text-align:center;line-height:52px">&#x1F451;</div>
+                <img src="data:image/jpeg;base64,${emblemPngBase64}" alt="CPC Emblem" width="52" height="72" style="display:block;border:0;outline:none;object-fit:contain">
               </td>
               <td style="vertical-align:middle">
                 <div style="font-family:Georgia,'Times New Roman',serif;font-size:19px;font-weight:700;color:#BA9765;letter-spacing:0.02em;line-height:1.2">Crown Prince's Court</div>
