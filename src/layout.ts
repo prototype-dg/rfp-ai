@@ -344,7 +344,7 @@ export function getLayout(): string {
       overflow-x: auto;
     }
     .lc-step { display: flex; align-items: flex-start; flex-shrink: 0; }
-    .lc-node { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 90px; }
+    .lc-node { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 76px; max-width: 90px; }
     .lc-circle {
       width: 32px;
       height: 32px;
@@ -360,17 +360,22 @@ export function getLayout(): string {
     }
     .lc-label {
       font-family: 'JetBrains Mono', monospace;
-      font-size: 11px;
-      letter-spacing: 0.06em;
+      font-size: 10px;
+      letter-spacing: 0.05em;
       text-transform: uppercase;
       text-align: center;
-      white-space: nowrap;
-      line-height: 1.2;
+      white-space: normal;
+      line-height: 1.25;
+      min-height: 2.5em;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding-top: 1px;
     }
     .lc-pending .lc-label  { color: var(--cpc-ink-2); opacity: 0.75; }
     /* margin-top:15px = (32px circle height / 2) - (2px connector height / 2) — aligns the
        connector's centre with the circle's centre regardless of label height below */
-    .lc-connector { height: 2px; width: 48px; flex-shrink: 0; margin-top: 15px; }
+    .lc-connector { height: 2px; width: 36px; flex-shrink: 0; margin-top: 15px; }
     .lc-done .lc-circle    { background: var(--cpc-gold); color: var(--cpc-paper); border-color: var(--cpc-gold); }
     .lc-done .lc-label     { color: var(--cpc-gold-deep); }
     .lc-done .lc-connector { background: var(--cpc-gold); }

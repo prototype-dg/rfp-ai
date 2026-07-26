@@ -367,7 +367,7 @@ function goBack() {
 // ============================================================
 // 5 stages — Evaluation removed; renamed per v9 spec
 var STAGES = ['draft','published','qa_open','submissions_closed','awarded'];
-var STAGE_LABELS = ['Publish\nRFP','Invite','Q&A','Proposals','Award'];
+var STAGE_LABELS = ['Publish RFP','Invite','Q&A','Proposals','Award'];
 var STAGE_ICONS = ['fa-paper-plane','fa-envelope-open-text','fa-comments','fa-inbox','fa-trophy'];
 
 // Explicit completion flags — keyed by rfpId, set when each milestone is reached
@@ -426,11 +426,10 @@ function renderLifecycleBar(rfp) {
       cls = 'lc-pending';
     }
     const icon = completionMap[i] ? 'fa-check' : STAGE_ICONS[i];
-    const labelLines = STAGE_LABELS[i].split('\n');
     html += '<div class="lc-step ' + cls + '">';
     html += '<div class="lc-node">';
-    html += '<div class="lc-circle" style="display:flex;align-items:center;justify-content:center"><i class="fas ' + icon + '" style="font-size:0.72rem;line-height:1"></i></div>';
-    html += '<div class="lc-label">' + labelLines.join('<br>') + '</div>';
+    html += '<div class="lc-circle"><i class="fas ' + icon + '" style="font-size:0.72rem;line-height:1"></i></div>';
+    html += '<div class="lc-label">' + escHtml(STAGE_LABELS[i]) + '</div>';
     html += '</div>';
     if (i < STAGES.length - 1) html += '<div class="lc-connector"></div>';
     html += '</div>';
@@ -754,32 +753,36 @@ function renderScoringMatrixEditor(matrix) {
   var totalColor = total === 100 ? '#065f46' : '#dc2626';
   var rows = matrix.map(function(r, i){
     return '<tr>'
-      + '<td style="padding:8px 10px;border:1px solid var(--cpc-line)">'
+      + '<td style="padding:8px 12px;border:1px solid var(--cpc-line);width:32%">'
       + '<input id="sm_crit_' + i + '" value="' + escHtml(r.criterion) + '" '
       + 'style="width:100%;border:none;background:transparent;font-size:13px;font-family:inherit;outline:none;color:var(--cpc-ink)" '
       + 'placeholder="Criterion name" oninput="updateScoringMatrixRow(' + i + ')">'
       + '</td>'
-      + '<td style="padding:8px 10px;border:1px solid var(--cpc-line);width:72px;text-align:center">'
-      + '<input id="sm_wt_' + i + '" type="number" min="0" max="100" value="' + (r.weight||0) + '" '
-      + 'style="width:52px;border:none;background:transparent;font-size:13px;font-family:\'JetBrains Mono\',monospace;text-align:center;outline:none;color:var(--cpc-ink);font-weight:700" '
-      + 'oninput="updateScoringMatrixRow(' + i + ')">'
+      + '<td style="padding:6px 10px;border:1px solid var(--cpc-line);width:80px;text-align:center">'
+      + '<div style="display:flex;align-items:center;justify-content:center;gap:2px">'
+      + '<input id="sm_wt_' + i + '" type="text" inputmode="numeric" value="' + (r.weight||0) + '" '
+      + 'style="width:46px;border:1px solid var(--cpc-line);border-radius:4px;background:var(--cpc-paper);font-size:14px;font-family:\'JetBrains Mono\',monospace;text-align:center;padding:3px 4px;color:var(--cpc-ink);font-weight:700" '
+      + 'oninput="validateScoringWeight(' + i + ')" onblur="updateScoringMatrixRow(' + i + ')">'
+      + '<span style="font-size:12px;color:#6b7280;font-weight:600">%</span>'
+      + '</div>'
       + '</td>'
-      + '<td style="padding:8px 10px;border:1px solid var(--cpc-line)">'
+      + '<td style="padding:8px 12px;border:1px solid var(--cpc-line)">'
       + '<input id="sm_desc_' + i + '" value="' + escHtml(r.description||'') + '" '
       + 'style="width:100%;border:none;background:transparent;font-size:12px;font-family:inherit;outline:none;color:#4b5563" '
       + 'placeholder="Describe what this criterion evaluates..." oninput="updateScoringMatrixRow(' + i + ')">'
       + '</td>'
-      + '<td style="padding:4px 6px;border:1px solid var(--cpc-line);width:32px;text-align:center">'
-      + '<button onclick="removeScoringMatrixRow(' + i + ')" class="btn-ghost btn-sm" style="padding:3px 6px;color:#dc2626" title="Remove"><i class="fas fa-times"></i></button>'
+      + '<td style="padding:4px 6px;border:1px solid var(--cpc-line);width:36px;text-align:center">'
+      + '<button onclick="removeScoringMatrixRow(' + i + ')" class="btn-ghost btn-sm" style="padding:4px 7px;color:#dc2626" title="Remove"><i class="fas fa-times"></i></button>'
       + '</td>'
       + '</tr>';
   }).join('');
-  return '<table style="width:100%;border-collapse:collapse;font-size:13px">'
+  return '<table style="width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed">'
+    + '<colgroup><col style="width:auto"><col style="width:90px"><col style="width:auto"><col style="width:36px"></colgroup>'
     + '<thead><tr style="background:var(--cpc-gold-tint)">'
-    + '<th style="padding:9px 10px;text-align:left;font-family:\'JetBrains Mono\',monospace;font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:var(--cpc-gold-deep);border-bottom:2px solid var(--cpc-line)">Criterion</th>'
-    + '<th style="padding:9px 10px;text-align:center;font-family:\'JetBrains Mono\',monospace;font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:var(--cpc-gold-deep);border-bottom:2px solid var(--cpc-line);width:72px">Wt %</th>'
-    + '<th style="padding:9px 10px;text-align:left;font-family:\'JetBrains Mono\',monospace;font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:var(--cpc-gold-deep);border-bottom:2px solid var(--cpc-line)">Description</th>'
-    + '<th style="width:32px;border-bottom:2px solid var(--cpc-line)"></th>'
+    + '<th style="padding:9px 12px;text-align:left;font-family:\'JetBrains Mono\',monospace;font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:var(--cpc-gold-deep);border-bottom:2px solid var(--cpc-line)">Criterion</th>'
+    + '<th style="padding:9px 10px;text-align:center;font-family:\'JetBrains Mono\',monospace;font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:var(--cpc-gold-deep);border-bottom:2px solid var(--cpc-line)">Weight</th>'
+    + '<th style="padding:9px 12px;text-align:left;font-family:\'JetBrains Mono\',monospace;font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:var(--cpc-gold-deep);border-bottom:2px solid var(--cpc-line)">Description</th>'
+    + '<th style="border-bottom:2px solid var(--cpc-line)"></th>'
     + '</tr></thead>'
     + '<tbody>' + rows + '</tbody>'
     + '</table>'
@@ -828,6 +831,18 @@ async function saveScoringMatrixAndClose(rfpId) {
   } catch(e) { /* apiCall shows error toast */ }
 }
 
+function validateScoringWeight(i) {
+  // Strip non-numeric chars while user types; allow empty string mid-edit
+  var wtEl = document.getElementById('sm_wt_' + i);
+  if (!wtEl) return;
+  var raw = wtEl.value.replace(/[^0-9]/g, '');
+  var num = raw === '' ? 0 : Math.min(100, parseInt(raw, 10));
+  // Only clamp if value is clearly out of range (not mid-typing)
+  if (raw !== '' && parseInt(raw, 10) > 100) wtEl.value = '100';
+  else if (raw !== wtEl.value) wtEl.value = raw;
+  updateScoringMatrixRow(i);
+}
+
 function updateScoringMatrixRow(i) {
   // read current matrix from DOM — do not touch appState.currentRfp directly
   var matrix = window._currentScoringMatrix || getScoringMatrix(appState.currentRfp);
@@ -836,7 +851,7 @@ function updateScoringMatrixRow(i) {
   var wtEl   = document.getElementById('sm_wt_' + i);
   var descEl = document.getElementById('sm_desc_' + i);
   if (critEl) matrix[i].criterion = critEl.value;
-  if (wtEl)   matrix[i].weight    = Number(wtEl.value) || 0;
+  if (wtEl)   matrix[i].weight    = parseInt(wtEl.value, 10) || 0;
   if (descEl) matrix[i].description = descEl.value;
   window._currentScoringMatrix = matrix;
   // Update total indicator
@@ -1943,6 +1958,9 @@ async function sendVendorReply(rfpId, vendorId) {
 var _inboxPollTimer = null;
 var _inboxPollRfpId = null;
 
+// Proposal count tracking — keyed by rfpId; initialised on first poll
+var _lastSeenProposalCount = {};
+
 // Start tab-scoped polling (stops when user leaves the emails tab)
 function startInboxPolling(rfpId) {
   if (_inboxPollTimer) clearInterval(_inboxPollTimer);
@@ -2098,7 +2116,68 @@ async function silentCheckInbox(rfpId) {
         renderRfpTabs(appState.currentRfpTab, rfpId, appState.unreadQA);
       }
     }
+
+    // ── Vendor-portal proposal detection ──────────────────────────────────
+    // Proposals submitted via the vendor portal bypass email entirely,
+    // so we poll the proposals list separately to detect new submissions.
+    await silentCheckProposals(rfpId);
+
   } catch(e) {}
+}
+
+// Poll the proposals endpoint and fire a notification when a new portal submission arrives.
+var _proposalPollLock = {};
+async function silentCheckProposals(rfpId) {
+  if (_proposalPollLock[rfpId]) return;         // prevent overlapping calls
+  _proposalPollLock[rfpId] = true;
+  try {
+    const proposals = await apiCall('GET', '/rfps/' + rfpId + '/proposals').catch(function(){ return null; });
+    if (!proposals || !Array.isArray(proposals)) return;
+
+    // Only count real submissions (exclude AI-generated samples)
+    var realProposals = proposals.filter(function(p){ return p.is_real_submission; });
+    var count = realProposals.length;
+    var lastSeen = _lastSeenProposalCount[rfpId];
+
+    // First call — initialise baseline, no notification
+    if (lastSeen === undefined) {
+      _lastSeenProposalCount[rfpId] = count;
+      return;
+    }
+
+    if (count <= lastSeen) return;               // nothing new
+
+    // New proposal(s) arrived via vendor portal
+    var newCount = count - lastSeen;
+    _lastSeenProposalCount[rfpId] = count;
+
+    // Find the newest vendor name(s)
+    var newProposals = realProposals.slice(0, newCount);
+    var vendorNames = newProposals.map(function(p){ return p.vendor_name || 'Unknown vendor'; });
+    var nameStr = vendorNames.length === 1 ? vendorNames[0]
+                : vendorNames.slice(0, 2).join(', ') + (vendorNames.length > 2 ? ' +' + (vendorNames.length - 2) + ' more' : '');
+
+    addNotification('proposal',
+      '📄 Proposal Received — ' + nameStr,
+      nameStr + ' submitted a proposal via the vendor portal. Check the Proposals tab.',
+      rfpId, 'proposals', newProposals[0] ? (newProposals[0].vendor_id || null) : null
+    );
+    showToast('📄 Proposal received from ' + nameStr + '. Check Proposals tab.', 'success', 5000);
+
+    // If user is already on this RFP, refresh proposals tab or badge
+    if (appState.currentRfpId && String(appState.currentRfpId) === String(rfpId)) {
+      if (appState.currentRfpTab === 'proposals') {
+        rfpTabs.proposals(rfpId);
+      } else {
+        // Just update the tab bar to show the user there's something to see
+        renderRfpTabs(appState.currentRfpTab, rfpId, appState.unreadQA);
+      }
+    }
+  } catch(e) {
+    // silent fail
+  } finally {
+    _proposalPollLock[rfpId] = false;
+  }
 }
 
 function pulseQATab() {
