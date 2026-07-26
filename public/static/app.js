@@ -4,6 +4,240 @@
 'use strict';
 const API = '/api';
 
+// ============================================================
+// INTERNATIONALISATION (Arabic / English)
+// ============================================================
+var _currentLang = localStorage.getItem('cpc_lang') || 'en';
+
+var I18N = {
+  en: {
+    // Sidebar
+    org_name:        "Crown Prince's Court",
+    product_name:    'AI RFP Management',
+    nav_overview:    'Overview',
+    nav_dashboard:   'Dashboard',
+    nav_procurement: 'Procurement',
+    nav_rfps:        'All RFPs',
+    nav_vendors:     'Vendor Registry',
+    nav_analytics:   'Analytics',
+    nav_reports:     'Reports',
+    user_name:       'Procurement Manager',
+    user_role:       'CPC · Abu Dhabi',
+    // Header
+    lang_btn:        'AR',
+    // Page titles
+    page_dashboard:        'Dashboard',
+    page_dashboard_sub:    'AI-Powered Procurement Overview',
+    page_rfps:             'All RFPs',
+    page_rfps_sub:         'Manage Active & Historic Procurement',
+    page_vendors:          'Vendor Registry',
+    page_vendors_sub:      'Global Vendor Pool & Performance',
+    page_reports:          'Reports & Analytics',
+    page_reports_sub:      'Cross-RFP Performance Metrics',
+    // Lifecycle bar
+    stage_publish:   'Publish RFP',
+    stage_invite:    'Invite',
+    stage_qa:        'Q&A',
+    stage_proposals: 'Proposals',
+    stage_award:     'Award',
+    // RFP tabs
+    tab_generate:  'Generate',
+    tab_vendors:   'Vendors',
+    tab_qa:        'Q&A',
+    tab_proposals: 'Proposals',
+    // Dashboard cards
+    dash_active_rfps:   'Active RFPs',
+    dash_total_vendors: 'Total Vendors',
+    dash_proposals:     'Proposals',
+    dash_awarded:       'Awarded',
+    // Stage labels
+    stage_label_draft:               'Draft',
+    stage_label_published:           'Published',
+    stage_label_qa_open:             'Q&A Open',
+    stage_label_submissions_closed:  'Submissions Closed',
+    stage_label_evaluation:          'Evaluation',
+    stage_label_awarded:             'Awarded',
+    // Common buttons / labels
+    btn_new_rfp:     '+ New RFP',
+    btn_save:        'Save',
+    btn_cancel:      'Cancel',
+    btn_back:        'Back',
+    btn_generate:    'Generate RFP',
+    btn_publish:     'Publish RFP',
+    btn_edit:        'Edit',
+    btn_delete:      'Delete',
+    btn_invite:      'Send Invitations',
+    btn_evaluate:    'Evaluate All',
+    btn_award:       'Award Contract',
+    lbl_loading:     'Loading…',
+    lbl_no_data:     'No data yet',
+    lbl_search:      'Search…',
+    lbl_filter:      'Filter',
+    lbl_status:      'Status',
+    lbl_score:       'Score',
+    lbl_vendor:      'Vendor',
+    lbl_date:        'Date',
+    lbl_actions:     'Actions',
+    lbl_ref:         'RFP Reference',
+    lbl_title:       'Title',
+    lbl_category:    'Category',
+    lbl_budget:      'Budget',
+    lbl_deadline:    'Deadline',
+    lbl_stage:       'Stage',
+  },
+  ar: {
+    // Sidebar
+    org_name:        'ديوان ولي العهد',
+    product_name:    'نظام إدارة طلبات العروض',
+    nav_overview:    'نظرة عامة',
+    nav_dashboard:   'لوحة التحكم',
+    nav_procurement: 'المشتريات',
+    nav_rfps:        'طلبات العروض',
+    nav_vendors:     'سجل الموردين',
+    nav_analytics:   'التحليلات',
+    nav_reports:     'التقارير',
+    user_name:       'مدير المشتريات',
+    user_role:       'ديوان ولي العهد · أبوظبي',
+    // Header
+    lang_btn:        'EN',
+    // Page titles
+    page_dashboard:        'لوحة التحكم',
+    page_dashboard_sub:    'نظرة عامة على المشتريات المدعومة بالذكاء الاصطناعي',
+    page_rfps:             'طلبات العروض',
+    page_rfps_sub:         'إدارة المشتريات الحالية والتاريخية',
+    page_vendors:          'سجل الموردين',
+    page_vendors_sub:      'قائمة الموردين العالميين والأداء',
+    page_reports:          'التقارير والتحليلات',
+    page_reports_sub:      'مقاييس الأداء عبر طلبات العروض',
+    // Lifecycle bar
+    stage_publish:   'نشر الطلب',
+    stage_invite:    'الدعوة',
+    stage_qa:        'الأسئلة',
+    stage_proposals: 'العروض',
+    stage_award:     'الترسية',
+    // RFP tabs
+    tab_generate:  'إنشاء',
+    tab_vendors:   'الموردون',
+    tab_qa:        'الأسئلة',
+    tab_proposals: 'العروض',
+    // Dashboard cards
+    dash_active_rfps:   'طلبات نشطة',
+    dash_total_vendors: 'إجمالي الموردين',
+    dash_proposals:     'العروض المقدمة',
+    dash_awarded:       'العقود المرساة',
+    // Stage labels
+    stage_label_draft:               'مسودة',
+    stage_label_published:           'منشور',
+    stage_label_qa_open:             'الأسئلة مفتوحة',
+    stage_label_submissions_closed:  'التقديم مغلق',
+    stage_label_evaluation:          'التقييم',
+    stage_label_awarded:             'مرسى',
+    // Common buttons / labels
+    btn_new_rfp:     '+ طلب عرض جديد',
+    btn_save:        'حفظ',
+    btn_cancel:      'إلغاء',
+    btn_back:        'رجوع',
+    btn_generate:    'إنشاء طلب العرض',
+    btn_publish:     'نشر طلب العرض',
+    btn_edit:        'تعديل',
+    btn_delete:      'حذف',
+    btn_invite:      'إرسال الدعوات',
+    btn_evaluate:    'تقييم الجميع',
+    btn_award:       'ترسية العقد',
+    lbl_loading:     'جاري التحميل…',
+    lbl_no_data:     'لا توجد بيانات',
+    lbl_search:      'بحث…',
+    lbl_filter:      'تصفية',
+    lbl_status:      'الحالة',
+    lbl_score:       'النقاط',
+    lbl_vendor:      'المورد',
+    lbl_date:        'التاريخ',
+    lbl_actions:     'الإجراءات',
+    lbl_ref:         'رقم الطلب',
+    lbl_title:       'العنوان',
+    lbl_category:    'الفئة',
+    lbl_budget:      'الميزانية',
+    lbl_deadline:    'الموعد النهائي',
+    lbl_stage:       'المرحلة',
+  }
+};
+
+function t(key) {
+  var lang = _currentLang;
+  return (I18N[lang] && I18N[lang][key]) || (I18N['en'] && I18N['en'][key]) || key;
+}
+
+function applyTranslations() {
+  var isAr = _currentLang === 'ar';
+  // direction + lang attribute
+  document.documentElement.setAttribute('lang', isAr ? 'ar' : 'en');
+  document.documentElement.setAttribute('dir',  isAr ? 'rtl' : 'ltr');
+  // Update header date locale
+  if (typeof updateHeaderDate === 'function') updateHeaderDate();
+  // All elements with data-i18n
+  document.querySelectorAll('[data-i18n]').forEach(function(el) {
+    var key = el.getAttribute('data-i18n');
+    el.textContent = t(key);
+  });
+  // Lang toggle button label
+  var btn = document.getElementById('langToggleBtn');
+  if (btn) btn.textContent = t('lang_btn');
+  // Back button text
+  var backBtn = document.getElementById('backBtn');
+  if (backBtn) {
+    var icon = backBtn.querySelector('i');
+    backBtn.innerHTML = '';
+    if (icon) backBtn.appendChild(icon);
+    backBtn.appendChild(document.createTextNode(' ' + t('btn_back')));
+  }
+  // Update STAGE_LABELS for lifecycle bar
+  STAGE_LABELS = [
+    t('stage_publish'), t('stage_invite'), t('stage_qa'),
+    t('stage_proposals'), t('stage_award')
+  ];
+  // Update RFP_TABS labels
+  RFP_TABS[0].label = t('tab_generate');
+  RFP_TABS[1].label = t('tab_vendors');
+  RFP_TABS[2].label = t('tab_qa');
+  RFP_TABS[3].label = t('tab_proposals');
+  // Update pageTitles
+  pageTitles.dashboard = [t('page_dashboard'), t('page_dashboard_sub')];
+  pageTitles.rfps      = [t('page_rfps'),      t('page_rfps_sub')];
+  pageTitles.vendors   = [t('page_vendors'),   t('page_vendors_sub')];
+  pageTitles.reports   = [t('page_reports'),   t('page_reports_sub')];
+  // Re-render current page header if on a standard page
+  if (appState && appState.currentPage && pageTitles[appState.currentPage]) {
+    var info = pageTitles[appState.currentPage];
+    var ptEl = document.getElementById('pageTitle');
+    var psEl = document.getElementById('pageSubtitle');
+    if (ptEl && !appState.currentRfpId) ptEl.textContent = info[0];
+    if (psEl && !appState.currentRfpId) psEl.textContent = info[1];
+  }
+  // Re-render lifecycle bar if visible
+  if (appState && appState.currentRfp && document.getElementById('lifecycleBar') &&
+      document.getElementById('lifecycleBar').style.display !== 'none') {
+    renderLifecycleBar(appState.currentRfp);
+  }
+  // Re-render tab bar if visible
+  if (appState && appState.currentRfpId && document.getElementById('rfpTabsBar') &&
+      document.getElementById('rfpTabsBar').style.display !== 'none') {
+    renderRfpTabs(appState.currentRfpTab, appState.currentRfpId, appState.unreadQA);
+  }
+}
+
+function switchLang() {
+  _currentLang = (_currentLang === 'en') ? 'ar' : 'en';
+  localStorage.setItem('cpc_lang', _currentLang);
+  applyTranslations();
+  // Re-render current page content to pick up translated labels
+  if (appState && appState.currentPage) {
+    var pageRenderFn = pages[appState.currentPage];
+    if (pageRenderFn && !appState.currentRfpId) {
+      pageRenderFn();
+    }
+  }
+}
+
 let appState = {
   currentPage: 'dashboard',
   currentRfpId: null,
@@ -261,13 +495,13 @@ function stageBadgeClass(stage) {
 }
 
 function stageLabelMap(stage) {
-  const map = {
-    draft: 'Publish RFP',
-    published: 'Invite',
-    qa_open: 'Q&A',
-    submissions_closed: 'Proposals',
-    evaluation: 'Proposals',   // legacy compat
-    awarded: 'Awarded',
+  var map = {
+    draft:               t('stage_label_draft'),
+    published:           t('stage_label_published'),
+    qa_open:             t('stage_label_qa_open'),
+    submissions_closed:  t('stage_label_submissions_closed'),
+    evaluation:          t('stage_label_submissions_closed'),   // legacy compat
+    awarded:             t('stage_label_awarded'),
   };
   return map[stage] || stage;
 }
@@ -298,9 +532,13 @@ async function apiCall(method, path, data) {
   }
 }
 
-document.getElementById('headerDate').textContent = new Date().toLocaleDateString('en-AE', {
-  weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
-});
+function updateHeaderDate() {
+  var locale = _currentLang === 'ar' ? 'ar-AE' : 'en-AE';
+  document.getElementById('headerDate').textContent = new Date().toLocaleDateString(locale, {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+  });
+}
+updateHeaderDate();
 
 document.getElementById('modalOverlay').addEventListener('click', function(e) {
   if (e.target.id === 'modalOverlay') closeModal();
@@ -310,10 +548,10 @@ document.getElementById('modalOverlay').addEventListener('click', function(e) {
 // NAVIGATION
 // ============================================================
 var pageTitles = {
-  dashboard:  ['Dashboard', 'AI-Powered Procurement Overview'],
-  rfps:       ['All RFPs', 'Manage Active & Historic Procurement'],
-  vendors:    ['Vendor Registry', 'Global Vendor Pool & Performance'],
-  reports:    ['Reports & Analytics', 'Cross-RFP Performance Metrics'],
+  dashboard:  [t('page_dashboard'), t('page_dashboard_sub')],
+  rfps:       [t('page_rfps'),      t('page_rfps_sub')],
+  vendors:    [t('page_vendors'),   t('page_vendors_sub')],
+  reports:    [t('page_reports'),   t('page_reports_sub')],
 };
 
 document.getElementById('mainNav').addEventListener('click', function(e) {
@@ -367,7 +605,7 @@ function goBack() {
 // ============================================================
 // 5 stages — Evaluation removed; renamed per v9 spec
 var STAGES = ['draft','published','qa_open','submissions_closed','awarded'];
-var STAGE_LABELS = ['Publish RFP','Invite','Q&A','Proposals','Award'];
+var STAGE_LABELS = [t('stage_publish'), t('stage_invite'), t('stage_qa'), t('stage_proposals'), t('stage_award')];
 var STAGE_ICONS = ['fa-paper-plane','fa-envelope-open-text','fa-comments','fa-inbox','fa-trophy'];
 
 // Explicit completion flags — keyed by rfpId, set when each milestone is reached
@@ -444,10 +682,10 @@ function renderLifecycleBar(rfp) {
 // RFP TABS BAR
 // ============================================================
 var RFP_TABS = [
-  { id: 'generate',        icon: 'fa-file-alt',      label: 'Generate' },
-  { id: 'vendors',         icon: 'fa-building',       label: 'Vendors' },
-  { id: 'qa',              icon: 'fa-comments',       label: 'Q&A' },
-  { id: 'proposals',       icon: 'fa-inbox',          label: 'Proposals' },
+  { id: 'generate',   icon: 'fa-file-alt',           label: t('tab_generate') },
+  { id: 'vendors',    icon: 'fa-building',            label: t('tab_vendors') },
+  { id: 'qa',         icon: 'fa-comments',            label: t('tab_qa') },
+  { id: 'proposals',  icon: 'fa-inbox',               label: t('tab_proposals') },
 ];
 
 function renderRfpTabs(activeTab, rfpId, qaBadge) {
@@ -485,6 +723,8 @@ function switchRfpTab(tab, rfpId) {
 // INIT
 // ============================================================
 async function init() {
+  // Apply saved language before first render
+  applyTranslations();
   try { await apiCall('POST', '/init', {}); } catch(e) {}
   navigateTo('dashboard');
 }

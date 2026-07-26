@@ -1,6 +1,6 @@
 export function getLayout(): string {
   return `<!DOCTYPE html>
-<html lang="en">
+<html lang="en" dir="ltr">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -892,6 +892,33 @@ export function getLayout(): string {
     .mini-bar { display: flex; align-items: flex-end; gap: 6px; height: 60px; }
     .mini-bar-item { flex: 1; border-radius: 4px 4px 0 0; background: var(--cpc-gold); opacity: 0.65; min-width: 20px; transition: opacity 0.2s; }
     .mini-bar-item:hover { opacity: 1; }
+
+    /* ── RTL / ARABIC OVERRIDES ── */
+    html[dir="rtl"] body { font-family: 'Noto Kufi Arabic', 'Inter', system-ui, sans-serif; }
+    html[dir="rtl"] .app-shell { flex-direction: row-reverse; }
+    html[dir="rtl"] .cpc-sidebar { border-right: none; border-left: 1px solid var(--cpc-line); }
+    html[dir="rtl"] .sidebar-brand { flex-direction: row-reverse; }
+    html[dir="rtl"] .sidebar-user  { flex-direction: row-reverse; }
+    html[dir="rtl"] .nav-item      { flex-direction: row-reverse; }
+    html[dir="rtl"] .nav-item i    { margin-right: 0; margin-left: 0; }
+    html[dir="rtl"] .header-left   { flex-direction: row-reverse; }
+    html[dir="rtl"] .header-right  { flex-direction: row-reverse; }
+    html[dir="rtl"] .btn-back i    { transform: scaleX(-1); }
+    html[dir="rtl"] .lc-step       { flex-direction: row-reverse; }
+    html[dir="rtl"] .lc-connector  { transform: scaleX(-1); }
+    html[dir="rtl"] .rfp-tabs      { flex-direction: row-reverse; }
+    html[dir="rtl"] .card-header, html[dir="rtl"] .card-title { flex-direction: row-reverse; }
+    html[dir="rtl"] .lifecycle-bar { flex-direction: row-reverse; }
+    html[dir="rtl"] #pageContent   { text-align: right; }
+    html[dir="rtl"] input, html[dir="rtl"] textarea, html[dir="rtl"] select { text-align: right; direction: ltr; }
+    html[dir="rtl"] .rfp-doc, html[dir="rtl"] [contenteditable] { direction: ltr; text-align: left; }
+    html[dir="rtl"] .modal { text-align: right; }
+    html[dir="rtl"] .toast { left: 20px; right: auto; }
+    html[dir="rtl"] .wm-org, html[dir="rtl"] .wm-product { text-align: right; }
+    html[dir="rtl"] .header-lang-toggle { letter-spacing: 0; }
+    html[dir="rtl"] .score-bar { direction: ltr; }
+    html[dir="rtl"] .rfp-card { text-align: right; }
+    html[dir="rtl"] .lc-label { text-align: center; }
   </style>
 </head>
 <body>
@@ -904,29 +931,29 @@ export function getLayout(): string {
         <img src="/static/cpc-emblem.png" alt="CPC Emblem" style="width:52px;height:52px;object-fit:contain;">
       </div>
       <div class="sidebar-wordmark">
-        <div class="wm-org">Crown Prince's Court</div>
-        <div class="wm-product">AI RFP Management</div>
+        <div class="wm-org" data-i18n="org_name">Crown Prince's Court</div>
+        <div class="wm-product" data-i18n="product_name">AI RFP Management</div>
       </div>
     </div>
 
     <!-- Navigation -->
     <nav class="sidebar-nav" id="mainNav">
-      <div class="nav-section-label">Overview</div>
+      <div class="nav-section-label" data-i18n="nav_overview">Overview</div>
       <a href="#" class="nav-item active" data-page="dashboard">
-        <i class="fas fa-chart-pie"></i><span>Dashboard</span>
+        <i class="fas fa-chart-pie"></i><span data-i18n="nav_dashboard">Dashboard</span>
       </a>
 
-      <div class="nav-section-label" style="margin-top:8px">Procurement</div>
+      <div class="nav-section-label" style="margin-top:8px" data-i18n="nav_procurement">Procurement</div>
       <a href="#" class="nav-item" data-page="rfps">
-        <i class="fas fa-layer-group"></i><span>All RFPs</span>
+        <i class="fas fa-layer-group"></i><span data-i18n="nav_rfps">All RFPs</span>
       </a>
       <a href="#" class="nav-item" data-page="vendors">
-        <i class="fas fa-building"></i><span>Vendor Registry</span>
+        <i class="fas fa-building"></i><span data-i18n="nav_vendors">Vendor Registry</span>
       </a>
 
-      <div class="nav-section-label" style="margin-top:8px">Analytics</div>
+      <div class="nav-section-label" style="margin-top:8px" data-i18n="nav_analytics">Analytics</div>
       <a href="#" class="nav-item" data-page="reports">
-        <i class="fas fa-chart-bar"></i><span>Reports</span>
+        <i class="fas fa-chart-bar"></i><span data-i18n="nav_reports">Reports</span>
       </a>
     </nav>
 
@@ -934,8 +961,8 @@ export function getLayout(): string {
     <div class="sidebar-user">
       <div class="user-avatar">PM</div>
       <div class="user-info">
-        <div class="user-name">Procurement Manager</div>
-        <div class="user-role">CPC · Abu Dhabi</div>
+        <div class="user-name" data-i18n="user_name">Procurement Manager</div>
+        <div class="user-role" data-i18n="user_role">CPC · Abu Dhabi</div>
       </div>
     </div>
   </aside>
@@ -955,7 +982,7 @@ export function getLayout(): string {
       </div>
       <div class="header-right">
         <span class="header-date" id="headerDate"></span>
-        <button class="header-lang-toggle">AR / EN</button>
+        <button class="header-lang-toggle" id="langToggleBtn" onclick="switchLang()">AR</button>
         <button id="bellBtn" onclick="toggleNotifPanel()" title="Notifications">
           <i class="fas fa-bell"></i>
           <span id="bellBadge">0</span>

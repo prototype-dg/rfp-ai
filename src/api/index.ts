@@ -3,7 +3,7 @@ import { initDb, seedVendors } from '../db/seed'
 import type { Bindings } from '../types'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-07-26-v33'
+const WORKER_VERSION = '2026-07-26-v34'
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.cpc-rfp.website.
@@ -363,7 +363,7 @@ apiRouter.post('/rfps/:id/generate', async (c) => {
       body: JSON.stringify({
         model: 'gpt-5-mini',
         messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
-        max_tokens: 20000,
+        max_tokens: 30000,
         temperature: 0.3,
         stream: true,
       }),
@@ -2636,7 +2636,7 @@ REMINDER: Do NOT reference any document filename, BRD name, or attached file any
 
 async function generateRFPWithLLM(data: any, archDocText: string, brdDocText: string, env: any, scoringMatrixJson?: string | null): Promise<string> {
   const { systemPrompt, userPrompt } = buildRFPPrompt(data, archDocText, brdDocText, scoringMatrixJson)
-  const llmContent = await callLLM(systemPrompt, userPrompt, env, 'gpt-5-mini', 20000)
+  const llmContent = await callLLM(systemPrompt, userPrompt, env, 'gpt-5-mini', 30000)
   if (llmContent && llmContent.length > 400) {
     return `<div class="rfp-doc">${llmContent}</div>`
   }
