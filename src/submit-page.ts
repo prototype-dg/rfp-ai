@@ -677,10 +677,34 @@ export function getSubmitPage(rfpId: string, participantCode: string): string {
     @media (max-width: 640px) {
       .header-inner { padding: 16px 20px; gap: 14px; }
       .header-badge { display: none; }
-      .page { padding: 24px 20px 56px; }
-      .card { padding: 20px; }
+      .page { padding: 24px 16px 56px; }
+      .card { padding: 16px; }
       .rfp-meta { grid-template-columns: repeat(2, 1fr); }
       .page-footer { flex-direction: column; align-items: flex-start; }
+      .drop-zone { padding: 24px 16px; }
+      .dz-text { font-size: 0.9rem; }
+      /* 13.4: show mobile upload button, hide drag-and-drop hint on phones */
+      .mobile-upload-btn { display: flex !important; }
+    }
+    @media (max-width: 480px) {
+      .rfp-meta { grid-template-columns: 1fr; }
+      .submit-btn { font-size: 1rem; padding: 0.9rem 1.5rem; }
+    }
+    .mobile-upload-btn {
+      display: none;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      width: 100%;
+      padding: 0.75rem 1rem;
+      margin-top: 0.75rem;
+      background: #f5f0e8;
+      border: 1.5px solid #BA9765;
+      border-radius: 8px;
+      color: #745B35;
+      font-weight: 600;
+      font-size: 0.92rem;
+      cursor: pointer;
     }
   </style>
 </head>
@@ -817,11 +841,17 @@ export function getSubmitPage(rfpId: string, participantCode: string): string {
            ondragleave="this.classList.remove('dragover')"
            ondrop="handleDrop(event)">
         <div class="dz-icon"><i class="fas fa-cloud-upload-alt"></i></div>
-        <div class="dz-text"><strong>Click to browse files</strong> or drag &amp; drop here</div>
+        <div class="dz-text"><strong>Tap to browse files</strong> or drag &amp; drop here</div>
         <div class="dz-sub">PDF documents only &nbsp;·&nbsp; Multiple files accepted &nbsp;·&nbsp; Max 50 MB per file</div>
       </div>
       <input type="file" id="fileInput" multiple accept=".pdf,application/pdf" style="display:none"
              onchange="handleFiles(this.files)"/>
+      <!-- 13.4: dedicated mobile tap-to-upload button visible only on small screens -->
+      <label for="fileInputMobile" class="mobile-upload-btn" style="display:none">
+        <i class="fas fa-camera"></i> Upload from Camera or Files
+      </label>
+      <input type="file" id="fileInputMobile" multiple accept=".pdf,application/pdf,image/*"
+             style="display:none" onchange="handleFiles(this.files)"/>
 
       <div class="file-list" id="fileList"></div>
     </div>

@@ -2116,6 +2116,11 @@ pages.rfps = async function() {
       + '</div>'
       + '<div style="font-size:0.78rem;color:' + (isArchived ? '#065f46' : 'var(--cpc-ink)') + ';font-weight:600">' + t('card_open') + ' <i class="fas fa-arrow-right" style="margin-left:4px"></i></div>'
       + '</div>'
+      + '<div style="display:flex;gap:0.5rem;border-top:1px solid #f3f4f6;padding-top:0.625rem;margin-top:0.5rem" onclick="event.stopPropagation()">'
+      + '<button class="btn-ghost btn-sm" onclick="event.stopPropagation();openRfp(' + rfp.id + ')" style="flex:1;justify-content:center"><i class="fas fa-arrow-right"></i> ' + t('card_menu_open') + '</button>'
+      + (!isArchived ? '<button class="btn-ghost btn-sm" onclick="event.stopPropagation();archiveRfp(' + rfp.id + ')" title="' + t('card_menu_archive') + '"><i class="fas fa-archive"></i></button>' : '')
+      + '<button class="btn-ghost btn-sm" onclick="event.stopPropagation();deleteRfpConfirm(' + rfp.id + ')" title="' + t('card_menu_delete') + '" style="color:#ef4444"><i class="fas fa-trash"></i></button>'
+      + '</div>'
       + '</div>';
   }
 
@@ -2537,13 +2542,7 @@ rfpTabs.generate = function(rfpId, rfp) {
     + '<div class="form-group"><label>' + t('form_project_title') + ' *</label><input id="rfpTitle" placeholder="e.g. New Oracle ERP Setup, Data Warehouse and Data Visualization" value="' + escHtml(titleVal) + '"></div>'
     + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem">'
     + '<div class="form-group"><label>' + t('form_category') + '</label><select id="rfpCategory">'
-    + [
-        [t('cat_it'), 'IT & Digital Transformation'],
-        [t('cat_consulting'), 'Consulting Services'],
-        [t('cat_infrastructure'), 'Infrastructure'],
-        [t('cat_professional'), 'Professional Services'],
-        [t('cat_data'), 'Data & Analytics']
-      ].map(function(c){ return '<option value="' + c[1] + '"' + (catVal===c[1]?' selected':'') + '>' + c[0] + '</option>'; }).join('')
+    + getSettingsCategories().map(function(c){ return '<option value="' + c + '"' + (catVal===c?' selected':'') + '>' + c + '</option>'; }).join('')
     + '</select></div>'
     + '<div class="form-group"><label>' + t('form_budget_aed') + '</label><input id="rfpBudget" placeholder="e.g. 5,000,000" value="' + escHtml(budgetVal) + '"></div>'
     + '</div>'
@@ -3949,6 +3948,10 @@ rfpTabs.qa = async function(rfpId) {
           + '<button class="btn-ghost btn-sm" onclick="editQAnswer(' + q.id + ')"><i class="fas fa-edit"></i>' + t('btn_edit') + '</button>'
         : '') + (q.answer && !q.published && needsManual
         ? '<button class="btn-primary btn-sm" onclick="approveQAnswer(' + rfpId + ',' + q.id + ')"><i class="fas fa-check"></i>' + t('qa_approve_btn') + '</button>'
+        : '')
+        // 7.4 — Edit button on published answers
+        + (q.published
+        ? '<button class="btn-ghost btn-sm" onclick="editQAnswer(' + q.id + ')" title="Edit published answer"><i class="fas fa-edit"></i> ' + t('btn_edit') + '</button>'
         : '');
 
       qCards += '<div class="card" style="padding:1rem;' + cardBg + '" id="q-' + q.id + '">'
@@ -4738,10 +4741,18 @@ function _renderProposalPanel(p, evalData) {
     + '<div id="pTabBody_verdict"    style="flex:1;overflow-y:auto;padding:1.25rem;' + (activeTab !== 'verdict'    ? 'display:none' : '') + '">' + tabVerdictHtml    + '</div>'
 
     // ── Footer ─────────────────────────────────────────────────────────────
-    + '<div style="position:sticky;bottom:0;background:#fff;border-top:1px solid #e5e7eb;padding:0.75rem 1.25rem;display:flex;gap:0.5rem;justify-content:flex-end;flex-shrink:0">'
-    + (!evalData ? '<button onclick="evaluateSingleProposal(' + rfpId + ',' + p.id + ')" id="evalSingleBtnFooter_' + p.id + '" style="background:linear-gradient(135deg,var(--cpc-gold-deep),var(--cpc-gold));color:white;border:none;border-radius:7px;padding:0.45rem 1.1rem;font-size:0.82rem;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:0.4rem"><i class="fas fa-robot"></i>' + t('panel_eval_footer_btn') + '</button>' : '')
-    + '<button class="btn-ghost" onclick="closeProposalPanel()" style="padding:0.45rem 1.1rem">' + t('btn_cancel') + '</button>'
-    + '</div>';
+    + (function() {
+        var rfpNow = appState.currentRfp;
+        var isAwarded = p.status === 'awarded' || !!p.awarded_at;
+        var rfpAlreadyAwarded = (appState.proposals||[]).some(function(pp){ return pp.status==='awarded' && pp.id!==p.id; });
+        var canAward = rfpNow && rfpNow.stage === 'submissions_closed' && !isAwarded && !rfpAlreadyAwarded;
+        return '<div style="position:sticky;bottom:0;background:#fff;border-top:1px solid #e5e7eb;padding:0.75rem 1.25rem;display:flex;gap:0.5rem;justify-content:flex-end;align-items:center;flex-shrink:0">'
+          + (isAwarded ? '<div style="background:#d1fae5;color:#065f46;padding:0.35rem 0.9rem;border-radius:7px;font-weight:700;font-size:0.82rem;display:inline-flex;align-items:center;gap:0.4rem"><i class="fas fa-trophy"></i>Contract Awarded</div>' : '')
+          + (canAward ? '<button onclick="closeProposalPanel();awardProposal(' + rfpId + ',' + p.id + ',\'' + escHtml(p.vendor_name||'this vendor') + '\')" style="background:linear-gradient(135deg,#059669,#10b981);color:white;border:none;border-radius:7px;padding:0.45rem 1.1rem;font-size:0.82rem;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:0.4rem"><i class="fas fa-trophy"></i>Award Contract</button>' : '')
+          + (!evalData ? '<button onclick="evaluateSingleProposal(' + rfpId + ',' + p.id + ')" id="evalSingleBtnFooter_' + p.id + '" style="background:linear-gradient(135deg,var(--cpc-gold-deep),var(--cpc-gold));color:white;border:none;border-radius:7px;padding:0.45rem 1.1rem;font-size:0.82rem;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:0.4rem"><i class="fas fa-robot"></i>' + t('panel_eval_footer_btn') + '</button>' : '')
+          + '<button class="btn-ghost" onclick="closeProposalPanel()" style="padding:0.45rem 1.1rem">' + t('btn_cancel') + '</button>'
+          + '</div>';
+      })()
 
   document.body.appendChild(overlay);
   document.body.appendChild(panel);
@@ -5007,6 +5018,7 @@ pages.vendor_comms = async function(opts) {
     + '<div style="font-weight:700;font-size:0.95rem;color:' + (vendorDeclined ? '#991b1b' : '#1f2937') + '">' + escHtml(vendorName) + '</div>'
     + '<div style="font-size:0.78rem;color:#9ca3af">' + vendorEmails.length + ' message(s) in thread'
     + ' &bull; <span style="font-family:monospace;color:var(--cpc-ink);font-weight:600" title="Participant Reference Code">RFP-' + rfpId + '-V' + vendorId + '</span>'
+    + (rfp ? ' &bull; <span style="color:#6b7280" title="RFP Reference">' + escHtml(rfp.ref_number||('RFP-'+rfpId)) + '</span>' : '')
     + (vendorDeclined ? ' &bull; <span style="color:#dc2626;font-weight:600">DECLINED</span>' : '') + '</div>'
     + '</div></div>'
     + '<div style="display:flex;gap:0.5rem">'
@@ -5224,10 +5236,42 @@ function viewVendorDetail(id) {
 
     + '</div>' // end grid
 
-    // ── Close button ──
-    + '<button class="btn-ghost" style="width:100%;margin-top:0.75rem" onclick="closeModal()">Close</button>';
+    // ── Footer buttons (10.1 view/edit + 10.3 history) ──
+    + '<div style="display:flex;gap:0.5rem;margin-top:0.75rem">'
+    + '<button class="btn-ghost" style="flex:1" onclick="closeModal()">Close</button>'
+    + '<button class="btn-secondary" style="padding:0.45rem 0.875rem;font-size:0.82rem" onclick="showVendorHistory(' + id + ')" title="View procurement history"><i class="fas fa-history"></i> History</button>'
+    + '</div>';
 
   showModal(html);
+}
+
+// 10.3 — Vendor procurement history modal
+async function showVendorHistory(vendorId) {
+  var history = await apiCall('GET', '/vendors/' + vendorId + '/history').catch(function(){ return []; });
+  if (!history.length) {
+    showToast('No procurement history found for this vendor.', 'info');
+    return;
+  }
+  var rows = history.map(function(h) {
+    var badge = h.awarded_at
+      ? '<span style="background:#d1fae5;color:#065f46;padding:2px 8px;border-radius:12px;font-size:0.72rem;font-weight:700"><i class="fas fa-trophy mr-1"></i>Awarded</span>'
+      : (h.submitted_at
+          ? '<span style="background:#dbeafe;color:#1e40af;padding:2px 8px;border-radius:12px;font-size:0.72rem;font-weight:700">Submitted</span>'
+          : '<span style="background:#f3f4f6;color:#6b7280;padding:2px 8px;border-radius:12px;font-size:0.72rem;font-weight:700">Invited</span>');
+    return '<tr><td style="font-size:0.82rem;font-weight:600;padding:0.5rem 0.25rem">' + escHtml(h.title||'') + '</td>'
+      + '<td style="font-size:0.78rem;color:#9ca3af;font-family:JetBrains Mono,monospace;padding:0.5rem 0.25rem">' + escHtml(h.ref_number||'') + '</td>'
+      + '<td style="padding:0.5rem 0.25rem">' + badge + '</td></tr>';
+  }).join('');
+  showModal(
+    '<h3 style="margin:0 0 1rem;font-size:1rem;font-weight:700"><i class="fas fa-history cpc-gold mr-2"></i>Procurement History</h3>'
+    + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;min-width:360px">'
+    + '<thead><tr>'
+    + '<th style="text-align:left;font-size:0.72rem;text-transform:uppercase;color:#9ca3af;padding-bottom:0.5rem;border-bottom:1px solid #e5e7eb">RFP Title</th>'
+    + '<th style="text-align:left;font-size:0.72rem;text-transform:uppercase;color:#9ca3af;padding-bottom:0.5rem;border-bottom:1px solid #e5e7eb">Ref #</th>'
+    + '<th style="text-align:left;font-size:0.72rem;text-transform:uppercase;color:#9ca3af;padding-bottom:0.5rem;border-bottom:1px solid #e5e7eb">Status</th>'
+    + '</tr></thead><tbody>' + rows + '</tbody></table></div>'
+    + '<div style="display:flex;justify-content:flex-end;margin-top:1rem"><button class="btn-ghost" onclick="closeModal()">Close</button></div>'
+  );
 }
 
 // 6.2 — Vendor hover card
@@ -5459,7 +5503,7 @@ function showCreateRfpModal() {
     // Category / Budget / Deadline in one row
     + '<div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:0.625rem;margin-bottom:0.75rem">'
     + '<div class="form-group" style="margin:0"><label>Category</label><select id="newRfpCat">'
-    + ['IT & Digital Transformation','Consulting Services','Infrastructure','Professional Services','Data & Analytics'].map(function(c){ return '<option>' + c + '</option>'; }).join('')
+    + (getSettingsCategories()).map(function(c){ return '<option>' + c + '</option>'; }).join('')
     + '</select></div>'
     + '<div class="form-group" style="margin:0"><label>Budget (AED)</label><input id="newRfpBudget" placeholder="5,000,000"></div>'
     + '<div class="form-group" style="margin:0"><label>Deadline</label><input type="date" id="newRfpDeadline" value="' + getDateOffset(30) + '"></div>'

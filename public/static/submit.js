@@ -65,7 +65,8 @@
       + '<p style="color:#5a4e3a;font-size:0.9rem;line-height:1.6;margin:0">'
       + 'Following your earlier communication, your organization has been respectfully removed from the list of participants for this RFP. '
       + 'This portal link is no longer active for your account.</p>'
-      + '<p style="color:#9ca3af;font-size:0.8rem;margin:16px 0 0">If you believe this is an error, please contact the procurement team directly.</p>'
+      + '<p style="color:#9ca3af;font-size:0.8rem;margin:16px 0 0">If you believe this is an error, please contact the procurement team directly.'
+      + (rfpData && rfpData.procurement_email ? ' Email: <a href="mailto:' + rfpData.procurement_email + '" style="color:#BA9765">' + rfpData.procurement_email + '</a>' : '') + '</p>'
       + '</div>';
     document.getElementById('rfpCard').innerHTML = html;
   }
@@ -349,6 +350,14 @@
         var n = result.data.files_stored || uploadedFiles.length;
         document.getElementById('successFiles').textContent =
           n + ' document' + (n === 1 ? '' : 's') + ' received';
+        // 13.3 — send confirmation email (best-effort, non-blocking)
+        var vendorEmail = (rfpData && rfpData.vendor_email) || '';
+        var vendorName  = (rfpData && rfpData.vendor_name)  || 'Vendor';
+        fetch('/api/submit/' + RFP_ID + '/confirmation', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ vendor_email: vendorEmail, vendor_name: vendorName, vendor_code: code })
+        }).catch(function() {});
       })
       .catch(function () {
         hideLoading();
