@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 import { emblemPngBase64 } from '../emblem-data'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-07-26-v40'
+const WORKER_VERSION = '2026-07-26-v41'
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.cpc-rfp.website.
@@ -1116,46 +1116,74 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
     } else if (pdfAttachment) {
       emailCategory = 'plain_email'  // PDF emails are comms only — no proposal entity
     } else if (!hasAttachment && bodyText.trim().length > 0) {
-      // Text-only email: use LLM to detect if vendor is declining participation
-      const openAiKey = (c.env as any).OPENAI_API_KEY || (globalThis as any).OPENAI_API_KEY || ''
-      if (openAiKey) {
-        try {
-          const intentRes = await fetch('https://api.openai.com/v1/chat/completions', {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${openAiKey}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              model: 'gpt-4o-mini',
-              max_tokens: 10,
-              temperature: 0,
-              messages: [
-                { role: 'system', content: 'You categorize vendor emails for a procurement system. Reply with exactly one word: DECLINE if the vendor is declining/withdrawing/expressing inability to participate in the RFP, or NEUTRAL for anything else.' },
-                { role: 'user', content: `Subject: ${subject}\n\n${bodyText.slice(0, 800)}` },
-              ],
-            }),
-          })
-          if (intentRes.ok) {
-            const intentData = await intentRes.json() as any
-            const verdict = (intentData?.choices?.[0]?.message?.content || '').trim().toUpperCase()
-            if (verdict === 'DECLINE') emailCategory = 'decline'
-          }
-        } catch(_) {}
+      // Text-only email: detect decline intent via LLM + keyword fallback
+      //
+      // Strip quoted reply chain before analysis — everything after the first
+      // "From: CPC Procurement" / "-----Original Message-----" / "On ... wrote:" line
+      // so the LLM and keywords only see the vendor's own words, not the original invitation.
+      const quoteStripPatterns = [
+        /\r?\nFrom:\s*CPC Procurement/i,
+        /\r?\n-{3,}[ \t]*Original Message[ \t]*-{3,}/i,
+        /\r?\nOn .{5,100}wrote:/i,
+        /\r?\n_{3,}/,
+        /\r?\n>{1}/,  // "> quoted text" lines
+      ]
+      let cleanBody = bodyText
+      for (const pat of quoteStripPatterns) {
+        const idx = cleanBody.search(pat)
+        if (idx > 30) { cleanBody = cleanBody.slice(0, idx); break }
+      }
+      cleanBody = cleanBody.trim()
+
+      // Comprehensive decline keyword list — applied to stripped body only
+      const declineKeywords = [
+        'not interested', 'decline to participate', 'declining to participate',
+        'unable to participate', 'cannot participate', 'regret to inform',
+        'pass on this opportunity', 'withdraw from', 'will not be submitting',
+        'no thank you', 'not in a position', 'unable to bid',
+        'not going to participate', 'not participate', 'will not participate',
+        'unable to submit', 'cannot submit', 'not able to participate',
+        'not able to submit', 'not in a position to participate',
+        'unable to respond', 'cannot respond', 'will not be responding',
+        'not bidding', 'not tendering', 'unable to tender',
+        'respectfully decline', 'must decline', 'have to decline',
+        'choosing not to participate', 'opted not to participate',
+        'will not be able to participate', 'are not going to participate',
+        'not going to be able', 'not able to bid', 'not able to tender',
+        'withdrawing from', 'withdraw our', 'not in a position to bid',
+        'cannot take part', 'unable to take part', 'not able to take part',
+      ]
+      const cleanBodyLower = cleanBody.toLowerCase()
+      const keywordHit = declineKeywords.some(kw => cleanBodyLower.includes(kw))
+
+      if (keywordHit) {
+        // Keywords matched on clean text — no need for LLM
+        emailCategory = 'decline'
       } else {
-        // Fallback keyword heuristic when no LLM key available
-        const bodyLower = bodyText.toLowerCase()
-        const declineKeywords = [
-          'not interested', 'decline to participate', 'declining to participate',
-          'unable to participate', 'cannot participate', 'regret to inform',
-          'pass on this opportunity', 'withdraw from', 'will not be submitting',
-          'no thank you', 'not in a position', 'unable to bid',
-          'not going to participate', 'not participate', 'will not participate',
-          'unable to submit', 'cannot submit', 'not able to participate',
-          'not able to submit', 'not in a position to participate',
-          'unable to respond', 'cannot respond', 'will not be responding',
-          'not bidding', 'not tendering', 'unable to tender',
-          'respectfully decline', 'must decline', 'have to decline',
-          'choosing not to participate', 'opted not to participate',
-        ]
-        if (declineKeywords.some(kw => bodyLower.includes(kw))) emailCategory = 'decline'
+        // No keyword hit — ask LLM on stripped body only
+        const openAiKey = (c.env as any).OPENAI_API_KEY || (globalThis as any).OPENAI_API_KEY || ''
+        if (openAiKey) {
+          try {
+            const intentRes = await fetch('https://api.openai.com/v1/chat/completions', {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${openAiKey}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                model: 'gpt-4o-mini',
+                max_tokens: 10,
+                temperature: 0,
+                messages: [
+                  { role: 'system', content: 'You categorize vendor reply emails for a procurement system. The vendor received an RFP invitation and is replying. Reply with exactly one word: DECLINE if the vendor is declining, withdrawing, or expressing inability/unwillingness to participate in the RFP. Reply NEUTRAL for acknowledgements, questions, or anything else.' },
+                  { role: 'user', content: `Subject: ${subject}\n\nVendor reply (quoted text removed):\n${cleanBody.slice(0, 600)}` },
+                ],
+              }),
+            })
+            if (intentRes.ok) {
+              const intentData = await intentRes.json() as any
+              const verdict = (intentData?.choices?.[0]?.message?.content || '').trim().toUpperCase()
+              if (verdict === 'DECLINE') emailCategory = 'decline'
+            }
+          } catch(_) {}
+        }
       }
     }
 
