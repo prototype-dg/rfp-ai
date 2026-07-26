@@ -3,7 +3,7 @@ import { initDb, seedVendors } from '../db/seed'
 import type { Bindings } from '../types'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-07-26-v28'
+const WORKER_VERSION = '2026-07-26-v29'
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.cpc-rfp.website.
@@ -1770,8 +1770,9 @@ async function evaluateProposal(proposal: any, rfp: any, env: any): Promise<any>
       for (const att of atts) {
         if (!att.r2_key) continue
         const pdfUrl = `https://a7b32759-e743-4139-9bb0-4bae44886667.vip.gensparksite.com/api/proposals/pdf/${encodeURIComponent(att.r2_key)}`
-        // Andersen technical PDF is 15.5MB — cap at 80 pages to stay within 50MB sidecar limit
-        const maxPages = att.label === 'technical' ? 80 : 50
+        // Cap pages to avoid OOM on VPS — large PDFs (>10MB) get fewer pages
+        const sizeMb = (att.size_bytes || 0) / 1024 / 1024
+        const maxPages = sizeMb > 10 ? 30 : sizeMb > 5 ? 50 : 80
         const result = await callSidecar(pdfUrl, env, maxPages)
         if (result && result.chars >= 100) {
           textParts.push(`[${att.label || att.filename}, ${result.pages_extracted}/${result.pages_total} pages]\n${result.text}`)
@@ -1780,10 +1781,13 @@ async function evaluateProposal(proposal: any, rfp: any, env: any): Promise<any>
     } catch (_) {}
 
     // Also try legacy single pdf_attachment_url field
+    // Strip r2:// prefix if present (legacy storage format)
     if (!textParts.length && proposal.pdf_attachment_url) {
-      const pdfKey = proposal.pdf_attachment_url.replace(/^\//, '')
+      const pdfKey = proposal.pdf_attachment_url
+        .replace(/^r2:\/\//, '')   // strip r2:// prefix
+        .replace(/^\//, '')         // strip leading slash
       const pdfUrl = `https://a7b32759-e743-4139-9bb0-4bae44886667.vip.gensparksite.com/api/proposals/pdf/${encodeURIComponent(pdfKey)}`
-      const result = await callSidecar(pdfUrl, env, 80)
+      const result = await callSidecar(pdfUrl, env, 40)
       if (result && result.chars >= 100) {
         textParts.push(`[${proposal.pdf_filename || 'proposal.pdf'}, ${result.pages_extracted}/${result.pages_total} pages]\n${result.text}`)
       }
