@@ -28,22 +28,46 @@
 
   /* ── Load RFP info ────────────────────────────────────────── */
   function loadRfp() {
-    fetch('/api/submit/' + RFP_ID)
+    var url = '/api/submit/' + RFP_ID + (PRESET_CODE ? '?vendor_code=' + encodeURIComponent(PRESET_CODE) : '');
+    fetch(url)
       .then(function (res) {
-        if (!res.ok) {
-          return res.json().catch(function () { return {}; }).then(function (err) {
-            showRfpError(err.error || 'This RFP is not available for submission.');
-            document.getElementById('formCard').style.display = 'none';
-          });
-        }
-        return res.json().then(function (data) {
-          rfpData = data;
-          renderRfpCard(data);
+        return res.json().catch(function () { return {}; }).then(function (data) {
+          return { ok: res.ok, status: res.status, data: data };
         });
+      })
+      .then(function (result) {
+        if (!result.ok) {
+          // Declined vendor — show polite removal message instead of form
+          if (result.status === 403 && result.data && result.data.declined) {
+            showDeclinedMessage();
+            document.getElementById('formCard').style.display = 'none';
+            return;
+          }
+          showRfpError(result.data.error || 'This RFP is not available for submission.');
+          document.getElementById('formCard').style.display = 'none';
+          return;
+        }
+        rfpData = result.data;
+        renderRfpCard(result.data);
       })
       .catch(function () {
         showRfpError('Could not load RFP details. Please refresh the page.');
       });
+  }
+
+  function showDeclinedMessage() {
+    var html = '<div style="background:#FBF8F2;border:1px solid #E7DFCE;border-radius:8px;padding:32px 24px;text-align:center;max-width:480px;margin:0 auto">'
+      + '<div style="width:56px;height:56px;border-radius:50%;background:#F5F0E8;display:flex;align-items:center;justify-content:center;margin:0 auto 16px">'
+      + '<i class="fas fa-info-circle" style="color:#BA9765;font-size:1.5rem"></i></div>'
+      + '<h3 style="color:#1B1712;font-family:Georgia,serif;font-size:1.1rem;margin:0 0 12px">Thank You for Your Interest</h3>'
+      + '<p style="color:#5a4e3a;font-size:0.9rem;line-height:1.6;margin:0 0 12px">'
+      + 'We appreciate your time and interest in this procurement opportunity.</p>'
+      + '<p style="color:#5a4e3a;font-size:0.9rem;line-height:1.6;margin:0">'
+      + 'Following your earlier communication, your organization has been respectfully removed from the list of participants for this RFP. '
+      + 'This portal link is no longer active for your account.</p>'
+      + '<p style="color:#9ca3af;font-size:0.8rem;margin:16px 0 0">If you believe this is an error, please contact the procurement team directly.</p>'
+      + '</div>';
+    document.getElementById('rfpCard').innerHTML = html;
   }
 
   /* ── Render RFP card ──────────────────────────────────────── */

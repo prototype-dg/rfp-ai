@@ -381,7 +381,12 @@ export function getLayout(): string {
     .lc-done .lc-circle    { background: var(--cpc-gold); color: var(--cpc-paper); border-color: var(--cpc-gold); }
     .lc-done .lc-label     { color: var(--cpc-gold-deep); }
     .lc-done .lc-connector { background: var(--cpc-gold); }
-    .lc-active .lc-circle  { background: var(--cpc-ink); color: var(--cpc-paper); border-color: var(--cpc-ink); box-shadow: 0 0 0 4px rgba(27,23,18,0.12); }
+    @keyframes lc-pulse {
+      0%   { box-shadow: 0 0 0 0 rgba(186,151,101,0.55); }
+      70%  { box-shadow: 0 0 0 7px rgba(186,151,101,0); }
+      100% { box-shadow: 0 0 0 0 rgba(186,151,101,0); }
+    }
+    .lc-active .lc-circle  { background: var(--cpc-ink); color: var(--cpc-paper); border-color: var(--cpc-ink); animation: lc-pulse 1.8s ease-out infinite; }
     .lc-active .lc-label   { color: var(--cpc-ink); font-weight: 600; }
     .lc-active .lc-connector { background: var(--cpc-line); }
     .lc-pending .lc-circle { background: var(--cpc-gold-tint); color: var(--cpc-ink-2); border-color: var(--cpc-line); }

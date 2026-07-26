@@ -3,7 +3,7 @@ import { initDb, seedVendors } from '../db/seed'
 import type { Bindings } from '../types'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-07-26-v38'
+const WORKER_VERSION = '2026-07-26-v39'
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.cpc-rfp.website.
@@ -1102,34 +1102,59 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
       a.content_type?.includes('pdf')
     )
 
-    // ── Simple email categorization (heuristic only — no LLM) ───
+    // ── Email categorization ─────────────────────────────────────
+    // Rules:
+    //  1. spreadsheet attachment  → questions (parse Q&A)
+    //  2. PDF attachment only     → plain communication (log + notify, no proposal created)
+    //  3. no attachment, text only → use LLM to detect decline intent
+    //  4. everything else         → plain_email
     let emailCategory = 'plain_email'
-    const bodyLower = bodyText.toLowerCase()
-    const declineKeywords = [
-      'not interested', 'decline to participate', 'declining to participate',
-      'unable to participate', 'cannot participate', 'regret to inform',
-      'pass on this opportunity', 'withdraw from', 'will not be submitting',
-      'no thank you',
-    ]
-    const proposalKeywords = ['find attached', 'please find', 'proposal', 'rfp response', 'bid', 'tender response', 'submission', 'attached our', 'attaching our']
 
-    if (declineKeywords.some(kw => bodyLower.includes(kw))) {
-      emailCategory = 'decline'
-    } else if (pdfAttachment && !spreadsheetAttachment) {
-      emailCategory = 'proposal'
-    } else if (spreadsheetAttachment) {
+    if (spreadsheetAttachment) {
       emailCategory = 'questions'
     } else if (pdfAttachment) {
-      emailCategory = 'proposal'
-    } else if (proposalKeywords.some(k => bodyLower.includes(k)) && hasAttachment) {
-      emailCategory = 'proposal'
+      emailCategory = 'plain_email'  // PDF emails are comms only — no proposal entity
+    } else if (!hasAttachment && bodyText.trim().length > 0) {
+      // Text-only email: use LLM to detect if vendor is declining participation
+      const openAiKey = (c.env as any).OPENAI_API_KEY || (globalThis as any).OPENAI_API_KEY || ''
+      if (openAiKey) {
+        try {
+          const intentRes = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${openAiKey}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              model: 'gpt-4o-mini',
+              max_tokens: 10,
+              temperature: 0,
+              messages: [
+                { role: 'system', content: 'You categorize vendor emails for a procurement system. Reply with exactly one word: DECLINE if the vendor is declining/withdrawing/expressing inability to participate in the RFP, or NEUTRAL for anything else.' },
+                { role: 'user', content: `Subject: ${subject}\n\n${bodyText.slice(0, 800)}` },
+              ],
+            }),
+          })
+          if (intentRes.ok) {
+            const intentData = await intentRes.json() as any
+            const verdict = (intentData?.choices?.[0]?.message?.content || '').trim().toUpperCase()
+            if (verdict === 'DECLINE') emailCategory = 'decline'
+          }
+        } catch(_) {}
+      } else {
+        // Fallback keyword heuristic when no LLM key available
+        const bodyLower = bodyText.toLowerCase()
+        const declineKeywords = [
+          'not interested', 'decline to participate', 'declining to participate',
+          'unable to participate', 'cannot participate', 'regret to inform',
+          'pass on this opportunity', 'withdraw from', 'will not be submitting',
+          'no thank you', 'not in a position', 'unable to bid',
+        ]
+        if (declineKeywords.some(kw => bodyLower.includes(kw))) emailCategory = 'decline'
+      }
     }
 
     console.log(`[webhook] Email category: ${emailCategory} | from: ${fromAddress} | vendor: ${vendorDisplayName} | attachments: ${attachments.length}`)
 
     // ── Log the inbound email ────────────────────────────────────
     const emailTypeForLog = emailCategory === 'questions' ? 'qa_questions'
-      : emailCategory === 'proposal' ? 'proposal'
       : emailCategory === 'decline' ? 'decline'
       : 'inbound'
     const insertResult = await db.prepare(`
@@ -1267,142 +1292,8 @@ procurement@cpc-rfp.website`
         `).bind(rfpId, vendorId).run()
       }
 
-    } else if (emailCategory === 'proposal') {
-      // ── Store attachments in R2 + create proposal entity ────────
-      // No text extraction, no AI evaluation.
-      const bucket: R2Bucket | undefined = (c.env as any).PROPOSALS_BUCKET
-      const safeVendorName = (vendorDisplayName || 'vendor').replace(/[^a-zA-Z0-9_-]/g,'_').slice(0,40)
-
-      let pdfR2Key = ''
-      let pdfFilename = ''
-      const allProposalAttachments: Array<{
-        r2_key: string
-        filename: string
-        size_bytes: number
-        content_type: string
-        label: string
-      }> = []
-
-      try {
-        const attachListRes = await fetch(`https://api.resend.com/emails/receiving/${emailId}/attachments`, {
-          headers: { 'Authorization': `Bearer ${apiKey}` }
-        })
-        if (attachListRes.ok) {
-          const attachList = await attachListRes.json() as any
-          const allAttachData: any[] = attachList.data || []
-
-          const docAttachments = allAttachData.filter((a: any) =>
-            a.filename?.match(/\.(pdf|doc|docx)$/i) ||
-            a.content_type?.includes('pdf') ||
-            a.content_type?.includes('word') ||
-            a.content_type?.includes('msword') ||
-            a.content_type?.includes('officedocument')
-          )
-          const attachsToProcess = docAttachments.length > 0 ? docAttachments : allAttachData.slice(0, 5)
-
-          for (let attachIdx = 0; attachIdx < attachsToProcess.length; attachIdx++) {
-            const attachData = attachsToProcess[attachIdx]
-            const fn = attachData.filename || `document_${attachIdx + 1}.pdf`
-            const ct = attachData.content_type || 'application/pdf'
-            const label = detectAttachmentLabel(fn)
-            const ts = Date.now() + attachIdx
-            const r2Key = `proposals/${rfpId}/${vendorId}_${safeVendorName}_${ts}_${attachIdx}.pdf`
-
-            if (!attachData?.download_url) {
-              allProposalAttachments.push({ r2_key: '', filename: fn, size_bytes: 0, content_type: ct, label })
-              continue
-            }
-
-            try {
-              const controller = new AbortController()
-              const timeoutId = setTimeout(() => controller.abort(), 25000)
-              const fileRes = await fetch(attachData.download_url, { signal: controller.signal })
-              clearTimeout(timeoutId)
-
-              if (!fileRes.ok) {
-                allProposalAttachments.push({ r2_key: '', filename: fn, size_bytes: 0, content_type: ct, label })
-                continue
-              }
-
-              let storedR2Key = ''
-              if (bucket && fileRes.body) {
-                // Stream directly to R2 — no buffering, works for any file size
-                try {
-                  await bucket.put(r2Key, fileRes.body, {
-                    httpMetadata: { contentType: ct },
-                    customMetadata: { rfpId: String(rfpId), vendorId: String(vendorId), filename: fn, label },
-                  })
-                  storedR2Key = r2Key
-                  console.log(`[webhook] Attachment ${attachIdx} (${label}) stored in R2: ${r2Key}`)
-                } catch(r2Err: any) {
-                  console.error(`[webhook] R2 put failed for ${fn}: ${r2Err?.message}`)
-                }
-              }
-
-              const getSize = parseInt(fileRes.headers.get('Content-Length') || '0', 10)
-              allProposalAttachments.push({ r2_key: storedR2Key, filename: fn, size_bytes: getSize, content_type: ct, label })
-
-              if (attachIdx === 0 || (label === 'technical' && !pdfR2Key)) {
-                pdfR2Key = storedR2Key
-                pdfFilename = fn
-              }
-            } catch(downloadErr: any) {
-              console.error(`[webhook] Attachment ${attachIdx} download error: ${downloadErr?.message}`)
-              allProposalAttachments.push({ r2_key: '', filename: fn, size_bytes: 0, content_type: ct, label })
-            }
-          }
-        }
-      } catch(_e) {}
-
-      // Fallback: if no download URL at all, record filename from metadata
-      if (allProposalAttachments.length === 0 && attachments.length > 0) {
-        const first = pdfAttachment || attachments[0]
-        pdfFilename = first?.filename || ''
-        if (pdfFilename) {
-          allProposalAttachments.push({ r2_key: '', filename: pdfFilename, size_bytes: 0, content_type: first?.content_type || 'application/pdf', label: detectAttachmentLabel(pdfFilename) })
-        }
-      } else if (!pdfFilename && attachments.length > 0) {
-        pdfFilename = (pdfAttachment || attachments[0])?.filename || ''
-      }
-
-      const pdfUrl = pdfR2Key ? `r2://${pdfR2Key}` : null
-      const proposalAttachmentsJson = allProposalAttachments.length > 0 ? JSON.stringify(allProposalAttachments) : null
-
-      const existing = await db.prepare('SELECT id FROM proposals WHERE vendor_id=? AND rfp_id=?').bind(vendorId, rfpId).first<any>()
-
-      if (existing) {
-        await db.prepare(`
-          UPDATE proposals SET
-            pdf_attachment_url=?, pdf_filename=?, proposal_attachments=?,
-            status='submitted', is_real_submission=?
-          WHERE id=?
-        `).bind(pdfUrl, pdfFilename || null, proposalAttachmentsJson, vendorRow?.contact_email?.includes('andersenlab.com') ? 1 : 0, existing.id).run()
-      } else {
-        await db.prepare(`
-          INSERT INTO proposals (
-            rfp_id, vendor_id, status, is_real_submission,
-            pdf_attachment_url, pdf_filename, proposal_attachments, created_at
-          )
-          VALUES (?,?,'submitted',?,?,?,?,datetime('now'))
-        `).bind(
-          rfpId, vendorId,
-          vendorRow?.contact_email?.includes('andersenlab.com') ? 1 : 0,
-          pdfUrl, pdfFilename || null, proposalAttachmentsJson
-        ).run()
-      }
-
-      if (vendorId) {
-        await db.prepare(`
-          INSERT INTO rfp_vendors (rfp_id, vendor_id, shortlisted, status)
-          VALUES (?,?,1,'active')
-          ON CONFLICT(rfp_id, vendor_id) DO UPDATE SET shortlisted=1
-        `).bind(rfpId, vendorId).run()
-      }
-
-      console.log(`[webhook] Proposal from ${vendorDisplayName} stored — ${allProposalAttachments.length} attachment(s)`)
-
-      // Note: Do NOT auto-advance stage — award is manual via Award button only
     }
+    // Note: plain_email (including PDF attachments) is just logged above — no further processing
 
     return c.json({ ok: true, emailCategory, newQuestions: newCount, emailLogId, autoInserted: newCount > 0 })
   } catch(e: any) {
@@ -2165,6 +2056,22 @@ apiRouter.get('/submit/:rfpId', async (c) => {
   if (!rfp) return c.json({ error: 'RFP not found' }, 404)
   const closedStages = ['awarded', 'archived']
   if (closedStages.includes(rfp.stage)) return c.json({ error: 'This RFP is no longer accepting submissions.' }, 403)
+
+  // Declined vendor check — requires vendor_code query param to resolve vendor
+  const vendorCode = (c.req.query('vendor_code') || '').trim().toUpperCase()
+  if (vendorCode) {
+    const codeMatch = vendorCode.match(/^RFP-(\d+)-V(\d+)$/)
+    if (codeMatch && Number(codeMatch[1]) === Number(rfpId)) {
+      const vId = Number(codeMatch[2])
+      const rv = await c.env.DB.prepare(
+        `SELECT status FROM rfp_vendors WHERE rfp_id=? AND vendor_id=?`
+      ).bind(rfpId, vId).first<any>()
+      if (rv?.status === 'declined') {
+        return c.json({ declined: true }, 403)
+      }
+    }
+  }
+
   return c.json(rfp)
 })
 
@@ -2177,6 +2084,11 @@ apiRouter.post('/submit/:rfpId', async (c) => {
   if (!rfp) return c.json({ error: 'RFP not found' }, 404)
   const closedStages = ['awarded', 'archived']
   if (closedStages.includes(rfp.stage)) return c.json({ error: 'This RFP is no longer accepting submissions.' }, 403)
+
+  // Early declined-vendor check before processing form data
+  // We need to read the vendor_code from formData — do a quick peek
+  // (This is checked again below after full vendor resolution)
+  // Full check happens after vendorId is resolved below.
 
   try { await initDb(c.env.DB) } catch (_) {}
 
@@ -2205,6 +2117,14 @@ apiRouter.post('/submit/:rfpId', async (c) => {
 
     if (!vendorId) {
       return c.json({ error: 'Invalid participant code. Please use the code from your invitation email.' }, 400)
+    }
+
+    // Declined vendor check — block portal submission
+    const rvStatus = await c.env.DB.prepare(
+      `SELECT status FROM rfp_vendors WHERE rfp_id=? AND vendor_id=?`
+    ).bind(rfpId, vendorId).first<any>()
+    if (rvStatus?.status === 'declined') {
+      return c.json({ declined: true }, 403)
     }
 
     // Collect all uploaded files
@@ -3445,21 +3365,84 @@ async function sendRealEmail(
     return { ok: false, error: 'RESEND_API_KEY not configured' }
   }
 
-  const htmlBody = `<div style="font-family:Arial,sans-serif;max-width:680px;margin:0 auto;padding:24px">
-    <div style="background:#1a1a2e;color:#c9a84c;padding:18px 24px;border-radius:8px 8px 0 0;display:flex;align-items:center;gap:12px">
-      <span style="font-size:22px">👑</span>
-      <div>
-        <div style="font-size:16px;font-weight:700">Crown Prince's Court — Procurement</div>
-        <div style="font-size:12px;color:#e5c87a;opacity:0.85">procurement@cpc-rfp.website</div>
-      </div>
-    </div>
-    <div style="background:#fff;padding:28px;border:1px solid #e5e7eb;border-radius:0 0 8px 8px">
-      <pre style="white-space:pre-wrap;font-family:Arial,sans-serif;font-size:14px;line-height:1.6;color:#111">${bodyText.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</pre>
-    </div>
-    <div style="margin-top:12px;font-size:11px;color:#9ca3af;text-align:center">
-      This is an official procurement communication from the Crown Prince's Court, Abu Dhabi.
-    </div>
-  </div>`
+  // ── CPC Brandbook Email Template ──────────────────────────────────────────
+  // Colors: --cpc-gold #BA9765 | --cpc-gold-deep #745B35 | --cpc-ivory #FBF8F2
+  //         --cpc-ink #1B1712 | --cpc-line #E7DFCE | --cpc-gold-tint #F5EFE3
+  const safeBody = bodyText.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+  const bodyHtmlContent = safeBody.replace(/\n/g,'<br>')
+  const htmlBody = `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>CPC Procurement</title></head>
+<body style="margin:0;padding:0;background:#F1F1F1;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#F1F1F1;padding:32px 0">
+  <tr><td align="center">
+    <table width="620" cellpadding="0" cellspacing="0" border="0" style="max-width:620px;width:100%">
+
+      <!-- ── Header ── -->
+      <tr>
+        <td style="background:#1B1712;border-radius:12px 12px 0 0;padding:28px 36px">
+          <table width="100%" cellpadding="0" cellspacing="0" border="0">
+            <tr>
+              <td style="padding-right:16px;vertical-align:middle;width:60px">
+                <!-- CPC emblem placeholder (inline SVG crown) -->
+                <div style="width:52px;height:52px;background:#F5EFE3;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:26px;text-align:center;line-height:52px">&#x1F451;</div>
+              </td>
+              <td style="vertical-align:middle">
+                <div style="font-family:Georgia,'Times New Roman',serif;font-size:19px;font-weight:700;color:#BA9765;letter-spacing:0.02em;line-height:1.2">Crown Prince's Court</div>
+                <div style="font-family:'Courier New',monospace;font-size:9px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:#E9DCC4;margin-top:4px;opacity:0.85">PROCUREMENT &amp; CONTRACTING</div>
+              </td>
+              <td align="right" style="vertical-align:middle">
+                <div style="font-family:'Courier New',monospace;font-size:9px;color:#BA9765;letter-spacing:0.12em;text-transform:uppercase;opacity:0.75">Abu Dhabi, UAE</div>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+
+      <!-- ── Gold rule ── -->
+      <tr>
+        <td style="background:#BA9765;height:3px;font-size:0;line-height:0">&nbsp;</td>
+      </tr>
+
+      <!-- ── Body ── -->
+      <tr>
+        <td style="background:#FFFFFF;padding:36px 36px 28px;border-left:1px solid #E7DFCE;border-right:1px solid #E7DFCE">
+          <div style="font-size:14px;line-height:1.75;color:#1B1712">${bodyHtmlContent}</div>
+        </td>
+      </tr>
+
+      <!-- ── Footer ── -->
+      <tr>
+        <td style="background:#FBF8F2;border:1px solid #E7DFCE;border-top:none;border-radius:0 0 12px 12px;padding:20px 36px">
+          <table width="100%" cellpadding="0" cellspacing="0" border="0">
+            <tr>
+              <td>
+                <div style="font-family:'Courier New',monospace;font-size:9px;letter-spacing:0.14em;text-transform:uppercase;color:#745B35;font-weight:700;margin-bottom:4px">Official Procurement Correspondence</div>
+                <div style="font-size:11px;color:#4A4238;line-height:1.5">Crown Prince's Court &nbsp;·&nbsp; Abu Dhabi, UAE<br>
+                <a href="mailto:procurement@cpc-rfp.website" style="color:#BA9765;text-decoration:none">procurement@cpc-rfp.website</a></div>
+              </td>
+              <td align="right" style="vertical-align:bottom">
+                <div style="font-family:'Courier New',monospace;font-size:8px;color:#9ca3af;letter-spacing:0.06em;text-transform:uppercase">AI RFP Management System</div>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+
+      <!-- ── Disclaimer ── -->
+      <tr>
+        <td style="padding:14px 0 0;text-align:center">
+          <div style="font-size:10px;color:#9ca3af;line-height:1.5">This is an official procurement communication from the Crown Prince's Court.<br>
+          Please do not reply to this message unless instructed.</div>
+        </td>
+      </tr>
+
+    </table>
+  </td></tr>
+</table>
+</body>
+</html>`
 
   // Attach PDF if provided (base64 string from client-side html2pdf generation)
   const attachments: any[] = pdfBase64

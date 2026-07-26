@@ -910,6 +910,7 @@ let appState = {
   currentRfp: null,
   previousPage: null,
   unreadQA: 0,         // count of unanswered questions (> 0 shows badge on Q&A tab)
+  unreadProposals: 0,  // count of new portal submissions (> 0 shows badge on Proposals tab)
   notifications: [],
   unreadNotifications: 0,
 };
@@ -1266,57 +1267,59 @@ var STAGES = ['draft','published','qa_open','submissions_closed','awarded'];
 var STAGE_LABELS = [t('stage_publish'), t('stage_invite'), t('stage_qa'), t('stage_proposals'), t('stage_award')];
 var STAGE_ICONS = ['fa-paper-plane','fa-envelope-open-text','fa-comments','fa-inbox','fa-trophy'];
 
-// Explicit completion flags — keyed by rfpId, set when each milestone is reached
+// Explicit completion/active flags — keyed by rfpId, set when each milestone is reached
 // Keys: publish, invite, qa, proposals, award
 var _stageCompleted = {};
+var _stageActive    = {};
 
 function getCompletedFlags(rfpId) {
   return _stageCompleted[rfpId] || {};
 }
 
+function getActiveFlags(rfpId) {
+  return _stageActive[rfpId] || {};
+}
+
 function markStageCompleted(rfpId, key) {
   if (!_stageCompleted[rfpId]) _stageCompleted[rfpId] = {};
   _stageCompleted[rfpId][key] = true;
+  // Clear active for this key — it's now done
+  if (_stageActive[rfpId]) delete _stageActive[rfpId][key];
   // Award implies proposals also done
-  if (key === 'award') _stageCompleted[rfpId]['proposals'] = true;
+  if (key === 'award') {
+    _stageCompleted[rfpId]['proposals'] = true;
+    if (_stageActive[rfpId]) delete _stageActive[rfpId]['proposals'];
+  }
+}
+
+function markStageActive(rfpId, key) {
+  if (!_stageActive[rfpId]) _stageActive[rfpId] = {};
+  _stageActive[rfpId][key] = true;
+  // Never active if already completed
+  if (_stageCompleted[rfpId] && _stageCompleted[rfpId][key]) {
+    delete _stageActive[rfpId][key];
+  }
 }
 
 function renderLifecycleBar(rfp) {
   if (!rfp) return;
   const rfpId = rfp.id;
-  const stage = rfp.stage || 'draft';
-  const flags = getCompletedFlags(rfpId);
+  const flags  = getCompletedFlags(rfpId);
+  const active = getActiveFlags(rfpId);
 
-  // Determine completion per stage from explicit flags
-  // Stage order: draft(0), published(1), qa_open(2), submissions_closed(3), awarded(4)
-  // 'publish'   → step 0 done when stage moved past draft OR flag set
-  // 'invite'    → step 1 done when flag set
-  // 'qa'        → step 2 done when flag set
-  // 'proposals' → step 3 done when flag set (set together with award)
-  // 'award'     → step 4 done when flag set
-
-  const stageIdx = STAGES.indexOf(stage);
-  const completionMap = [
-    flags.publish  || stageIdx > 0,                                           // Publish RFP: done once past draft
-    flags.invite   || stageIdx >= 2,                                           // Invite: done once stage is qa_open or beyond
-    flags.qa       || stageIdx >= 3 || stage === 'submissions_closed' || stage === 'awarded',  // Q&A
-    flags.proposals || stage === 'awarded',                                    // Proposals
-    flags.award,                                                               // Award
-  ];
-
-  // Active step: first step not yet completed
-  let activeIdx = -1;
-  for (let i = 0; i < STAGES.length; i++) {
-    if (!completionMap[i]) { activeIdx = i; break; }
-  }
-  if (activeIdx === -1) activeIdx = STAGES.length - 1; // all done
+  // Stage order: publish(0), invite(1), qa(2), proposals(3), award(4)
+  // completed → lc-done (gold check)
+  // active    → lc-active (black icon + pulse)
+  // else      → lc-pending (gray)
+  const completionMap = [flags.publish, flags.invite, flags.qa, flags.proposals, flags.award];
+  const activeMap     = [active.publish, active.invite, active.qa, active.proposals, active.award];
 
   let html = '';
   for (let i = 0; i < STAGES.length; i++) {
     let cls;
     if (completionMap[i]) {
       cls = 'lc-done';
-    } else if (i === activeIdx) {
+    } else if (activeMap[i]) {
       cls = 'lc-active';
     } else {
       cls = 'lc-pending';
@@ -1330,7 +1333,6 @@ function renderLifecycleBar(rfp) {
     if (i < STAGES.length - 1) html += '<div class="lc-connector"></div>';
     html += '</div>';
   }
-  // No info pill
 
   document.getElementById('lifecycleBar').innerHTML = '<div class="lifecycle-bar">' + html + '</div>';
   document.getElementById('lifecycleBar').style.display = 'block';
@@ -1351,10 +1353,12 @@ function renderRfpTabs(activeTab, rfpId, qaBadge) {
   RFP_TABS.forEach(function(tab) {
     const isActive = tab.id === activeTab;
     const qaBadgeHtml = (tab.id === 'qa' && qaBadge) ? '<span style="background:#ef4444;color:white;border-radius:10px;padding:1px 6px;font-size:0.68rem;margin-left:4px;font-weight:700">' + (typeof qaBadge === 'number' && qaBadge > 0 ? qaBadge : '!') + '</span>' : '';
+    const propsBadgeCount = appState.unreadProposals || 0;
+    const propsBadgeHtml = (tab.id === 'proposals' && propsBadgeCount > 0) ? '<span style="background:#ef4444;color:white;border-radius:10px;padding:1px 6px;font-size:0.68rem;margin-left:4px;font-weight:700">' + propsBadgeCount + '</span>' : '';
     const emailBadgeCount = appState.unreadEmailCount || 0;
     const emailBadgeHtml = (tab.id === 'emails' && emailBadgeCount > 0) ? '<span style="background:var(--cpc-gold);color:white;border-radius:10px;padding:1px 6px;font-size:0.68rem;margin-left:4px">' + emailBadgeCount + '</span>' : '';
     html += '<div class="rfp-tab' + (isActive ? ' active' : '') + '" onclick="switchRfpTab(\'' + tab.id + '\',' + rfpId + ')">';
-    html += '<i class="fas ' + tab.icon + '"></i>' + escHtml(tab.label) + qaBadgeHtml + emailBadgeHtml;
+    html += '<i class="fas ' + tab.icon + '"></i>' + escHtml(tab.label) + qaBadgeHtml + propsBadgeHtml + emailBadgeHtml;
     html += '</div>';
   });
   html += '</div>';
@@ -1367,6 +1371,10 @@ function switchRfpTab(tab, rfpId) {
   // Clear Q&A unread badge when user navigates to the Q&A tab
   if (tab === 'qa' && appState.unreadQA) {
     appState.unreadQA = 0;   // clear badge when user navigates to Q&A
+  }
+  // Clear proposals badge when user navigates to the Proposals tab
+  if (tab === 'proposals' && appState.unreadProposals) {
+    appState.unreadProposals = 0;
   }
   renderRfpTabs(tab, rfpId, appState.unreadQA);
   const rfp = appState.currentRfp;
@@ -1589,6 +1597,32 @@ pages.rfp_detail = async function(opts) {
   document.getElementById('pageTitle').textContent = rfp.title || 'RFP Detail';
   document.getElementById('pageSubtitle').textContent = (rfp.ref_number||'') + ' \u2022 ' + stageLabelMap(rfp.stage||'draft');
 
+  // Seed initial active stage from DB stage if no flags set yet
+  if (!_stageCompleted[rfpId] && !_stageActive[rfpId]) {
+    var s = rfp.stage || 'draft';
+    if (s === 'draft') {
+      markStageActive(rfpId, 'publish');
+    } else if (s === 'published') {
+      markStageCompleted(rfpId, 'publish');
+      markStageActive(rfpId, 'invite');
+    } else if (s === 'qa_open') {
+      markStageCompleted(rfpId, 'publish');
+      markStageCompleted(rfpId, 'invite');
+      markStageActive(rfpId, 'qa');
+      markStageActive(rfpId, 'proposals');
+    } else if (s === 'submissions_closed') {
+      markStageCompleted(rfpId, 'publish');
+      markStageCompleted(rfpId, 'invite');
+      markStageCompleted(rfpId, 'qa');
+      markStageActive(rfpId, 'proposals');
+    } else if (s === 'awarded') {
+      markStageCompleted(rfpId, 'publish');
+      markStageCompleted(rfpId, 'invite');
+      markStageCompleted(rfpId, 'qa');
+      markStageCompleted(rfpId, 'proposals');
+      markStageCompleted(rfpId, 'award');
+    }
+  }
   renderLifecycleBar(rfp);
   renderRfpTabs(opts.tab || appState.currentRfpTab, rfpId, appState.unreadQA);
 
@@ -2061,9 +2095,11 @@ async function advanceRfpStage(rfpId, stage) {
   document.getElementById('pageSubtitle').textContent = (rfp.ref_number||'') + ' \u2022 ' + stageLabelMap(rfp.stage||'draft');
   renderLifecycleBar(rfp);
 
-  // Mark Publish RFP stage complete
+  // Mark Publish RFP stage complete; Invite becomes active next
   if (stage === 'published') {
     markStageCompleted(rfpId, 'publish');
+    markStageActive(rfpId, 'invite');
+    renderLifecycleBar(rfp);
     showToast('\uD83C\uDF89 RFP Published! Now proceed to the Vendors tab to invite vendors.', 'success', 5000);
   }
   renderRfpTabs(appState.currentRfpTab, rfpId, appState.unreadQA);
@@ -2672,12 +2708,11 @@ async function confirmSendInvitations(rfpId) {
     renderRfpTabs('vendors', rfpId, appState.unreadQA);
     // Count shortlisted vendors from local state (avoid undefined reference)
     var sentCount = (result && result.results) ? result.results.length : (appState.rfpVendors ? appState.rfpVendors.filter(function(v){ return v.shortlisted; }).length : 0);
-    // Mark Invite, Q&A and Proposals stages completed on lifecycle bar
-    // (Sending invitations means we are now waiting for both questions AND proposals)
+    // Publish + Invite are now done; Q&A and Proposals become ACTIVE (we wait for both)
     markStageCompleted(rfpId, 'publish');
     markStageCompleted(rfpId, 'invite');
-    markStageCompleted(rfpId, 'qa');
-    markStageCompleted(rfpId, 'proposals');
+    markStageActive(rfpId, 'qa');
+    markStageActive(rfpId, 'proposals');
     renderLifecycleBar(rfp);
     var pdfNote = pdfBase64 ? ' with PDF attachment' : '';
     showToast('\u2709\uFE0F Invitations sent to ' + sentCount + ' vendor(s)' + pdfNote + '!', 'success', 5000);
@@ -3099,12 +3134,13 @@ async function silentCheckProposals(rfpId) {
     );
     showToast('📄 Proposal received from ' + nameStr + '. Check Proposals tab.', 'success', 5000);
 
-    // If user is already on this RFP, refresh proposals tab or badge
+    // If user is already on this RFP, refresh proposals tab or increment badge
     if (appState.currentRfpId && String(appState.currentRfpId) === String(rfpId)) {
       if (appState.currentRfpTab === 'proposals') {
         rfpTabs.proposals(rfpId);
       } else {
-        // Just update the tab bar to show the user there's something to see
+        // Increment badge and update tab bar
+        appState.unreadProposals = (appState.unreadProposals || 0) + newCount;
         renderRfpTabs(appState.currentRfpTab, rfpId, appState.unreadQA);
       }
     }
@@ -3499,13 +3535,18 @@ rfpTabs.proposals = async function(rfpId) {
       + '<td>' + statusBadge(p) + '</td>'
       + '<td style="white-space:nowrap">'
       + '<button class="btn-ghost btn-sm" onclick="viewProposalDetail(' + p.id + ')" style="margin-right:4px" title="View details"><i class="fas fa-eye"></i>' + t('prop_view_btn') + '</button>'
+      + (p.ai_recommendation ? '<button class="btn-ghost btn-sm" onclick="evaluateSingleProposal(' + rfpId + ',' + p.id + ')" style="margin-right:4px" title="Re-evaluate with AI"><i class="fas fa-sync-alt"></i> ' + t('panel_save_reevaluate').replace('Save & ','') + '</button>' : '')
       + awardBtn
       + '</td>'
       + '</tr>';
   });
 
   var evaluated = proposals.filter(function(p){ return p.ai_recommendation; }).length;
-  var evalBtn = proposals.length > 0
+  var bulkDone = proposals.length > 0 && evaluated === proposals.length;
+  // Show bulk "Evaluate with AI" only if no proposals have been evaluated yet.
+  // Once bulk eval is done (all have ai_recommendation), replace with nothing here —
+  // individual "Re-evaluate" buttons appear in the row actions instead.
+  var evalBtn = proposals.length > 0 && evaluated === 0
     ? '<button class="btn-primary" id="evaluateAllBtn" onclick="evaluateAllProposals(' + rfpId + ')" style="background:linear-gradient(135deg,var(--cpc-gold-deep),var(--cpc-gold));border:none"><i class="fas fa-robot"></i>' + t('prop_evaluate_ai') + '</button>'
     : '';
 
@@ -3546,6 +3587,10 @@ async function evaluateAllProposals(rfpId) {
     var count = result.evaluated || 0;
     showToast('✅ AI evaluation complete — ' + count + ' proposal(s) scored!', 'success', 7000);
     addNotification('info', '🤖 AI Evaluation Complete', count + ' proposal(s) scored and ranked by AI.', rfpId, 'proposals', null);
+    // Award stage becomes ACTIVE now that bulk evaluation is done
+    markStageActive(rfpId, 'award');
+    var rfpNow = appState.currentRfp;
+    if (rfpNow && String(rfpNow.id) === String(rfpId)) renderLifecycleBar(rfpNow);
     rfpTabs.proposals(rfpId);
   } catch(e) {
     showToast('Evaluation failed: ' + (e.message || e), 'error');
