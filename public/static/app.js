@@ -84,6 +84,101 @@ var I18N = {
     lbl_budget:      'Budget',
     lbl_deadline:    'Deadline',
     lbl_stage:       'Stage',
+    // Notifications panel
+    notif_panel_title:  'Notifications',
+    notif_mark_read:    'Mark all read',
+    notif_none:         'No notifications yet',
+    notif_dismiss:      'Dismiss',
+    // Dashboard stats
+    dash_total_rfps:    'Total RFPs',
+    dash_win_rate:      'Win Rate',
+    dash_avg_duration:  'Avg Duration',
+    dash_vendor_pool:   'Vendor Pool',
+    dash_proposals_lbl: 'Proposals',
+    dash_emails_sent:   'Emails Sent',
+    dash_active_suffix: 'active',
+    dash_awarded_suffix:'awarded',
+    dash_per_rfp:       'per RFP cycle',
+    dash_reg_vendors:   'registered vendors',
+    dash_total_recv:    'total received',
+    dash_inv_replies:   'invitations & replies',
+    dash_stage_breakdown:'RFP Stage Breakdown',
+    dash_quick_actions: 'Quick Actions',
+    dash_no_rfp_data:   'No RFP data yet',
+    // Quick-action buttons (dashboard)
+    qa_btn_new_rfp:     'New RFP',
+    qa_btn_all_rfps:    'All RFPs',
+    qa_btn_vendors:     'Vendors',
+    qa_btn_reports:     'Reports',
+    // RFP list page
+    active_procurements:'Active Procurements',
+    rfps_in_progress:   'RFP(s) in progress',
+    archived_contracts: 'Archived — Awarded Contracts',
+    completed_procs:    'completed procurement(s)',
+    no_active_rfps:     'No active procurements — all RFPs have been awarded!',
+    // RFP card
+    card_created:       'Created',
+    card_deadline:      'Deadline:',
+    card_no_deadline:   'No deadline set',
+    card_open:          'Open',
+    card_complete:      'Complete',
+    card_completed:     'Completed',
+    card_awarded_badge: 'Awarded',
+    // Empty states
+    no_rfps_title:      'No RFPs Yet',
+    no_rfps_sub:        'Create your first RFP to start the procurement process',
+    btn_create_rfp:     'Create New RFP',
+    // Form labels (generate tab)
+    form_project_title: 'Project Title',
+    form_category:      'Category',
+    form_budget_aed:    'Budget (AED)',
+    form_deadline:      'Submission Deadline',
+    form_background:    'Project Background',
+    form_objectives:    'Objectives',
+    form_scope:         'Scope of Work',
+    form_tech_req:      'Technical Requirements',
+    // Category options
+    cat_it:             'IT & Digital Transformation',
+    cat_consulting:     'Consulting Services',
+    cat_infrastructure: 'Infrastructure',
+    cat_professional:   'Professional Services',
+    cat_data:           'Data & Analytics',
+    // Vendors tab
+    vendors_shortlisted:'shortlisted',
+    vendors_inv_status: 'Invitation status and vendor responses tracked below',
+    vendors_none_title: 'No vendors shortlisted yet',
+    vendors_none_sub:   'Use AI Suggested Vendors to auto-shortlist, or add vendors manually from the pool below.',
+    vendors_show_pool:  'Show full vendor pool',
+    vendors_not_shortlisted: 'not shortlisted',
+    // Invite modal
+    invite_q_deadline:  'Questions Deadline',
+    invite_s_deadline:  'Submission Deadline',
+    invite_notes:       'Additional Notes',
+    invite_notes_ph:    'Any special instructions for vendors...',
+    // Q&A tab stats
+    qa_pending:         'pending',
+    qa_awaiting:        'awaiting approval',
+    qa_published:       'published',
+    qa_need_manual:     'need manual input',
+    // Proposals tab
+    proposals_received: 'proposal(s) received',
+    proposals_evaluated:'AI-evaluated',
+    proposals_none:     'No proposals received yet.',
+    proposals_submitted:'Submitted Proposals',
+    // Table headers (proposals)
+    th_vendor:          'Vendor',
+    th_date:            'Date',
+    th_budget:          'Budget',
+    th_duration:        'Duration',
+    th_files:           'Files',
+    th_ai_score:        'AI Score',
+    th_status:          'Status',
+    th_actions:         'Actions',
+    // Vendor table headers
+    th_specializations: 'Specializations',
+    th_fit_score:       'AI Fit Score',
+    th_participation:   'Participation Status',
+    th_shortlist:       'Shortlist',
   },
   ar: {
     // Sidebar
@@ -159,6 +254,101 @@ var I18N = {
     lbl_budget:      'الميزانية',
     lbl_deadline:    'الموعد النهائي',
     lbl_stage:       'المرحلة',
+    // Notifications panel
+    notif_panel_title:  'الإشعارات',
+    notif_mark_read:    'تحديد الكل كمقروء',
+    notif_none:         'لا توجد إشعارات',
+    notif_dismiss:      'تجاهل',
+    // Dashboard stats
+    dash_total_rfps:    'إجمالي الطلبات',
+    dash_win_rate:      'معدل الترسية',
+    dash_avg_duration:  'متوسط المدة',
+    dash_vendor_pool:   'قائمة الموردين',
+    dash_proposals_lbl: 'العروض',
+    dash_emails_sent:   'رسائل مُرسلة',
+    dash_active_suffix: 'نشط',
+    dash_awarded_suffix:'مُرسى',
+    dash_per_rfp:       'لكل دورة طلب',
+    dash_reg_vendors:   'مورد مسجل',
+    dash_total_recv:    'إجمالي المستلم',
+    dash_inv_replies:   'دعوات وردود',
+    dash_stage_breakdown:'توزيع مراحل الطلبات',
+    dash_quick_actions: 'الإجراءات السريعة',
+    dash_no_rfp_data:   'لا توجد بيانات بعد',
+    // Quick-action buttons (dashboard)
+    qa_btn_new_rfp:     'طلب جديد',
+    qa_btn_all_rfps:    'كل الطلبات',
+    qa_btn_vendors:     'الموردون',
+    qa_btn_reports:     'التقارير',
+    // RFP list page
+    active_procurements:'المشتريات النشطة',
+    rfps_in_progress:   'طلب(ات) قيد التنفيذ',
+    archived_contracts: 'الأرشيف — عقود مُرساة',
+    completed_procs:    'عملية(عمليات) شراء مكتملة',
+    no_active_rfps:     'لا توجد مشتريات نشطة — تم ترسية جميع الطلبات!',
+    // RFP card
+    card_created:       'تاريخ الإنشاء',
+    card_deadline:      'الموعد النهائي:',
+    card_no_deadline:   'لا يوجد موعد نهائي',
+    card_open:          'فتح',
+    card_complete:      'مكتمل',
+    card_completed:     'مكتمل',
+    card_awarded_badge: 'مرسى',
+    // Empty states
+    no_rfps_title:      'لا توجد طلبات بعد',
+    no_rfps_sub:        'أنشئ أول طلب عرض أسعار لبدء عملية الشراء',
+    btn_create_rfp:     'إنشاء طلب جديد',
+    // Form labels (generate tab)
+    form_project_title: 'عنوان المشروع',
+    form_category:      'الفئة',
+    form_budget_aed:    'الميزانية (درهم)',
+    form_deadline:      'الموعد النهائي للتقديم',
+    form_background:    'خلفية المشروع',
+    form_objectives:    'الأهداف',
+    form_scope:         'نطاق العمل',
+    form_tech_req:      'المتطلبات التقنية',
+    // Category options
+    cat_it:             'تقنية المعلومات والتحول الرقمي',
+    cat_consulting:     'خدمات الاستشارات',
+    cat_infrastructure: 'البنية التحتية',
+    cat_professional:   'الخدمات المهنية',
+    cat_data:           'البيانات والتحليلات',
+    // Vendors tab
+    vendors_shortlisted:'مختار',
+    vendors_inv_status: 'حالة الدعوة وردود الموردين مُتتبَّعة أدناه',
+    vendors_none_title: 'لا يوجد موردون مختارون بعد',
+    vendors_none_sub:   'استخدم "الموردون المقترحون بالذكاء الاصطناعي" للاختيار التلقائي، أو أضف موردين يدوياً من القائمة أدناه.',
+    vendors_show_pool:  'عرض قائمة الموردين الكاملة',
+    vendors_not_shortlisted: 'غير مختار',
+    // Invite modal
+    invite_q_deadline:  'الموعد النهائي للأسئلة',
+    invite_s_deadline:  'الموعد النهائي للتقديم',
+    invite_notes:       'ملاحظات إضافية',
+    invite_notes_ph:    'أي تعليمات خاصة للموردين...',
+    // Q&A tab stats
+    qa_pending:         'في الانتظار',
+    qa_awaiting:        'بانتظار الموافقة',
+    qa_published:       'منشور',
+    qa_need_manual:     'تحتاج إدخالاً يدوياً',
+    // Proposals tab
+    proposals_received: 'عرض(عروض) مستلمة',
+    proposals_evaluated:'مُقيَّم بالذكاء الاصطناعي',
+    proposals_none:     'لم تُستلم أي عروض بعد.',
+    proposals_submitted:'العروض المقدمة',
+    // Table headers (proposals)
+    th_vendor:          'المورد',
+    th_date:            'التاريخ',
+    th_budget:          'الميزانية',
+    th_duration:        'المدة',
+    th_files:           'الملفات',
+    th_ai_score:        'تقييم الذكاء الاصطناعي',
+    th_status:          'الحالة',
+    th_actions:         'الإجراءات',
+    // Vendor table headers
+    th_specializations: 'التخصصات',
+    th_fit_score:       'مدى الملاءمة',
+    th_participation:   'حالة المشاركة',
+    th_shortlist:       'القائمة المختصرة',
   }
 };
 
@@ -321,7 +511,7 @@ function showNotifPopup(notif) {
     + '<div style="font-weight:700;font-size:0.82rem;color:#1f2937;margin-bottom:2px">' + escHtml(notif.title) + '</div>'
     + '<div style="font-size:0.77rem;color:#6b7280;line-height:1.4">' + escHtml(notif.message) + '</div>'
     + '<div style="margin-top:8px;display:flex;align-items:center">' + navigateBtn
-    + '<button onclick="dismissNotifPopup(\'' + popupId + '\',' + notif.id + ')" style="background:#f3f4f6;color:#374151;border:none;border-radius:6px;padding:4px 10px;font-size:0.75rem;cursor:pointer">Dismiss</button>'
+    + '<button onclick="dismissNotifPopup(\'' + popupId + '\',' + notif.id + ')" style="background:#f3f4f6;color:#374151;border:none;border-radius:6px;padding:4px 10px;font-size:0.75rem;cursor:pointer">' + t('notif_dismiss') + '</button>'
     + '</div></div>'
     + '<button onclick="dismissNotifPopup(\'' + popupId + '\',' + notif.id + ')" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1rem;line-height:1;padding:0;margin-left:4px">&times;</button>'
     + '</div>';
@@ -400,11 +590,11 @@ function renderNotifPanel() {
   const typeColors = { email: '#BA9765', questions: '#745B35', proposal: '#BA9765', info: '#6b7280', decline: '#dc2626', stage: '#16a34a' };
   const typeIcons = { email: 'fa-envelope', questions: 'fa-question-circle', proposal: 'fa-inbox', info: 'fa-info-circle', decline: 'fa-times-circle', stage: 'fa-flag' };
   let html = '<div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid #f3f4f6">'
-    + '<span style="font-weight:700;font-size:0.875rem;color:#1f2937"><i class="fas fa-bell mr-1"></i>Notifications</span>'
-    + '<button onclick="markAllNotifsRead();renderNotifPanel()" style="font-size:0.72rem;color:var(--cpc-gold-deep);background:none;border:none;cursor:pointer">Mark all read</button>'
+    + '<span style="font-weight:700;font-size:0.875rem;color:#1f2937"><i class="fas fa-bell mr-1"></i>' + t('notif_panel_title') + '</span>'
+    + '<button onclick="markAllNotifsRead();renderNotifPanel()" style="font-size:0.72rem;color:var(--cpc-gold-deep);background:none;border:none;cursor:pointer">' + t('notif_mark_read') + '</button>'
     + '</div>';
   if (appState.notifications.length === 0) {
-    html += '<div style="padding:2rem;text-align:center;color:#9ca3af;font-size:0.82rem"><i class="fas fa-bell-slash" style="display:block;font-size:1.5rem;margin-bottom:0.5rem"></i>No notifications yet</div>';
+    html += '<div style="padding:2rem;text-align:center;color:#9ca3af;font-size:0.82rem"><i class="fas fa-bell-slash" style="display:block;font-size:1.5rem;margin-bottom:0.5rem"></i>' + t('notif_none') + '</div>';
   } else {
     html += '<div style="max-height:400px;overflow-y:auto">';
     appState.notifications.slice(0, 20).forEach(function(n) {
@@ -747,12 +937,12 @@ pages.dashboard = async function() {
 
   // KPI cards
   const kpis = [
-    { label:'Total RFPs',      value: stats.totalRfps || 0,      icon:'fa-layer-group',   color:'#745B35', sub: (stats.activeRfps||0) + ' active' },
-    { label:'Win Rate',        value: (stats.winRate||0) + '%',  icon:'fa-trophy',        color:'#BA9765', sub: (stats.awardedRfps||0) + ' awarded' },
-    { label:'Avg Duration',    value: stats.avgDuration ? stats.avgDuration + 'd' : 'N/A', icon:'fa-clock', color:'#065f46', sub: 'per RFP cycle' },
-    { label:'Vendor Pool',     value: stats.totalVendors || 0,   icon:'fa-building',      color:'#BA9765', sub: 'registered vendors' },
-    { label:'Proposals',       value: stats.totalProposals || 0, icon:'fa-inbox',         color:'#dc6803', sub: 'total received' },
-    { label:'Emails Sent',     value: stats.totalEmails || 0,    icon:'fa-envelope',      color:'#1d4ed8', sub: 'invitations & replies' },
+    { label:t('dash_total_rfps'),      value: stats.totalRfps || 0,      icon:'fa-layer-group',   color:'#745B35', sub: (stats.activeRfps||0) + ' ' + t('dash_active_suffix') },
+    { label:t('dash_win_rate'),        value: (stats.winRate||0) + '%',  icon:'fa-trophy',        color:'#BA9765', sub: (stats.awardedRfps||0) + ' ' + t('dash_awarded_suffix') },
+    { label:t('dash_avg_duration'),    value: stats.avgDuration ? stats.avgDuration + 'd' : 'N/A', icon:'fa-clock', color:'#065f46', sub: t('dash_per_rfp') },
+    { label:t('dash_vendor_pool'),     value: stats.totalVendors || 0,   icon:'fa-building',      color:'#BA9765', sub: t('dash_reg_vendors') },
+    { label:t('dash_proposals_lbl'),   value: stats.totalProposals || 0, icon:'fa-inbox',         color:'#dc6803', sub: t('dash_total_recv') },
+    { label:t('dash_emails_sent'),     value: stats.totalEmails || 0,    icon:'fa-envelope',      color:'#1d4ed8', sub: t('dash_inv_replies') },
   ];
   let kpiHtml = '';
   kpis.forEach(function(k) {
@@ -779,7 +969,7 @@ pages.dashboard = async function() {
         + '</div>';
     });
   } else {
-    stageChart = '<div style="color:#9ca3af;font-size:0.85rem;padding:1rem">No RFP data yet</div>';
+    stageChart = '<div style="color:#9ca3af;font-size:0.85rem;padding:1rem">' + t('dash_no_rfp_data') + '</div>';
   }
 
   setContent(
@@ -790,20 +980,20 @@ pages.dashboard = async function() {
     // Row 2: stage chart + quick actions
     + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1.25rem">'
     + '<div class="card" style="padding:1.25rem">'
-    + '<h3 style="font-weight:700;color:#1f2937;font-size:0.9rem;margin:0 0 1rem"><i class="fas fa-chart-bar mr-2 cpc-gold"></i>RFP Stage Breakdown</h3>'
+    + '<h3 style="font-weight:700;color:#1f2937;font-size:0.9rem;margin:0 0 1rem"><i class="fas fa-chart-bar mr-2 cpc-gold"></i>' + t('dash_stage_breakdown') + '</h3>'
     + '<div class="mini-bar" style="align-items:flex-end;gap:8px">' + stageChart + '</div>'
     + '</div>'
     + '<div class="card" style="padding:1.25rem">'
-    + '<h3 style="font-weight:700;color:#1f2937;font-size:0.9rem;margin:0 0 1rem"><i class="fas fa-bolt mr-2 cpc-gold"></i>Quick Actions</h3>'
+    + '<h3 style="font-weight:700;color:#1f2937;font-size:0.9rem;margin:0 0 1rem"><i class="fas fa-bolt mr-2 cpc-gold"></i>' + t('dash_quick_actions') + '</h3>'
     + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem">'
     + '<button class="btn-primary" style="flex-direction:column;padding:0.875rem;justify-content:center" onclick="showCreateRfpModal()">'
-    + '<i class="fas fa-plus-circle" style="font-size:1.25rem;margin-bottom:4px"></i><span style="font-size:0.8rem">New RFP</span></button>'
+    + '<i class="fas fa-plus-circle" style="font-size:1.25rem;margin-bottom:4px"></i><span style="font-size:0.8rem">' + t('qa_btn_new_rfp') + '</span></button>'
     + '<button class="btn-secondary" style="flex-direction:column;padding:0.875rem;justify-content:center" onclick="navigateTo(\'rfps\')">'
-    + '<i class="fas fa-layer-group" style="font-size:1.25rem;margin-bottom:4px"></i><span style="font-size:0.8rem">All RFPs</span></button>'
+    + '<i class="fas fa-layer-group" style="font-size:1.25rem;margin-bottom:4px"></i><span style="font-size:0.8rem">' + t('qa_btn_all_rfps') + '</span></button>'
     + '<button class="btn-ghost" style="flex-direction:column;padding:0.875rem;justify-content:center" onclick="navigateTo(\'vendors\')">'
-    + '<i class="fas fa-building" style="font-size:1.25rem;margin-bottom:4px"></i><span style="font-size:0.8rem">Vendors</span></button>'
+    + '<i class="fas fa-building" style="font-size:1.25rem;margin-bottom:4px"></i><span style="font-size:0.8rem">' + t('qa_btn_vendors') + '</span></button>'
     + '<button class="btn-ghost" style="flex-direction:column;padding:0.875rem;justify-content:center" onclick="navigateTo(\'reports\')">'
-    + '<i class="fas fa-chart-line" style="font-size:1.25rem;margin-bottom:4px"></i><span style="font-size:0.8rem">Reports</span></button>'
+    + '<i class="fas fa-chart-line" style="font-size:1.25rem;margin-bottom:4px"></i><span style="font-size:0.8rem">' + t('qa_btn_reports') + '</span></button>'
     + '</div></div>'
     + '</div>'
 
@@ -823,9 +1013,9 @@ pages.rfps = async function() {
       '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:400px;gap:1.25rem">'
       + '<div style="width:80px;height:80px;border-radius:50%;background:#f3f4f6;display:flex;align-items:center;justify-content:center">'
       + '<i class="fas fa-file-circle-plus" style="font-size:2rem;color:#d1d5db"></i></div>'
-      + '<div style="text-align:center"><h2 style="font-size:1.25rem;font-weight:700;color:#374151;margin:0 0 0.5rem">No RFPs Yet</h2>'
-      + '<p style="color:#9ca3af;margin:0">Create your first RFP to start the procurement process</p></div>'
-      + '<button class="btn-primary" onclick="showCreateRfpModal()"><i class="fas fa-plus"></i>Create New RFP</button>'
+      + '<div style="text-align:center"><h2 style="font-size:1.25rem;font-weight:700;color:#374151;margin:0 0 0.5rem">' + t('no_rfps_title') + '</h2>'
+      + '<p style="color:#9ca3af;margin:0">' + t('no_rfps_sub') + '</p></div>'
+      + '<button class="btn-primary" onclick="showCreateRfpModal()"><i class="fas fa-plus"></i>' + t('btn_create_rfp') + '</button>'
       + '</div>'
     );
     return;
@@ -850,15 +1040,15 @@ pages.rfps = async function() {
       + '<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.3rem">'
       + '<span style="font-size:0.72rem;color:#9ca3af;font-family:monospace">' + escHtml(rfp.ref_number||'') + '</span>'
       + '<span class="stage-badge ' + badgeCls + '">' + stageLabel + '</span>'
-      + (isArchived ? '<span style="background:#d1fae5;color:#065f46;border-radius:4px;padding:1px 6px;font-size:0.68rem;font-weight:700"><i class="fas fa-trophy mr-1"></i>Awarded</span>' : '')
+      + (isArchived ? '<span style="background:#d1fae5;color:#065f46;border-radius:4px;padding:1px 6px;font-size:0.68rem;font-weight:700"><i class="fas fa-trophy mr-1"></i>' + t('card_awarded_badge') + '</span>' : '')
       + '</div>'
       + '<h3 style="font-weight:700;color:#1f2937;font-size:0.97rem;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + escHtml(rfp.title||'Untitled RFP') + '</h3>'
-      + '<p style="color:#6b7280;font-size:0.8rem;margin:0.2rem 0 0">' + escHtml(rfp.category||'') + ' &bull; Created ' + dateStr + '</p>'
+      + '<p style="color:#6b7280;font-size:0.8rem;margin:0.2rem 0 0">' + escHtml(rfp.category||'') + ' &bull; ' + t('card_created') + ' ' + dateStr + '</p>'
       + '</div>'
       + '<div style="margin-left:1rem;text-align:right;flex-shrink:0">'
       + (isArchived
-        ? '<div style="font-size:1.1rem;font-weight:700;color:#065f46"><i class="fas fa-trophy"></i></div><div style="font-size:0.7rem;color:#9ca3af">Completed</div>'
-        : '<div style="font-size:1.5rem;font-weight:700;color:var(--cpc-ink)">' + progress + '%</div><div style="font-size:0.7rem;color:#9ca3af">Complete</div>')
+        ? '<div style="font-size:1.1rem;font-weight:700;color:#065f46"><i class="fas fa-trophy"></i></div><div style="font-size:0.7rem;color:#9ca3af">' + t('card_completed') + '</div>'
+        : '<div style="font-size:1.5rem;font-weight:700;color:var(--cpc-ink)">' + progress + '%</div><div style="font-size:0.7rem;color:#9ca3af">' + t('card_complete') + '</div>')
       + '</div>'
       + '</div>'
       + '<div style="margin-bottom:0.5rem">'
@@ -867,9 +1057,9 @@ pages.rfps = async function() {
       + '</div></div>'
       + '<div style="display:flex;align-items:center;justify-content:space-between">'
       + '<div style="font-size:0.78rem;color:#9ca3af">'
-      + (rfp.deadline ? '<i class="fas fa-calendar-alt" style="margin-right:4px"></i>Deadline: ' + new Date(rfp.deadline).toLocaleDateString('en-AE') : '<i class="fas fa-infinity" style="margin-right:4px"></i>No deadline set')
+      + (rfp.deadline ? '<i class="fas fa-calendar-alt" style="margin-right:4px"></i>' + t('card_deadline') + ' ' + new Date(rfp.deadline).toLocaleDateString(_currentLang === 'ar' ? 'ar-AE' : 'en-AE') : '<i class="fas fa-infinity" style="margin-right:4px"></i>' + t('card_no_deadline'))
       + '</div>'
-      + '<div style="font-size:0.78rem;color:' + (isArchived ? '#065f46' : 'var(--cpc-ink)') + ';font-weight:600">Open <i class="fas fa-arrow-right" style="margin-left:4px"></i></div>'
+      + '<div style="font-size:0.78rem;color:' + (isArchived ? '#065f46' : 'var(--cpc-ink)') + ';font-weight:600">' + t('card_open') + ' <i class="fas fa-arrow-right" style="margin-left:4px"></i></div>'
       + '</div>'
       + '</div>';
   }
@@ -882,13 +1072,13 @@ pages.rfps = async function() {
 
   let content = '<div style="display:flex;flex-direction:column;gap:1.5rem">'
     + '<div style="display:flex;align-items:center;justify-content:space-between">'
-    + '<div><h2 style="font-weight:700;color:#1f2937;font-size:1rem;margin:0">Active Procurements</h2>'
-    + '<p style="color:#9ca3af;font-size:0.82rem;margin:0">' + activeRfps.length + ' RFP' + (activeRfps.length !== 1 ? 's' : '') + ' in progress</p></div>'
-    + '<button class="btn-primary" onclick="showCreateRfpModal()"><i class="fas fa-plus"></i>New RFP</button>'
+    + '<div><h2 style="font-weight:700;color:#1f2937;font-size:1rem;margin:0">' + t('active_procurements') + '</h2>'
+    + '<p style="color:#9ca3af;font-size:0.82rem;margin:0">' + activeRfps.length + ' ' + t('rfps_in_progress') + '</p></div>'
+    + '<button class="btn-primary" onclick="showCreateRfpModal()"><i class="fas fa-plus"></i>' + t('btn_new_rfp') + '</button>'
     + '</div>';
 
   if (activeRfps.length === 0) {
-    content += '<div class="card" style="padding:2rem;text-align:center;color:#9ca3af"><i class="fas fa-check-circle" style="font-size:2rem;display:block;margin-bottom:0.75rem;color:#d1d5db"></i><p>No active procurements — all RFPs have been awarded!</p></div>';
+    content += '<div class="card" style="padding:2rem;text-align:center;color:#9ca3af"><i class="fas fa-check-circle" style="font-size:2rem;display:block;margin-bottom:0.75rem;color:#d1d5db"></i><p>' + t('no_active_rfps') + '</p></div>';
   } else {
     content += '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:1rem">' + activeCardsHtml + '</div>';
   }
@@ -898,8 +1088,8 @@ pages.rfps = async function() {
       + '<div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:1rem">'
       + '<div style="width:32px;height:32px;border-radius:8px;background:#d1fae5;display:flex;align-items:center;justify-content:center">'
       + '<i class="fas fa-archive" style="color:#065f46;font-size:0.875rem"></i></div>'
-      + '<div><h3 style="font-weight:700;color:#374151;font-size:0.92rem;margin:0">Archived — Awarded Contracts</h3>'
-      + '<p style="font-size:0.78rem;color:#9ca3af;margin:0">' + archivedRfps.length + ' completed procurement' + (archivedRfps.length !== 1 ? 's' : '') + '</p>'
+      + '<div><h3 style="font-weight:700;color:#374151;font-size:0.92rem;margin:0">' + t('archived_contracts') + '</h3>'
+      + '<p style="font-size:0.78rem;color:#9ca3af;margin:0">' + archivedRfps.length + ' ' + t('completed_procs') + '</p>'
       + '</div></div>'
       + '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:1rem">' + archivedCardsHtml + '</div>'
       + '</div>';
@@ -1181,18 +1371,24 @@ rfpTabs.generate = function(rfpId, rfp) {
     // LEFT: form
     + '<div class="card" style="padding:1.25rem;overflow-y:auto;display:flex;flex-direction:column;gap:0.875rem">'
     + '<h3 style="font-weight:700;color:#1f2937;font-size:0.9rem;margin:0"><i class="fas fa-magic cpc-gold" style="margin-right:6px"></i>RFP Parameters</h3>'
-    + '<div class="form-group"><label>Project Title *</label><input id="rfpTitle" placeholder="e.g. New Oracle ERP Setup, Data Warehouse and Data Visualization" value="' + escHtml(titleVal) + '"></div>'
+    + '<div class="form-group"><label>' + t('form_project_title') + ' *</label><input id="rfpTitle" placeholder="e.g. New Oracle ERP Setup, Data Warehouse and Data Visualization" value="' + escHtml(titleVal) + '"></div>'
     + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem">'
-    + '<div class="form-group"><label>Category</label><select id="rfpCategory">'
-    + ['IT & Digital Transformation','Consulting Services','Infrastructure','Professional Services','Data & Analytics'].map(function(c){ return '<option value="' + c + '"' + (catVal===c?' selected':'') + '>' + c + '</option>'; }).join('')
+    + '<div class="form-group"><label>' + t('form_category') + '</label><select id="rfpCategory">'
+    + [
+        [t('cat_it'), 'IT & Digital Transformation'],
+        [t('cat_consulting'), 'Consulting Services'],
+        [t('cat_infrastructure'), 'Infrastructure'],
+        [t('cat_professional'), 'Professional Services'],
+        [t('cat_data'), 'Data & Analytics']
+      ].map(function(c){ return '<option value="' + c[1] + '"' + (catVal===c[1]?' selected':'') + '>' + c[0] + '</option>'; }).join('')
     + '</select></div>'
-    + '<div class="form-group"><label>Budget (AED)</label><input id="rfpBudget" placeholder="e.g. 5,000,000" value="' + escHtml(budgetVal) + '"></div>'
+    + '<div class="form-group"><label>' + t('form_budget_aed') + '</label><input id="rfpBudget" placeholder="e.g. 5,000,000" value="' + escHtml(budgetVal) + '"></div>'
     + '</div>'
-    + '<div class="form-group"><label>Submission Deadline</label><input type="date" id="rfpDeadline" value="' + escHtml(deadlineVal) + '"></div>'
-    + '<div class="form-group"><label>Project Background <span style="color:#ef4444">*</span></label><textarea id="rfpBackground" rows="3" placeholder="Describe the current situation, business problem, and strategic drivers...">' + escHtml(bgVal) + '</textarea></div>'
-    + '<div class="form-group"><label>Objectives <span style="color:#ef4444">*</span></label><textarea id="rfpObjectives" rows="3" placeholder="List 4-6 measurable objectives for this project...">' + escHtml(objVal) + '</textarea></div>'
-    + '<div class="form-group"><label>Scope of Work <span style="color:#ef4444">*</span></label><textarea id="rfpScope" rows="4" placeholder="Detail the work phases, deliverables, and what is in/out of scope...">' + escHtml(scopeVal) + '</textarea></div>'
-    + '<div class="form-group"><label>Technical Requirements</label><textarea id="rfpTech" rows="3" placeholder="Infrastructure, hosting, security, compliance, integration specs...">' + escHtml(techVal) + '</textarea></div>'
+    + '<div class="form-group"><label>' + t('form_deadline') + '</label><input type="date" id="rfpDeadline" value="' + escHtml(deadlineVal) + '"></div>'
+    + '<div class="form-group"><label>' + t('form_background') + ' <span style="color:#ef4444">*</span></label><textarea id="rfpBackground" rows="3" placeholder="Describe the current situation, business problem, and strategic drivers...">' + escHtml(bgVal) + '</textarea></div>'
+    + '<div class="form-group"><label>' + t('form_objectives') + ' <span style="color:#ef4444">*</span></label><textarea id="rfpObjectives" rows="3" placeholder="List 4-6 measurable objectives for this project...">' + escHtml(objVal) + '</textarea></div>'
+    + '<div class="form-group"><label>' + t('form_scope') + ' <span style="color:#ef4444">*</span></label><textarea id="rfpScope" rows="4" placeholder="Detail the work phases, deliverables, and what is in/out of scope...">' + escHtml(scopeVal) + '</textarea></div>'
+    + '<div class="form-group"><label>' + t('form_tech_req') + '</label><textarea id="rfpTech" rows="3" placeholder="Infrastructure, hosting, security, compliance, integration specs...">' + escHtml(techVal) + '</textarea></div>'
     // SCORING MATRIX SECTION — read-only summary + Edit Matrix modal button
     + '<div style="border-top:1px solid var(--cpc-line);padding-top:0.875rem;margin-top:0.25rem">'
     + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">'
@@ -1845,7 +2041,7 @@ rfpTabs.vendors = async function(rfpId, rfp) {
   let otherRows = '';
   otherVendors.forEach(function(v){ otherRows += buildVendorRow(v, false); });
 
-  const tableHead = '<thead><tr><th>Vendor</th><th>Specializations</th><th>AI Fit Score</th><th>Participation Status</th><th style="text-align:center">Shortlist</th><th></th></tr></thead>';
+  const tableHead = '<thead><tr><th>' + t('th_vendor') + '</th><th>' + t('th_specializations') + '</th><th>' + t('th_fit_score') + '</th><th>' + t('th_participation') + '</th><th style="text-align:center">' + t('th_shortlist') + '</th><th></th></tr></thead>';
 
   setContent(
     '<div class="space-y-4">'
@@ -1854,7 +2050,7 @@ rfpTabs.vendors = async function(rfpId, rfp) {
     + '<div style="display:flex;align-items:center;justify-content:space-between">'
     + '<div>'
     + '<h3 style="font-weight:700;font-size:0.95rem;color:#1f2937;margin:0">Vendor Shortlist & Participation</h3>'
-    + '<p style="font-size:0.8rem;color:#9ca3af;margin:0">' + shortlistedCount + ' shortlisted &bull; Invitation status and vendor responses tracked below</p>'
+    + '<p style="font-size:0.8rem;color:#9ca3af;margin:0">' + shortlistedCount + ' ' + t('vendors_shortlisted') + ' &bull; ' + t('vendors_inv_status') + '</p>'
     + '</div>'
     + '<div style="display:flex;gap:0.5rem">'
     + '<button class="btn-secondary" id="aiShortlistBtn" onclick="aiShortlistVendors(' + rfpId + ')"><i class="fas fa-robot"></i>AI Suggested Vendors</button>'
@@ -1866,8 +2062,8 @@ rfpTabs.vendors = async function(rfpId, rfp) {
     + (shortlistedCount === 0
       ? '<div class="card" style="padding:2.5rem;text-align:center;color:#9ca3af">'
         + '<i class="fas fa-clipboard-list" style="font-size:2rem;display:block;margin-bottom:0.75rem;color:#d1d5db"></i>'
-        + '<p style="font-weight:600;color:#6b7280;margin-bottom:0.5rem">No vendors shortlisted yet</p>'
-        + '<p style="font-size:0.85rem">Use <strong>AI Suggested Vendors</strong> to auto-shortlist, or add vendors manually from the pool below.</p>'
+        + '<p style="font-weight:600;color:#6b7280;margin-bottom:0.5rem">' + t('vendors_none_title') + '</p>'
+        + '<p style="font-size:0.85rem">' + t('vendors_none_sub') + '</p>'
         + '</div>'
       : '<div class="card"><div style="overflow-x:auto"><table>' + tableHead + '<tbody>' + shortlistedRows + '</tbody></table></div></div>')
 
@@ -1875,7 +2071,7 @@ rfpTabs.vendors = async function(rfpId, rfp) {
     + '<div>'
     + '<button class="btn-ghost btn-sm" style="font-size:0.82rem;color:#9ca3af" onclick="toggleOtherVendors()">'
     + '<i class="fas fa-chevron-right" id="otherVendorsChevron" style="margin-right:4px;font-size:0.72rem"></i>'
-    + 'Show full vendor pool (' + otherVendors.length + ' not shortlisted)'
+    + t('vendors_show_pool') + ' (' + otherVendors.length + ' ' + t('vendors_not_shortlisted') + ')'
     + '</button>'
     + '<div id="otherVendorsPanel" style="display:none;margin-top:0.75rem">'
     + '<div class="card"><div style="overflow-x:auto"><table>' + tableHead + '<tbody>' + otherRows + '</tbody></table></div></div>'
@@ -1931,9 +2127,9 @@ async function sendRfpInvitations(rfpId) {
     + '<p style="color:#6b7280;font-size:0.875rem;margin-bottom:1rem">Sending to <strong>' + shortlisted.length + '</strong> shortlisted vendors. '
     + (andersen ? 'A <strong>real email</strong> will be sent to ' + escHtml(andersen.contact_email) + '. All others are simulated.' : 'All emails will be simulated.')
     + '</p>'
-    + '<div class="form-group"><label>Questions Deadline</label><input type="date" id="invQDeadline" value="' + getDateOffset(14) + '"></div>'
-    + '<div class="form-group"><label>Submission Deadline</label><input type="date" id="invSDeadline" value="' + (rfp && rfp.deadline ? rfp.deadline : getDateOffset(30)) + '"></div>'
-    + '<div class="form-group"><label>Additional Notes</label><textarea id="invNotes" rows="2" placeholder="Any special instructions for vendors..."></textarea></div>'
+    + '<div class="form-group"><label>' + t('invite_q_deadline') + '</label><input type="date" id="invQDeadline" value="' + getDateOffset(14) + '"></div>'
+    + '<div class="form-group"><label>' + t('invite_s_deadline') + '</label><input type="date" id="invSDeadline" value="' + (rfp && rfp.deadline ? rfp.deadline : getDateOffset(30)) + '"></div>'
+    + '<div class="form-group"><label>' + t('invite_notes') + '</label><textarea id="invNotes" rows="2" placeholder="' + t('invite_notes_ph') + '"></textarea></div>'
     + '<div style="display:flex;gap:0.75rem;margin-top:1rem">'
     + '<button class="btn-primary" id="sendInvBtn" onclick="confirmSendInvitations(' + rfpId + ')"><i class="fas fa-send"></i>Send Invitations + PDF</button>'
     + '<button class="btn-ghost" onclick="closeModal()">Cancel</button>'
@@ -2576,10 +2772,10 @@ rfpTabs.qa = async function(rfpId) {
     '<div class="space-y-4">'
     + '<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:0.5rem">'
     + '<div style="display:flex;gap:1rem;flex-wrap:wrap">'
-    + '<span style="font-size:0.82rem;color:#6b7280"><strong>' + pending + '</strong> pending</span>'
-    + '<span style="font-size:0.82rem;color:#92400e"><strong>' + answered + '</strong> awaiting approval</span>'
-    + '<span style="font-size:0.82rem;color:#065f46"><strong>' + published + '</strong> published</span>'
-    + (manualNeeded > 0 ? '<span style="font-size:0.82rem;color:#dc2626;font-weight:600"><strong>' + manualNeeded + '</strong> need manual input</span>' : '')
+    + '<span style="font-size:0.82rem;color:#6b7280"><strong>' + pending + '</strong> ' + t('qa_pending') + '</span>'
+    + '<span style="font-size:0.82rem;color:#92400e"><strong>' + answered + '</strong> ' + t('qa_awaiting') + '</span>'
+    + '<span style="font-size:0.82rem;color:#065f46"><strong>' + published + '</strong> ' + t('qa_published') + '</span>'
+    + (manualNeeded > 0 ? '<span style="font-size:0.82rem;color:#dc2626;font-weight:600"><strong>' + manualNeeded + '</strong> ' + t('qa_need_manual') + '</span>' : '')
     + '</div>'
     + '<div style="display:flex;gap:0.5rem;flex-wrap:wrap">'
     + '<button class="btn-ghost btn-sm" id="reprocessQBtn" onclick="reprocessQuestions(' + rfpId + ')" title="Re-extract questions from received emails"><i class="fas fa-sync"></i>Re-extract</button>'
@@ -2835,22 +3031,22 @@ rfpTabs.proposals = async function(rfpId) {
   setContent(
     '<div class="space-y-4">'
     + '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem">'
-    + '<div><h3 style="font-weight:700;font-size:0.95rem;color:#1f2937;margin:0">Submitted Proposals</h3>'
-    + '<p style="font-size:0.8rem;color:#9ca3af;margin:0">' + proposals.length + ' proposal(s) received'
-    + (evaluated > 0 ? ' · <span style="color:var(--cpc-gold-deep);font-weight:600">' + evaluated + ' AI-evaluated</span>' : '') + '</p></div>'
+    + '<div><h3 style="font-weight:700;font-size:0.95rem;color:#1f2937;margin:0">' + t('proposals_submitted') + '</h3>'
+    + '<p style="font-size:0.8rem;color:#9ca3af;margin:0">' + proposals.length + ' ' + t('proposals_received')
+    + (evaluated > 0 ? ' · <span style="color:var(--cpc-gold-deep);font-weight:600">' + evaluated + ' ' + t('proposals_evaluated') + '</span>' : '') + '</p></div>'
     + '<div style="display:flex;gap:0.5rem;align-items:center">' + evalBtn + '</div>'
     + '</div>'
 
     + '<div class="card" style="overflow:hidden">'
     + (proposals.length === 0
       ? '<div style="padding:3rem;text-align:center;color:#9ca3af"><i class="fas fa-inbox" style="font-size:2.5rem;display:block;margin-bottom:1rem;color:#d1d5db"></i>'
-        + '<p style="margin-bottom:0.5rem">No proposals received yet.</p>'
+        + '<p style="margin-bottom:0.5rem">' + t('proposals_none') + '</p>'
         + '<p style="font-size:0.8rem;color:#c4b5fd;margin:0"><i class="fas fa-link" style="margin-right:4px"></i>Vendors submit proposals via the secure submission portal link included in their invitation email.</p></div>'
       : '<div style="overflow-x:auto"><table>'
         + '<thead><tr>'
-        + '<th>Vendor</th><th>Date</th><th>Budget</th><th>Duration</th>'
-        + '<th>Files</th><th>AI Score</th><th>Status</th>'
-        + '<th style="text-align:right">Actions</th>'
+        + '<th>' + t('th_vendor') + '</th><th>' + t('th_date') + '</th><th>' + t('th_budget') + '</th><th>' + t('th_duration') + '</th>'
+        + '<th>' + t('th_files') + '</th><th>' + t('th_ai_score') + '</th><th>' + t('th_status') + '</th>'
+        + '<th style="text-align:right">' + t('th_actions') + '</th>'
         + '</tr></thead>'
         + '<tbody>' + rows + '</tbody>'
         + '</table></div>')
