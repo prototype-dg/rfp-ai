@@ -854,6 +854,35 @@ function applyTranslations() {
   }
 }
 
+// ── Sidebar toggle (mobile) ──────────────────────────────────────────────────
+function toggleSidebar() {
+  var sidebar = document.querySelector('.cpc-sidebar');
+  var overlay = document.getElementById('sidebarOverlay');
+  if (!sidebar || !overlay) return;
+  var isOpen = sidebar.classList.contains('open');
+  if (isOpen) {
+    sidebar.classList.remove('open');
+    overlay.classList.remove('open');
+    document.body.style.overflow = '';
+  } else {
+    sidebar.classList.add('open');
+    overlay.classList.add('open');
+    document.body.style.overflow = 'hidden'; // prevent body scroll while drawer is open
+  }
+}
+
+// Close sidebar when a nav item is clicked on mobile
+document.addEventListener('click', function(e) {
+  var navItem = e.target.closest('.nav-item');
+  if (navItem && window.innerWidth <= 768) {
+    var sidebar = document.querySelector('.cpc-sidebar');
+    var overlay = document.getElementById('sidebarOverlay');
+    if (sidebar) sidebar.classList.remove('open');
+    if (overlay) overlay.classList.remove('open');
+    document.body.style.overflow = '';
+  }
+});
+
 function switchLang() {
   _currentLang = (_currentLang === 'en') ? 'ar' : 'en';
   localStorage.setItem('cpc_lang', _currentLang);
@@ -1690,7 +1719,7 @@ function openScoringMatrixModal(rfpId) {
     + '<p style="font-size:0.75rem;color:#9ca3af;margin:4px 0 0 0">' + t('gen_matrix_hint') + '</p>'
     + '</div>'
     + '</div>'
-    + '<div style="border:1px solid var(--cpc-line);border-radius:6px;overflow:hidden;margin-bottom:1rem" id="scoringMatrixEditor">'
+    + '<div class="sm-table-wrap" style="border:1px solid var(--cpc-line);border-radius:6px;overflow:hidden;margin-bottom:1rem" id="scoringMatrixEditor">'
     + renderScoringMatrixEditor(window._currentScoringMatrix)
     + '</div>'
     + '<div style="display:flex;gap:8px;justify-content:flex-end">'
@@ -1819,7 +1848,7 @@ rfpTabs.generate = function(rfpId, rfp) {
       + '</div>';
 
   setContent(
-    '<div style="display:grid;grid-template-columns:460px 1fr;gap:1.25rem;height:calc(100vh - 240px)">'
+    '<div class="generate-layout" style="display:grid;grid-template-columns:460px 1fr;gap:1.25rem;height:calc(100vh - 240px)">'
     // LEFT: form
     + '<div class="card" style="padding:1.25rem;overflow-y:auto;display:flex;flex-direction:column;gap:0.875rem">'
     + '<h3 style="font-weight:700;color:#1f2937;font-size:0.9rem;margin:0"><i class="fas fa-magic cpc-gold" style="margin-right:6px"></i>' + t('gen_rfp_params') + '</h3>'

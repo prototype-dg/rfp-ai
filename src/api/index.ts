@@ -3,7 +3,7 @@ import { initDb, seedVendors } from '../db/seed'
 import type { Bindings } from '../types'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-07-26-v37'
+const WORKER_VERSION = '2026-07-26-v38'
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.cpc-rfp.website.

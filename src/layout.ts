@@ -85,6 +85,8 @@ export function getLayout(): string {
       display: flex;
       flex-direction: column;
       overflow-y: auto;
+      transition: transform 0.28s cubic-bezier(0.4,0,0.2,1);
+      z-index: 200;
     }
 
     /* Sidebar wordmark */
@@ -893,6 +895,91 @@ export function getLayout(): string {
     .mini-bar-item { flex: 1; border-radius: 4px 4px 0 0; background: var(--cpc-gold); opacity: 0.65; min-width: 20px; transition: opacity 0.2s; }
     .mini-bar-item:hover { opacity: 1; }
 
+    /* ── HAMBURGER BUTTON ── */
+    .sidebar-toggle {
+      display: none;
+      align-items: center;
+      justify-content: center;
+      width: 36px;
+      height: 36px;
+      background: transparent;
+      border: 1px solid var(--cpc-line);
+      border-radius: var(--r-input);
+      cursor: pointer;
+      color: var(--cpc-ink-2);
+      font-size: 14px;
+      flex-shrink: 0;
+      transition: border-color 0.2s, color 0.2s;
+    }
+    .sidebar-toggle:hover { border-color: var(--cpc-gold); color: var(--cpc-gold-deep); }
+
+    /* ── SIDEBAR OVERLAY (mobile backdrop) ── */
+    .sidebar-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(27,23,18,0.45);
+      z-index: 199;
+      transition: opacity 0.28s;
+    }
+    .sidebar-overlay.open { display: block; }
+
+    /* ── MOBILE RESPONSIVE ── */
+    @media (max-width: 768px) {
+      /* Show hamburger */
+      .sidebar-toggle { display: flex; }
+
+      /* Sidebar: fixed overlay drawer, hidden off-screen by default */
+      .cpc-sidebar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        bottom: 0;
+        transform: translateX(-100%);
+      }
+      /* RTL: slide from the right */
+      html[dir="rtl"] .cpc-sidebar {
+        left: auto;
+        right: 0;
+        transform: translateX(100%);
+      }
+      /* Open state */
+      .cpc-sidebar.open {
+        transform: translateX(0);
+        box-shadow: var(--shadow-modal);
+      }
+
+      /* Header: reduce horizontal padding */
+      .cpc-header { padding: 0 14px; }
+
+      /* Page content: tighten gutter */
+      #pageContent { padding: 16px; }
+
+      /* Lifecycle bar: allow horizontal scroll, no wrap */
+      .lifecycle-bar { padding: 10px 14px; }
+
+      /* RFP tabs: allow horizontal scroll */
+      .rfp-tabs { padding: 0 14px; overflow-x: auto; }
+
+      /* Generate tab two-pane grid → single column */
+      .generate-layout {
+        grid-template-columns: 1fr !important;
+      }
+
+      /* Scoring matrix editor table: horizontal scroll */
+      .sm-table-wrap { overflow-x: auto; }
+
+      /* Compliance table: horizontal scroll */
+      .comp-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+      /* Header title: clip long text */
+      .header-page-title { font-size: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px; }
+      .header-page-subtitle { display: none; }
+
+      /* Hide header date on mobile */
+      .header-date { display: none; }
+    }
+
     /* ── RTL / ARABIC OVERRIDES ── */
     html[dir="rtl"] body { font-family: 'Noto Kufi Arabic', 'Inter', system-ui, sans-serif; }
     html[dir="rtl"] .app-shell { flex-direction: row-reverse; }
@@ -914,6 +1001,7 @@ export function getLayout(): string {
     html[dir="rtl"] .rfp-doc, html[dir="rtl"] [contenteditable] { direction: ltr; text-align: left; }
     html[dir="rtl"] .modal { text-align: right; }
     html[dir="rtl"] .toast { left: 20px; right: auto; }
+    html[dir="rtl"] .sidebar-toggle { margin-right: 0; }
     html[dir="rtl"] .wm-org, html[dir="rtl"] .wm-product { text-align: right; }
     html[dir="rtl"] .header-lang-toggle { letter-spacing: 0; }
     html[dir="rtl"] .score-bar { direction: ltr; }
@@ -972,6 +1060,9 @@ export function getLayout(): string {
     <!-- Top header -->
     <header class="cpc-header">
       <div class="header-left">
+        <button class="sidebar-toggle" id="sidebarToggleBtn" onclick="toggleSidebar()" aria-label="Toggle navigation">
+          <i class="fas fa-bars"></i>
+        </button>
         <button id="backBtn" onclick="goBack()" class="btn-back" style="display:none">
           <i class="fas fa-arrow-left" style="font-size:11px"></i> Back
         </button>
@@ -1015,6 +1106,9 @@ export function getLayout(): string {
 <div class="modal-overlay" id="modalOverlay">
   <div class="modal" id="modalContent"></div>
 </div>
+
+<!-- Sidebar backdrop overlay (mobile) -->
+<div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
 
 <script src="/static/app.js" defer><\/script>
 </body>
