@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 import { emblemPngBase64 } from '../emblem-data'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-07-27-v42'
+const WORKER_VERSION = '2026-07-27-v44'
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.cpc-rfp.website.
@@ -515,17 +515,22 @@ apiRouter.post('/rfps/:id/generate', async (c) => {
         }
       }
 
-      // Save to DB
+      // Save to DB — also strip HTML and store as rfp_full_text for evaluation (no OCR needed)
       const content = fullContent.length > 400 ? `<div class="rfp-doc">${fullContent}</div>` : ''
       if (content) {
+        const rfpFullText = fullContent
+          .replace(/<[^>]+>/g, ' ')
+          .replace(/&amp;/g,'&').replace(/&mdash;/g,'—').replace(/&nbsp;/g,' ')
+          .replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"')
+          .replace(/\s{2,}/g, ' ').trim()
         await c.env.DB.prepare(`
           UPDATE rfps SET title=?, category=?, budget=?, deadline=?, scope=?, tech_requirements=?,
-            objectives=?, background=?, content=?, arch_doc_text=?, brd_doc_text=?, updated_at=datetime('now')
+            objectives=?, background=?, content=?, rfp_full_text=?, arch_doc_text=?, brd_doc_text=?, updated_at=datetime('now')
           WHERE id=?
         `).bind(
           body.title, body.category, body.budget, body.deadline, body.scope,
           body.tech_requirements || '', body.objectives || '', body.background || '',
-          content, archDocText, brdDocText, id
+          content, rfpFullText.slice(0, 100000), archDocText, brdDocText, id
         ).run()
       }
 
@@ -634,7 +639,8 @@ function unescapePdfString(s: string): string {
     .replace(/\\([0-7]{1,3})/g, (_, oct) => String.fromCharCode(parseInt(oct, 8)))
 }
 
-// POST /rfps/:id/upload-arch-doc — upload a supporting document PDF with text extraction
+// POST /rfps/:id/upload-arch-doc — upload BRD/arch doc, fire async OCR immediately
+// v28: returns immediately after R2 store + async sidecar fire. OCR result saved via callback.
 apiRouter.post('/rfps/:id/upload-arch-doc', async (c) => {
   try {
     const id = c.req.param('id')
@@ -644,57 +650,74 @@ apiRouter.post('/rfps/:id/upload-arch-doc', async (c) => {
 
     const docLabel = (formData.get('doc_label') as string || '').toLowerCase()
     const isBRD = docLabel.includes('business requirement') || docLabel.includes('brd')
+    const docType = isBRD ? 'brd' : 'arch'
 
     const arrayBuffer = await file.arrayBuffer()
     const bytes = new Uint8Array(arrayBuffer)
+    const sizeKb = Math.round(bytes.length / 1024)
 
-    // Store in R2 if available
+    // Store in R2
     const bucket: R2Bucket | undefined = (c.env as any).PROPOSALS_BUCKET
     let r2Key = ''
     if (bucket) {
       r2Key = `arch-docs/${id}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
       await bucket.put(r2Key, bytes, {
         httpMetadata: { contentType: file.type || 'application/pdf' },
-        customMetadata: { rfpId: String(id), docType: isBRD ? 'brd' : 'arch' },
+        customMetadata: { rfpId: String(id), docType },
       })
     }
 
-    // Extract text via Python sidecar (pdfplumber) — far more reliable than JS regex
-    const sizeKb = Math.round(bytes.length / 1024)
-    let extractedText = ''
-    let extractionOk = false
-
-    if (r2Key) {
-      // Build proxied URL through our own PDF endpoint so sidecar can fetch it
-      const pdfProxyUrl = `https://a7b32759-e743-4139-9bb0-4bae44886667.vip.gensparksite.com/api/proposals/pdf/${encodeURIComponent(r2Key)}`
-      const sidecarResult = await callSidecar(pdfProxyUrl, c.env, 100)
-      if (sidecarResult && sidecarResult.chars >= 200) {
-        extractedText = `[Source: ${file.name}, ${sizeKb}KB, ${sidecarResult.pages_extracted}/${sidecarResult.pages_total} pages${sidecarResult.truncated ? ' — truncated' : ''}]\n\n${sidecarResult.text}`
-        if (extractedText.length > 40000) extractedText = extractedText.slice(0, 40000) + '\n\n[... document continues — content above is sufficient for RFP generation ...]'
-        extractionOk = true
-      }
-    }
-
-    if (!extractionOk) {
-      extractedText = `[PDF: ${file.name}, ${sizeKb}KB — text extraction incomplete. File stored in R2 at key: ${r2Key}. Use file name and context to infer content type.]`
-    }
-
+    // Save r2Key + placeholder text immediately
+    const placeholder = `[PDF: ${file.name}, ${sizeKb}KB — OCR in progress...]`
     if (isBRD) {
-      await c.env.DB.prepare(`UPDATE rfps SET brd_doc_text=?, updated_at=datetime('now') WHERE id=?`).bind(extractedText, id).run()
+      await c.env.DB.prepare(`UPDATE rfps SET brd_doc_r2_key=?, brd_doc_text=?, updated_at=datetime('now') WHERE id=?`).bind(r2Key, placeholder, id).run()
     } else {
-      await c.env.DB.prepare(`UPDATE rfps SET arch_doc_text=?, updated_at=datetime('now') WHERE id=?`).bind(extractedText, id).run()
+      await c.env.DB.prepare(`UPDATE rfps SET arch_doc_r2_key=?, arch_doc_text=?, updated_at=datetime('now') WHERE id=?`).bind(r2Key, placeholder, id).run()
     }
 
-    return c.json({
-      ok: true,
-      column: isBRD ? 'brd_doc_text' : 'arch_doc_text',
-      size: bytes.length,
-      r2Key,
-      extracted_chars: extractedText.length,
-      extraction_ok: extractionOk
-    })
+    // Fire async OCR — callback will write the real text when done
+    if (r2Key) {
+      const workerBase = `https://a7b32759-e743-4139-9bb0-4bae44886667.vip.gensparksite.com/api`
+      const pdfUrl = `${workerBase}/proposals/pdf/${encodeURIComponent(r2Key)}`
+      const callbackUrl = `${workerBase}/callback/rfps/${id}/doc-ocr-complete?doc_type=${docType}&filename=${encodeURIComponent(file.name)}&size_kb=${sizeKb}`
+      const secret = c.env.PDF_SIDECAR_SECRET || (globalThis as any).PDF_SIDECAR_SECRET || ''
+      await callSidecarAsync(pdfUrl, c.env, 100, callbackUrl, secret)
+      console.log(`[upload-arch-doc] async OCR fired rfp=${id} docType=${docType}`)
+    }
+
+    return c.json({ ok: true, column: isBRD ? 'brd_doc_text' : 'arch_doc_text', size: bytes.length, r2Key, ocr_status: 'processing' })
   } catch (e: any) {
     return c.json({ error: e.message }, 500)
+  }
+})
+
+// POST /callback/rfps/:rfpId/doc-ocr-complete — sidecar calls this when arch/brd OCR finishes
+apiRouter.post('/callback/rfps/:rfpId/doc-ocr-complete', async (c) => {
+  const rfpId = c.req.param('rfpId')
+  const docType  = c.req.query('doc_type') || 'arch'
+  const filename = decodeURIComponent(c.req.query('filename') || 'document.pdf')
+  const sizeKb   = c.req.query('size_kb') || '?'
+  const db = c.env.DB
+  const expectedSecret = c.env.PDF_SIDECAR_SECRET || (globalThis as any).PDF_SIDECAR_SECRET || ''
+  try {
+    const body: any = await c.req.json()
+    if (expectedSecret && body.callback_secret !== expectedSecret) return c.json({ error: 'Unauthorized' }, 401)
+    let text: string
+    if (body.ok && body.chars >= 200) {
+      text = `[Source: ${filename}, ${sizeKb}KB, ${body.pages_extracted}/${body.pages_total} pages]\n\n${body.text}`
+      if (text.length > 60000) text = text.slice(0, 60000) + '\n\n[... truncated ...]'
+    } else {
+      text = `[PDF: ${filename}, ${sizeKb}KB — OCR yielded ${body.chars || 0} chars. ${body.error || ''}]`
+    }
+    if (docType === 'brd') {
+      await db.prepare(`UPDATE rfps SET brd_doc_text=?, updated_at=datetime('now') WHERE id=?`).bind(text, rfpId).run()
+    } else {
+      await db.prepare(`UPDATE rfps SET arch_doc_text=?, updated_at=datetime('now') WHERE id=?`).bind(text, rfpId).run()
+    }
+    console.log(`[doc-ocr-callback] rfp=${rfpId} docType=${docType} chars=${text.length}`)
+    return c.json({ ok: true, chars: text.length })
+  } catch (e: any) {
+    return c.json({ ok: false, error: e?.message }, 500)
   }
 })
 
@@ -1720,6 +1743,14 @@ apiRouter.post('/rfps/:rfpId/proposals/:proposalId/award', async (c) => {
  *  proposal_attachments[].extracted_text / technical_proposal fields.
  *  We never try to parse a raw PDF binary at runtime (Worker memory limits). */
 function extractProposalText(proposal: any): string {
+  // v28: priority order — proposal_full_text (OCR at upload) > ocr_job_text (legacy async) > legacy fields
+  if (proposal.proposal_full_text && proposal.proposal_full_text.length > 200) {
+    return proposal.proposal_full_text.slice(0, 80000)
+  }
+  if (proposal.ocr_job_text && proposal.ocr_job_text.length > 200) {
+    return proposal.ocr_job_text.slice(0, 80000)
+  }
+  // Legacy fallback: assemble from individual text fields
   const parts: string[] = []
   if (proposal.technical_proposal && typeof proposal.technical_proposal === 'string') {
     parts.push(proposal.technical_proposal.slice(0, 12000))
@@ -1826,49 +1857,34 @@ async function evaluateProposal(proposal: any, rfp: any, env: any): Promise<any>
   // Step 1: Try to get text from DB fields (fast path — already extracted at upload time)
   let proposalText = extractProposalText(proposal)
 
-  // Step 2: If DB text fields are empty, fetch PDFs from R2 via the sidecar.
-  // IMPORTANT: skip the commercial PDF here — it is fetched separately in /evaluate-budget.
-  // Fetching both large PDFs (15MB technical + 9MB commercial) serially exceeds the 30s limit.
+  // Step 2: v28 — text comes from DB only (pre-extracted at upload time).
+  // No sidecar calls here. If proposal_full_text is empty it means OCR hasn't finished yet
+  // or was never triggered — return a clear status so the UI can tell the user to wait.
   if (proposalText.length < 200) {
-    const textParts: string[] = []
-    try {
-      const atts: any[] = JSON.parse(proposal.proposal_attachments || '[]')
-      // Prefer the technical attachment; skip anything labelled 'commercial'
-      const scoringAtts = atts.filter((a: any) => {
-        const lbl = (a.label || '').toLowerCase()
-        const fn  = (a.filename || '').toLowerCase()
-        return !lbl.includes('commercial') && !fn.includes('commercial')
-      })
-      // Fall back to all attachments only if there is no non-commercial one
-      const attsToFetch = scoringAtts.length > 0 ? scoringAtts : atts.slice(0, 1)
-      for (const att of attsToFetch) {
-        if (!att.r2_key) continue
-        const pdfUrl = `https://a7b32759-e743-4139-9bb0-4bae44886667.vip.gensparksite.com/api/proposals/pdf/${encodeURIComponent(att.r2_key)}`
-        // Hard cap at 15 pages for scoring — enough to understand the proposal approach
-        // without blowing the 30s CPU budget. Budget extraction uses its own dedicated
-        // /evaluate-budget endpoint with no page limit.
-        const result = await callSidecar(pdfUrl, env, 15)
-        if (result && result.chars >= 100) {
-          textParts.push(`[${att.label || att.filename}, ${result.pages_extracted}/${result.pages_total} pages]\n${result.text}`)
-        }
-      }
-    } catch (_) {}
-
-    // Also try legacy single pdf_attachment_url field
-    // Strip r2:// prefix if present (legacy storage format)
-    if (!textParts.length && proposal.pdf_attachment_url) {
-      const pdfKey = proposal.pdf_attachment_url
-        .replace(/^r2:\/\//, '')   // strip r2:// prefix
-        .replace(/^\//, '')         // strip leading slash
-      const pdfUrl = `https://a7b32759-e743-4139-9bb0-4bae44886667.vip.gensparksite.com/api/proposals/pdf/${encodeURIComponent(pdfKey)}`
-      const result = await callSidecar(pdfUrl, env, 40)
-      if (result && result.chars >= 100) {
-        textParts.push(`[${proposal.pdf_filename || 'proposal.pdf'}, ${result.pages_extracted}/${result.pages_total} pages]\n${result.text}`)
-      }
-    }
-
-    if (textParts.length) {
-      proposalText = textParts.join('\n\n---\n\n').slice(0, 40000)
+    console.log(`[evaluateProposal] proposalId=${proposal.id} — no text in DB (proposal_full_text empty). OCR may still be running.`)
+    // Return early with a clear status instead of silently scoring an empty text
+    return {
+      evaluated_at: new Date().toISOString(),
+      proposal_id: proposal.id,
+      vendor_name: proposal.vendor_name || '',
+      total_score: 0,
+      recommendation: 'PENDING',
+      validation_status: 'OCR_PENDING',
+      compliance_score: 0,
+      quality_score: 0,
+      commercial_score: null,
+      budget_extracted: null,
+      budget_currency: 'AED',
+      budget_confidence: 0,
+      duration_extracted: null,
+      strengths: [],
+      weaknesses: [],
+      recommendation_reasoning: 'Proposal text not yet available — OCR extraction may still be running. Please wait 1-2 minutes and try again.',
+      mandatory_failed: [],
+      compliance_breakdown: [],
+      scoring_breakdown: [],
+      glossary_used: 0,
+      text_chars_analyzed: 0,
     }
   }
 
@@ -2308,6 +2324,41 @@ Return ONLY a JSON array — no markdown, no extra text:
   }
 }
 
+// ── POST /callback/proposals/:proposalId/file-ocr-complete ───────────────────
+// Called by sidecar once per uploaded file when OCR finishes at submission time.
+// Appends extracted text to proposal_full_text. Multiple files arrive as separate calls.
+apiRouter.post('/callback/proposals/:proposalId/file-ocr-complete', async (c) => {
+  const proposalId = c.req.param('proposalId')
+  const label    = decodeURIComponent(c.req.query('label') || 'other')
+  const filename = decodeURIComponent(c.req.query('filename') || 'document.pdf')
+  const db = c.env.DB
+  const expectedSecret = c.env.PDF_SIDECAR_SECRET || (globalThis as any).PDF_SIDECAR_SECRET || ''
+  try {
+    const body: any = await c.req.json()
+    if (expectedSecret && body.callback_secret !== expectedSecret) return c.json({ error: 'Unauthorized' }, 401)
+
+    // Build section text for this file
+    let fileText: string
+    if (body.ok && body.chars >= 100) {
+      fileText = `=== FILE: ${filename} [label: ${label}] (${body.pages_extracted}/${body.pages_total} pages, ${body.chars} chars) ===\n\n${body.text}`
+    } else {
+      fileText = `=== FILE: ${filename} [label: ${label}] — OCR yielded ${body.chars || 0} chars${body.error ? ': ' + body.error : ''} ===`
+    }
+
+    // Append to existing proposal_full_text (multiple files arrive independently)
+    const existing = await db.prepare(`SELECT proposal_full_text FROM proposals WHERE id=?`).bind(proposalId).first<any>()
+    const currentText: string = existing?.proposal_full_text || ''
+    const merged = (currentText + '\n\n' + fileText).slice(0, 200000).trim()
+
+    await db.prepare(`UPDATE proposals SET proposal_full_text=?, updated_at=datetime('now') WHERE id=?`).bind(merged, proposalId).run()
+    console.log(`[file-ocr-callback] proposalId=${proposalId} label=${label} chars=${body.chars} total_merged=${merged.length}`)
+    return c.json({ ok: true, merged_chars: merged.length })
+  } catch (e: any) {
+    console.error(`[file-ocr-callback] error: ${e?.message}`)
+    return c.json({ ok: false, error: e?.message }, 500)
+  }
+})
+
 // ── POST /api/rfps/:id/proposals/evaluate-all — batch AI evaluation ────────
 apiRouter.post('/rfps/:id/proposals/evaluate-all', async (c) => {
   const rfpId = c.req.param('id')
@@ -2374,91 +2425,34 @@ apiRouter.post('/rfps/:rfpId/proposals/:proposalId/evaluate', async (c) => {
     `).bind(proposalId, rfpId).first<any>()
     if (!proposal) return c.json({ error: 'Proposal not found' }, 404)
 
-    // Fast path: text already in DB — score immediately
-    const existingText = extractProposalText(proposal)
-    if (existingText.length >= 200) {
-      console.log(`[evaluate] fast path: proposalText.length=${existingText.length}`)
-      const evalData = await evaluateProposal(proposal, rfp, c.env)
-      await db.prepare(`
-        UPDATE proposals SET
-          evaluation_data=?, ai_total_score=?, ai_recommendation=?,
-          ai_validation_status=?, ai_evaluated_at=datetime('now'),
-          ai_compliance_score=?, ai_quality_score=?, ai_commercial_score=?,
-          ocr_job_status='done', updated_at=datetime('now')
-        WHERE id=?
-      `).bind(
-        JSON.stringify(evalData), evalData.total_score, evalData.recommendation,
-        evalData.validation_status, evalData.compliance_score, evalData.quality_score,
-        evalData.commercial_score, proposal.id
-      ).run()
-      return c.json({ ok: true, ...evalData })
+    // v28: text must already be in DB (extracted at upload time)
+    // evaluateProposal() returns OCR_PENDING if proposal_full_text is empty
+    const evalData = await evaluateProposal(proposal, rfp, c.env)
+
+    if (evalData.validation_status === 'OCR_PENDING') {
+      // Text not ready yet — tell UI to wait and retry
+      return c.json({
+        ok: true,
+        status: 'ocr_pending',
+        validation_status: 'OCR_PENDING',
+        message: 'Proposal text extraction is still running. Please wait 1-2 minutes and try again.',
+        proposal_id: parseInt(proposalId),
+      }, 202)
     }
 
-    // Async path: no text in DB — find the technical PDF and fire sidecar with callback
-    console.log(`[evaluate] async path: no text in DB, firing sidecar with callback`)
-    const atts: any[] = JSON.parse(proposal.proposal_attachments || '[]')
-    const scoringAtts = atts.filter((a: any) => {
-      const lbl = (a.label || '').toLowerCase()
-      const fn  = (a.filename || '').toLowerCase()
-      return !lbl.includes('commercial') && !fn.includes('commercial')
-    })
-    const attToFetch = scoringAtts.length > 0 ? scoringAtts[0] : atts[0]
-
-    if (!attToFetch?.r2_key) {
-      // No attachment at all — run evaluate with empty text (will use fallback glossary)
-      const evalData = await evaluateProposal(proposal, rfp, c.env)
-      await db.prepare(`
-        UPDATE proposals SET
-          evaluation_data=?, ai_total_score=?, ai_recommendation=?,
-          ai_validation_status=?, ai_evaluated_at=datetime('now'),
-          ai_compliance_score=?, ai_quality_score=?, ai_commercial_score=?,
-          ocr_job_status='done', updated_at=datetime('now')
-        WHERE id=?
-      `).bind(
-        JSON.stringify(evalData), evalData.total_score, evalData.recommendation,
-        evalData.validation_status, evalData.compliance_score, evalData.quality_score,
-        evalData.commercial_score, proposal.id
-      ).run()
-      return c.json({ ok: true, ...evalData })
-    }
-
-    const pdfUrl = `https://a7b32759-e743-4139-9bb0-4bae44886667.vip.gensparksite.com/api/proposals/pdf/${encodeURIComponent(attToFetch.r2_key)}`
-    const workerBase = `https://a7b32759-e743-4139-9bb0-4bae44886667.vip.gensparksite.com/api`
-    const callbackUrl = `${workerBase}/callback/proposals/${proposalId}/ocr-complete?rfp_id=${rfpId}`
-    const callbackSecret = c.env.PDF_SIDECAR_SECRET || (globalThis as any).PDF_SIDECAR_SECRET || ''
-
-    // Mark as pending in DB so UI knows OCR is running
     await db.prepare(`
-      UPDATE proposals SET ocr_job_status='pending_scoring', updated_at=datetime('now') WHERE id=?
-    `).bind(proposalId).run()
-
-    const fired = await callSidecarAsync(pdfUrl, c.env, 100, callbackUrl, callbackSecret)
-    if (!fired) {
-      // Sidecar config error — fall back to sync evaluate with empty text
-      const evalData = await evaluateProposal(proposal, rfp, c.env)
-      await db.prepare(`
-        UPDATE proposals SET
-          evaluation_data=?, ai_total_score=?, ai_recommendation=?,
-          ai_validation_status=?, ai_evaluated_at=datetime('now'),
-          ai_compliance_score=?, ai_quality_score=?, ai_commercial_score=?,
-          ocr_job_status='done', updated_at=datetime('now')
-        WHERE id=?
-      `).bind(
-        JSON.stringify(evalData), evalData.total_score, evalData.recommendation,
-        evalData.validation_status, evalData.compliance_score, evalData.quality_score,
-        evalData.commercial_score, proposal.id
-      ).run()
-      return c.json({ ok: true, ...evalData })
-    }
-
-    // Return 202 — OCR is running in background, client should poll
-    return c.json({
-      ok: true,
-      status: 'processing',
-      message: 'OCR started — proposal text is being extracted. Poll /evaluation to check progress.',
-      proposal_id: parseInt(proposalId),
-      ocr_job_status: 'pending_scoring',
-    }, 202)
+      UPDATE proposals SET
+        evaluation_data=?, ai_total_score=?, ai_recommendation=?,
+        ai_validation_status=?, ai_evaluated_at=datetime('now'),
+        ai_compliance_score=?, ai_quality_score=?, ai_commercial_score=?,
+        ocr_job_status='done', updated_at=datetime('now')
+      WHERE id=?
+    `).bind(
+      JSON.stringify(evalData), evalData.total_score, evalData.recommendation,
+      evalData.validation_status, evalData.compliance_score, evalData.quality_score,
+      evalData.commercial_score, proposal.id
+    ).run()
+    return c.json({ ok: true, ...evalData })
 
   } catch (e: any) {
     return c.json({ ok: false, error: e?.message }, 500)
@@ -2680,8 +2674,10 @@ apiRouter.post('/callback/proposals/:proposalId/ocr-complete', async (c) => {
 })
 
 // ── POST /api/rfps/:rfpId/proposals/:proposalId/evaluate-budget ──────────────
-// Async budget enrichment: fires sidecar OCR on the commercial PDF with callback_url.
-// Returns 202 immediately. Sidecar calls back to /callback/proposals/:id/budget-complete.
+// v28: No sidecar calls. Reads directly from proposal_full_text (extracted at upload time).
+// Finds the commercial file section (=== FILE: ... [label: commercial] ===) and runs
+// runBudgetLLM() synchronously. Falls back to full proposal_full_text or legacy fields
+// if no commercial section is found. Returns 200 with budget data or 202 if text missing.
 apiRouter.post('/rfps/:rfpId/proposals/:proposalId/evaluate-budget', async (c) => {
   const rfpId = c.req.param('rfpId')
   const proposalId = c.req.param('proposalId')
@@ -2694,54 +2690,49 @@ apiRouter.post('/rfps/:rfpId/proposals/:proposalId/evaluate-budget', async (c) =
     `).bind(proposalId, rfpId).first<any>()
     if (!proposal) return c.json({ error: 'Proposal not found' }, 404)
 
-    // If we already have cached OCR budget text, skip sidecar and run LLM directly
-    if (proposal.ocr_budget_text && proposal.ocr_budget_text.length > 100) {
-      console.log(`[eval-budget] using cached ocr_budget_text (${proposal.ocr_budget_text.length} chars)`)
-      const result = await runBudgetLLM(proposal.ocr_budget_text, proposal, db, c.env)
-      return c.json({ ok: true, ...result, text_source: 'cached_ocr' })
+    // ── Step 1: build the full text from DB (no PDFs ever touched here) ──────
+    const fullText: string = extractProposalText(proposal)
+    if (fullText.length < 100) {
+      console.log(`[eval-budget] no text in DB for proposalId=${proposalId} — OCR may still be running`)
+      return c.json({
+        ok: true,
+        status: 'ocr_pending',
+        message: 'Proposal text extraction is still running. Please wait 1-2 minutes and try again.',
+        proposal_id: parseInt(proposalId),
+      }, 202)
     }
 
-    // Find commercial PDF attachment
-    const atts: any[] = JSON.parse(proposal.proposal_attachments || '[]')
-    const commercialAtt = atts.find((a: any) =>
-      (a.label || '').toLowerCase().includes('commercial') ||
-      (a.filename || '').toLowerCase().includes('commercial')
-    ) || atts[0]
+    // ── Step 2: try to isolate the commercial section ─────────────────────────
+    // proposal_full_text is built by the callback as:
+    //   === FILE: <filename> [label: <label>] ===\n<text>\n
+    // We find the block whose label includes "commercial".
+    let budgetText = ''
+    let textSource = 'full_text'
 
-    console.log(`[eval-budget] chosen attachment: filename="${commercialAtt?.filename}" label="${commercialAtt?.label}"`)
-
-    if (!commercialAtt?.r2_key) {
-      // No PDF — run LLM on stored text fields
-      const storedText = extractProposalText(proposal)
-      if (storedText.length < 50) return c.json({ ok: false, error: 'No commercial PDF and no stored text' })
-      const result = await runBudgetLLM(storedText, proposal, db, c.env)
-      return c.json({ ok: true, ...result, text_source: 'stored_text' })
+    // Try to find commercial section marker
+    const commercialMatch = fullText.match(
+      /={3} FILE:[^\n]*\[label:\s*commercial[^\]]*\][^\n]*\n([\s\S]*?)(?:={3} FILE:|$)/i
+    )
+    if (commercialMatch && commercialMatch[1].trim().length > 100) {
+      budgetText = commercialMatch[1].trim()
+      textSource = 'commercial_section'
+      console.log(`[eval-budget] found commercial section: ${budgetText.length} chars`)
+    } else {
+      // No labelled commercial section — fall back to entire merged text
+      // (covers legacy proposals that have ocr_job_text or only one attachment)
+      budgetText = fullText
+      textSource = fullText === proposal.proposal_full_text ? 'proposal_full_text'
+                 : fullText === proposal.ocr_job_text       ? 'ocr_job_text'
+                 : 'legacy_fields'
+      console.log(`[eval-budget] no commercial section found — using ${textSource} (${budgetText.length} chars)`)
     }
 
-    const pdfUrl = `https://a7b32759-e743-4139-9bb0-4bae44886667.vip.gensparksite.com/api/proposals/pdf/${encodeURIComponent(commercialAtt.r2_key)}`
-    const workerBase = `https://a7b32759-e743-4139-9bb0-4bae44886667.vip.gensparksite.com/api`
-    const callbackUrl = `${workerBase}/callback/proposals/${proposalId}/budget-complete?rfp_id=${rfpId}`
-    const callbackSecret = c.env.PDF_SIDECAR_SECRET || (globalThis as any).PDF_SIDECAR_SECRET || ''
-
-    // Mark budget extraction as pending
-    await db.prepare(`
-      UPDATE proposals SET ocr_job_status='pending_budget', updated_at=datetime('now') WHERE id=?
-    `).bind(proposalId).run()
-
-    const fired = await callSidecarAsync(pdfUrl, c.env, 100, callbackUrl, callbackSecret)
-    if (!fired) {
-      return c.json({ ok: false, error: 'Sidecar not configured or unreachable' }, 500)
-    }
-
-    return c.json({
-      ok: true,
-      status: 'processing',
-      message: 'Budget OCR started — commercial PDF is being extracted. Poll /evaluation to check progress.',
-      proposal_id: parseInt(proposalId),
-      ocr_job_status: 'pending_budget',
-    }, 202)
+    // ── Step 3: run budget LLM synchronously ─────────────────────────────────
+    const result = await runBudgetLLM(budgetText, proposal, db, c.env)
+    return c.json({ ok: true, ...result, text_source: textSource })
 
   } catch (e: any) {
+    console.error(`[eval-budget] error: ${e?.message}`)
     return c.json({ ok: false, error: e?.message }, 500)
   }
 })
@@ -3161,12 +3152,29 @@ apiRouter.post('/submit/:rfpId', async (c) => {
 
     console.log(`[submit] Proposal from ${vendorName} stored — ${storedAttachments.length} file(s)`)
 
+    // Fire async OCR for each uploaded file — each calls back to /callback/proposals/:id/file-ocr-complete
+    // The callback merges all texts into proposal_full_text. No OCR happens at evaluation time.
+    const workerBase = `https://a7b32759-e743-4139-9bb0-4bae44886667.vip.gensparksite.com/api`
+    const callbackSecret = c.env.PDF_SIDECAR_SECRET || (globalThis as any).PDF_SIDECAR_SECRET || ''
+    let ocrFired = 0
+    for (const att of storedAttachments) {
+      if (!att.r2_key) continue
+      const pdfUrl = `${workerBase}/proposals/pdf/${encodeURIComponent(att.r2_key)}`
+      const cbUrl  = `${workerBase}/callback/proposals/${proposalId}/file-ocr-complete?label=${encodeURIComponent(att.label || 'other')}&filename=${encodeURIComponent(att.filename || 'document.pdf')}`
+      try {
+        await callSidecarAsync(pdfUrl, c.env, 100, cbUrl, callbackSecret)
+        ocrFired++
+      } catch (_) {}
+    }
+    console.log(`[submit] OCR fired for ${ocrFired}/${storedAttachments.length} files`)
+
     return c.json({
       ok: true,
       proposal_id: proposalId,
       vendor_name: vendorName,
       files_stored: storedAttachments.length,
-      message: 'Proposal submitted successfully.',
+      ocr_started: ocrFired,
+      message: 'Proposal submitted successfully. Text extraction running in background.',
     })
   } catch(err: any) {
     console.error('[submit]', err)

@@ -205,6 +205,14 @@ export async function initDb(db: D1Database) {
     `ALTER TABLE proposals ADD COLUMN ocr_job_status TEXT`,
     `ALTER TABLE proposals ADD COLUMN ocr_job_text TEXT`,
     `ALTER TABLE proposals ADD COLUMN ocr_budget_text TEXT`,
+    // v28: extract-once architecture
+    // proposals.proposal_full_text — merged OCR text of ALL uploaded files, populated at submission time
+    // rfps.rfp_full_text — plain-text version of the generated RFP document, populated at generate time
+    // rfps.arch_doc_r2_key / rfps.brd_doc_r2_key — R2 keys for the uploaded source docs
+    `ALTER TABLE proposals ADD COLUMN proposal_full_text TEXT`,
+    `ALTER TABLE rfps ADD COLUMN rfp_full_text TEXT`,
+    `ALTER TABLE rfps ADD COLUMN arch_doc_r2_key TEXT`,
+    `ALTER TABLE rfps ADD COLUMN brd_doc_r2_key TEXT`,
   ]
   for (const sql of alterMigrations) {
     try {
