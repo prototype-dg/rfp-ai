@@ -2911,7 +2911,7 @@ function refreshStageBanner(rfpId, rfp) {
     },
     qa_open: {
       icon: 'fa-comments',
-      text: 'Invitations sent — Q&amp;A is <strong>Open</strong>. Answer vendor questions, then close Q&amp;A when ready to receive proposals.',
+      text: 'Invitations sent — Q&amp;A is <strong>Open</strong>. Vendors can submit proposals at any time before the deadline. Close Q&amp;A when you want to stop accepting clarification questions.',
       action: 'switchRfpTab(\x27qa\x27,' + rfpId + ')',
       label: 'Go to Q&A'
     },
@@ -4208,7 +4208,7 @@ rfpTabs.qa = async function(rfpId) {
     qaStageBar = '<div style="background:linear-gradient(90deg,#faf5ff,#ede9fe);border:1.5px solid #7c3aed;border-radius:10px;padding:0.65rem 1rem;display:flex;align-items:center;gap:0.75rem">'
       + '<i class="fas fa-comments" style="color:#7c3aed;font-size:1rem;flex-shrink:0"></i>'
       + '<div style="flex:1"><span style="font-weight:700;color:#4c1d95;font-size:0.88rem">Q&amp;A is Open</span>'
-      + '<span style="color:#5b21b6;font-size:0.82rem;margin-left:0.5rem">Answer and publish vendor questions, then close Q&amp;A when ready to receive proposals.</span></div>'
+      + '<span style="color:#5b21b6;font-size:0.82rem;margin-left:0.5rem">Vendors can submit proposals at any time before the submission deadline — regardless of Q&amp;A status. Close Q&amp;A only stops vendors from asking clarification questions.</span></div>'
       + '<button style="flex-shrink:0;white-space:nowrap;display:flex;align-items:center;gap:6px;padding:0.4rem 1rem;font-size:0.82rem;background:#7c3aed;color:#fff;border:none;border-radius:7px;cursor:pointer;font-weight:600" onclick="closeQA(' + rfpId + ')"><i class="fas fa-lock" style="font-size:0.78rem"></i>Close Q&amp;A</button>'
       + '</div>';
   } else if (qaRfp && ['submissions_closed','evaluation','awarded'].includes(qaRfp.stage)) {
