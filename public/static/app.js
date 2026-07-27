@@ -1630,8 +1630,7 @@ function renderLifecycleBar(rfp) {
     html += '</div>';
   }
 
-  var lcStyle = '<style>.lc-step::before{content:\'\';position:absolute;top:0;left:0;right:0;height:3px;background:transparent;border-radius:0 0 2px 2px;transition:background 0.18s}.lc-step:hover::before{background:var(--cpc-gold)}.lc-done.lc-step::before{background:var(--cpc-gold);opacity:0.5}.lc-active.lc-step::before{background:var(--cpc-ink)}</style>';
-  document.getElementById('lifecycleBar').innerHTML = lcStyle + '<div class="lifecycle-bar">' + html + '</div>';
+  document.getElementById('lifecycleBar').innerHTML = '<div class="lifecycle-bar">' + html + '</div>';
   document.getElementById('lifecycleBar').style.display = 'block';
 }
 
@@ -2162,12 +2161,12 @@ pages.rfps = async function() {
     + '</div>';
 
   let content = '<div style="display:flex;flex-direction:column;gap:1.5rem">'
-    + '<div style="display:flex;align-items:center;gap:0.75rem">'
+    + '<div style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap">'
     + '<div><h2 style="font-weight:700;color:#1f2937;font-size:1rem;margin:0">' + t('active_procurements') + '</h2>'
     + '<p style="color:#9ca3af;font-size:0.82rem;margin:0">' + activeRfps.length + ' ' + t('rfps_in_progress') + '</p></div>'
-    + '<div style="margin-left:auto;display:flex;align-items:center;gap:8px">'
+    + '<div style="margin-left:auto;display:flex;align-items:center;gap:8px;flex-shrink:0">'
     + filterStrip
-    + '<button class="btn-primary" onclick="showCreateRfpModal()"><i class="fas fa-plus"></i>' + t('btn_new_rfp') + '</button>'
+    + '<button class="btn-primary" style="flex-shrink:0;white-space:nowrap" onclick="showCreateRfpModal()"><i class="fas fa-plus"></i>' + t('btn_new_rfp') + '</button>'
     + '</div>'
     + '</div>';
 
@@ -2612,19 +2611,8 @@ function startAutoSave(rfpId) {
   }, 30000);
 }
 function restoreAutoSave(rfpId) {
-  try {
-    var raw = localStorage.getItem('cpc_autosave_' + rfpId);
-    if (!raw) return;
-    var saved = JSON.parse(raw);
-    if (!saved || !saved.data) return;
-    var age = Math.round((Date.now() - (saved.ts||0)) / 60000);
-    if (age > 120) { localStorage.removeItem('cpc_autosave_' + rfpId); return; } // discard >2h old
-    var fields = Object.keys(saved.data);
-    if (!fields.length) return;
-    if (!confirm('Restore auto-saved draft from ' + age + ' minute(s) ago?')) return;
-    fields.forEach(function(id){ var el=document.getElementById(id); if(el && saved.data[id]) el.value=saved.data[id]; });
-    showToast('Draft restored from auto-save.', 'success');
-  } catch(e) {}
+  // Auto-restore disabled — prompt removed per user request
+  try { localStorage.removeItem('cpc_autosave_' + rfpId); } catch(e) {}
 }
 
 async function generateRfpDoc(rfpId) {

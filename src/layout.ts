@@ -601,7 +601,7 @@ export function getLayout(): string {
       border: 4px solid transparent;
       border-top-color: var(--cpc-ink);
     }
-    .lc-step:hover .lc-tooltip { opacity: 1; }
+    .lc-step:hover .lc-tooltip { opacity: 0; } /* hover highlight disabled */
 
     /* ── RFP TABS ── */
     .rfp-tabs {
