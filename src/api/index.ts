@@ -1892,21 +1892,64 @@ Respond ONLY with JSON: {"is_proposal": true|false, "reason": "<one sentence, ma
   let glossary: any[] = []
   try { glossary = JSON.parse(rfp.requirement_glossary || '[]') } catch (_) {}
   if (!glossary.length) {
-    // Auto-extract requirements from RFP content
-    const rfpText = (rfp.content || rfp.scope || rfp.tech_requirements || rfp.objectives || '').replace(/<[^>]+>/g, ' ').slice(0, 8000)
-    const lines = rfpText.split(/[\n\r]+/).map((l: string) => l.trim()).filter((l: string) => l.length > 20)
-    let reqId = 0
-    for (const line of lines) {
-      const lo = line.toLowerCase()
-      const isMandatory = /\bmust\b|\bshall\b|\brequired\b|\bmandatory\b/.test(lo)
-      const isCriteria = /\bmust\b|\bshall\b|\brequired\b|\bcriteria\b|\bscope\b|\bobjective\b|\bevaluation\b/.test(lo) || /^[-•*]\s/.test(line) || /^\d+[\.)]\s/.test(line)
-      if (isCriteria) {
-        glossary.push({ id: `req_${++reqId}`, text: line.slice(0, 300), mandatory: isMandatory })
+    // Use LLM to extract real requirements from the RFP — avoids pulling HTML/TOC garbage.
+    // Prefer structured fields over raw HTML content.
+    const structuredText = [rfp.scope || '', rfp.tech_requirements || '', rfp.objectives || ''].join('\n\n').trim()
+    const contentStripped = (rfp.content || '').replace(/<[^>]+>/g, ' ').replace(/\s{2,}/g, ' ').trim()
+    const rfpSource = structuredText.length > 200 ? structuredText : contentStripped
+    // Remove TOC-style lines: e.g. "1. Section Title  2" (heading + trailing page number)
+    const cleanedRfpText = rfpSource
+      .split(/[\n\r]+/)
+      .map((l: string) => l.trim())
+      .filter((l: string) => {
+        if (l.length < 15) return false
+        if (/^\d+\.?\s+.{5,60}\s{2,}\d{1,3}$/.test(l)) return false  // TOC entry
+        return true
+      })
+      .join('\n')
+      .slice(0, 6000)
+
+    try {
+      const rawGlossary = await callLLM(
+        'You are a procurement analyst. Extract a list of concrete requirements from an RFP document.',
+        `Extract up to 10 specific, distinct requirements from this RFP. Each requirement must be a full sentence describing what the vendor must deliver or demonstrate.
+
+Do NOT include section headings, table of contents entries, boilerplate, or duplicates.
+Mark mandatory=true only if the text uses "must", "shall", "required", or "mandatory".
+
+Return ONLY a JSON array:
+[
+  { "id": "req_1", "text": "<full requirement sentence>", "mandatory": true },
+  ...
+]
+
+RFP Content:
+${cleanedRfpText}`,
+        env, 'gpt-5-mini', 1500
+      )
+      const jsonMatch = rawGlossary.match(/\[\s*\{[\s\S]*?\}\s*\]/)
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0])
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          glossary = parsed.slice(0, 12).map((r: any, i: number) => ({
+            id: r.id || `req_${i + 1}`,
+            text: String(r.text || '').slice(0, 350),
+            mandatory: !!r.mandatory,
+          }))
+        }
       }
-      if (reqId >= 20) break
+    } catch (_) {
+      // LLM failed — fall back to simple line extraction
     }
-    if (!glossary.length && rfpText) {
-      glossary.push({ id: 'req_1', text: rfpText.slice(0, 500), mandatory: false })
+
+    // Last resort fallback
+    if (!glossary.length && cleanedRfpText) {
+      const fallbackLines = cleanedRfpText.split('\n').filter((l: string) => l.length > 30).slice(0, 8)
+      glossary = fallbackLines.map((l: string, i: number) => ({
+        id: `req_${i + 1}`,
+        text: l.slice(0, 300),
+        mandatory: /\bmust\b|\bshall\b|\brequired\b|\bmandatory\b/i.test(l),
+      }))
     }
   }
 
@@ -1927,8 +1970,8 @@ Respond ONLY with JSON: {"is_proposal": true|false, "reason": "<one sentence, ma
         const relevant = topChunks(req.text, chunks)
         const raw = await callLLM(
           'You are an expert procurement evaluator. Rate the vendor proposal strictly based on the given requirement.',
-          `Requirement: ${req.text}\n\nVendor Proposal Excerpt:\n${relevant.slice(0, 2000)}\n\nRate from 0-100 based on depth, clarity and feasibility. Return ONLY JSON: {"score": <integer>, "justification": "<max 20 words>"}`,
-          env, 'gpt-5-mini', 300
+          `Requirement: ${req.text}\n\nVendor Proposal Excerpt:\n${relevant.slice(0, 2500)}\n\nRate from 0-100 how thoroughly this specific requirement is addressed (depth, clarity, feasibility). Return ONLY valid JSON: {"score": <integer 0-100>, "justification": "<one sentence, max 25 words>"}`,
+          env, 'gpt-5-mini', 150
         )
         const parsed = parseLLMScore(raw)
         aiScore = parsed.score
@@ -1944,15 +1987,69 @@ Respond ONLY with JSON: {"is_proposal": true|false, "reason": "<one sentence, ma
     })
   }
 
-  // ── Budget & Duration ─────────────────────────────────────────────────────
-  const budget = extractBudget(proposalText)
-  const duration = extractDuration(proposalText) || proposal.proposed_duration || null
+  // ── Budget & Duration via LLM ────────────────────────────────────────────────
+  // Regex-based extraction is unreliable on OCR'd PDFs (phone numbers, page sizes,
+  // reference numbers all look like large amounts). Use LLM to find the real totals.
+  let budget = { amount: null as number | null, currency: 'AED', confidence: 0.0 }
+  let duration: string | null = proposal.proposed_duration || null
 
-  // Use stored budget_amount if extraction failed
+  try {
+    const budgetSample = proposalText.length > 6000
+      ? proposalText.slice(0, 5000) + '\n...\n' + proposalText.slice(-2000)
+      : proposalText
+
+    const rawBudget = await callLLM(
+      'You are a financial analyst reading a vendor proposal. Extract the total proposed price and project duration.',
+      `From the vendor proposal excerpt below, extract:
+1. The total proposed price (look for "Total", "Grand Total", "Total Cost", "Total Price", "Total Project Cost", pricing summary table)
+2. The project duration (timeline, delivery schedule, number of months/weeks)
+
+Rules:
+- Use ONLY values explicitly stated as a total/final price — do NOT sum line items
+- Ignore document sizes, page numbers, phone numbers, reference numbers
+- For duration: express as "X months" or "X weeks" — NOT years unless explicitly stated as years
+- If a value is genuinely not present, set it to null
+
+Return ONLY JSON:
+{
+  "total_price": <number or null>,
+  "currency": "AED"|"USD"|"EUR"|"GBP"|null,
+  "duration": "<e.g. 3.5 months>"|null,
+  "confidence": 0.0-1.0
+}
+
+Proposal excerpt:
+${budgetSample.slice(0, 6000)}`,
+      env, 'gpt-5-mini', 200
+    )
+    const jsonMatch = rawBudget.match(/\{[\s\S]*?\}/)
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0])
+      if (parsed.total_price && parsed.total_price > 0 && parsed.total_price < 1e10) {
+        budget = {
+          amount: parsed.total_price,
+          currency: parsed.currency || 'AED',
+          confidence: Math.min(1.0, Math.max(0.0, parseFloat(parsed.confidence) || 0.5)),
+        }
+      }
+      if (parsed.duration && typeof parsed.duration === 'string') {
+        duration = parsed.duration
+      }
+    }
+  } catch (_) {
+    // LLM failed — fall back to regex (better than nothing)
+    const regexBudget = extractBudget(proposalText)
+    if (regexBudget.amount) {
+      budget = { ...regexBudget, confidence: Math.min(regexBudget.confidence, 0.4) }
+    }
+    duration = extractDuration(proposalText) || duration
+  }
+
+  // Use stored budget_amount if we still have nothing
   if (!budget.amount && proposal.budget_amount) {
     budget.amount = proposal.budget_amount
     budget.currency = proposal.budget_currency || 'AED'
-    budget.confidence = 0.5
+    budget.confidence = 0.4
   }
 
   // ── Score calculation ──────────────────────────────────────────────────────

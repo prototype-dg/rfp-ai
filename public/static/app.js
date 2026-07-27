@@ -4825,13 +4825,38 @@ function closeProposalPanel() {
 function viewProposalDetail(id) {
   const p = appState.proposals.find(function(p){ return p.id === id; });
   if (!p) return;
-  // Load evaluation data async and render the panel (with or without AI results)
+  // Open panel immediately (no eval data yet — Summary tab active)
   _renderProposalPanel(p, null);
+  // If already evaluated, fetch eval data and update tabs in-place (no re-render)
   if (p.ai_evaluated_at) {
     apiCall('GET', '/rfps/' + p.rfp_id + '/proposals/' + p.id + '/evaluation').then(function(ev) {
-      _renderProposalPanel(p, ev.evaluation_data);
+      _updateProposalPanelEval(p, ev.evaluation_data);
     }).catch(function(){});
   }
+}
+
+// Update only the tab bodies of an already-open proposal panel (no blink).
+// evalData has just arrived from the async fetch; we inject it without
+// destroying the panel overlay, header, or tab nav.
+function _updateProposalPanelEval(p, evalData) {
+  var panel = document.getElementById('proposalSidePanel');
+  if (!panel) return; // panel closed before the fetch came back
+
+  // We need the same four tab-body HTML strings that _renderProposalPanel builds.
+  // Build them by calling the shared helper (which both paths now use).
+  var bodies = _buildEvalTabBodies(p, evalData);
+
+  ['summary','compliance','scoring','verdict'].forEach(function(tab) {
+    var existing = document.getElementById('pTabBody_' + tab);
+    if (!existing) return;
+    var wasHidden = existing.style.display === 'none';
+    existing.innerHTML = bodies[tab];
+    // keep the same visibility
+    existing.style.display = wasHidden ? 'none' : '';
+  });
+
+  // Quietly switch to AI Verdict tab now that data is ready
+  switchProposalTab('verdict');
 }
 
 function _proposalAttachmentRow(a) {
@@ -4850,7 +4875,9 @@ function _proposalAttachmentRow(a) {
     + '</div>';
 }
 
-function _renderProposalPanel(p, evalData) {
+// Returns {summary, compliance, scoring, verdict} HTML strings for the four tabs.
+// Shared by _renderProposalPanel (initial open) and _updateProposalPanelEval (in-place update).
+function _buildEvalTabBodies(p, evalData) {
   // ── Scalar metadata ──────────────────────────────────────────────────────
   var rfpId = p.rfp_id;
   var fin = '-';
@@ -4975,7 +5002,7 @@ function _renderProposalPanel(p, evalData) {
       ? '<div style="background:#fee2e2;border:1.5px solid #fca5a5;border-radius:8px;padding:0.75rem 1rem;margin-bottom:1rem;display:flex;align-items:flex-start;gap:0.625rem">'
         + '<i class="fas fa-ban" style="color:#dc2626;font-size:1rem;margin-top:2px;flex-shrink:0"></i>'
         + '<div><div style="font-weight:700;font-size:0.85rem;color:#991b1b;margin-bottom:2px">🚨 Mandatory Requirement(s) Not Met — Proposal Automatically Disqualified</div>'
-        + failedMandatory.map(function(r){ return '<div style="font-size:0.78rem;color:#dc2626"><i class="fas fa-times-circle" style="margin-right:0.25rem"></i>' + escHtml(r.requirement_text || r.id) + '</div>'; }).join('')
+        + failedMandatory.map(function(r){ return '<div style="font-size:0.78rem;color:#dc2626"><i class="fas fa-times-circle" style="margin-right:0.25rem"></i>' + escHtml(r.text || r.requirement_text || r.id) + '</div>'; }).join('')
         + '</div></div>'
       : '';
 
@@ -4987,7 +5014,7 @@ function _renderProposalPanel(p, evalData) {
         ? '<div style="display:flex;align-items:center;gap:0.4rem"><div style="width:40px;height:5px;border-radius:3px;background:#e5e7eb;overflow:hidden"><div style="height:100%;width:' + r.ai_score + '%;background:' + (r.ai_score >= 75 ? '#059669' : r.ai_score >= 50 ? '#d97706' : '#dc2626') + '"></div></div><span style="font-size:0.75rem;color:#374151">' + r.ai_score + '/100</span></div>'
         : '<span style="color:#9ca3af;font-size:0.75rem">—</span>';
       return '<tr style="border-bottom:1px solid #f3f4f6">'
-        + '<td style="padding:0.5rem 0.75rem;font-size:0.78rem;color:#374151;max-width:280px;word-break:break-word">' + escHtml(r.requirement_text || r.id) + '</td>'
+        + '<td style="padding:0.5rem 0.75rem;font-size:0.78rem;color:#374151;max-width:280px;word-break:break-word">' + escHtml(r.text || r.requirement_text || r.id) + '</td>'
         + '<td style="padding:0.5rem 0.75rem;text-align:center">' + (r.mandatory ? '<span style="background:#fee2e2;color:#991b1b;border-radius:4px;padding:2px 6px;font-size:0.68rem;font-weight:700">' + t('panel_comp_must') + '</span>' : '<span style="background:#f3f4f6;color:#6b7280;border-radius:4px;padding:2px 6px;font-size:0.68rem">' + t('panel_comp_should') + '</span>') + '</td>'
         + '<td style="padding:0.5rem 0.75rem;text-align:center">' + metIcon + '</td>'
         + '<td style="padding:0.5rem 0.75rem">' + scoreCell + '</td>'
@@ -5002,8 +5029,8 @@ function _renderProposalPanel(p, evalData) {
       + '<th style="padding:0.5rem 0.75rem;text-align:left;font-size:0.72rem;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em">Requirement</th>'
       + '<th style="padding:0.5rem 0.75rem;text-align:center;font-size:0.72rem;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em">Mandatory</th>'
       + '<th style="padding:0.5rem 0.75rem;text-align:center;font-size:0.72rem;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em">Met?</th>'
-      + '<th style="padding:0.5rem 0.75rem;text-align:left;font-size:0.72rem;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em">AI Depth</th>'
-      + '<th style="padding:0.5rem 0.75rem;text-align:left;font-size:0.72rem;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em">Justification</th>'
+      + '<th style="padding:0.5rem 0.75rem;text-align:left;font-size:0.72rem;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em">Score</th>'
+      + '<th style="padding:0.5rem 0.75rem;text-align:left;font-size:0.72rem;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em">AI Assessment</th>'
       + '</tr></thead>'
       + '<tbody>' + rows + '</tbody>'
       + '</table></div>';
@@ -5104,6 +5131,18 @@ function _renderProposalPanel(p, evalData) {
       + '</div>';
   }
 
+  return { summary: tabSummaryHtml, compliance: tabComplianceHtml, scoring: tabScoringHtml, verdict: tabVerdictHtml };
+}
+
+function _renderProposalPanel(p, evalData) {
+  var bodies = _buildEvalTabBodies(p, evalData);
+  var tabSummaryHtml    = bodies.summary;
+  var tabComplianceHtml = bodies.compliance;
+  var tabScoringHtml    = bodies.scoring;
+  var tabVerdictHtml    = bodies.verdict;
+  var rfpId = p.rfp_id;
+  var dateStr = p.created_at ? new Date(p.created_at).toLocaleString('en-AE') : '-';
+
   // ── Build the panel DOM ───────────────────────────────────────────────────
   closeProposalPanel();
 
@@ -5116,7 +5155,7 @@ function _renderProposalPanel(p, evalData) {
   panel.id = 'proposalSidePanel';
   panel.style.cssText = 'position:fixed;top:0;right:0;bottom:0;width:min(740px,100vw);background:#fff;z-index:901;overflow:hidden;box-shadow:-4px 0 32px rgba(0,0,0,0.15);transform:translateX(100%);transition:transform 0.3s cubic-bezier(0.16,1,0.3,1);display:flex;flex-direction:column';
 
-  var activeTab = evalData ? 'verdict' : 'summary';
+  var activeTab = 'summary'; // always open on Summary; eval update switches to Verdict
 
   panel.innerHTML =
     // ── Panel header ──────────────────────────────────────────────────────
