@@ -4577,28 +4577,38 @@ rfpTabs.proposals = async function(rfpId) {
   function aiBadge(p) {
     if (!p.ai_recommendation) return '<span style="color:#9ca3af;font-size:0.75rem">—</span>';
     var score = p.ai_total_score != null ? Math.round(p.ai_total_score) : '?';
+    // Derive max_score from stored evaluation_data if available
+    var maxScore = 100;
+    try { var ed = p.evaluation_data ? JSON.parse(p.evaluation_data) : null; if (ed && ed.max_score) maxScore = ed.max_score; } catch(e){}
     var vs = p.ai_validation_status || '';
-    if (vs === 'PENDING_MANUAL_REVIEW') return '<span style="background:#fef3c7;color:#92400e;border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:600" title="Budget not auto-extracted — manual review needed"><i class="fas fa-clock" style="margin-right:0.25rem"></i>' + score + '/100 · ' + t('prop_review_badge') + '</span>';
+    if (vs === 'PENDING_MANUAL_REVIEW') return '<span style="background:#fef3c7;color:#92400e;border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:600" title="Budget not auto-extracted — manual review needed"><i class="fas fa-clock" style="margin-right:0.25rem"></i>' + score + '/' + maxScore + ' · ' + t('prop_review_badge') + '</span>';
     if (vs === 'WRONG_DOCUMENT') return '<span style="background:#fee2e2;color:#991b1b;border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:600" title="This file does not appear to be a vendor proposal"><i class="fas fa-ban" style="margin-right:0.25rem"></i>Wrong document</span>';
     var rec = p.ai_recommendation;
-    if (rec === 'RECOMMENDED') return '<span style="background:#d1fae5;color:#065f46;border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:700"><i class="fas fa-check-circle" style="margin-right:0.25rem"></i>' + score + '/100</span>';
-    if (rec === 'CONDITIONAL') return '<span style="background:#fef3c7;color:#92400e;border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:700"><i class="fas fa-exclamation-circle" style="margin-right:0.25rem"></i>' + score + '/100</span>';
-    return '<span style="background:#fee2e2;color:#991b1b;border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:700"><i class="fas fa-times-circle" style="margin-right:0.25rem"></i>' + score + '/100</span>';
+    if (rec === 'RECOMMENDED') return '<span style="background:#d1fae5;color:#065f46;border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:700"><i class="fas fa-check-circle" style="margin-right:0.25rem"></i>' + score + '/' + maxScore + '</span>';
+    if (rec === 'CONDITIONAL') return '<span style="background:#fef3c7;color:#92400e;border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:700"><i class="fas fa-exclamation-circle" style="margin-right:0.25rem"></i>' + score + '/' + maxScore + '</span>';
+    return '<span style="background:#fee2e2;color:#991b1b;border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:700"><i class="fas fa-times-circle" style="margin-right:0.25rem"></i>' + score + '/' + maxScore + '</span>';
   }
 
   let rows = '';
   proposals.forEach(function(p) {
-    // Use budget_amount/currency if available, fallback to financial_proposal
+    // Resolve budget from evaluation_data.budget_extracted first (most accurate),
+    // then DB columns budget_amount, then legacy financial_proposal
+    var _ed = null;
+    try { _ed = p.evaluation_data ? JSON.parse(p.evaluation_data) : null; } catch(e){}
     let fin = '-';
-    if (p.budget_amount && p.budget_amount > 0) {
-      const cur = p.budget_currency || 'AED';
-      fin = cur + ' ' + Number(p.budget_amount).toLocaleString();
+    var _budgetAmt = (_ed && _ed.budget_extracted) || p.budget_amount;
+    var _budgetCur = (_ed && _ed.budget_currency) || p.budget_currency || 'AED';
+    if (_budgetAmt && _budgetAmt > 0) {
+      fin = _budgetCur + ' ' + Number(_budgetAmt).toLocaleString();
     } else if (p.financial_proposal) {
       fin = 'AED ' + Number(p.financial_proposal).toLocaleString();
     }
-    // Use timeline_months if available, fallback to proposed_duration
+    // Resolve duration from evaluation_data.duration_extracted first
     let dur = '-';
-    if (p.timeline_months && p.timeline_months > 0) {
+    var _dur = (_ed && _ed.duration_extracted) || null;
+    if (_dur) {
+      dur = _dur;
+    } else if (p.timeline_months && p.timeline_months > 0) {
       dur = p.timeline_months + ' mo';
     } else if (p.proposed_duration) {
       dur = p.proposed_duration;
@@ -5046,39 +5056,72 @@ function _buildEvalTabBodies(p, evalData) {
   var tabScoringHtml = '';
   if (evalData && evalData.compliance_score != null) {
     var totalScore = evalData.total_score || 0;
-    var compScore  = evalData.compliance_score || 0;
-    var qualScore  = evalData.quality_score || 0;
-    var commScore  = evalData.commercial_score;
+    var maxScore   = evalData.max_score   || 100;
 
     function scoreBar(score, color) {
       return '<div style="flex:1;height:8px;background:#e5e7eb;border-radius:4px;overflow:hidden"><div style="height:100%;width:' + Math.min(100, score) + '%;background:' + color + ';border-radius:4px;transition:width 0.5s"></div></div>';
     }
 
-    var scoringRows = [
-      { label: t('panel_score_compliance'), weight: '40%', score: compScore, color: '#3b82f6', desc: t('panel_score_comp_desc') },
-      { label: t('panel_score_quality'),    weight: '60%', score: qualScore, color: '#8b5cf6', desc: t('panel_score_qual_desc') },
-    ];
-    if (commScore != null) {
-      scoringRows.push({ label: t('panel_score_commercial'), weight: 'bonus', score: commScore, color: '#059669', desc: t('panel_score_comm_desc') });
+    // Build scoring rows from scoring_breakdown (new v48 format) if available;
+    // fall back to the old compliance/quality/commercial triple for older evalData.
+    var scoringRows = [];
+    var rowColors = ['#3b82f6','#8b5cf6','#059669','#f59e0b','#ef4444','#06b6d4','#10b981'];
+    if (evalData.scoring_breakdown && evalData.scoring_breakdown.length > 0) {
+      evalData.scoring_breakdown.forEach(function(s, idx) {
+        var pct = s.weight > 0 ? Math.round((s.score_achieved / s.weight) * 100) : (s.achieved_pct || 0);
+        var color = /commercial|cost/i.test(s.criterion) ? '#059669' : rowColors[idx % rowColors.length];
+        scoringRows.push({
+          label: s.criterion,
+          weight: s.weight + ' pts',
+          score: pct,
+          scoreAchieved: s.score_achieved,
+          maxWeight: s.weight,
+          color: color,
+          desc: s.justification || ''
+        });
+      });
+    } else {
+      // Legacy format fallback
+      var compScore = evalData.compliance_score || 0;
+      var qualScore = evalData.quality_score || 0;
+      var commScore = evalData.commercial_score;
+      scoringRows = [
+        { label: t('panel_score_compliance'), weight: '40%', score: compScore, scoreAchieved: null, maxWeight: null, color: '#3b82f6', desc: t('panel_score_comp_desc') },
+        { label: t('panel_score_quality'),    weight: '60%', score: qualScore, scoreAchieved: null, maxWeight: null, color: '#8b5cf6', desc: t('panel_score_qual_desc') },
+      ];
+      if (commScore != null) {
+        scoringRows.push({ label: t('panel_score_commercial'), weight: 'bonus', score: commScore, scoreAchieved: null, maxWeight: null, color: '#059669', desc: t('panel_score_comm_desc') });
+      }
     }
+
+    // Determine score colour thresholds relative to maxScore
+    var pct80 = maxScore * 0.80; var pct60 = maxScore * 0.60;
+    var scoreColor = totalScore >= pct80 ? '#4ade80' : totalScore >= pct60 ? '#fbbf24' : '#f87171';
+    var scoreIcon  = totalScore >= pct80 ? 'fa-check-circle' : totalScore >= pct60 ? 'fa-exclamation-circle' : 'fa-times-circle';
 
     tabScoringHtml = '<div style="margin-bottom:1.25rem;background:linear-gradient(135deg,var(--cpc-ink),#2d2519);border-radius:12px;padding:1.25rem;color:white;display:flex;align-items:center;justify-content:space-between">'
       + '<div><div style="font-size:0.75rem;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:rgba(255,255,255,0.6);margin-bottom:4px">' + t('panel_score_overall') + '</div>'
-      + '<div style="font-size:2.5rem;font-weight:800;line-height:1;color:' + (totalScore >= 80 ? '#4ade80' : totalScore >= 60 ? '#fbbf24' : '#f87171') + '">' + Math.round(totalScore) + '<span style="font-size:1.2rem;font-weight:500;color:rgba(255,255,255,0.4)">/100</span></div>'
+      + '<div style="font-size:2.5rem;font-weight:800;line-height:1;color:' + scoreColor + '">' + Math.round(totalScore) + '<span style="font-size:1.2rem;font-weight:500;color:rgba(255,255,255,0.4)">/' + maxScore + '</span></div>'
       + '</div>'
-      + '<div style="width:72px;height:72px;border-radius:50%;border:4px solid ' + (totalScore >= 80 ? '#4ade80' : totalScore >= 60 ? '#fbbf24' : '#f87171') + ';display:flex;align-items:center;justify-content:center">'
-      + '<i class="fas ' + (totalScore >= 80 ? 'fa-check-circle' : totalScore >= 60 ? 'fa-exclamation-circle' : 'fa-times-circle') + '" style="font-size:1.75rem;color:' + (totalScore >= 80 ? '#4ade80' : totalScore >= 60 ? '#fbbf24' : '#f87171') + '"></i></div>'
+      + '<div style="width:72px;height:72px;border-radius:50%;border:4px solid ' + scoreColor + ';display:flex;align-items:center;justify-content:center">'
+      + '<i class="fas ' + scoreIcon + '" style="font-size:1.75rem;color:' + scoreColor + '"></i></div>'
       + '</div>'
       + '<div style="display:flex;flex-direction:column;gap:0.75rem">'
       + scoringRows.map(function(r) {
+          // Score display: if we have raw achieved/max use that, else show % of 100
+          var scoreDisplay = (r.scoreAchieved != null && r.maxWeight != null)
+            ? (Math.round(r.scoreAchieved * 10)/10) + '/' + r.maxWeight
+            : Math.round(r.score) + '/100';
+          // Truncate long justification to 2 lines in collapsed state
+          var justShort = (r.desc || '').slice(0, 140) + ((r.desc || '').length > 140 ? '…' : '');
           return '<div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:0.875rem">'
             + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'
             + '<div><span style="font-size:0.85rem;font-weight:600;color:#1f2937">' + escHtml(r.label) + '</span>'
             + ' <span style="font-size:0.7rem;color:#9ca3af;background:#f3f4f6;border-radius:4px;padding:1px 6px">' + r.weight + '</span></div>'
-            + '<span style="font-size:1.1rem;font-weight:800;color:' + r.color + '">' + Math.round(r.score) + '/100</span>'
+            + '<span style="font-size:1.1rem;font-weight:800;color:' + r.color + '">' + scoreDisplay + '</span>'
             + '</div>'
             + '<div style="display:flex;align-items:center;gap:0.5rem">' + scoreBar(r.score, r.color) + '</div>'
-            + '<div style="font-size:0.72rem;color:#9ca3af;margin-top:4px">' + escHtml(r.desc) + '</div>'
+            + (r.desc ? '<div style="font-size:0.72rem;color:#6b7280;margin-top:6px;line-height:1.55">' + escHtml(justShort) + '</div>' : '')
             + '</div>';
         }).join('')
       + '</div>'
@@ -5105,7 +5148,7 @@ function _buildEvalTabBodies(p, evalData) {
     tabVerdictHtml = '<div style="text-align:center;padding:1.25rem;background:' + recBg + ';border-radius:12px;margin-bottom:1.25rem">'
       + '<i class="fas ' + recIcon + '" style="font-size:2.5rem;color:' + recColor + ';display:block;margin-bottom:0.5rem"></i>'
       + '<div style="font-size:1.5rem;font-weight:800;color:' + recColor + '">' + escHtml(rec) + '</div>'
-      + (evalData.total_score != null ? '<div style="font-size:0.85rem;color:' + recColor + ';opacity:0.75;margin-top:4px">' + t('panel_score_score_lbl') + ' ' + Math.round(evalData.total_score) + ' / 100</div>' : '')
+      + (evalData.total_score != null ? '<div style="font-size:0.85rem;color:' + recColor + ';opacity:0.75;margin-top:4px">' + t('panel_score_score_lbl') + ' ' + Math.round(evalData.total_score) + ' / ' + (evalData.max_score || 100) + '</div>' : '')
       + '</div>'
       + (evalData.recommendation_reasoning ? '<div style="margin-bottom:1.25rem"><div class="panel-section-title"><i class="fas fa-gavel" style="color:var(--cpc-ink)"></i>' + t('panel_verdict_reasoning') + '</div>'
         + '<div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:0.875rem;font-size:0.82rem;line-height:1.7;color:#374151">' + escHtml(evalData.recommendation_reasoning) + '</div></div>' : '')

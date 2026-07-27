@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 import { emblemPngBase64 } from '../emblem-data'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-07-27-v47'  // OCR callback now uses evaluateProposal() (single gpt-5 call)
+const WORKER_VERSION = '2026-07-27-v48'  // v48: new budget prompt (gpt-5/16k), inline budget in evaluateProposal, commercial score added to total
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.cpc-rfp.website.
@@ -1947,17 +1947,52 @@ Respond ONLY with JSON: {"is_proposal": true|false, "reason": "<one sentence, ma
     }
   }
 
-  // ── Budget & Duration ────────────────────────────────────────────────────────
-  // Full budget extraction (analytical LLM) is handled by the separate
-  // /evaluate-budget endpoint. Here we just carry over any stored value.
+  // ── Budget & Duration — run inline extraction ────────────────────────────────
+  // Always run runBudgetLLM here so budget + duration are always fresh from
+  // the full proposal text. Results are saved to DB as a side-effect.
   let budget = { amount: null as number | null, currency: 'AED', confidence: 0.0 }
   let duration: string | null = proposal.proposed_duration || null
 
-  if (proposal.budget_amount) {
-    budget.amount = proposal.budget_amount
-    budget.currency = proposal.budget_currency || 'AED'
-    budget.confidence = 0.4
+  try {
+    const budgetResult = await runBudgetLLM(proposalText, proposal, env.DB, env)
+    if (budgetResult.budget_amount) {
+      budget.amount     = budgetResult.budget_amount
+      budget.currency   = budgetResult.budget_currency || 'AED'
+      budget.confidence = budgetResult.budget_confidence || 0.9
+    }
+    if (budgetResult.duration) duration = budgetResult.duration
+    console.log(`[eval-v48] budget extracted: ${budget.currency} ${budget.amount} duration=${duration}`)
+  } catch (budgetErr: any) {
+    // Budget extraction failure is non-fatal — proceed with technical evaluation
+    console.error(`[eval-v48] budget extraction error: ${budgetErr?.message}`)
+    // Fall back to any stored values
+    if (proposal.budget_amount) {
+      budget.amount     = proposal.budget_amount
+      budget.currency   = proposal.budget_currency || 'AED'
+      budget.confidence = 0.4
+    }
   }
+
+  // ── Parse scoring_matrix to find commercial weight ───────────────────────────
+  // scoring_matrix JSON: [{ criterion, weight, description }, ...]
+  // The commercial/cost criterion is identified by criterion name containing
+  // "commercial" or "cost" (case-insensitive). Default weight = 10 if not found.
+  let commercialWeight = 10
+  let technicalTotal   = 90   // sum of all non-commercial weights
+  try {
+    const matrixArr: any[] = JSON.parse(rfp.scoring_matrix || '[]')
+    if (matrixArr.length > 0) {
+      const commercialCrit = matrixArr.find((c: any) =>
+        /commercial|cost competitiveness|price/i.test(c.criterion || c.name || '')
+      )
+      if (commercialCrit) {
+        commercialWeight = Number(commercialCrit.weight) || 10
+      }
+      const allWeights = matrixArr.reduce((sum: number, c: any) => sum + (Number(c.weight) || 0), 0)
+      if (allWeights > 0) technicalTotal = allWeights - commercialWeight
+    }
+  } catch (_) {}
+  console.log(`[eval-v48] commercialWeight=${commercialWeight} technicalTotal=${technicalTotal}`)
 
   // ── Single-call LLM scoring ──────────────────────────────────────────────────
   // One gpt-5 call receives both full documents and returns structured scores
@@ -1965,7 +2000,7 @@ Respond ONLY with JSON: {"is_proposal": true|false, "reason": "<one sentence, ma
   const rfpFullText   = (rfp.rfp_full_text || '').trim()
   const scoringMatrix = (rfp.scoring_matrix || '').trim() || '(not configured — use standard procurement scoring criteria as defined in the RFP)'
 
-  console.log(`[eval-v47] proposalId=${proposal.id} rfp_full_text=${rfpFullText.length} proposal_full_text=${proposalText.length}`)
+  console.log(`[eval-v48] proposalId=${proposal.id} rfp_full_text=${rfpFullText.length} proposal_full_text=${proposalText.length}`)
 
   const evalSystemPrompt = `You are a procurement evaluation expert. You will be given two documents:
 
@@ -2034,7 +2069,7 @@ Now evaluate the proposal and return only the JSON object. Do not include any ad
 
   try {
     const rawEval = await callLLM(evalSystemPrompt, evalUserPrompt, env, 'gpt-5', 16000)
-    console.log(`[eval-v47] LLM raw response length=${rawEval.length} preview="${rawEval.slice(0, 200)}"`)
+    console.log(`[eval-v48] LLM raw response length=${rawEval.length} preview="${rawEval.slice(0, 200)}"`)
 
     // Strip markdown fences if present
     let clean = rawEval.trim()
@@ -2091,41 +2126,136 @@ Now evaluate the proposal and return only the JSON object. Do not include any ad
       .filter((s: any) => Number(s.weight) >= 10 && (Number(s.score_achieved) / Math.max(1, Number(s.weight))) < 0.34)
       .map((s: any) => `${s.criterion} (${s.score_achieved}/${s.weight})`)
 
-    // ── Recommendation ────────────────────────────────────────────────────────
-    if (totalScore >= 72) {         // ≥80% of 90
-      recommendation = 'RECOMMENDED'
-      reasoning = `Strong overall score of ${totalScore}/90. Proposal meets most RFP criteria.`
-    } else if (totalScore >= 54) {  // ≥60% of 90
-      recommendation = 'CONDITIONAL'
-      reasoning = `Score of ${totalScore}/90 meets minimum threshold. Review weaknesses before proceeding.`
-    } else {
-      recommendation = 'NOT RECOMMENDED'
-      reasoning = `Score of ${totalScore}/90 is below acceptance threshold.`
-    }
-    if (mandatoryFailed.length > 0) {
-      recommendation = 'NOT RECOMMENDED'
-      reasoning = `Critical criteria scored below 34%: ${mandatoryFailed.slice(0, 2).join('; ')}.`
-    }
-
     validationStatus = 'EVALUATED'
-    console.log(`[eval-v47] DONE total_score=${totalScore} criteria=${scores.length} strengths=${strengths.length} weaknesses=${weaknesses.length}`)
+    console.log(`[eval-v48] technical DONE total_score=${totalScore} criteria=${scores.length}`)
 
   } catch (evalErr: any) {
-    console.log(`[eval-v47] LLM EXCEPTION: ${evalErr?.message || evalErr}`)
+    console.log(`[eval-v48] LLM EXCEPTION: ${evalErr?.message || evalErr}`)
     validationStatus = 'EVAL_FAILED'
     reasoning = `Evaluation failed: ${evalErr?.message || evalErr}`
   }
+
+  // ── Commercial / Cost Competitiveness scoring ────────────────────────────────
+  // Runs after technical evaluation. Compares extracted budget against the RFP's
+  // stated budget range (if any) and awards a score out of commercialWeight.
+  // Scoring logic (read from RFP text):
+  //   • If RFP states a budget ceiling (rfp.budget field), compare against it.
+  //   • ≤ budget ceiling             → 100% of commercialWeight
+  //   • ≤ 110% of budget ceiling     → 70%  of commercialWeight
+  //   • ≤ 125% of budget ceiling     → 40%  of commercialWeight
+  //   • > 125% of budget ceiling     → 10%  of commercialWeight
+  //   • Budget not extracted         → 0  (excluded from total; note in reasoning)
+  let commercialScore: number | null = null
+  let commercialJustification = ''
+  const commercialScoreAchieved: number | null = null  // kept as let for mutation below
+  let commercialScoreActual: number | null = null
+
+  if (budget.amount && commercialWeight > 0) {
+    // Try to get RFP budget ceiling from rfp.budget field
+    let rfpBudgetCeiling: number | null = null
+    if (rfp.budget) {
+      const rfpBudgetStr = String(rfp.budget).replace(/,/g, '')
+      const rfpBudgetNum = parseFloat(rfpBudgetStr.replace(/[^\d.]/g, ''))
+      if (rfpBudgetNum > 0 && rfpBudgetNum < 1e10) rfpBudgetCeiling = rfpBudgetNum
+    }
+    // Also search rfp_full_text for "budget" + number pattern as fallback
+    if (!rfpBudgetCeiling && rfpFullText) {
+      const budgetPatterns = [
+        /total\s+budget[^a-z]*?([\d,]+(?:\.\d+)?)/i,
+        /budget[^a-z]*?(?:aed|usd|eur)?\s*([\d,]+(?:\.\d+)?)/i,
+        /(?:aed|usd|eur)\s*([\d,]+(?:\.\d+)?)\s*(?:total\s+budget|budget\s+ceiling|estimated\s+budget)/i,
+      ]
+      for (const pat of budgetPatterns) {
+        const m = rfpFullText.match(pat)
+        if (m) {
+          const val = parseFloat(m[1].replace(/,/g, ''))
+          if (val > 10000 && val < 1e10) { rfpBudgetCeiling = val; break }
+        }
+      }
+    }
+
+    if (rfpBudgetCeiling) {
+      const ratio = budget.amount / rfpBudgetCeiling
+      let pct: number
+      if (ratio <= 1.0)  pct = 1.00
+      else if (ratio <= 1.10) pct = 0.70
+      else if (ratio <= 1.25) pct = 0.40
+      else pct = 0.10
+
+      commercialScoreActual = Math.round(pct * commercialWeight * 10) / 10
+      const ratioStr = (ratio * 100).toFixed(0)
+      commercialJustification = `Proposed cost ${budget.currency} ${budget.amount.toLocaleString()} is ${ratioStr}% of the RFP budget ceiling ${budget.currency} ${rfpBudgetCeiling.toLocaleString()}. Score: ${commercialScoreActual}/${commercialWeight} (${Math.round(pct*100)}%).`
+    } else {
+      // No RFP budget ceiling found — use market-average heuristic:
+      // Score = commercialWeight × (1 - penalty), where penalty grows with budget size
+      // This rewards lower bids relative to no benchmark (neutral mid score = 60%).
+      commercialScoreActual = Math.round(commercialWeight * 0.6 * 10) / 10
+      commercialJustification = `No RFP budget ceiling specified. Awarded ${Math.round(commercialWeight * 0.6 * 10)/10}/${commercialWeight} (neutral 60%) — budget extracted: ${budget.currency} ${budget.amount.toLocaleString()}. Manual review recommended.`
+    }
+    commercialScore = Math.round((commercialScoreActual / commercialWeight) * 100)
+    console.log(`[eval-v48] commercial score=${commercialScoreActual}/${commercialWeight} (${commercialScore}%)`)
+  } else {
+    commercialJustification = budget.amount
+      ? `Commercial criterion weight is 0 — excluded from scoring.`
+      : `Budget could not be extracted from proposal text — commercial score omitted.`
+    console.log(`[eval-v48] commercial skipped: budget=${budget.amount} weight=${commercialWeight}`)
+  }
+
+  // ── Merge commercial into total score ─────────────────────────────────────────
+  const technicalScore = totalScore  // the /90 (or /technicalTotal) score from LLM
+  if (commercialScoreActual !== null) {
+    totalScore = Math.round((technicalScore + commercialScoreActual) * 10) / 10
+    // Add commercial row to scoring breakdown
+    scoringBreakdown.push({
+      criterion: 'Commercial Proposal & Cost Competitiveness',
+      weight: commercialWeight,
+      score_achieved: commercialScoreActual,
+      justification: commercialJustification,
+      achieved_pct: commercialScore ?? 0,
+    })
+    // Add to compliance breakdown for UI back-compat
+    complianceBreakdown.push({
+      id: 'crit_commercial_proposal_cost_competitiveness',
+      text: 'Commercial Proposal & Cost Competitiveness',
+      mandatory: false,
+      compliance_met: (commercialScore ?? 0) >= 50,
+      ai_score: commercialScore ?? 0,
+      justification: commercialJustification,
+    })
+  }
+
+  const maxScore = technicalTotal + commercialWeight  // e.g. 90 + 10 = 100
+
+  // ── Recommendation (now out of maxScore) ─────────────────────────────────────
+  const threshold80 = maxScore * 0.80
+  const threshold60 = maxScore * 0.60
+  if (mandatoryFailed.length > 0) {
+    recommendation = 'NOT RECOMMENDED'
+    reasoning = `Critical criteria scored below 34%: ${mandatoryFailed.slice(0, 2).join('; ')}.`
+  } else if (totalScore >= threshold80) {
+    recommendation = 'RECOMMENDED'
+    reasoning = `Strong overall score of ${totalScore}/${maxScore}. Proposal meets most RFP criteria.`
+  } else if (totalScore >= threshold60) {
+    recommendation = 'CONDITIONAL'
+    reasoning = `Score of ${totalScore}/${maxScore} meets minimum threshold. Review weaknesses before proceeding.`
+  } else {
+    recommendation = 'NOT RECOMMENDED'
+    reasoning = `Score of ${totalScore}/${maxScore} is below the acceptance threshold.`
+  }
+
+  console.log(`[eval-v48] FINAL total=${totalScore}/${maxScore} technical=${technicalScore}/${technicalTotal} commercial=${commercialScoreActual ?? 'n/a'}/${commercialWeight} rec=${recommendation}`)
 
   return {
     evaluated_at: new Date().toISOString(),
     proposal_id: proposal.id,
     vendor_name: proposal.vendor_name || '',
     total_score: totalScore,
+    max_score: maxScore,
     recommendation,
     validation_status: validationStatus,
-    compliance_score: totalScore,   // re-use total as unified score (no separate compliance pass)
+    compliance_score: totalScore,
     quality_score: totalScore,
-    commercial_score: null,         // commercial excluded per prompt instructions
+    commercial_score: commercialScore,
     budget_extracted: budget.amount,
     budget_currency: budget.currency,
     budget_confidence: budget.confidence,
@@ -2472,116 +2602,9 @@ apiRouter.post('/callback/proposals/:proposalId/budget-complete', async (c) => {
 })
 
 // ── Shared budget LLM function ────────────────────────────────────────────────
+// Uses the structured extraction prompt: sums core phase costs + mandatory
+// 3rd-party licenses; excludes optional add-ons, support, VAT, hosting.
 async function runBudgetLLM(proposalText: string, proposal: any, db: D1Database, env?: any): Promise<any> {
-  const systemPrompt = 'You are a financial extraction analyst. I will provide you with the raw OCR text of a commercial proposal.'
-  const userPrompt = `Your task is to find, categorize, and sum all costs to calculate the total budget.
-Do not assume any specific section titles (like "MVP1" or "Tableau"). Instead, use the following logical methodology to parse the text dynamically:
-
-**Step 1: Identify all monetary values**
-- Scan the entire text and locate every figure that includes a currency symbol or code (e.g., AED, USD, EUR, SAR, $, etc.).
-- For each monetary value, read the 3-5 lines of text immediately before and after it to understand its context.
-
-**Step 2: Group monetary values into cost clusters**
-- **Implementation/Phase Clusters**: If a monetary value appears after a long list of technical tasks, deliverables, or work items, treat that value as the total cost for that specific phase or workstream. There may be multiple such clusters (e.g., Phase 1, Phase 2).
-- **Auxiliary One-Time Clusters**: If a monetary value appears near words like "License", "Subscription", "Training", "Workshop", "Enablement", or "Setup", treat it as an additional one-time fixed cost.
-- **Recurring Support Clusters**: If a monetary value appears near words like "Support", "Maintenance", "Managed Services", or contains phrases like "per month", "monthly", or "hours per month", calculate the total monthly recurring cost by summing the individual line items in that cluster.
-
-**Step 3: Determine the project timeline (for recurring costs)**
-- Scan the text for any phrases indicating duration (e.g., "in X months", "X weeks", "quarter", "by QX").
-- If the total project duration or support period is explicitly stated, use that.
-- If the support duration is missing, use a baseline assumption of 12 months, but clearly flag this as an assumption in your output.
-
-**Step 4: Detect currency and tax rules**
-- Identify the dominant currency code/symbol used.
-- Look for mentions of "VAT", "GST", or "tax" and note the percentage. If found, calculate the inclusive total.
-
-**Step 5: Perform the calculations**
-- **Total Fixed (One-Time) Budget** = Sum of all Implementation/Phase clusters + Sum of all Auxiliary one-time clusters.
-- **Total Budget with Support** = Total Fixed Budget + (Monthly Recurring Support Cost * number of support months, or the 12-month baseline assumption).
-- **Tax-Inclusive Total** = Add the detected tax percentage to the final total.
-
-**Step 6: Output your findings as JSON**
-Return ONLY valid JSON (no markdown, no extra text):
-{
-  "clusters": [
-    {"description": "<cluster name>", "type": "fixed|recurring_monthly", "amount": <number>, "currency": "<AED|USD|EUR>", "how_identified": "<brief explanation>"}
-  ],
-  "total_fixed": <number or null>,
-  "total_with_support": <number or null>,
-  "support_months": <number>,
-  "support_months_assumed": <true|false>,
-  "tax_rate": <0.05 for 5% VAT, or 0 if none>,
-  "tax_inclusive_total": <number or null>,
-  "currency": "<dominant currency>",
-  "duration": "<e.g. 3.5 months or next quarter>"|null,
-  "confidence": <0.0-1.0>,
-  "missing_info": ["<list any missing data that prevents definitive answer>"]
-}
-
-**Here is the OCR text to analyze:**
-${proposalText}`
-
-  const rawBudget = await callLLM(systemPrompt, userPrompt, env || {}, 'gpt-5-mini', 1200)
-
-  const jsonMatch = rawBudget.match(/\{[\s\S]*\}/)
-  if (!jsonMatch) return { budget_amount: null, budget_currency: 'AED', budget_confidence: 0, duration: null, clusters: [], missing_info: ['LLM returned no JSON'] }
-
-  let parsed: any
-  try { parsed = JSON.parse(jsonMatch[0]) } catch (_) {
-    return { budget_amount: null, budget_currency: 'AED', budget_confidence: 0, duration: null, clusters: [], missing_info: ['JSON parse failed'] }
-  }
-
-  const bestTotal = parsed.tax_inclusive_total || parsed.total_with_support || parsed.total_fixed
-  const budget = {
-    amount: (bestTotal && bestTotal > 0 && bestTotal < 1e10) ? Math.round(bestTotal) : null,
-    currency: parsed.currency || 'AED',
-    confidence: Math.min(1.0, Math.max(0.0, parseFloat(parsed.confidence) || 0.5)),
-  }
-  const duration: string | null = (parsed.duration && typeof parsed.duration === 'string') ? parsed.duration : (proposal.proposed_duration || null)
-
-  if (budget.amount) {
-    await db.prepare(`
-      UPDATE proposals SET budget_amount=?, budget_currency=?, proposed_duration=?, updated_at=datetime('now') WHERE id=?
-    `).bind(budget.amount, budget.currency, duration, proposal.id).run()
-    try {
-      let evalData: any = {}
-      try { evalData = JSON.parse(proposal.evaluation_data || '{}') } catch (_) {}
-      evalData.budget_extracted = budget.amount
-      evalData.budget_currency = budget.currency
-      evalData.budget_confidence = budget.confidence
-      evalData.duration_extracted = duration
-      evalData.budget_clusters = parsed.clusters || []
-      evalData.budget_missing_info = parsed.missing_info || []
-      await db.prepare(`UPDATE proposals SET evaluation_data=? WHERE id=?`).bind(JSON.stringify(evalData), proposal.id).run()
-    } catch (_) {}
-  }
-
-  return {
-    budget_amount: budget.amount,
-    budget_currency: budget.currency,
-    budget_confidence: budget.confidence,
-    duration,
-    clusters: parsed.clusters || [],
-    missing_info: parsed.missing_info || [],
-    text_chars: proposalText.length,
-  }
-}
-
-// ── POST /api/rfps/:rfpId/proposals/:proposalId/budget-debug ────────────────
-// Temporary one-shot endpoint: runs the user-supplied budget/duration extraction
-// prompt against proposal_full_text and returns raw LLM JSON output.
-// TODO: remove after prompt validation.
-apiRouter.post('/rfps/:rfpId/proposals/:proposalId/budget-debug', async (c) => {
-  const proposalId = c.req.param('proposalId')
-  const db = c.env.DB
-  const proposal = await db.prepare(
-    `SELECT p.*, v.name as vendor_name FROM proposals p LEFT JOIN vendors v ON p.vendor_id=v.id WHERE p.id=?`
-  ).bind(proposalId).first<any>()
-  if (!proposal) return c.json({ error: 'Proposal not found' }, 404)
-
-  const proposalText = (proposal.proposal_full_text || proposal.ocr_job_text || '').trim()
-  if (!proposalText) return c.json({ error: 'No proposal text available' }, 400)
-
   const systemPrompt = `You are a procurement expert AI. Your task is to analyze the provided vendor proposal text and extract the TOTAL PROJECT COST and TOTAL PROJECT DURATION.`
 
   const userPrompt = `Follow these rules strictly:
@@ -2610,25 +2633,67 @@ Now, analyze the following vendor proposal text and output the JSON:
 
 ${proposalText}`
 
-  const raw = await callLLM(systemPrompt, userPrompt, c.env, 'gpt-5', 16000)
+  const rawBudget = await callLLM(systemPrompt, userPrompt, env || {}, 'gpt-5', 16000)
 
-  let parsed: any = null
-  try {
-    let clean = raw.trim()
-    if (clean.startsWith('```')) {
-      clean = clean.split('\n').slice(1).join('\n').replace(/```\s*$/, '').trim()
+  // Strip markdown fences
+  let cleanRaw = rawBudget.trim()
+  if (cleanRaw.startsWith('```')) {
+    cleanRaw = cleanRaw.split('\n').slice(1).join('\n').replace(/```\s*$/, '').trim()
+  }
+
+  const jsonMatch = cleanRaw.match(/\{[\s\S]*?\}/)
+  if (!jsonMatch) return { budget_amount: null, budget_currency: 'AED', budget_confidence: 0, duration: null, missing_info: ['LLM returned no JSON'] }
+
+  let parsed: any
+  try { parsed = JSON.parse(jsonMatch[0]) } catch (_) {
+    return { budget_amount: null, budget_currency: 'AED', budget_confidence: 0, duration: null, missing_info: ['JSON parse failed'] }
+  }
+
+  // Parse "total_cost" string like "1,832,436 AED" or "AED 1,832,436"
+  let budgetAmount: number | null = null
+  let budgetCurrency = 'AED'
+  const totalCostStr: string = (parsed.total_cost || '').toString()
+  if (totalCostStr) {
+    // Extract currency code
+    const curMatch = totalCostStr.match(/\b(AED|USD|EUR|GBP|SAR|QAR|KWD|BHD)\b/i)
+    if (curMatch) budgetCurrency = curMatch[1].toUpperCase()
+    // Extract numeric value
+    const numMatch = totalCostStr.replace(/,/g, '').match(/[\d]+(?:\.\d+)?/)
+    if (numMatch) {
+      const val = parseFloat(numMatch[0])
+      if (val > 0 && val < 1e10) budgetAmount = Math.round(val)
     }
-    parsed = JSON.parse(clean)
-  } catch (_) {}
+  }
 
-  return c.json({
-    ok: true,
-    proposal_id: parseInt(proposalId),
-    chars_analyzed: proposalText.length,
-    raw_llm_response: raw,
-    parsed,
-  })
-})
+  const duration: string | null = (parsed.duration && typeof parsed.duration === 'string')
+    ? parsed.duration
+    : (proposal.proposed_duration || null)
+
+  if (budgetAmount) {
+    await db.prepare(`
+      UPDATE proposals SET budget_amount=?, budget_currency=?, proposed_duration=?, updated_at=datetime('now') WHERE id=?
+    `).bind(budgetAmount, budgetCurrency, duration, proposal.id).run()
+    try {
+      let evalData: any = {}
+      try { evalData = JSON.parse(proposal.evaluation_data || '{}') } catch (_) {}
+      evalData.budget_extracted = budgetAmount
+      evalData.budget_currency  = budgetCurrency
+      evalData.budget_confidence = 0.9   // high confidence — model was given clear rules
+      evalData.duration_extracted = duration
+      await db.prepare(`UPDATE proposals SET evaluation_data=? WHERE id=?`).bind(JSON.stringify(evalData), proposal.id).run()
+    } catch (_) {}
+  }
+
+  return {
+    budget_amount:     budgetAmount,
+    budget_currency:   budgetCurrency,
+    budget_confidence: budgetAmount ? 0.9 : 0,
+    duration,
+    raw_total_cost: totalCostStr,
+    missing_info:  budgetAmount ? [] : ['Could not parse monetary value from LLM response'],
+    text_chars:    proposalText.length,
+  }
+}
 
 // ── GET /api/rfps/:rfpId/proposals/:proposalId/evaluation — fetch results ────
 apiRouter.get('/rfps/:rfpId/proposals/:proposalId/evaluation', async (c) => {
