@@ -124,7 +124,7 @@ var I18N = {
     qa_via_email:         'Via Email',
     qa_ai_draft_btn:      'AI Draft',
     qa_manual_edit_btn:   'Manual Edit',
-    qa_approve_send_btn:  'Approve & Send',
+    qa_approve_send_btn:  'Approve',
     qa_approve_btn:       'Approve',
     qa_ai_draft_label:    'AI Draft Answer',
     qa_ai_no_answer:      'AI could not generate an answer',
@@ -595,7 +595,7 @@ var I18N = {
     qa_via_email:         'عبر البريد الإلكتروني',
     qa_ai_draft_btn:      'مسودة ذكاء اصطناعي',
     qa_manual_edit_btn:   'تعديل يدوي',
-    qa_approve_send_btn:  'موافقة وإرسال',
+    qa_approve_send_btn:  'موافقة',
     qa_approve_btn:       'موافقة',
     qa_ai_draft_label:    'مسودة إجابة الذكاء الاصطناعي',
     qa_ai_no_answer:      'تعذّر على الذكاء الاصطناعي توليد إجابة',
@@ -4328,6 +4328,7 @@ rfpTabs.qa = async function(rfpId) {
     + '<div style="display:flex;gap:0.5rem;flex-wrap:wrap">'
     + '<button class="btn-ghost btn-sm" id="reprocessQBtn" onclick="reprocessQuestions(' + rfpId + ')" title="Re-extract questions from received emails"><i class="fas fa-sync"></i>' + t('qa_re_extract_btn') + '</button>'
     + '<button class="btn-secondary" id="draftAllBtn" onclick="draftAllQAnswers(' + rfpId + ')"><i class="fas fa-robot"></i>' + t('qa_ai_answer_all') + '</button>'
+    + '<button class="btn-ghost btn-sm" id="approveAllBtn" onclick="approveAllQAnswers(' + rfpId + ')" title="Mark all AI-drafted answers as approved"><i class="fas fa-check-double"></i>Approve All</button>'
     + '<button class="btn-primary" onclick="publishAllQAnswers(' + rfpId + ')" ' + (manualNeeded > 0 ? 'title="' + t('qa_blocked_title') + ' ' + manualNeeded + ' ' + t('qa_need_manual_answers') + '" style="opacity:0.6"' : '') + '><i class="fas fa-paper-plane"></i>' + t('qa_publish_approved') + '</button>'
     + '</div>'
     + '</div>'
@@ -4358,8 +4359,30 @@ async function draftAllQAnswers(rfpId) {
 
 async function approveQAnswer(rfpId, qId) {
   await apiCall('PUT', '/rfps/' + rfpId + '/questions/' + qId + '/approve', {});
-  showToast('Answer approved and sent back to vendor!', 'success');
+  showToast('Answer approved!', 'success');
   rfpTabs.qa(rfpId);
+}
+
+async function approveAllQAnswers(rfpId) {
+  var qs = appState.questions || [];
+  // Only approve questions that have a drafted answer, are not yet published, and don't need manual review
+  var approvable = qs.filter(function(q) {
+    return q.answer && q.answer.trim() !== '' && !q.published && !q.needs_manual;
+  });
+  if (approvable.length === 0) {
+    showToast('No AI-drafted answers to approve yet. Run "AI Answer All" first.', 'warning', 5000);
+    return;
+  }
+  var btn = document.getElementById('approveAllBtn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Approving…'; }
+  try {
+    await apiCall('POST', '/rfps/' + rfpId + '/questions/approve-all', {});
+    showToast('✅ ' + approvable.length + ' answer(s) approved! Use "Publish All Approved" to send them to vendors.', 'success', 5000);
+    rfpTabs.qa(rfpId);
+  } catch(e) {
+    showToast('Approve all failed: ' + (e.message || e), 'error');
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-check-double"></i>Approve All'; }
+  }
 }
 
 function editQAnswer(qId) {
