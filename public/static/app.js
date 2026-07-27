@@ -4082,6 +4082,44 @@ async function silentCheckProposals(rfpId) {
   }
 }
 
+// Scroll to the next question card that requires manual intervention.
+// ids = array of question IDs that need manual answers (in display order).
+// Cycles: after the last one it wraps back to the first.
+function scrollToNextManual(ids) {
+  if (!ids || ids.length === 0) return;
+  // Gather elements in DOM order (questions may be reordered by filter)
+  var els = ids.map(function(id) { return document.getElementById('q-' + id); })
+               .filter(function(el) { return !!el; });
+  if (els.length === 0) return;
+
+  // Find the scroll container — #mainContent or the page body
+  var container = document.getElementById('mainContent') || document.documentElement;
+  var containerTop = container === document.documentElement ? 0 : container.getBoundingClientRect().top;
+  var scrollTop = container === document.documentElement ? window.scrollY : container.scrollTop;
+
+  // Current viewport midpoint relative to the document
+  var viewportMid = scrollTop + (window.innerHeight || 600) / 2;
+
+  // Find first element whose centre is BELOW the current viewport midpoint
+  var next = null;
+  for (var i = 0; i < els.length; i++) {
+    var rect = els[i].getBoundingClientRect();
+    var elCenter = scrollTop + rect.top + rect.height / 2 - containerTop;
+    if (elCenter > viewportMid + 10) { next = els[i]; break; }
+  }
+  // If none found below, wrap to the first one
+  if (!next) next = els[0];
+
+  // Scroll it into view with a small top offset so it's not hidden under sticky headers
+  next.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+  // Brief highlight flash so the user can spot it instantly
+  var prev = next.style.outline;
+  next.style.outline = '3px solid #dc2626';
+  next.style.transition = 'outline 0.2s';
+  setTimeout(function() { next.style.outline = prev || ''; }, 1800);
+}
+
 function pulseQATab() {
   var tabs = document.querySelectorAll('.rfp-tab');
   tabs.forEach(function(t) {
@@ -4212,11 +4250,23 @@ rfpTabs.qa = async function(rfpId) {
     });
   }
 
+  // Build comma-separated list of manual question IDs for the scroll helper
+  var manualQIds = questions
+    .filter(function(q){ return q.needs_manual && !q.published; })
+    .map(function(q){ return q.id; });
+
   const manualWarning = manualNeeded > 0
-    ? '<div style="background:#fee2e2;border:1.5px solid #fca5a5;border-radius:8px;padding:0.75rem 1rem;display:flex;align-items:center;gap:0.75rem">'
+    ? '<div style="background:#fee2e2;border:1.5px solid #fca5a5;border-radius:8px;padding:0.75rem 1rem;display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap">'
       + '<i class="fas fa-exclamation-triangle" style="color:#dc2626;font-size:1.1rem;flex-shrink:0"></i>'
-      + '<div><div style="font-weight:700;font-size:0.85rem;color:#991b1b">' + manualNeeded + ' ' + t('qa_manual_warning_hd') + '</div>'
-      + '<div style="font-size:0.78rem;color:#7f1d1d">' + t('qa_manual_warning_sub') + '</div></div>'
+      + '<div style="flex:1;min-width:0">'
+      + '<div style="font-weight:700;font-size:0.85rem;color:#991b1b">' + manualNeeded + ' ' + t('qa_manual_warning_hd') + '</div>'
+      + '<div style="font-size:0.78rem;color:#7f1d1d">' + t('qa_manual_warning_sub') + '</div>'
+      + '</div>'
+      + '<button onclick="scrollToNextManual([' + manualQIds.join(',') + '])" '
+      +   'style="flex-shrink:0;display:inline-flex;align-items:center;gap:5px;background:#dc2626;color:#fff;border:none;border-radius:6px;padding:0.3rem 0.8rem;font-size:0.78rem;font-weight:600;cursor:pointer;white-space:nowrap" '
+      +   'title="Jump to next question that needs a manual answer">'
+      +   '<i class="fas fa-arrow-down" style="font-size:0.72rem"></i>Next unanswered'
+      + '</button>'
       + '</div>'
     : '';
 
