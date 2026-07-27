@@ -855,21 +855,30 @@ apiRouter.put('/rfps/:rfpId/questions/:id/answer', async (c) => {
 
 apiRouter.post('/rfps/:id/questions/publish-all', async (c) => {
   const rfpId = c.req.param('id')
-  // Only publish answered, non-manual questions
-  await c.env.DB.prepare(`UPDATE questions SET published=1 WHERE answer IS NOT NULL AND answer != "" AND rfp_id=? AND needs_manual=0`).bind(rfpId).run()
+  // NOTE: We do NOT bulk-set published=1 here — that is done by approve / approve-all.
+  // This endpoint only sends emails and stamps emailed_at on success.
 
   try {
     const rfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(rfpId).first<any>()
 
+    // Fetch all approved (published=1) questions — anonymize using participant codes
     const { results: allQuestions } = await c.env.DB.prepare(`
-      SELECT q.*, COALESCE(v.name, 'Unknown Vendor') as vendor_name
+      SELECT q.*, COALESCE(v.name, 'Unknown Vendor') as vendor_name, q.vendor_id as q_vendor_id
       FROM questions q
       LEFT JOIN vendors v ON q.vendor_id = v.id
       WHERE q.rfp_id=? AND q.published=1
       ORDER BY q.vendor_id, q.id
     `).bind(rfpId).all<any>()
 
-    const xlsxBytes = generateQAExcel(allQuestions)
+    // Build anonymized questions — replace vendor_name with participant code
+    const anonymizedQuestions = allQuestions.map((q: any) => ({
+      ...q,
+      vendor_name: q.q_vendor_id
+        ? buildParticipantCode(rfpId, q.q_vendor_id)
+        : 'Participant',
+    }))
+
+    const xlsxBytes = generateQAExcel(anonymizedQuestions)
     const xlsxBase64 = uint8ToBase64(xlsxBytes)
     const xlsxFilename = `QA_Consolidated_${(rfp?.ref_number || 'RFP').replace(/\//g,'_')}.xlsx`
 
@@ -882,6 +891,7 @@ apiRouter.post('/rfps/:id/questions/publish-all', async (c) => {
 
     const sentTo: string[] = []
     const resendKey = (c.env as any).RESEND_API_KEY || ''
+    const nowStamp = new Date().toISOString()
 
     for (const vendor of activeVendors) {
       const participantCode = buildParticipantCode(rfpId, vendor.id)
@@ -937,6 +947,7 @@ Please include this reference code in ALL correspondence regarding this RFP.
           sentTo.push(vendor.contact_email + ' (error)')
         }
       } else {
+        // No Resend key — simulate send (dev/staging)
         sentTo.push(vendor.contact_email + ' (simulated)')
         await c.env.DB.prepare(`
           INSERT INTO email_log (rfp_id, vendor_id, recipient, subject, body, email_type, status, has_attachment, created_at)
@@ -946,6 +957,13 @@ Please include this reference code in ALL correspondence regarding this RFP.
           emailText).run()
       }
     }
+
+    // Mark all approved questions as emailed (both real sends and simulated — simulated = dev environment)
+    // Only stamp questions that are published=1 and not yet stamped (emailed_at IS NULL)
+    await c.env.DB.prepare(`
+      UPDATE questions SET emailed_at=?
+      WHERE rfp_id=? AND published=1 AND (emailed_at IS NULL OR emailed_at='')
+    `).bind(nowStamp, rfpId).run()
 
     return c.json({ ok: true, sentTo, totalQuestions: allQuestions.length, vendorCount: activeVendors.length })
   } catch(e: any) {
@@ -2752,50 +2770,126 @@ function detectAttachmentLabel(filename: string): 'technical' | 'commercial' | '
 // HELPERS — Q&A EXCEL GENERATION
 // ============================================================
 function generateQAExcel(questions: any[]): Uint8Array {
-  // Build a minimal XLSX file with the Q&A data
+  // Build a formatted XLSX file with Q&A data.
+  // Columns C (Question) and D (Answer) use wrapText=true so long text is readable.
+  // Vendor column (B) already contains anonymized participant codes (caller's responsibility).
   const rows: string[][] = [
-    ['Ref', 'Vendor', 'Question', 'Answer', 'Status'],
+    ['Ref', 'Participant', 'Question', 'Answer', 'Status'],
     ...questions.map((q: any, i: number) => [
       String(i + 1),
-      q.vendor_name || 'Unknown',
+      q.vendor_name || 'Participant',
       q.question || '',
       q.answer || '',
-      q.published ? 'Published' : 'Draft',
+      q.emailed_at ? 'Sent' : (q.published ? 'Approved' : 'Draft'),
     ])
   ]
 
-  // Minimal XML for a valid XLSX
+  // ── Shared strings ────────────────────────────────────────────────────────
   const sharedStrings: string[] = []
   const ssMap = new Map<string, number>()
-  const getCellRef = (s: string) => {
+  const getSSIdx = (s: string) => {
     if (!ssMap.has(s)) { ssMap.set(s, sharedStrings.length); sharedStrings.push(s) }
     return ssMap.get(s)!
   }
 
+  // ── Styles — two xf entries:
+  //   xfId 0 = default (header + Ref/Participant/Status cols)
+  //   xfId 1 = wrapText=true (Question col C, Answer col D)
+  // ─────────────────────────────────────────────────────────────────────────
+  const stylesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`
+    + `<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">`
+    + `<fonts count="2">`
+    +   `<font><sz val="11"/><name val="Calibri"/></font>`
+    +   `<font><b/><sz val="11"/><name val="Calibri"/></font>`
+    + `</fonts>`
+    + `<fills count="2">`
+    +   `<fill><patternFill patternType="none"/></fill>`
+    +   `<fill><patternFill patternType="gray125"/></fill>`
+    + `</fills>`
+    + `<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>`
+    + `<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>`
+    + `<cellXfs count="3">`
+    +   `<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>`
+    +   `<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"><alignment wrapText="1" vertical="top"/></xf>`
+    +   `<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0"><alignment wrapText="1" vertical="top"/></xf>`
+    + `</cellXfs>`
+    + `</styleSheet>`
+  // xf index 0 = normal, 1 = wrapText+top, 2 = bold+wrapText+top (header row)
+
   const cols = ['A','B','C','D','E']
   let sheetRows = ''
   rows.forEach((row, ri) => {
+    const isHeader = ri === 0
     const cells = row.map((val, ci) => {
       const ref = `${cols[ci]}${ri+1}`
-      const idx = getCellRef(val)
-      return `<c r="${ref}" t="s"><v>${idx}</v></c>`
+      const idx = getSSIdx(val)
+      // Apply wrapText style to Question (ci=2) and Answer (ci=3) cells; bold wrap for header
+      let styleAttr = ''
+      if (isHeader) {
+        styleAttr = ' s="2"'          // bold + wrapText
+      } else if (ci === 2 || ci === 3) {
+        styleAttr = ' s="1"'          // wrapText only
+      }
+      return `<c r="${ref}" t="s"${styleAttr}><v>${idx}</v></c>`
     }).join('')
     sheetRows += `<row r="${ri+1}">${cells}</row>`
   })
 
-  const ssXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="${sharedStrings.length}" uniqueCount="${sharedStrings.length}">${sharedStrings.map(s => `<si><t>${escXml(s)}</t></si>`).join('')}</sst>`
-  const sheetXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${sheetRows}</sheetData></worksheet>`
-  const workbookXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Q&amp;A" sheetId="1" r:id="rId1"/></sheets></workbook>`
-  const relsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/></Relationships>`
-  const contentTypesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/></Types>`
+  // Column widths: A=6, B=22, C=55, D=55, E=12
+  const colDefs = `<cols>`
+    + `<col min="1" max="1" width="6" customWidth="1"/>`
+    + `<col min="2" max="2" width="22" customWidth="1"/>`
+    + `<col min="3" max="3" width="55" customWidth="1"/>`
+    + `<col min="4" max="4" width="55" customWidth="1"/>`
+    + `<col min="5" max="5" width="12" customWidth="1"/>`
+    + `</cols>`
+
+  const ssXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`
+    + `<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="${sharedStrings.length}" uniqueCount="${sharedStrings.length}">`
+    + sharedStrings.map(s => `<si><t xml:space="preserve">${escXml(s)}</t></si>`).join('')
+    + `</sst>`
+
+  const sheetXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`
+    + `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">`
+    + colDefs
+    + `<sheetData>${sheetRows}</sheetData>`
+    + `</worksheet>`
+
+  const workbookXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`
+    + `<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">`
+    + `<sheets><sheet name="Q&amp;A" sheetId="1" r:id="rId1"/></sheets>`
+    + `</workbook>`
+
+  const relsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`
+    + `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">`
+    + `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>`
+    + `<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>`
+    + `<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>`
+    + `</Relationships>`
+
+  const contentTypesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`
+    + `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">`
+    + `<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>`
+    + `<Default Extension="xml" ContentType="application/xml"/>`
+    + `<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>`
+    + `<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`
+    + `<Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>`
+    + `<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>`
+    + `</Types>`
 
   const files: Record<string, Uint8Array> = {
     '[Content_Types].xml': encodeUtf8(contentTypesXml),
-    '_rels/.rels': encodeUtf8(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`),
+    '_rels/.rels': encodeUtf8(
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`
+      + `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">`
+      + `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>`
+      + `</Relationships>`
+    ),
     'xl/workbook.xml': encodeUtf8(workbookXml),
     'xl/_rels/workbook.xml.rels': encodeUtf8(relsXml),
     'xl/worksheets/sheet1.xml': encodeUtf8(sheetXml),
     'xl/sharedStrings.xml': encodeUtf8(ssXml),
+    'xl/styles.xml': encodeUtf8(stylesXml),
   }
   return buildZip(files)
 }

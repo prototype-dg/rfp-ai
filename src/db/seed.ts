@@ -195,6 +195,9 @@ export async function initDb(db: D1Database) {
     `ALTER TABLE proposals ADD COLUMN ai_commercial_score REAL`,
     // rfps requirement glossary — v26
     `ALTER TABLE rfps ADD COLUMN requirement_glossary TEXT`,
+    // questions.emailed_at — timestamp when Q&A answer was actually emailed to vendors via Send Answers
+    // NULL = not yet sent; non-null = sent. Used for "published" count in status bar.
+    `ALTER TABLE questions ADD COLUMN emailed_at TEXT`,
   ]
   for (const sql of alterMigrations) {
     try {

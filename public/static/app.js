@@ -115,7 +115,7 @@ var I18N = {
     qa_re_extract_btn:    'Re-extract',
     qa_re_extract_full:   'Re-extract Questions from Emails',
     qa_ai_answer_all:     'AI Answer All',
-    qa_publish_approved:  'Publish All Approved',
+    qa_publish_approved:  'Send Answers',
     qa_close_qa:          'Close Q&A',
     qa_closed_label:      'Q&A Closed',
     qa_manual_required:   'Manual Required',
@@ -293,7 +293,7 @@ var I18N = {
     // Q&A tab stats
     qa_pending:         'pending',
     qa_awaiting:        'awaiting approval',
-    qa_published:       'published',
+    qa_published:       'sent to vendors',
     qa_need_manual:     'need manual input',
     // Proposals tab
     proposals_received: 'proposal(s) received',
@@ -403,7 +403,7 @@ var I18N = {
     qa_edit_answer_btn: 'Edit Answer',
     qa_save_answer_btn: 'Save Answer',
     qa_ai_tooltip:      'AI will draft answers for all unanswered questions. You can review and edit each draft before approving.',
-    qa_publish_confirm_title: 'Publish All Approved Answers?',
+    qa_publish_confirm_title: 'Send Answers to Vendors?',
     qa_publish_confirm_body:  'The following answers will be emailed to all shortlisted vendors:',
     // Proposals tab extras
     prop_evaluate_all_btn:'Evaluate All',
@@ -586,7 +586,7 @@ var I18N = {
     qa_re_extract_btn:    'إعادة استخراج',
     qa_re_extract_full:   'إعادة استخراج الأسئلة من الرسائل',
     qa_ai_answer_all:     'إجابة الكل بالذكاء الاصطناعي',
-    qa_publish_approved:  'نشر جميع الموافق عليها',
+    qa_publish_approved:  'إرسال الإجابات',
     qa_close_qa:          'إغلاق الأسئلة',
     qa_closed_label:      'الأسئلة مغلقة',
     qa_manual_required:   'يتطلب إدخالاً يدوياً',
@@ -764,7 +764,7 @@ var I18N = {
     // Q&A tab stats
     qa_pending:         'في الانتظار',
     qa_awaiting:        'بانتظار الموافقة',
-    qa_published:       'منشور',
+    qa_published:       'تم الإرسال',
     qa_need_manual:     'تحتاج إدخالاً يدوياً',
     // Proposals tab
     proposals_received: 'عرض(عروض) مستلمة',
@@ -4176,11 +4176,14 @@ rfpTabs.qa = async function(rfpId) {
   const questions = await apiCall('GET', '/rfps/' + rfpId + '/questions').catch(function(){ return []; });
   appState.questions = questions;
 
-  const pending   = questions.filter(function(q){ return !q.published && !q.answer; }).length;
-  const answered  = questions.filter(function(q){ return q.answer && !q.published; }).length;
-  const published = questions.filter(function(q){ return q.published; }).length;
+  // pending   = no answer yet
+  // answered  = has answer AND approved (published=1) but NOT yet emailed (emailed_at is null)
+  // published = actually emailed to vendors (emailed_at is set)
+  const pending   = questions.filter(function(q){ return !q.answer; }).length;
+  const answered  = questions.filter(function(q){ return q.answer && !q.emailed_at; }).length;
+  const published = questions.filter(function(q){ return !!q.emailed_at; }).length;
 
-  const manualNeeded = questions.filter(function(q){ return q.needs_manual && !q.published; }).length;
+  const manualNeeded = questions.filter(function(q){ return q.needs_manual && !q.emailed_at; }).length;
 
   let qCards = '';
   if (questions.length === 0) {
@@ -4195,13 +4198,16 @@ rfpTabs.qa = async function(rfpId) {
       + '</div>';
   } else {
     questions.forEach(function(q) {
-      const needsManual = q.needs_manual && !q.published;
+      const needsManual = q.needs_manual && !q.emailed_at;
       const cardBg = needsManual ? 'background:#fff5f5;border:1.5px solid #fca5a5' : '';
 
-      const badgeHtml = q.published
+      // Badge hierarchy: emailed > approved-awaiting-send > needs-manual > answered-draft > unanswered
+      const badgeHtml = q.emailed_at
         ? '<span class="stage-badge stage-published">' + t('badge_published') + '</span>'
         : needsManual
         ? '<span style="background:#fee2e2;color:#991b1b;border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:700"><i class="fas fa-exclamation-triangle" style="margin-right:0.25rem"></i>' + t('qa_manual_required') + '</span>'
+        : q.published
+        ? '<span class="stage-badge stage-submissions_closed">' + t('badge_awaiting') + '</span>'
         : q.answer
         ? '<span class="stage-badge stage-submissions_closed">' + t('badge_awaiting') + '</span>'
         : '<span class="stage-badge stage-draft">' + t('badge_unanswered') + '</span>'
@@ -4229,9 +4235,12 @@ rfpTabs.qa = async function(rfpId) {
         : '') + (q.answer && !q.published && needsManual
         ? '<button class="btn-primary btn-sm" onclick="approveQAnswer(' + rfpId + ',' + q.id + ')"><i class="fas fa-check"></i>' + t('qa_approve_btn') + '</button>'
         : '')
-        // 7.4 — Edit button on published answers
-        + (q.published
-        ? '<button class="btn-ghost btn-sm" onclick="editQAnswer(' + q.id + ')" title="Edit published answer"><i class="fas fa-edit"></i> ' + t('btn_edit') + '</button>'
+        // Edit button: show on emailed answers (allows re-editing before next send)
+        + (q.published && !q.emailed_at
+        ? '<button class="btn-ghost btn-sm" onclick="editQAnswer(' + q.id + ')" title="Edit approved answer"><i class="fas fa-edit"></i> ' + t('btn_edit') + '</button>'
+        : '')
+        + (q.emailed_at
+        ? '<button class="btn-ghost btn-sm" onclick="editQAnswer(' + q.id + ')" title="Edit sent answer (will mark as pending re-send)"><i class="fas fa-edit"></i> ' + t('btn_edit') + '</button>'
         : '');
 
       qCards += '<div class="card" style="padding:1rem;' + cardBg + '" id="q-' + q.id + '">'
@@ -4377,7 +4386,7 @@ async function approveAllQAnswers(rfpId) {
   if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Approving…'; }
   try {
     await apiCall('POST', '/rfps/' + rfpId + '/questions/approve-all', {});
-    showToast('✅ ' + approvable.length + ' answer(s) approved! Use "Publish All Approved" to send them to vendors.', 'success', 5000);
+    showToast('✅ ' + approvable.length + ' answer(s) approved! Use "Send Answers" to send them to vendors.', 'success', 5000);
     rfpTabs.qa(rfpId);
   } catch(e) {
     showToast('Approve all failed: ' + (e.message || e), 'error');
@@ -4427,28 +4436,28 @@ async function publishAllQAnswers(rfpId) {
       return; // do NOT call the API — no emails sent
     }
 
-    // 7.2 — confirm before sending
+    // Confirm before sending
     await new Promise(function(resolve, reject) {
       showConfirm({
-        title: 'Publish ' + readyToPublish.length + ' Answer(s)?',
-        body: 'This will email approved answers to all invited vendors. This action cannot be undone.',
+        title: 'Send ' + readyToPublish.length + ' Answer(s) to Vendors?',
+        body: 'Approved answers will be emailed as a consolidated Q&A Excel to all invited vendors. Vendor names are anonymized with participant codes in the Excel.',
         type: 'info',
         list: readyToPublish.slice(0,5).map(function(q){ return 'Q' + q.id + ': ' + (q.question||'').slice(0,80); }),
-        confirmText: 'Publish & Send',
+        confirmText: 'Send Answers',
         cancelText: 'Cancel',
       }, resolve, function(){ reject(new Error('cancelled')); });
     }).catch(function(err){ if(err.message==='cancelled') throw err; });
     var result = await apiCall('POST', '/rfps/' + rfpId + '/questions/publish-all', {});
-    // NOTE: Publish All Approved does NOT advance stage — use "Close Q&A" button for that
+    // NOTE: Send Answers does NOT advance stage — use "Close Q&A" button for that
     var sentCount = result && result.vendorCount ? result.vendorCount : 0;
-    showToast('\u2705 ' + readyToPublish.length + ' answer(s) published and sent to ' + sentCount + ' vendor(s)!', 'success', 5000);
-    addNotification('info', '\u2705 Answers Published', readyToPublish.length + ' approved Q&A answer(s) sent to ' + sentCount + ' vendor(s).', rfpId, 'qa', null);
+    showToast('\u2705 ' + readyToPublish.length + ' answer(s) sent to ' + sentCount + ' vendor(s)!', 'success', 5000);
+    addNotification('info', '\u2705 Answers Sent', readyToPublish.length + ' Q&A answer(s) emailed to ' + sentCount + ' vendor(s).', rfpId, 'qa', null);
     // Stay on Q&A tab, clear badge
     appState.unreadQA = 0;
     renderRfpTabs('qa', rfpId, 0);
     rfpTabs.qa(rfpId);
   } catch(e) {
-    if (e.message !== 'cancelled') showToast('Publish failed: ' + e.message, 'error');
+    if (e.message !== 'cancelled') showToast('Send failed: ' + e.message, 'error');
   }
 }
 
