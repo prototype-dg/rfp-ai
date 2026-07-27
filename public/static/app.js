@@ -1212,7 +1212,7 @@ function showNotifPopup(notif) {
   const color = colors[notif.type] || '#6b7280';
   const popupId = 'notif-popup-' + notif.id;
   const navigateBtn = (notif.rfpId && (notif.tab || notif.vendorId))
-    ? '<button onclick="navigateFromNotif(' + notif.id + ')" style="background:' + color + ';color:white;border:none;border-radius:6px;padding:4px 10px;font-size:0.75rem;cursor:pointer;margin-right:6px">View</button>'
+    ? '<button onclick="navigateFromNotif(\x27 + notif.id + \x27)" style="background:' + color + ';color:white;border:none;border-radius:6px;padding:4px 10px;font-size:0.75rem;cursor:pointer;margin-right:6px">View</button>'
     : '';
   const popup = document.createElement('div');
   popup.id = popupId;
@@ -1224,9 +1224,9 @@ function showNotifPopup(notif) {
     + '<div style="font-weight:700;font-size:0.82rem;color:#1f2937;margin-bottom:2px">' + escHtml(notif.title) + '</div>'
     + '<div style="font-size:0.77rem;color:#6b7280;line-height:1.4">' + escHtml(notif.message) + '</div>'
     + '<div style="margin-top:8px;display:flex;align-items:center">' + navigateBtn
-    + '<button onclick="dismissNotifPopup(\'' + popupId + '\',' + notif.id + ')" style="background:#f3f4f6;color:#374151;border:none;border-radius:6px;padding:4px 10px;font-size:0.75rem;cursor:pointer">' + t('notif_dismiss') + '</button>'
+    + '<button onclick="dismissNotifPopup(\\x27\x27 + popupId + \x27\\x27,\x27 + notif.id + \x27)" style="background:#f3f4f6;color:#374151;border:none;border-radius:6px;padding:4px 10px;font-size:0.75rem;cursor:pointer">' + t('notif_dismiss') + '</button>'
     + '</div></div>'
-    + '<button onclick="dismissNotifPopup(\'' + popupId + '\',' + notif.id + ')" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1rem;line-height:1;padding:0;margin-left:4px">&times;</button>'
+    + '<button onclick="dismissNotifPopup(\\x27\x27 + popupId + \x27\\x27,\x27 + notif.id + \x27)" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1rem;line-height:1;padding:0;margin-left:4px">&times;</button>'
     + '</div>';
   // Stack popups
   var existingPopups = document.querySelectorAll('[id^="notif-popup-"]');
@@ -1329,7 +1329,7 @@ function renderNotifPanel() {
       const unreadDot = !n.read ? '<span style="width:8px;height:8px;border-radius:50%;background:var(--cpc-gold);display:inline-block;flex-shrink:0"></span>' : '';
       const bg = n.read ? '' : 'background:#fefbf6;';
       html += '<div style="padding:12px 18px;border-bottom:1px solid #f3f4f6;display:flex;gap:10px;align-items:flex-start;' + bg + (n.rfpId && n.tab ? 'cursor:pointer;' : '') + '" '
-        + (n.rfpId && n.tab ? 'onclick="navigateFromNotif(' + n.id + ');toggleNotifPanel()"' : '') + '>'
+        + (n.rfpId && n.tab ? 'onclick="navigateFromNotif(\x27 + n.id + \x27);toggleNotifPanel()"' : '') + '>'
         + '<div style="width:32px;height:32px;border-radius:50%;background:' + color + '22;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:2px">'
         + '<i class="fas ' + icon + '" style="color:' + color + ';font-size:0.78rem"></i></div>'
         + '<div style="flex:1;min-width:0">'
@@ -1525,18 +1525,18 @@ function updateBreadcrumb(page, opts) {
   if (!bar) return;
   if (page === 'rfp_detail' && opts && opts.rfpId) {
     var rfpTitle = (appState.currentRfp && appState.currentRfp.title) || ('RFP #' + opts.rfpId);
-    bar.innerHTML = '<i class="fas fa-home bc-item" onclick="navigateTo(\'dashboard\')" title="Dashboard"></i>'
+    bar.innerHTML = '<i class="fas fa-home bc-item" onclick="navigateTo(\\x27dashboard\\x27)" title="Dashboard"></i>'
       + '<span class="bc-sep">›</span>'
-      + '<span class="bc-item" onclick="navigateTo(\'rfps\')">All RFPs</span>'
+      + '<span class="bc-item" onclick="navigateTo(\\x27rfps\\x27)">All RFPs</span>'
       + '<span class="bc-sep">›</span>'
       + '<span class="bc-current" id="bcRfpTitle">' + escHtml(rfpTitle.slice(0,48)) + '</span>';
     bar.classList.add('visible');
   } else if (page === 'vendor_comms' && opts && opts.rfpId) {
-    bar.innerHTML = '<i class="fas fa-home bc-item" onclick="navigateTo(\'dashboard\')" title="Dashboard"></i>'
+    bar.innerHTML = '<i class="fas fa-home bc-item" onclick="navigateTo(\\x27dashboard\\x27)" title="Dashboard"></i>'
       + '<span class="bc-sep">›</span>'
-      + '<span class="bc-item" onclick="navigateTo(\'rfps\')">All RFPs</span>'
+      + '<span class="bc-item" onclick="navigateTo(\\x27rfps\\x27)">All RFPs</span>'
       + '<span class="bc-sep">›</span>'
-      + '<span class="bc-item" onclick="navigateTo(\'rfp_detail\',{rfpId:' + opts.rfpId + '})">RFP #' + opts.rfpId + '</span>'
+      + '<span class="bc-item" onclick="navigateTo(\\x27rfp_detail\\x27,{rfpId:\x27 + opts.rfpId + \x27})">RFP #' + opts.rfpId + '</span>'
       + '<span class="bc-sep">›</span>'
       + '<span class="bc-current">Comms</span>';
     bar.classList.add('visible');
@@ -1657,7 +1657,7 @@ function renderRfpTabs(activeTab, rfpId, qaBadge) {
     // 4.3 — Comms (vendors tab) badge
     const commsBadgeCount = appState.unreadComms || 0;
     const commsBadgeHtml = (tab.id === 'vendors' && commsBadgeCount > 0) ? '<span style="background:var(--cpc-gold);color:white;border-radius:10px;padding:1px 6px;font-size:0.68rem;margin-left:4px;font-weight:700">' + commsBadgeCount + '</span>' : '';
-    html += '<div class="rfp-tab' + (isActive ? ' active' : '') + '" onclick="switchRfpTab(\'' + tab.id + '\',' + rfpId + ')">';
+    html += '<div class="rfp-tab' + (isActive ? ' active' : '') + '" onclick="switchRfpTab(\\x27\x27 + tab.id + \x27\\x27,\x27 + rfpId + \x27)">';
     html += '<i class="fas ' + tab.icon + '"></i>' + escHtml(tab.label) + qaBadgeHtml + propsBadgeHtml + commsBadgeHtml;
     html += '</div>';
   });
@@ -1815,7 +1815,7 @@ function renderCmdResults() {
   }
   if (empty) empty.style.display = 'none';
   results.innerHTML = filtered.slice(0, 8).map(function(item, idx) {
-    return '<div class="cmd-item" data-idx="' + idx + '" onclick="cmdItemClick(' + idx + ')">'
+    return '<div class="cmd-item" data-idx="' + idx + '" onclick="cmdItemClick(\x27 + idx + \x27)">'
       + '<i class="fas ' + item.icon + '"></i>'
       + '<span>' + escHtml(item.label) + '</span>'
       + '<span class="cmd-item-sub">' + escHtml(item.sub) + '</span>'
@@ -2010,7 +2010,7 @@ pages.dashboard = async function() {
   if (stageBreakdown.length > 0) {
     stageBreakdown.forEach(function(s) {
       var h = Math.max(8, Math.round((s.cnt / maxStage) * 50));
-      stageBarClickable += '<div style="display:flex;flex-direction:column;align-items:center;gap:4px;flex:1;cursor:pointer" title="' + stageLabelMap(s.stage) + ': ' + s.cnt + '" onclick="navigateTo(\'rfps\',{filterStage:\'' + s.stage + '\'})"><div style="font-size:0.7rem;font-weight:700;color:#374151">' + s.cnt + '</div><div class="mini-bar-item" style="height:' + h + 'px" onmouseover="this.style.opacity=\'0.65\'" onmouseout="this.style.opacity=\'1\'"></div><div style="font-size:0.65rem;color:#9ca3af;text-align:center">' + stageLabelMap(s.stage) + '</div></div>';
+      stageBarClickable += '<div style="display:flex;flex-direction:column;align-items:center;gap:4px;flex:1;cursor:pointer" title="' + stageLabelMap(s.stage) + ': ' + s.cnt + '" onclick="navigateTo(\\x27rfps\\x27,{filterStage:\\x27\x27 + s.stage + \x27\\x27})"><div style="font-size:0.7rem;font-weight:700;color:#374151">' + s.cnt + '</div><div class="mini-bar-item" style="height:' + h + 'px" onmouseover="this.style.opacity=\\x270.65\\x27" onmouseout="this.style.opacity=\\x271\\x27"></div><div style="font-size:0.65rem;color:#9ca3af;text-align:center">' + stageLabelMap(s.stage) + '</div></div>';
     });
   } else { stageBarClickable = '<div style="color:#9ca3af;font-size:0.85rem;padding:1rem">' + t('dash_no_rfp_data') + '</div>'; }
 
@@ -2019,9 +2019,9 @@ pages.dashboard = async function() {
   var _dRfps = (appState.rfps||[]).filter(function(r){ return r.stage==='draft'; });
   var _qRfps = (appState.rfps||[]).filter(function(r){ return r.stage==='qa_open'; });
   var _cRfps = (appState.rfps||[]).filter(function(r){ return r.stage==='submissions_closed'; });
-  if (_dRfps.length) contextCards += '<div class="card" style="padding:0.875rem 1rem;border-left:3px solid var(--cpc-gold);cursor:pointer;margin-bottom:0" onclick="navigateTo(\'rfps\',{filterStage:\'draft\'})"><div style="font-size:0.72rem;color:var(--cpc-gold);font-weight:700;text-transform:uppercase;letter-spacing:0.05em">Action Needed</div><div style="font-size:0.88rem;font-weight:600;color:#1f2937;margin-top:2px">' + _dRfps.length + ' draft RFP' + (_dRfps.length>1?'s':'') + ' awaiting publish</div></div>';
-  if (_qRfps.length) { var _pqa = _qRfps.reduce(function(n,r){ return n+(r.pending_qa||0); },0); if (_pqa) contextCards += '<div class="card" style="padding:0.875rem 1rem;border-left:3px solid #f59e0b;cursor:pointer;margin-bottom:0" onclick="navigateTo(\'rfps\',{filterStage:\'qa_open\'})"><div style="font-size:0.72rem;color:#f59e0b;font-weight:700;text-transform:uppercase;letter-spacing:0.05em">Pending Q&amp;A</div><div style="font-size:0.88rem;font-weight:600;color:#1f2937;margin-top:2px">' + _pqa + ' unanswered question' + (_pqa>1?'s':'') + '</div></div>'; }
-  if (_cRfps.length) contextCards += '<div class="card" style="padding:0.875rem 1rem;border-left:3px solid #10b981;cursor:pointer;margin-bottom:0" onclick="navigateTo(\'rfps\',{filterStage:\'submissions_closed\'})"><div style="font-size:0.72rem;color:#10b981;font-weight:700;text-transform:uppercase;letter-spacing:0.05em">Ready to Evaluate</div><div style="font-size:0.88rem;font-weight:600;color:#1f2937;margin-top:2px">' + _cRfps.length + ' RFP' + (_cRfps.length>1?'s':'') + ' ready for award</div></div>';
+  if (_dRfps.length) contextCards += '<div class="card" style="padding:0.875rem 1rem;border-left:3px solid var(--cpc-gold);cursor:pointer;margin-bottom:0" onclick="navigateTo(\\x27rfps\\x27,{filterStage:\\x27draft\\x27})"><div style="font-size:0.72rem;color:var(--cpc-gold);font-weight:700;text-transform:uppercase;letter-spacing:0.05em">Action Needed</div><div style="font-size:0.88rem;font-weight:600;color:#1f2937;margin-top:2px">' + _dRfps.length + ' draft RFP' + (_dRfps.length>1?'s':'') + ' awaiting publish</div></div>';
+  if (_qRfps.length) { var _pqa = _qRfps.reduce(function(n,r){ return n+(r.pending_qa||0); },0); if (_pqa) contextCards += '<div class="card" style="padding:0.875rem 1rem;border-left:3px solid #f59e0b;cursor:pointer;margin-bottom:0" onclick="navigateTo(\\x27rfps\\x27,{filterStage:\\x27qa_open\\x27})"><div style="font-size:0.72rem;color:#f59e0b;font-weight:700;text-transform:uppercase;letter-spacing:0.05em">Pending Q&amp;A</div><div style="font-size:0.88rem;font-weight:600;color:#1f2937;margin-top:2px">' + _pqa + ' unanswered question' + (_pqa>1?'s':'') + '</div></div>'; }
+  if (_cRfps.length) contextCards += '<div class="card" style="padding:0.875rem 1rem;border-left:3px solid #10b981;cursor:pointer;margin-bottom:0" onclick="navigateTo(\\x27rfps\\x27,{filterStage:\\x27submissions_closed\\x27})"><div style="font-size:0.72rem;color:#10b981;font-weight:700;text-transform:uppercase;letter-spacing:0.05em">Ready to Evaluate</div><div style="font-size:0.88rem;font-weight:600;color:#1f2937;margin-top:2px">' + _cRfps.length + ' RFP' + (_cRfps.length>1?'s':'') + ' ready for award</div></div>';
   if (!contextCards) contextCards = '<div style="color:#9ca3af;font-size:0.85rem;padding:0.25rem 0">' + t('dash_no_rfp_data') + '</div>';
 
   setContent(
@@ -2039,9 +2039,9 @@ pages.dashboard = async function() {
     + '<div style="display:flex;flex-direction:column;gap:0.5rem;margin-bottom:0.75rem">' + contextCards + '</div>'
     + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;border-top:1px solid #f3f4f6;padding-top:0.75rem">'
     + '<button class="btn-primary" style="flex-direction:column;padding:0.75rem;justify-content:center" onclick="showCreateRfpModal()"><i class="fas fa-plus-circle" style="font-size:1.1rem;margin-bottom:3px"></i><span style="font-size:0.78rem">' + t('qa_btn_new_rfp') + '</span></button>'
-    + '<button class="btn-secondary" style="flex-direction:column;padding:0.75rem;justify-content:center" onclick="navigateTo(\'rfps\')"><i class="fas fa-layer-group" style="font-size:1.1rem;margin-bottom:3px"></i><span style="font-size:0.78rem">' + t('qa_btn_all_rfps') + '</span></button>'
-    + '<button class="btn-ghost" style="flex-direction:column;padding:0.75rem;justify-content:center" onclick="navigateTo(\'vendors\')"><i class="fas fa-building" style="font-size:1.1rem;margin-bottom:3px"></i><span style="font-size:0.78rem">' + t('qa_btn_vendors') + '</span></button>'
-    + '<button class="btn-ghost" style="flex-direction:column;padding:0.75rem;justify-content:center" onclick="navigateTo(\'reports\')"><i class="fas fa-chart-line" style="font-size:1.1rem;margin-bottom:3px"></i><span style="font-size:0.78rem">' + t('qa_btn_reports') + '</span></button>'
+    + '<button class="btn-secondary" style="flex-direction:column;padding:0.75rem;justify-content:center" onclick="navigateTo(\\x27rfps\\x27)"><i class="fas fa-layer-group" style="font-size:1.1rem;margin-bottom:3px"></i><span style="font-size:0.78rem">' + t('qa_btn_all_rfps') + '</span></button>'
+    + '<button class="btn-ghost" style="flex-direction:column;padding:0.75rem;justify-content:center" onclick="navigateTo(\\x27vendors\\x27)"><i class="fas fa-building" style="font-size:1.1rem;margin-bottom:3px"></i><span style="font-size:0.78rem">' + t('qa_btn_vendors') + '</span></button>'
+    + '<button class="btn-ghost" style="flex-direction:column;padding:0.75rem;justify-content:center" onclick="navigateTo(\\x27reports\\x27)"><i class="fas fa-chart-line" style="font-size:1.1rem;margin-bottom:3px"></i><span style="font-size:0.78rem">' + t('qa_btn_reports') + '</span></button>'
     + '</div></div>'
     + '</div>'
     + '</div>'
@@ -2082,7 +2082,7 @@ pages.rfps = async function() {
     const dateStr = rfp.created_at ? new Date(rfp.created_at).toLocaleDateString('en-AE', {year:'numeric',month:'short',day:'numeric'}) : '-';
 
     const progressPct = isArchived ? 100 : Math.round(((stageIdx + 1) / STAGES.length) * 100);
-    return '<div class="rfp-card" onclick="openRfp(' + rfp.id + ')" style="' + (isArchived ? 'opacity:0.85;border-left:4px solid var(--cpc-gold)' : '') + '">'
+    return '<div class="rfp-card" onclick="openRfp(\x27 + rfp.id + \x27)" style="' + (isArchived ? 'opacity:0.85;border-left:4px solid var(--cpc-gold)' : '') + '">'
       + '<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:0.75rem">'
       + '<div style="flex:1;min-width:0">'
       + '<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.3rem">'
@@ -2110,9 +2110,9 @@ pages.rfps = async function() {
       + '<div style="font-size:0.78rem;color:' + (isArchived ? '#065f46' : 'var(--cpc-ink)') + ';font-weight:600">' + t('card_open') + ' <i class="fas fa-arrow-right" style="margin-left:4px"></i></div>'
       + '</div>'
       + '<div style="display:flex;gap:0.5rem;border-top:1px solid #f3f4f6;padding-top:0.625rem;margin-top:0.5rem" onclick="event.stopPropagation()">'
-      + '<button class="btn-ghost btn-sm" onclick="event.stopPropagation();openRfp(' + rfp.id + ')" style="flex:1;justify-content:center"><i class="fas fa-arrow-right"></i> ' + t('card_menu_open') + '</button>'
-      + (!isArchived ? '<button class="btn-ghost btn-sm" onclick="event.stopPropagation();archiveRfp(' + rfp.id + ')" title="' + t('card_menu_archive') + '"><i class="fas fa-archive"></i></button>' : '')
-      + '<button class="btn-ghost btn-sm" onclick="event.stopPropagation();deleteRfpConfirm(' + rfp.id + ')" title="' + t('card_menu_delete') + '" style="color:#ef4444"><i class="fas fa-trash"></i></button>'
+      + '<button class="btn-ghost btn-sm" onclick="event.stopPropagation();openRfp(\x27 + rfp.id + \x27)" style="flex:1;justify-content:center"><i class="fas fa-arrow-right"></i> ' + t('card_menu_open') + '</button>'
+      + (!isArchived ? '<button class="btn-ghost btn-sm" onclick="event.stopPropagation();archiveRfp(\x27 + rfp.id + \x27)" title="' + t('card_menu_archive') + '"><i class="fas fa-archive"></i></button>' : '')
+      + '<button class="btn-ghost btn-sm" onclick="event.stopPropagation();deleteRfpConfirm(\x27 + rfp.id + \x27)" title="' + t('card_menu_delete') + '" style="color:#ef4444"><i class="fas fa-trash"></i></button>'
       + '</div>'
       + '</div>';
   }
@@ -2153,8 +2153,8 @@ pages.rfps = async function() {
     + '<option value="az"' + (_rfpFilter.sort==='az'?' selected':'') + '>A–Z</option>'
     + '</select>'
     + '<div style="margin-left:auto;display:flex;gap:4px">'
-    + '<button onclick="window._rfpFilter.view='grid';pages.rfps()" style="border:1px solid #e5e7eb;border-radius:6px;padding:4px 8px;background:' + (_rfpFilter.view==='grid'?'var(--cpc-ink)':'white') + ';color:' + (_rfpFilter.view==='grid'?'white':'#6b7280') + ';cursor:pointer" title="Grid view"><i class="fas fa-th-large"></i></button>'
-    + '<button onclick="window._rfpFilter.view='list';pages.rfps()" style="border:1px solid #e5e7eb;border-radius:6px;padding:4px 8px;background:' + (_rfpFilter.view==='list'?'var(--cpc-ink)':'white') + ';color:' + (_rfpFilter.view==='list'?'white':'#6b7280') + ';cursor:pointer" title="List view"><i class="fas fa-list"></i></button>'
+    + '<button onclick="window._rfpFilter.view=\x27grid\x27;pages.rfps()" style="border:1px solid #e5e7eb;border-radius:6px;padding:4px 8px;background:' + (_rfpFilter.view==='grid'?'var(--cpc-ink)':'white') + ';color:' + (_rfpFilter.view==='grid'?'white':'#6b7280') + ';cursor:pointer" title="Grid view"><i class="fas fa-th-large"></i></button>'
+    + '<button onclick="window._rfpFilter.view=\x27list\x27;pages.rfps()" style="border:1px solid #e5e7eb;border-radius:6px;padding:4px 8px;background:' + (_rfpFilter.view==='list'?'var(--cpc-ink)':'white') + ';color:' + (_rfpFilter.view==='list'?'white':'#6b7280') + ';cursor:pointer" title="List view"><i class="fas fa-list"></i></button>'
     + '</div>'
     + '</div>';
 
@@ -2261,7 +2261,7 @@ pages.rfp_detail = async function(opts) {
     var m = msgs[rfp.stage];
     if (m) {
       banner.innerHTML = '<i class="fas ' + m.icon + '" style="margin-right:0.5rem;color:var(--cpc-gold)"></i><span>' + m.text + '</span>'
-        + (m.action ? '<button class="btn-ghost" style="margin-left:auto;padding:0.25rem 0.75rem;font-size:0.8rem;white-space:nowrap" onclick="'+m.action+'">'+m.label+' <i class="fas fa-arrow-right" style="font-size:0.7rem"></i></button>' : '');
+        + (m.action ? '<button class="btn-ghost" style="margin-left:auto;padding:0.25rem 0.75rem;font-size:0.8rem;white-space:nowrap" onclick="\x27+m.action+\x27">'+m.label+' <i class="fas fa-arrow-right" style="font-size:0.7rem"></i></button>' : '');
       banner.classList.add('visible');
     } else {
       banner.classList.remove('visible');
@@ -2346,25 +2346,25 @@ function renderScoringMatrixEditor(matrix) {
       + '<td style="padding:8px 12px;border:1px solid var(--cpc-line);vertical-align:top;width:28%">'
       + '<textarea id="sm_crit_' + i + '" rows="2" '
       + 'style="' + taStyle + ';font-size:13px;font-weight:500" '
-      + 'placeholder="Criterion name" oninput="autoResizeSMTA(this);updateScoringMatrixRow(' + i + ')">'
+      + 'placeholder="Criterion name" oninput="autoResizeSMTA(this);updateScoringMatrixRow(\x27 + i + \x27)">'
       + escHtml(r.criterion) + '</textarea>'
       + '</td>'
       + '<td style="padding:6px 10px;border:1px solid var(--cpc-line);width:86px;text-align:center;vertical-align:top">'
       + '<div style="display:flex;align-items:center;justify-content:center;gap:2px;padding-top:2px">'
       + '<input id="sm_wt_' + i + '" type="text" inputmode="numeric" value="' + (r.weight||0) + '" '
       + 'style="width:46px;border:1px solid var(--cpc-line);border-radius:4px;background:var(--cpc-paper);font-size:14px;font-family:\'JetBrains Mono\',monospace;text-align:center;padding:3px 4px;color:var(--cpc-ink);font-weight:700" '
-      + 'oninput="validateScoringWeight(' + i + ')" onblur="updateScoringMatrixRow(' + i + ')">'
+      + 'oninput="validateScoringWeight(\x27 + i + \x27)" onblur="updateScoringMatrixRow(\x27 + i + \x27)">'
       + '<span style="font-size:12px;color:#6b7280;font-weight:600">%</span>'
       + '</div>'
       + '</td>'
       + '<td style="padding:8px 12px;border:1px solid var(--cpc-line);vertical-align:top">'
       + '<textarea id="sm_desc_' + i + '" rows="2" '
       + 'style="' + taStyle + ';font-size:12px;color:#4b5563" '
-      + 'placeholder="Describe what this criterion evaluates..." oninput="autoResizeSMTA(this);updateScoringMatrixRow(' + i + ')">'
+      + 'placeholder="Describe what this criterion evaluates..." oninput="autoResizeSMTA(this);updateScoringMatrixRow(\x27 + i + \x27)">'
       + escHtml(r.description||'') + '</textarea>'
       + '</td>'
       + '<td style="padding:4px 6px;border:1px solid var(--cpc-line);width:36px;text-align:center;vertical-align:top">'
-      + '<button onclick="removeScoringMatrixRow(' + i + ')" class="btn-ghost btn-sm" style="padding:4px 7px;color:#dc2626;margin-top:2px" title="Remove"><i class="fas fa-times"></i></button>'
+      + '<button onclick="removeScoringMatrixRow(\x27 + i + \x27)" class="btn-ghost btn-sm" style="padding:4px 7px;color:#dc2626;margin-top:2px" title="Remove"><i class="fas fa-times"></i></button>'
       + '</td>'
       + '</tr>';
   }).join('');
@@ -2402,7 +2402,7 @@ function openScoringMatrixModal(rfpId) {
     + '</div>'
     + '<div style="display:flex;gap:8px;justify-content:flex-end">'
     + '<button class="btn-ghost" onclick="closeModal()">' + t('btn_cancel') + '</button>'
-    + '<button class="btn-primary" onclick="saveScoringMatrixAndClose(' + rfpId + ')"><i class="fas fa-save"></i>' + t('gen_save_matrix') + '</button>'
+    + '<button class="btn-primary" onclick="saveScoringMatrixAndClose(\x27 + rfpId + \x27)"><i class="fas fa-save"></i>' + t('gen_save_matrix') + '</button>'
     + '</div>'
   );
   // auto-size textareas after modal DOM is painted
@@ -2548,17 +2548,17 @@ rfpTabs.generate = function(rfpId, rfp) {
     + '<div style="border-top:1px solid var(--cpc-line);padding-top:0.875rem;margin-top:0.25rem">'
     + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">'
     + '<label style="margin:0;font-weight:600;color:var(--cpc-ink);font-size:0.82rem"><i class="fas fa-balance-scale cpc-gold" style="margin-right:6px"></i>' + t('gen_scoring_matrix') + '</label>'
-    + '<button onclick="openScoringMatrixModal(' + rfpId + ')" class="btn-ghost btn-sm" style="font-size:11px;display:flex;align-items:center;gap:4px"><i class="fas fa-edit"></i>' + t('gen_edit_matrix') + '</button>'
+    + '<button onclick="openScoringMatrixModal(\x27 + rfpId + \x27)" class="btn-ghost btn-sm" style="font-size:11px;display:flex;align-items:center;gap:4px"><i class="fas fa-edit"></i>' + t('gen_edit_matrix') + '</button>'
     + '</div>'
     + '<div id="scoringMatrixSummary">' + renderScoringMatrixSummary(window._currentScoringMatrix) + '</div>'
     + '</div>'
     // END SCORING MATRIX SECTION
     + '<div style="display:flex;gap:0.5rem;padding-top:0.25rem">'
-    + '<button class="btn-primary" id="genBtn" style="flex:1" onclick="generateRfpDoc(' + rfpId + ')"><i class="fas fa-robot"></i>' + t('gen_generate_ai') + '</button>'
-    + '<button class="btn-secondary" onclick="saveRfpFields(' + rfpId + ')"><i class="fas fa-save"></i>Save</button>'
+    + '<button class="btn-primary" id="genBtn" style="flex:1" onclick="generateRfpDoc(\x27 + rfpId + \x27)"><i class="fas fa-robot"></i>' + t('gen_generate_ai') + '</button>'
+    + '<button class="btn-secondary" onclick="saveRfpFields(\x27 + rfpId + \x27)"><i class="fas fa-save"></i>Save</button>'
     + '</div>'
     + '<div id="genActionButtons" style="' + (hasContent ? 'display:flex' : 'display:none') + ';gap:0.5rem">'
-      + '<button class="btn-ghost" style="flex:1" onclick="downloadRfpPdf(' + rfpId + ')"><i class="fas fa-file-pdf"></i>Download PDF</button>'
+      + '<button class="btn-ghost" style="flex:1" onclick="downloadRfpPdf(\x27 + rfpId + \x27)"><i class="fas fa-file-pdf"></i>Download PDF</button>'
       + advanceStageButton(rfp)
       + '</div>'
     + '</div>'
@@ -2568,7 +2568,7 @@ rfpTabs.generate = function(rfpId, rfp) {
     + '<span style="font-weight:600;color:#374151;font-size:0.88rem"><i class="fas fa-eye cpc-gold" style="margin-right:6px"></i>' + t('gen_rfp_preview') + '</span>'
     + '<div style="display:flex;gap:0.4rem">'
     + (hasContent ? '<button class="btn-ghost btn-sm" onclick="copyRfpPreview()" title="Copy all text"><i class="fas fa-copy"></i>Copy All</button>' : '')
-    + '<button id="genPreviewPdfBtn" class="btn-ghost btn-sm" onclick="downloadRfpPdf(' + rfpId + ')" style="' + (hasContent ? '' : 'display:none') + '"><i class="fas fa-download"></i>PDF</button>'
+    + '<button id="genPreviewPdfBtn" class="btn-ghost btn-sm" onclick="downloadRfpPdf(\x27 + rfpId + \x27)" style="' + (hasContent ? '' : 'display:none') + '"><i class="fas fa-download"></i>PDF</button>'
     + '</div>'
     + '</div>'
     + '<div id="rfpPreviewArea" style="padding:0;flex:1;overflow-y:auto">' + previewHtml + '</div>'
@@ -2593,7 +2593,7 @@ function copyRfpPreview() {
 function advanceStageButton(rfp) {
   const stage = rfp ? rfp.stage : 'draft';
   const id = rfp ? rfp.id : '';
-  if (stage === 'draft') return '<button class="btn-primary" style="flex:1" onclick="advanceRfpStage(' + id + ',\'published\')"><i class="fas fa-rocket"></i>Publish RFP</button>';
+  if (stage === 'draft') return '<button class="btn-primary" style="flex:1" onclick="advanceRfpStage(\x27 + id + \x27,\\x27published\\x27)"><i class="fas fa-rocket"></i>Publish RFP</button>';
   return '';
 }
 
@@ -3180,8 +3180,8 @@ rfpTabs.vendors = async function(rfpId, rfp) {
     const actionBtn = isDeclined
       ? '<span style="font-size:0.72rem;color:#dc2626;font-weight:600;padding:2px 8px">' + t('vstatus_declined') + '</span>'
       : allowRemove
-        ? '<button class="btn-danger btn-sm" onclick="toggleVendorShortlist(' + rfpId + ',' + v.id + ',false)"><i class="fas fa-minus"></i>' + t('btn_remove') + '</button>'
-        : '<button class="btn-secondary btn-sm" onclick="toggleVendorShortlist(' + rfpId + ',' + v.id + ',true)"><i class="fas fa-plus"></i>' + t('btn_add') + '</button>';
+        ? '<button class="btn-danger btn-sm" onclick="toggleVendorShortlist(\x27 + rfpId + \x27,\x27 + v.id + \x27,false)"><i class="fas fa-minus"></i>' + t('btn_remove') + '</button>'
+        : '<button class="btn-secondary btn-sm" onclick="toggleVendorShortlist(\x27 + rfpId + \x27,\x27 + v.id + \x27,true)"><i class="fas fa-plus"></i>' + t('btn_add') + '</button>';
 
     // Participation status badge — declined overrides invitation badge
     let invBadge = '';
@@ -3208,7 +3208,7 @@ rfpTabs.vendors = async function(rfpId, rfp) {
     // Communications button: disabled if declined
     const commBtn = isDeclined
       ? '<button class="btn-ghost btn-sm" disabled title="Communications prohibited — vendor declined" style="opacity:0.4;cursor:not-allowed"><i class="fas fa-ban"></i>' + t('vstatus_no_comms') + '</button>'
-      : '<button class="btn-ghost btn-sm" onclick="navigateToVendorComms(' + rfpId + ',' + v.id + ')" title="Open Communications"><i class="fas fa-comments"></i>' + t('btn_comms') + '</button>';
+      : '<button class="btn-ghost btn-sm" onclick="navigateToVendorComms(\x27 + rfpId + \x27,\x27 + v.id + \x27)" title="Open Communications"><i class="fas fa-comments"></i>' + t('btn_comms') + '</button>';
 
     // Avatar background: red if declined
     const avatarBg = isDeclined ? '#dc2626' : 'var(--cpc-ink)';
@@ -3225,11 +3225,11 @@ rfpTabs.vendors = async function(rfpId, rfp) {
       + (participantCode ? ' &bull; <span style="font-family:monospace;color:var(--cpc-ink);font-weight:600" title="Participant Reference">' + participantCode + '</span>' : '')
       + '</div>'
       + '</div></div></td>'
-      + '<td onclick="viewVendorDetail(' + v.id + ')" style="cursor:pointer" title="Click to see all specializations"><div class="tag-group">' + tags + '</div></td>'
+      + '<td onclick="viewVendorDetail(\x27 + v.id + \x27)" style="cursor:pointer" title="Click to see all specializations"><div class="tag-group">' + tags + '</div></td>'
       + '<td><span class="perf-badge ' + fitCls + '">' + score + '/100</span></td>'
       + '<td>' + invBadge + rxBadge + '</td>'
       + '<td style="text-align:center">' + actionBtn + '</td>'
-      + '<td><div style="display:flex;gap:4px">' + commBtn + '<button class="btn-ghost btn-sm" onclick="viewVendorDetail(' + v.id + ')"><i class="fas fa-eye"></i></button></div></td>'
+      + '<td><div style="display:flex;gap:4px">' + commBtn + '<button class="btn-ghost btn-sm" onclick="viewVendorDetail(\x27 + v.id + \x27)"><i class="fas fa-eye"></i></button></div></td>'
       + '</tr>';
   }
 
@@ -3253,8 +3253,8 @@ rfpTabs.vendors = async function(rfpId, rfp) {
     + '<p style="font-size:0.8rem;color:#9ca3af;margin:0">' + shortlistedCount + ' ' + t('vendors_shortlisted') + ' &bull; ' + t('vendors_inv_status') + '</p>'
     + '</div>'
     + '<div style="display:flex;gap:0.5rem">'
-    + '<button class="btn-secondary" id="aiShortlistBtn" onclick="aiShortlistVendors(' + rfpId + ')"><i class="fas fa-robot"></i>' + t('vendors_ai_suggest') + '</button>'
-    + '<button class="btn-primary" onclick="sendRfpInvitations(' + rfpId + ')"><i class="fas fa-paper-plane"></i>' + t('vendors_send_inv') + '</button>'
+    + '<button class="btn-secondary" id="aiShortlistBtn" onclick="aiShortlistVendors(\x27 + rfpId + \x27)"><i class="fas fa-robot"></i>' + t('vendors_ai_suggest') + '</button>'
+    + '<button class="btn-primary" onclick="sendRfpInvitations(\x27 + rfpId + \x27)"><i class="fas fa-paper-plane"></i>' + t('vendors_send_inv') + '</button>'
     + '</div>'
     + '</div>'
 
@@ -3331,7 +3331,7 @@ async function sendRfpInvitations(rfpId) {
     + '<div class="form-group"><label>' + t('invite_s_deadline') + '</label><input type="date" id="invSDeadline" value="' + (rfp && rfp.deadline ? rfp.deadline : getDateOffset(30)) + '"></div>'
     + '<div class="form-group"><label>' + t('invite_notes') + '</label><textarea id="invNotes" rows="2" placeholder="' + t('invite_notes_ph') + '"></textarea></div>'
     + '<div style="display:flex;gap:0.75rem;margin-top:1rem">'
-    + '<button class="btn-primary" id="sendInvBtn" onclick="confirmSendInvitations(' + rfpId + ')"><i class="fas fa-send"></i>' + t('inv_send_pdf_btn') + '</button>'
+    + '<button class="btn-primary" id="sendInvBtn" onclick="confirmSendInvitations(\x27 + rfpId + \x27)"><i class="fas fa-send"></i>' + t('inv_send_pdf_btn') + '</button>'
     + '<button class="btn-ghost" onclick="closeModal()">Cancel</button>'
     + '</div>'
   );
@@ -3485,7 +3485,7 @@ rfpTabs.emails = async function(rfpId) {
           + '<div style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap">' + typeBadge + attachBadge + '<span style="font-size:0.7rem;color:#9ca3af">' + dateStr + '</span></div>'
           + '</div>'
           + '<div style="font-size:0.82rem;font-weight:600;color:#374151;margin-bottom:0.4rem">' + escHtml(e.subject||'(no subject)') + '</div>'
-          + '<button onclick="toggleInboundBody(\'' + bodyCollapseId + '\')" style="font-size:0.72rem;color:' + (isInbound ? '#BA9765' : '#b45309') + ';background:none;border:none;cursor:pointer;padding:0;margin-bottom:0.4rem">'
+          + '<button onclick="toggleInboundBody(\\x27\x27 + bodyCollapseId + \x27\\x27)" style="font-size:0.72rem;color:' + (isInbound ? '#BA9765' : '#b45309') + ';background:none;border:none;cursor:pointer;padding:0;margin-bottom:0.4rem">'
           + '<i class="fas fa-chevron-down" id="chevron-' + bodyCollapseId + '"></i> View body</button>'
           + '<div id="' + bodyCollapseId + '" style="display:none;margin-top:0.5rem">' + bodyContent + '</div>'
           + (isInbound && e.has_attachment ? '<div style="margin-top:0.5rem;font-size:0.75rem;color:#92400e;background:#fef3c7;padding:4px 8px;border-radius:4px"><i class="fas fa-file-excel mr-1"></i>Attachment processed — see Q&A tab</div>' : '')
@@ -3504,8 +3504,8 @@ rfpTabs.emails = async function(rfpId) {
         + '<input id="' + replySubjId + '" type="text" placeholder="Subject..." style="width:100%;padding:7px 10px;border:1px solid #e5e7eb;border-radius:6px;font-size:0.82rem;margin-bottom:0.5rem;box-sizing:border-box">'
         + '<textarea id="' + replyTextId + '" rows="4" placeholder="Your reply message..." style="width:100%;padding:8px 10px;border:1px solid #e5e7eb;border-radius:6px;font-size:0.82rem;resize:vertical;box-sizing:border-box"></textarea>'
         + '<div style="display:flex;gap:0.5rem;margin-top:0.5rem">'
-        + '<button class="btn-primary btn-sm" onclick="sendVendorReply(' + rfpId + ',' + vid + ')"><i class="fas fa-paper-plane"></i>Send Reply</button>'
-        + '<button class="btn-ghost btn-sm" onclick="document.getElementById(\'' + replyFormId + '\').style.display=\'none\'">Cancel</button>'
+        + '<button class="btn-primary btn-sm" onclick="sendVendorReply(\x27 + rfpId + \x27,\x27 + vid + \x27)"><i class="fas fa-paper-plane"></i>Send Reply</button>'
+        + '<button class="btn-ghost btn-sm" onclick="document.getElementById(\\x27\x27 + replyFormId + \x27\\x27).style.display=\\x27none\\x27">Cancel</button>'
         + '</div>'
         + '</div>'
       ) : '';
@@ -3521,8 +3521,8 @@ rfpTabs.emails = async function(rfpId) {
         + '</div>'
         + '</div>'
         + '<div style="display:flex;gap:0.5rem">'
-        + (isNumericVid ? '<button class="btn-ghost btn-sm" onclick="toggleVendorReply(\'' + replyFormId + '\')"><i class="fas fa-reply"></i>Reply</button>' : '')
-        + '<button class="btn-ghost btn-sm" onclick="toggleThreadBody(\'' + threadId + '\')"><i class="fas fa-chevron-down" id="chevron-' + threadId + '"></i></button>'
+        + (isNumericVid ? '<button class="btn-ghost btn-sm" onclick="toggleVendorReply(\\x27\x27 + replyFormId + \x27\\x27)"><i class="fas fa-reply"></i>Reply</button>' : '')
+        + '<button class="btn-ghost btn-sm" onclick="toggleThreadBody(\\x27\x27 + threadId + \x27\\x27)"><i class="fas fa-chevron-down" id="chevron-' + threadId + '"></i></button>'
         + '</div>'
         + '</div>'
         // Thread body (collapsible)
@@ -3549,7 +3549,7 @@ rfpTabs.emails = async function(rfpId) {
     + '</p>'
     + '</div>'
     + '<div style="display:flex;gap:0.5rem">'
-    + '<button class="btn-secondary" onclick="checkInboxForQA(' + rfpId + ')" id="checkInboxBtn"><i class="fas fa-sync"></i>Refresh</button>'
+    + '<button class="btn-secondary" onclick="checkInboxForQA(\x27 + rfpId + \x27)" id="checkInboxBtn"><i class="fas fa-sync"></i>Refresh</button>'
     + '</div>'
     + '</div>'
 
@@ -3902,7 +3902,7 @@ rfpTabs.qa = async function(rfpId) {
       + '<p style="margin-bottom:0.5rem;font-weight:600;color:#374151">' + t('qa_no_questions_title') + '</p>'
       + '<p style="margin-bottom:1rem;font-size:0.85rem">' + t('qa_no_questions_sub') + '<br>' + t('qa_no_questions_hint') + ' <strong>' + t('qa_re_extract_link') + '</strong>.</p>'
       + '<div style="display:flex;gap:0.75rem;justify-content:center;flex-wrap:wrap">'
-      + '<button class="btn-secondary" id="reprocessQBtn" onclick="reprocessQuestions(' + rfpId + ')"><i class="fas fa-sync"></i>' + t('qa_re_extract_full') + '</button>'
+      + '<button class="btn-secondary" id="reprocessQBtn" onclick="reprocessQuestions(\x27 + rfpId + \x27)"><i class="fas fa-sync"></i>' + t('qa_re_extract_full') + '</button>'
       // Load Demo Questions button removed (v9)
       + '</div>'
       + '</div>';
@@ -3934,17 +3934,17 @@ rfpTabs.qa = async function(rfpId) {
 
       const isFromEmail = q.source === 'email';
       const btns = (!q.answer || needsManual
-        ? '<button class="btn-secondary btn-sm" onclick="draftOneAnswer(' + rfpId + ',' + q.id + ')"><i class="fas fa-robot"></i>' + t('qa_ai_draft_btn') + '</button>'
-          + '<button class="btn-ghost btn-sm" onclick="editQAnswer(' + q.id + ')"><i class="fas fa-edit"></i>' + t('qa_manual_edit_btn') + '</button>'
+        ? '<button class="btn-secondary btn-sm" onclick="draftOneAnswer(\x27 + rfpId + \x27,\x27 + q.id + \x27)"><i class="fas fa-robot"></i>' + t('qa_ai_draft_btn') + '</button>'
+          + '<button class="btn-ghost btn-sm" onclick="editQAnswer(\x27 + q.id + \x27)"><i class="fas fa-edit"></i>' + t('qa_manual_edit_btn') + '</button>'
         : '') + (q.answer && !q.published && !needsManual
-        ? '<button class="btn-primary btn-sm" onclick="approveQAnswer(' + rfpId + ',' + q.id + ')"><i class="fas fa-check"></i>' + t('qa_approve_send_btn') + '</button>'
-          + '<button class="btn-ghost btn-sm" onclick="editQAnswer(' + q.id + ')"><i class="fas fa-edit"></i>' + t('btn_edit') + '</button>'
+        ? '<button class="btn-primary btn-sm" onclick="approveQAnswer(\x27 + rfpId + \x27,\x27 + q.id + \x27)"><i class="fas fa-check"></i>' + t('qa_approve_send_btn') + '</button>'
+          + '<button class="btn-ghost btn-sm" onclick="editQAnswer(\x27 + q.id + \x27)"><i class="fas fa-edit"></i>' + t('btn_edit') + '</button>'
         : '') + (q.answer && !q.published && needsManual
-        ? '<button class="btn-primary btn-sm" onclick="approveQAnswer(' + rfpId + ',' + q.id + ')"><i class="fas fa-check"></i>' + t('qa_approve_btn') + '</button>'
+        ? '<button class="btn-primary btn-sm" onclick="approveQAnswer(\x27 + rfpId + \x27,\x27 + q.id + \x27)"><i class="fas fa-check"></i>' + t('qa_approve_btn') + '</button>'
         : '')
         // 7.4 — Edit button on published answers
         + (q.published
-        ? '<button class="btn-ghost btn-sm" onclick="editQAnswer(' + q.id + ')" title="Edit published answer"><i class="fas fa-edit"></i> ' + t('btn_edit') + '</button>'
+        ? '<button class="btn-ghost btn-sm" onclick="editQAnswer(\x27 + q.id + \x27)" title="Edit published answer"><i class="fas fa-edit"></i> ' + t('btn_edit') + '</button>'
         : '');
 
       qCards += '<div class="card" style="padding:1rem;' + cardBg + '" id="q-' + q.id + '">'
@@ -3977,7 +3977,7 @@ rfpTabs.qa = async function(rfpId) {
     + ['all','pending','answered','published'].map(function(f){
         var counts = {all: questions.length, pending: pending, answered: answered, published: published};
         var active = _qaFilter === f;
-        return '<button onclick="window._qaFilter='' + f + '';rfpTabs.qa(' + rfpId + ')" style="border:1px solid ' + (active?'var(--cpc-ink)':'#e5e7eb') + ';border-radius:6px;padding:3px 10px;font-size:0.75rem;background:' + (active?'var(--cpc-ink)':'white') + ';color:' + (active?'white':'#6b7280') + ';cursor:pointer;font-weight:' + (active?'700':'400') + '">'
+        return '<button onclick="window._qaFilter=\x27\x27 + f + \x27\x27;rfpTabs.qa(\x27 + rfpId + \x27)" style="border:1px solid ' + (active?'var(--cpc-ink)':'#e5e7eb') + ';border-radius:6px;padding:3px 10px;font-size:0.75rem;background:' + (active?'var(--cpc-ink)':'white') + ';color:' + (active?'white':'#6b7280') + ';cursor:pointer;font-weight:' + (active?'700':'400') + '">'
           + f.charAt(0).toUpperCase()+f.slice(1) + ' (' + (counts[f]||0) + ')</button>';
       }).join('')
     + '</div>';
@@ -4008,11 +4008,11 @@ rfpTabs.qa = async function(rfpId) {
     + (manualNeeded > 0 ? '<span style="font-size:0.82rem;color:#dc2626;font-weight:600"><strong>' + manualNeeded + '</strong> ' + t('qa_need_manual') + '</span>' : '')
     + '</div>'
     + '<div style="display:flex;gap:0.5rem;flex-wrap:wrap">'
-    + '<button class="btn-ghost btn-sm" id="reprocessQBtn" onclick="reprocessQuestions(' + rfpId + ')" title="Re-extract questions from received emails"><i class="fas fa-sync"></i>' + t('qa_re_extract_btn') + '</button>'
-    + '<button class="btn-secondary" id="draftAllBtn" onclick="draftAllQAnswers(' + rfpId + ')"><i class="fas fa-robot"></i>' + t('qa_ai_answer_all') + '</button>'
-    + '<button class="btn-primary" onclick="publishAllQAnswers(' + rfpId + ')" ' + (manualNeeded > 0 ? 'title="' + t('qa_blocked_title') + ' ' + manualNeeded + ' ' + t('qa_need_manual_answers') + '" style="opacity:0.6"' : '') + '><i class="fas fa-paper-plane"></i>' + t('qa_publish_approved') + '</button>'
+    + '<button class="btn-ghost btn-sm" id="reprocessQBtn" onclick="reprocessQuestions(\x27 + rfpId + \x27)" title="Re-extract questions from received emails"><i class="fas fa-sync"></i>' + t('qa_re_extract_btn') + '</button>'
+    + '<button class="btn-secondary" id="draftAllBtn" onclick="draftAllQAnswers(\x27 + rfpId + \x27)"><i class="fas fa-robot"></i>' + t('qa_ai_answer_all') + '</button>'
+    + '<button class="btn-primary" onclick="publishAllQAnswers(\x27 + rfpId + \x27)" ' + (manualNeeded > 0 ? 'title="' + t('qa_blocked_title') + ' ' + manualNeeded + ' ' + t('qa_need_manual_answers') + '" style="opacity:0.6"' : '') + '><i class="fas fa-paper-plane"></i>' + t('qa_publish_approved') + '</button>'
     + (appState.currentRfp && appState.currentRfp.stage === 'qa_open'
-        ? '<button class="btn-danger" onclick="closeQA(' + rfpId + ')" title="Stop accepting vendor questions and mark Q&amp;A stage as complete" style="background:#dc2626;color:#fff;border:none;padding:0.35rem 0.75rem;border-radius:6px;font-size:0.82rem;cursor:pointer;display:flex;align-items:center;gap:0.35rem"><i class="fas fa-lock"></i>' + t('qa_close_qa') + '</button>'
+        ? '<button class="btn-danger" onclick="closeQA(\x27 + rfpId + \x27)" title="Stop accepting vendor questions and mark Q&amp;A stage as complete" style="background:#dc2626;color:#fff;border:none;padding:0.35rem 0.75rem;border-radius:6px;font-size:0.82rem;cursor:pointer;display:flex;align-items:center;gap:0.35rem"><i class="fas fa-lock"></i>' + t('qa_close_qa') + '</button>'
         : (appState.currentRfp && ['submissions_closed','evaluation','awarded'].includes(appState.currentRfp.stage)
             ? '<span style="font-size:0.78rem;color:#065f46;font-weight:600;display:flex;align-items:center;gap:0.35rem;padding:0.35rem 0.5rem"><i class="fas fa-lock mr-1"></i>' + t('qa_closed_label') + '</span>'
             : ''))
@@ -4058,7 +4058,7 @@ function editQAnswer(qId) {
     + '<label>Answer</label>'
     + '<textarea id="editAnswerText" rows="5" style="margin-bottom:1rem">' + escHtml(q.answer||'') + '</textarea>'
     + '<div style="display:flex;gap:0.5rem">'
-    + '<button class="btn-primary" onclick="saveQAnswer(' + appState.currentRfpId + ',' + qId + ')">Save &amp; Approve</button>'
+    + '<button class="btn-primary" onclick="saveQAnswer(\x27 + appState.currentRfpId + \x27,\x27 + qId + \x27)">Save &amp; Approve</button>'
     + '<button class="btn-ghost" onclick="closeModal()">Cancel</button>'
     + '</div>'
   );
@@ -4240,7 +4240,7 @@ rfpTabs.proposals = async function(rfpId) {
     var attachCount = attachments.length || (p.pdf_attachment_url ? 1 : 0);
 
     var filesCell = attachCount > 0
-      ? '<span class="file-count-badge" onclick="viewProposalDetail(' + p.id + ')" title="Click to view &amp; download ' + attachCount + ' file(s)">'
+      ? '<span class="file-count-badge" onclick="viewProposalDetail(\x27 + p.id + \x27)" title="Click to view &amp; download ' + attachCount + ' file(s)">'
         + '<i class="fas fa-paperclip"></i>' + attachCount + ' ' + (attachCount !== 1 ? t('prop_files_pl') : t('prop_files')) + '</span>'
       : '<span style="color:#9ca3af;font-size:0.8rem">—</span>';
 
@@ -4250,7 +4250,7 @@ rfpTabs.proposals = async function(rfpId) {
     if (isAwarded) {
       awardBtn = '<span style="background:linear-gradient(135deg,#d4a017,#f5c842);color:#1a1a1a;border-radius:6px;padding:0.3rem 0.7rem;font-size:0.78rem;font-weight:700;display:inline-flex;align-items:center;gap:4px"><i class="fas fa-trophy"></i>' + t('prop_awarded_badge') + '</span>';
     } else if (!rfpAwarded) {
-      awardBtn = '<button onclick="awardProposal(' + rfpId + ',' + p.id + ',\'' + escHtml(p.vendor_name||'this vendor') + '\')" '
+      awardBtn = '<button onclick="awardProposal(\x27 + rfpId + \x27,\x27 + p.id + \x27,\\x27\x27 + escHtml(p.vendor_name||\x27this vendor\x27) + \x27\\x27)" '
         + 'style="background:linear-gradient(135deg,#d4a017,#f5c842);color:#1a1a1a;border:none;border-radius:6px;padding:0.3rem 0.7rem;font-size:0.78rem;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:4px;box-shadow:0 2px 6px rgba(212,160,23,0.45);transition:opacity 0.15s" '
         + 'title="Award contract to ' + escHtml(p.vendor_name||'vendor') + '">'
         + '<i class="fas fa-trophy"></i>' + t('prop_award_btn') + '</button>';
@@ -4268,8 +4268,8 @@ rfpTabs.proposals = async function(rfpId) {
       + '<td>' + aiBadge(p) + '</td>'
       + '<td>' + statusBadge(p) + '</td>'
       + '<td style="white-space:nowrap">'
-      + '<button class="btn-ghost btn-sm" onclick="viewProposalDetail(' + p.id + ')" style="margin-right:4px" title="View details"><i class="fas fa-eye"></i>' + t('prop_view_btn') + '</button>'
-      + (p.ai_recommendation ? '<button class="btn-ghost btn-sm" onclick="evaluateSingleProposal(' + rfpId + ',' + p.id + ')" style="margin-right:4px" title="Re-evaluate with AI"><i class="fas fa-sync-alt"></i> ' + t('panel_save_reevaluate').replace('Save & ','') + '</button>' : '')
+      + '<button class="btn-ghost btn-sm" onclick="viewProposalDetail(\x27 + p.id + \x27)" style="margin-right:4px" title="View details"><i class="fas fa-eye"></i>' + t('prop_view_btn') + '</button>'
+      + (p.ai_recommendation ? '<button class="btn-ghost btn-sm" onclick="evaluateSingleProposal(\x27 + rfpId + \x27,\x27 + p.id + \x27)" style="margin-right:4px" title="Re-evaluate with AI"><i class="fas fa-sync-alt"></i> ' + t('panel_save_reevaluate').replace('Save & ','') + '</button>' : '')
       + awardBtn
       + '</td>'
       + '</tr>';
@@ -4283,8 +4283,8 @@ rfpTabs.proposals = async function(rfpId) {
   // 8.1 — always show evaluate/re-evaluate all button
   var evalBtn = proposals.length > 0
     ? (evaluated === proposals.length
-      ? '<button class="btn-secondary" id="evaluateAllBtn" onclick="evaluateAllProposals(' + rfpId + ')"><i class="fas fa-sync-alt"></i>Re-evaluate All (' + proposals.length + ')</button>'
-      : '<button class="btn-primary" id="evaluateAllBtn" onclick="evaluateAllProposals(' + rfpId + ')" style="background:linear-gradient(135deg,var(--cpc-gold-deep),var(--cpc-gold));border:none"><i class="fas fa-robot"></i>' + t('prop_evaluate_ai') + ' (' + (proposals.length - evaluated) + ' remaining)</button>')
+      ? '<button class="btn-secondary" id="evaluateAllBtn" onclick="evaluateAllProposals(\x27 + rfpId + \x27)"><i class="fas fa-sync-alt"></i>Re-evaluate All (' + proposals.length + ')</button>'
+      : '<button class="btn-primary" id="evaluateAllBtn" onclick="evaluateAllProposals(\x27 + rfpId + \x27)" style="background:linear-gradient(135deg,var(--cpc-gold-deep),var(--cpc-gold));border:none"><i class="fas fa-robot"></i>' + t('prop_evaluate_ai') + ' (' + (proposals.length - evaluated) + ' remaining)</button>')
     : '';
 
   setContent(
@@ -4495,7 +4495,7 @@ function _renderProposalPanel(p, evalData) {
       + '<div style="display:flex;gap:0.5rem;align-items:center;margin-top:0.25rem">'
       + '<input id="manualBudgetInput_' + p.id + '" type="number" min="0" placeholder="Enter amount (e.g. 1500000)" style="flex:1;padding:6px 10px;border:1.5px solid #fcd34d;border-radius:6px;font-size:0.82rem">'
       + '<select id="manualBudgetCur_' + p.id + '" style="padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:0.82rem"><option>AED</option><option>USD</option><option>EUR</option><option>GBP</option></select>'
-      + '<button onclick="saveManualBudget(' + rfpId + ',' + p.id + ')" style="background:var(--cpc-gold-deep);color:white;border:none;border-radius:6px;padding:6px 14px;font-size:0.82rem;font-weight:600;cursor:pointer;white-space:nowrap"><i class="fas fa-save" style="margin-right:4px"></i>Save &amp; Re-evaluate</button>'
+      + '<button onclick="saveManualBudget(\x27 + rfpId + \x27,\x27 + p.id + \x27)" style="background:var(--cpc-gold-deep);color:white;border:none;border-radius:6px;padding:6px 14px;font-size:0.82rem;font-weight:600;cursor:pointer;white-space:nowrap"><i class="fas fa-save" style="margin-right:4px"></i>Save &amp; Re-evaluate</button>'
       + '</div>'
       + '</div>';
   }
@@ -4688,7 +4688,7 @@ function _renderProposalPanel(p, evalData) {
       + '<i class="fas fa-robot" style="font-size:2.5rem;display:block;margin-bottom:0.75rem;color:#d1d5db"></i>'
       + '<div style="font-weight:600;font-size:0.95rem;margin-bottom:0.5rem">' + t('panel_verdict_no_data') + '</div>'
       + '<div style="font-size:0.8rem;margin-bottom:1.25rem">' + t('panel_verdict_no_data_sub') + '</div>'
-      + '<button onclick="evaluateSingleProposal(' + rfpId + ',' + p.id + ')" style="background:linear-gradient(135deg,var(--cpc-gold-deep),var(--cpc-gold));color:white;border:none;border-radius:8px;padding:0.6rem 1.5rem;font-size:0.85rem;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:0.5rem" id="evalSingleBtn_' + p.id + '"><i class="fas fa-robot"></i>' + t('panel_eval_single_btn') + '</button>'
+      + '<button onclick="evaluateSingleProposal(\x27 + rfpId + \x27,\x27 + p.id + \x27)" style="background:linear-gradient(135deg,var(--cpc-gold-deep),var(--cpc-gold));color:white;border:none;border-radius:8px;padding:0.6rem 1.5rem;font-size:0.85rem;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:0.5rem" id="evalSingleBtn_' + p.id + '"><i class="fas fa-robot"></i>' + t('panel_eval_single_btn') + '</button>'
       + '</div>';
   }
 
@@ -4723,7 +4723,7 @@ function _renderProposalPanel(p, evalData) {
     + ['summary','compliance','scoring','verdict'].map(function(tab) {
         var labels = { summary: '<i class="fas fa-file-alt mr-1"></i>Summary', compliance: '<i class="fas fa-clipboard-check mr-1"></i>Compliance', scoring: '<i class="fas fa-chart-bar mr-1"></i>Scoring', verdict: '<i class="fas fa-robot mr-1"></i>AI Verdict' };
         var isActive = tab === activeTab;
-        return '<button onclick="switchProposalTab(\'' + tab + '\')" id="ptab_' + tab + '" style="padding:0.75rem 1rem;font-size:0.8rem;font-weight:' + (isActive ? '700' : '500') + ';color:' + (isActive ? 'var(--cpc-gold-deep)' : '#6b7280') + ';background:none;border:none;border-bottom:2px solid ' + (isActive ? 'var(--cpc-gold)' : 'transparent') + ';cursor:pointer;white-space:nowrap;transition:all 0.15s">' + labels[tab] + '</button>';
+        return '<button onclick="switchProposalTab(\\x27\x27 + tab + \x27\\x27)" id="ptab_' + tab + '" style="padding:0.75rem 1rem;font-size:0.8rem;font-weight:' + (isActive ? '700' : '500') + ';color:' + (isActive ? 'var(--cpc-gold-deep)' : '#6b7280') + ';background:none;border:none;border-bottom:2px solid ' + (isActive ? 'var(--cpc-gold)' : 'transparent') + ';cursor:pointer;white-space:nowrap;transition:all 0.15s">' + labels[tab] + '</button>';
       }).join('')
     + '</div>'
 
@@ -4741,8 +4741,8 @@ function _renderProposalPanel(p, evalData) {
         var canAward = rfpNow && rfpNow.stage === 'submissions_closed' && !isAwarded && !rfpAlreadyAwarded;
         return '<div style="position:sticky;bottom:0;background:#fff;border-top:1px solid #e5e7eb;padding:0.75rem 1.25rem;display:flex;gap:0.5rem;justify-content:flex-end;align-items:center;flex-shrink:0">'
           + (isAwarded ? '<div style="background:#d1fae5;color:#065f46;padding:0.35rem 0.9rem;border-radius:7px;font-weight:700;font-size:0.82rem;display:inline-flex;align-items:center;gap:0.4rem"><i class="fas fa-trophy"></i>Contract Awarded</div>' : '')
-          + (canAward ? '<button onclick="closeProposalPanel();awardProposal(' + rfpId + ',' + p.id + ',\'' + escHtml(p.vendor_name||'this vendor') + '\')" style="background:linear-gradient(135deg,#059669,#10b981);color:white;border:none;border-radius:7px;padding:0.45rem 1.1rem;font-size:0.82rem;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:0.4rem"><i class="fas fa-trophy"></i>Award Contract</button>' : '')
-          + (!evalData ? '<button onclick="evaluateSingleProposal(' + rfpId + ',' + p.id + ')" id="evalSingleBtnFooter_' + p.id + '" style="background:linear-gradient(135deg,var(--cpc-gold-deep),var(--cpc-gold));color:white;border:none;border-radius:7px;padding:0.45rem 1.1rem;font-size:0.82rem;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:0.4rem"><i class="fas fa-robot"></i>' + t('panel_eval_footer_btn') + '</button>' : '')
+          + (canAward ? '<button onclick="closeProposalPanel();awardProposal(\x27 + rfpId + \x27,\x27 + p.id + \x27,\\x27\x27 + escHtml(p.vendor_name||\x27this vendor\x27) + \x27\\x27)" style="background:linear-gradient(135deg,#059669,#10b981);color:white;border:none;border-radius:7px;padding:0.45rem 1.1rem;font-size:0.82rem;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:0.4rem"><i class="fas fa-trophy"></i>Award Contract</button>' : '')
+          + (!evalData ? '<button onclick="evaluateSingleProposal(\x27 + rfpId + \x27,\x27 + p.id + \x27)" id="evalSingleBtnFooter_' + p.id + '" style="background:linear-gradient(135deg,var(--cpc-gold-deep),var(--cpc-gold));color:white;border:none;border-radius:7px;padding:0.45rem 1.1rem;font-size:0.82rem;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:0.4rem"><i class="fas fa-robot"></i>' + t('panel_eval_footer_btn') + '</button>' : '')
           + '<button class="btn-ghost" onclick="closeProposalPanel()" style="padding:0.45rem 1.1rem">' + t('btn_cancel') + '</button>'
           + '</div>';
       })()
@@ -4949,7 +4949,7 @@ pages.vendor_comms = async function(opts) {
         // Subject
         + '<div style="font-size:0.85rem;font-weight:600;color:#1f2937;margin-bottom:0.35rem">' + escHtml(e.subject||'(no subject)') + '</div>'
         // Toggle body
-        + '<button onclick="toggleInboundBody(\'' + bodyCollapseId + '\')" style="font-size:0.72rem;color:' + nameColor + ';background:none;border:none;cursor:pointer;padding:0;margin-bottom:0.35rem">'
+        + '<button onclick="toggleInboundBody(\\x27\x27 + bodyCollapseId + \x27\\x27)" style="font-size:0.72rem;color:' + nameColor + ';background:none;border:none;cursor:pointer;padding:0;margin-bottom:0.35rem">'
         + '<i class="fas fa-chevron-down" id="chevron-' + bodyCollapseId + '"></i> View message</button>'
         + '<div id="' + bodyCollapseId + '" style="display:none;margin-top:0.5rem">' + bodyContent + '</div>'
         // Attachment note
@@ -4973,7 +4973,7 @@ pages.vendor_comms = async function(opts) {
       + '<div><div style="font-weight:700;font-size:0.9rem;color:#991b1b">Correspondence Prohibited</div>'
       + '<div style="font-size:0.8rem;color:#dc2626">' + escHtml(vendorName) + ' has declined participation in this RFP. No further correspondence is permitted.</div>'
       + '</div></div>'
-      + '<button class="btn-ghost" onclick="navigateTo(\'rfp_detail\',{rfpId:' + rfpId + ',tab:\'vendors\'})"><i class="fas fa-arrow-left"></i>Back to RFP</button>'
+      + '<button class="btn-ghost" onclick="navigateTo(\\x27rfp_detail\\x27,{rfpId:\x27 + rfpId + \x27,tab:\\x27vendors\\x27})"><i class="fas fa-arrow-left"></i>Back to RFP</button>'
       + '</div>'
     : '<div class="card" style="padding:1.25rem;margin-top:1rem">'
       + '<h4 style="font-weight:700;font-size:0.875rem;color:#1f2937;margin:0 0 0.75rem"><i class="fas fa-reply mr-2" style="color:var(--cpc-ink)"></i>Reply to ' + escHtml(vendorName) + '</h4>'
@@ -4981,12 +4981,12 @@ pages.vendor_comms = async function(opts) {
       + '<input id="vc-reply-subj" type="text" placeholder="Subject..." style="width:100%;padding:7px 10px;border:1px solid #e5e7eb;border-radius:6px;font-size:0.82rem;box-sizing:border-box">'
       + '</div>'
       + '<div class="form-group" style="margin-bottom:0.5rem">'
-      + '<textarea id="vc-reply-text" rows="4" placeholder="Type your message..." style="width:100%;padding:8px 10px;border:1px solid #e5e7eb;border-radius:6px;font-size:0.82rem;resize:vertical;box-sizing:border-box" oninput="var c=document.getElementById('vc-charcount');if(c)c.textContent=this.value.length+' chars'"></textarea>'
+      + '<textarea id="vc-reply-text" rows="4" placeholder="Type your message..." style="width:100%;padding:8px 10px;border:1px solid #e5e7eb;border-radius:6px;font-size:0.82rem;resize:vertical;box-sizing:border-box" oninput="var c=document.getElementById(\x27vc-charcount\x27);if(c)c.textContent=this.value.length+\x27 chars\x27"></textarea>'
       + '<div style="text-align:right;font-size:0.7rem;color:#9ca3af;margin-top:2px" id="vc-charcount">0 chars</div>'
       + '</div>'
       + '<div style="display:flex;gap:0.5rem">'
-      + '<button class="btn-primary" onclick="sendVendorCommReply(' + rfpId + ',' + vendorId + ')"><i class="fas fa-paper-plane"></i>Send Reply</button>'
-      + '<button class="btn-ghost" onclick="navigateTo(\'rfp_detail\',{rfpId:' + rfpId + ',tab:\'vendors\'})"><i class="fas fa-arrow-left"></i>Back to RFP</button>'
+      + '<button class="btn-primary" onclick="sendVendorCommReply(\x27 + rfpId + \x27,\x27 + vendorId + \x27)"><i class="fas fa-paper-plane"></i>Send Reply</button>'
+      + '<button class="btn-ghost" onclick="navigateTo(\\x27rfp_detail\\x27,{rfpId:\x27 + rfpId + \x27,tab:\\x27vendors\\x27})"><i class="fas fa-arrow-left"></i>Back to RFP</button>'
       + '</div>'
       + '</div>';
 
@@ -5015,9 +5015,9 @@ pages.vendor_comms = async function(opts) {
     + (vendorDeclined ? ' &bull; <span style="color:#dc2626;font-weight:600">DECLINED</span>' : '') + '</div>'
     + '</div></div>'
     + '<div style="display:flex;gap:0.5rem">'
-    + '<button class="btn-ghost btn-sm" id="jumpLatestBtn" onclick="(function(){var el=document.getElementById('vc-latest');if(el)el.scrollIntoView({behavior:'smooth'})})()"><i class="fas fa-arrow-down"></i>Latest</button>'
-    + '<button class="btn-secondary btn-sm" onclick="pages.vendor_comms({rfpId:' + rfpId + ',vendorId:' + vendorId + '})"><i class="fas fa-sync"></i>Refresh</button>'
-    + '<button class="btn-ghost btn-sm" onclick="navigateTo(\'rfp_detail\',{rfpId:' + rfpId + ',tab:\'vendors\'})"><i class="fas fa-arrow-left"></i>Back to RFP</button>'
+    + '<button class="btn-ghost btn-sm" id="jumpLatestBtn" onclick="(function(){var el=document.getElementById(\x27vc-latest\x27);if(el)el.scrollIntoView({behavior:\x27smooth\x27})})()"><i class="fas fa-arrow-down"></i>Latest</button>'
+    + '<button class="btn-secondary btn-sm" onclick="pages.vendor_comms({rfpId:\x27 + rfpId + \x27,vendorId:\x27 + vendorId + \x27})"><i class="fas fa-sync"></i>Refresh</button>'
+    + '<button class="btn-ghost btn-sm" onclick="navigateTo(\\x27rfp_detail\\x27,{rfpId:\x27 + rfpId + \x27,tab:\\x27vendors\\x27})"><i class="fas fa-arrow-left"></i>Back to RFP</button>'
     + '</div>'
     + '</div>'
     // Messages
@@ -5083,12 +5083,12 @@ pages.vendors = async function() {
     rows += '<tr>'
       + '<td><div style="display:flex;align-items:center;gap:0.75rem">'
       + '<div style="width:36px;height:36px;border-radius:8px;background:var(--cpc-ink);display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:0.9rem;flex-shrink:0">' + escHtml(v.name.charAt(0)) + '</div>'
-      + '<div><div style="font-weight:600;font-size:0.95rem;cursor:pointer" onmouseenter="showVendorHoverCard(event,' + v.id + ')" onmouseleave="hideVendorHoverCard()">' + escHtml(v.name) + '</div>'
+      + '<div><div style="font-weight:600;font-size:0.95rem;cursor:pointer" onmouseenter="showVendorHoverCard(event,\x27 + v.id + \x27)" onmouseleave="hideVendorHoverCard()">' + escHtml(v.name) + '</div>'
       + '<div style="font-size:0.78rem;color:#9ca3af">' + escHtml(tVendorCountry(v.country||'UAE')) + ' &bull; ' + escHtml(tVendorSize(v.size||'')) + '</div>'
       + '</div></div></td>'
       + '<td>' + escHtml(tVendorCat(v.category||'')) + '</td>'
-      + '<td onclick="viewVendorDetail(' + v.id + ')" style="cursor:pointer" title="Click to see all specializations"><div class="tag-group">' + tags + '</div></td>'
-      + '<td><button class="btn-ghost btn-sm" onclick="viewVendorDetail(' + v.id + ')"><i class="fas fa-eye"></i></button></td>'
+      + '<td onclick="viewVendorDetail(\x27 + v.id + \x27)" style="cursor:pointer" title="Click to see all specializations"><div class="tag-group">' + tags + '</div></td>'
+      + '<td><button class="btn-ghost btn-sm" onclick="viewVendorDetail(\x27 + v.id + \x27)"><i class="fas fa-eye"></i></button></td>'
       + '</tr>';
   });
 
@@ -5201,7 +5201,7 @@ function viewVendorDetail(id) {
     +     '<input id="vendorEmailInput_' + id + '" type="email" value="' + escHtml(vendor.contact_email||'') + '" '
     +     'style="flex:1;border:1px solid #d1d5db;border-radius:6px;padding:5px 8px;font-size:0.82rem;min-width:0" '
     +     'placeholder="email@vendor.com">'
-    +     '<button class="btn-primary" style="padding:5px 12px;font-size:0.78rem;white-space:nowrap;flex-shrink:0" onclick="saveVendorEmail(' + id + ')"><i class="fas fa-save"></i>Save</button>'
+    +     '<button class="btn-primary" style="padding:5px 12px;font-size:0.78rem;white-space:nowrap;flex-shrink:0" onclick="saveVendorEmail(\x27 + id + \x27)"><i class="fas fa-save"></i>Save</button>'
     +   '</div>'
     +   '<div id="vendorEmailMsg_' + id + '" style="font-size:0.72rem;margin-top:3px"></div>'
     + '</div>'
@@ -5232,7 +5232,7 @@ function viewVendorDetail(id) {
     // ── Footer buttons (10.1 view/edit + 10.3 history) ──
     + '<div style="display:flex;gap:0.5rem;margin-top:0.75rem">'
     + '<button class="btn-ghost" style="flex:1" onclick="closeModal()">Close</button>'
-    + '<button class="btn-secondary" style="padding:0.45rem 0.875rem;font-size:0.82rem" onclick="showVendorHistory(' + id + ')" title="View procurement history"><i class="fas fa-history"></i> History</button>'
+    + '<button class="btn-secondary" style="padding:0.45rem 0.875rem;font-size:0.82rem" onclick="showVendorHistory(\x27 + id + \x27)" title="View procurement history"><i class="fas fa-history"></i> History</button>'
     + '</div>';
 
   showModal(html);
@@ -5414,7 +5414,7 @@ pages.settings = async function() {
     + cats.map(function(c, i){
         return '<div style="display:flex;align-items:center;gap:0.5rem;padding:6px 10px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px">'
           + '<span style="flex:1;font-size:0.85rem">' + escHtml(c) + '</span>'
-          + '<button class="btn-ghost btn-sm" onclick="removeSettingsCategory(' + i + ')" style="color:#dc2626;padding:2px 8px"><i class="fas fa-times"></i></button>'
+          + '<button class="btn-ghost btn-sm" onclick="removeSettingsCategory(\x27 + i + \x27)" style="color:#dc2626;padding:2px 8px"><i class="fas fa-times"></i></button>'
           + '</div>';
       }).join('')
     + '</div>'
@@ -5427,7 +5427,7 @@ pages.settings = async function() {
     // Procurement email section
     + '<div class="card" style="padding:1.5rem">'
     + '<h3 style="font-weight:700;font-size:1rem;color:#1f2937;margin:0 0 0.25rem"><i class="fas fa-envelope cpc-gold" style="margin-right:8px"></i>Procurement Team Email</h3>'
-    + '<p style="font-size:0.82rem;color:#9ca3af;margin:0 0 0.75rem">Shown on the vendor portal's declined message as a contact address.</p>'
+    + '<p style="font-size:0.82rem;color:#9ca3af;margin:0 0 0.75rem">Shown on the vendor portal\x27s declined message as a contact address.</p>'
     + '<div style="display:flex;gap:0.5rem">'
     + '<input id="settingsProcEmail" type="email" value="' + escHtml(procEmail) + '" placeholder="procurement@example.com" style="flex:1;border:1px solid #d1d5db;border-radius:6px;padding:6px 10px;font-size:0.84rem">'
     + '<button class="btn-primary" onclick="saveProcurementEmail()"><i class="fas fa-save"></i>Save</button>'
@@ -5520,9 +5520,9 @@ function showCreateRfpModal() {
 }
 
 function buildDocUploadSlot(slotId, docLabel, icon, color) {
-  return '<div id="slot-wrap-' + slotId + '" onclick="document.getElementById(\'file-' + slotId + '\').click()" '
+  return '<div id="slot-wrap-' + slotId + '" onclick="document.getElementById(\\x27file-\x27 + slotId + \x27\\x27).click()" '
     + 'style="border:2px dashed #d1d5db;border-radius:8px;padding:0.625rem 0.875rem;display:flex;align-items:center;gap:0.75rem;cursor:pointer;transition:border-color 0.2s;background:#fafafa;margin-bottom:0.5rem" '
-    + 'onmouseover="this.style.borderColor=\'' + color + '\'" onmouseout="if(!document.getElementById(\'file-' + slotId + '\').files.length){this.style.borderColor=\'#d1d5db\'}">'
+    + 'onmouseover="this.style.borderColor=\\x27\x27 + color + \x27\\x27" onmouseout="if(!document.getElementById(\\x27file-\x27 + slotId + \x27\\x27).files.length){this.style.borderColor=\\x27#d1d5db\\x27}">'
     + '<div style="width:30px;height:30px;border-radius:7px;background:' + color + '18;display:flex;align-items:center;justify-content:center;flex-shrink:0">'
     + '<i class="fas ' + icon + '" style="color:' + color + ';font-size:0.82rem"></i></div>'
     + '<div style="flex:1;min-width:0">'
@@ -5531,7 +5531,7 @@ function buildDocUploadSlot(slotId, docLabel, icon, color) {
     + '</div>'
     + '<i class="fas fa-cloud-upload-alt" id="slot-icon-' + slotId + '" style="color:#d1d5db;font-size:1rem"></i>'
     + '</div>'
-    + '<input type="file" id="file-' + slotId + '" accept=".pdf" style="display:none" onchange="handleDocSlotSelect(\'' + slotId + '\',\'' + docLabel + '\',event)">';
+    + '<input type="file" id="file-' + slotId + '" accept=".pdf" style="display:none" onchange="handleDocSlotSelect(\\x27\x27 + slotId + \x27\\x27,\\x27\x27 + docLabel + \x27\\x27,event)">';
 }
 
 function handleDocSlotSelect(slotId, docLabel, event) {
