@@ -2144,29 +2144,29 @@ pages.rfps = async function() {
       + (s ? stageLabelMap(s) : 'All Stages') + '</option>';
   }).join('');
 
-  var filterBar = '<div style="display:flex;align-items:center;gap:0.625rem;flex-wrap:wrap;padding:0.625rem 0.875rem;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px">'
-    + '<i class="fas fa-filter" style="color:#9ca3af;font-size:0.82rem"></i>'
-    + '<select style="border:1px solid #e5e7eb;border-radius:6px;padding:4px 8px;font-size:0.78rem;background:white" onchange="window._rfpFilter.stage=this.value;pages.rfps()">' + stageOpts + '</select>'
-    + '<select style="border:1px solid #e5e7eb;border-radius:6px;padding:4px 8px;font-size:0.78rem;background:white" onchange="window._rfpFilter.sort=this.value;pages.rfps()">'
-    + '<option value="newest"' + (_rfpFilter.sort==='newest'?' selected':'') + '>Newest first</option>'
-    + '<option value="oldest"' + (_rfpFilter.sort==='oldest'?' selected':'') + '>Oldest first</option>'
-    + '<option value="az"' + (_rfpFilter.sort==='az'?' selected':'') + '>A–Z</option>'
-    + '</select>'
-    + '<div style="margin-left:auto;display:flex;gap:4px">'
-    + '<button onclick="window._rfpFilter.view=\x27grid\x27;pages.rfps()" style="border:1px solid #e5e7eb;border-radius:6px;padding:4px 8px;background:' + (_rfpFilter.view==='grid'?'var(--cpc-ink)':'white') + ';color:' + (_rfpFilter.view==='grid'?'white':'#6b7280') + ';cursor:pointer" title="Grid view"><i class="fas fa-th-large"></i></button>'
-    + '<button onclick="window._rfpFilter.view=\x27list\x27;pages.rfps()" style="border:1px solid #e5e7eb;border-radius:6px;padding:4px 8px;background:' + (_rfpFilter.view==='list'?'var(--cpc-ink)':'white') + ';color:' + (_rfpFilter.view==='list'?'white':'#6b7280') + ';cursor:pointer" title="List view"><i class="fas fa-list"></i></button>'
-    + '</div>'
-    + '</div>';
-
   var gridCols = _rfpFilter.view === 'list' ? '1fr' : 'repeat(2,1fr)';
 
+  // Inline controls: stage filter + sort + view toggle — all in the header row
+  var inlineControls = '<div style="display:flex;align-items:center;gap:6px;margin-left:auto">'
+    + '<select style="border:1px solid #e5e7eb;border-radius:6px;padding:3px 6px;font-size:0.75rem;background:white;color:#374151;height:28px" onchange="window._rfpFilter.stage=this.value;pages.rfps()">' + stageOpts + '</select>'
+    + '<select style="border:1px solid #e5e7eb;border-radius:6px;padding:3px 6px;font-size:0.75rem;background:white;color:#374151;height:28px" onchange="window._rfpFilter.sort=this.value;pages.rfps()">'
+    + '<option value="newest"' + (_rfpFilter.sort==='newest'?' selected':'') + '>Newest</option>'
+    + '<option value="oldest"' + (_rfpFilter.sort==='oldest'?' selected':'') + '>Oldest</option>'
+    + '<option value="az"' + (_rfpFilter.sort==='az'?' selected':'') + '>A–Z</option>'
+    + '</select>'
+    + '<div style="display:flex;border:1px solid #e5e7eb;border-radius:6px;overflow:hidden">'
+    + '<button onclick="window._rfpFilter.view=\x27grid\x27;pages.rfps()" style="border:none;padding:4px 7px;background:' + (_rfpFilter.view==='grid'?'var(--cpc-ink)':'white') + ';color:' + (_rfpFilter.view==='grid'?'white':'#9ca3af') + ';cursor:pointer;line-height:1" title="Grid view"><i class="fas fa-th-large" style="font-size:0.7rem"></i></button>'
+    + '<button onclick="window._rfpFilter.view=\x27list\x27;pages.rfps()" style="border:none;border-left:1px solid #e5e7eb;padding:4px 7px;background:' + (_rfpFilter.view==='list'?'var(--cpc-ink)':'white') + ';color:' + (_rfpFilter.view==='list'?'white':'#9ca3af') + ';cursor:pointer;line-height:1" title="List view"><i class="fas fa-list" style="font-size:0.7rem"></i></button>'
+    + '</div>'
+    + '<button class="btn-primary" style="height:28px;padding:0 10px;font-size:0.78rem" onclick="showCreateRfpModal()"><i class="fas fa-plus" style="font-size:0.7rem"></i>' + t('btn_new_rfp') + '</button>'
+    + '</div>';
+
   let content = '<div style="display:flex;flex-direction:column;gap:1.5rem">'
-    + '<div style="display:flex;align-items:center;justify-content:space-between">'
+    + '<div style="display:flex;align-items:center;gap:0.75rem">'
     + '<div><h2 style="font-weight:700;color:#1f2937;font-size:1rem;margin:0">' + t('active_procurements') + '</h2>'
     + '<p style="color:#9ca3af;font-size:0.82rem;margin:0">' + activeRfps.length + ' ' + t('rfps_in_progress') + '</p></div>'
-    + '<button class="btn-primary" onclick="showCreateRfpModal()"><i class="fas fa-plus"></i>' + t('btn_new_rfp') + '</button>'
-    + '</div>'
-    + filterBar;
+    + inlineControls
+    + '</div>';
 
   var filteredActiveCards = '';
   filteredActive.forEach(function(rfp) { filteredActiveCards += buildRfpCard(rfp); });
