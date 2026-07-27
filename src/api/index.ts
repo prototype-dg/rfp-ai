@@ -1816,6 +1816,64 @@ async function evaluateProposal(proposal: any, rfp: any, env: any): Promise<any>
     }
   }
 
+  // ── Step 3: Sanity check — is this actually a vendor proposal? ───────────────
+  // Cheap single call (max 80 tokens) before spending budget on scoring.
+  // Skip if text is too short to classify (OCR failure / empty upload).
+  if (proposalText.length >= 200) {
+    try {
+      const sample = proposalText.slice(0, 3000) // first 3 KB is enough to classify
+      const raw = await callLLM(
+        'You are a document classifier for a procurement system. Answer only with valid JSON.',
+        `Classify the following document. Is it a vendor proposal (i.e. a response to an RFP / tender / request for proposal)?
+
+A vendor proposal typically contains: company introduction, proposed solution or methodology, pricing or commercial offer, team / CV section, compliance statements, or a covering letter to a procurement team.
+
+A document is NOT a vendor proposal if it is: the RFP/tender document itself, a contract, a policy, a report, a recipe, a poem, a presentation unrelated to a bid, or any other non-bid document.
+
+Document excerpt:
+"""
+${sample}
+"""
+
+Respond ONLY with JSON: {"is_proposal": true|false, "reason": "<one sentence, max 15 words>"}`,
+        env, 'gpt-5-mini', 80
+      )
+      // Parse — accept any JSON blob in the response
+      const jsonMatch = raw.match(/\{[\s\S]*?\}/)
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0])
+        if (parsed.is_proposal === false) {
+          return {
+            evaluated_at: new Date().toISOString(),
+            proposal_id: proposal.id,
+            vendor_name: proposal.vendor_name || '',
+            total_score: 0,
+            recommendation: 'INVALID',
+            validation_status: 'WRONG_DOCUMENT',
+            wrong_document_reason: parsed.reason || 'Document does not appear to be a vendor proposal.',
+            compliance_score: 0,
+            quality_score: 0,
+            commercial_score: null,
+            budget_extracted: null,
+            budget_currency: null,
+            budget_confidence: 0,
+            duration_extracted: null,
+            strengths: [],
+            weaknesses: [],
+            recommendation_reasoning: parsed.reason || 'Document does not appear to be a vendor proposal.',
+            mandatory_failed: [],
+            compliance_breakdown: [],
+            scoring_breakdown: [],
+            glossary_used: 0,
+            text_chars_analyzed: proposalText.length,
+          }
+        }
+      }
+    } catch (_) {
+      // Classification failed — proceed with evaluation anyway (fail open)
+    }
+  }
+
   const chunks = chunkText(proposalText)
 
   // Parse scoring matrix

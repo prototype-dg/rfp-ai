@@ -4579,6 +4579,7 @@ rfpTabs.proposals = async function(rfpId) {
     var score = p.ai_total_score != null ? Math.round(p.ai_total_score) : '?';
     var vs = p.ai_validation_status || '';
     if (vs === 'PENDING_MANUAL_REVIEW') return '<span style="background:#fef3c7;color:#92400e;border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:600" title="Budget not auto-extracted — manual review needed"><i class="fas fa-clock" style="margin-right:0.25rem"></i>' + score + '/100 · ' + t('prop_review_badge') + '</span>';
+    if (vs === 'WRONG_DOCUMENT') return '<span style="background:#fee2e2;color:#991b1b;border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:600" title="This file does not appear to be a vendor proposal"><i class="fas fa-ban" style="margin-right:0.25rem"></i>Wrong document</span>';
     var rec = p.ai_recommendation;
     if (rec === 'RECOMMENDED') return '<span style="background:#d1fae5;color:#065f46;border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:700"><i class="fas fa-check-circle" style="margin-right:0.25rem"></i>' + score + '/100</span>';
     if (rec === 'CONDITIONAL') return '<span style="background:#fef3c7;color:#92400e;border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:700"><i class="fas fa-exclamation-circle" style="margin-right:0.25rem"></i>' + score + '/100</span>';
@@ -4889,6 +4890,15 @@ function _renderProposalPanel(p, evalData) {
       + (evalData.budget_confidence != null ? ' <span style="font-size:0.7rem;color:#9ca3af">(confidence: ' + Math.round(evalData.budget_confidence * 100) + '%)</span>' : '')
     : null;
 
+  var wrongDocBanner = '';
+  if (evalData && evalData.validation_status === 'WRONG_DOCUMENT') {
+    wrongDocBanner = '<div style="background:#fef2f2;border:1.5px solid #fca5a5;border-radius:8px;padding:0.75rem 1rem;margin-bottom:1rem;display:flex;flex-direction:column;gap:0.5rem">'
+      + '<div style="display:flex;align-items:center;gap:0.5rem;font-weight:700;font-size:0.85rem;color:#991b1b"><i class="fas fa-ban"></i>Wrong document type — not a vendor proposal</div>'
+      + '<div style="font-size:0.78rem;color:#7f1d1d">' + escHtml(evalData.wrong_document_reason || 'This file does not appear to be a response to an RFP.') + '</div>'
+      + '<div style="font-size:0.75rem;color:#9ca3af;margin-top:0.15rem">Please replace the attachment with the correct vendor proposal document and re-evaluate.</div>'
+      + '</div>';
+  }
+
   var manualBudgetBanner = '';
   if (evalData && evalData.validation_status === 'PENDING_MANUAL_REVIEW') {
     manualBudgetBanner = '<div style="background:#fffbeb;border:1.5px solid #fcd34d;border-radius:8px;padding:0.75rem 1rem;margin-bottom:1rem;display:flex;flex-direction:column;gap:0.5rem">'
@@ -4937,7 +4947,7 @@ function _renderProposalPanel(p, evalData) {
       + '</ul></div></div>';
   }
 
-  var tabSummaryHtml = manualBudgetBanner
+  var tabSummaryHtml = wrongDocBanner + manualBudgetBanner
     + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem;margin-bottom:1rem">'
     + '<div style="background:#faf9f7;border:1px solid #e5e7eb;border-radius:8px;padding:0.75rem">'
     + '<div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#9a8c78;margin-bottom:4px">Budget</div>'
