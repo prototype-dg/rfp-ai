@@ -2207,6 +2207,35 @@ function openRfp(rfpId) {
   navigateTo('rfp_detail', { rfpId: rfpId });
 }
 
+async function deleteRfpConfirm(rfpId) {
+  if (!confirm('Permanently delete this RFP? This cannot be undone.')) return;
+  try {
+    await apiCall('DELETE', '/rfps/' + rfpId);
+    showToast('RFP deleted.', 'success');
+    // If we're viewing this RFP's detail page, go back to the list
+    if (appState.currentRfp && String(appState.currentRfp.id) === String(rfpId)) {
+      navigateTo('rfps');
+    } else {
+      pages.rfps();
+    }
+  } catch(e) {
+    showToast('Delete failed: ' + (e.message || e), 'error');
+  }
+}
+
+async function archiveRfp(rfpId) {
+  // "Archive" sets the stage to 'awarded' so the card moves to the Archived section.
+  // A real archive stage could be added later; for now this mirrors the existing pattern.
+  if (!confirm('Archive this RFP? It will move to the Archived section.')) return;
+  try {
+    await apiCall('POST', '/rfps/' + rfpId + '/stage', { stage: 'awarded' });
+    showToast('RFP archived.', 'success');
+    pages.rfps();
+  } catch(e) {
+    showToast('Archive failed: ' + (e.message || e), 'error');
+  }
+}
+
 // ============================================================
 // PAGE: RFP DETAIL
 // ============================================================
@@ -2710,10 +2739,12 @@ function restoreAutoSave(rfpId) {
 
 async function generateRfpDoc(rfpId) {
   // Validate mandatory fields before calling the API
-  var background = document.getElementById('rfpBackground').value.trim();
-  var objectives = document.getElementById('rfpObjectives').value.trim();
-  var scope      = document.getElementById('rfpScope').value.trim();
-  var title      = document.getElementById('rfpTitle').value.trim();
+  var background = (document.getElementById('rfpBackground') || {}).value || '';
+  var objectives = (document.getElementById('rfpObjectives') || {}).value || '';
+  var scope      = (document.getElementById('rfpScope')      || {}).value || '';
+  var title      = (document.getElementById('rfpTitle')      || {}).value || '';
+  background = background.trim(); objectives = objectives.trim();
+  scope = scope.trim(); title = title.trim();
   if (!background || !objectives || !scope) {
     var missing = [];
     if (!background) missing.push('Project Background');
@@ -2724,7 +2755,31 @@ async function generateRfpDoc(rfpId) {
   }
 
   var btn = document.getElementById('genBtn');
-  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating…'; }
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving…'; }
+
+  // ── Flush all form fields to DB before generating ──────────────────────────
+  // Cancel any pending debounced saves first
+  Object.keys(_fieldSaveTimers).forEach(function(k){ clearTimeout(_fieldSaveTimers[k]); delete _fieldSaveTimers[k]; });
+  var genPayload = {
+    title:             title,
+    category:          (document.getElementById('rfpCategory')   || {}).value || '',
+    budget:            (document.getElementById('rfpBudget')     || {}).value || '',
+    deadline:          (document.getElementById('rfpDeadline')   || {}).value || '',
+    background:        background,
+    objectives:        objectives,
+    scope:             scope,
+    tech_requirements: (document.getElementById('rfpTech')       || {}).value || ''
+  };
+  try {
+    var saved = await apiCall('PUT', '/rfps/' + rfpId, genPayload);
+    if (saved && appState.currentRfp) Object.assign(appState.currentRfp, saved);
+  } catch(saveErr) {
+    showToast('Could not save fields: ' + (saveErr.message || saveErr), 'error');
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-robot"></i> Generate with AI'; }
+    return;
+  }
+
+  if (btn) { btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating…'; }
 
   // Show live streaming progress area
   var previewEl = document.getElementById('rfpPreviewArea');

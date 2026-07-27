@@ -265,12 +265,35 @@ apiRouter.put('/rfps/:id', async (c) => {
   try {
     const id = c.req.param('id')
     const body = await c.req.json()
-    const scoringMatrix = body.scoring_matrix ? JSON.stringify(body.scoring_matrix) : null
-    await c.env.DB.prepare(`
-      UPDATE rfps SET title=?, category=?, budget=?, deadline=?, scope=?, tech_requirements=?, objectives=?, background=?,
-        scoring_matrix=COALESCE(?, scoring_matrix), updated_at=datetime('now')
-      WHERE id=?
-    `).bind(body.title, body.category, body.budget, body.deadline, body.scope, body.tech_requirements||'', body.objectives||'', body.background||'', scoringMatrix, id).run()
+    // Build SET clause dynamically so partial updates (single-field auto-save)
+    // never pass undefined to D1 (D1_TYPE_ERROR).
+    const fieldMap: Record<string, string> = {
+      title: 'title', category: 'category', budget: 'budget', deadline: 'deadline',
+      scope: 'scope', tech_requirements: 'tech_requirements', objectives: 'objectives',
+      background: 'background', content: 'content'
+    }
+    const setParts: string[] = []
+    const bindings: any[] = []
+    for (const [bodyKey, col] of Object.entries(fieldMap)) {
+      if (body[bodyKey] !== undefined) {
+        setParts.push(`${col}=?`)
+        bindings.push(body[bodyKey] ?? '')
+      }
+    }
+    // Handle scoring_matrix separately (needs JSON serialisation)
+    if (body.scoring_matrix !== undefined) {
+      setParts.push('scoring_matrix=?')
+      bindings.push(body.scoring_matrix ? JSON.stringify(body.scoring_matrix) : null)
+    }
+    if (setParts.length === 0) {
+      // Nothing to update — just return current record
+      const rfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(id).first()
+      return c.json(rfp)
+    }
+    setParts.push("updated_at=datetime('now')")
+    bindings.push(id)
+    await c.env.DB.prepare(`UPDATE rfps SET ${setParts.join(', ')} WHERE id=?`)
+      .bind(...bindings).run()
     const rfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(id).first()
     return c.json(rfp)
   } catch (e: any) {
