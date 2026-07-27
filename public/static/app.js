@@ -2916,8 +2916,8 @@ function refreshStageBanner(rfpId, rfp) {
       label: 'Go to Q&A'
     },
     submissions_closed: {
-      icon: 'fa-gavel',
-      text: 'Submissions are <strong>Closed</strong>. Evaluate proposals with AI and award the contract.',
+      icon: 'fa-inbox',
+      text: 'Q&amp;A is closed — <strong>waiting for vendor proposals</strong>. Questions are no longer accepted. You can already run AI evaluation on any proposals received so far; award the contract once the submission deadline passes.',
       action: 'switchRfpTab(\x27proposals\x27,' + rfpId + ')',
       label: 'Go to Proposals'
     },
