@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 import { emblemPngBase64 } from '../emblem-data'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-07-27-v46'
+const WORKER_VERSION = '2026-07-27-v47'  // OCR callback now uses evaluateProposal() (single gpt-5 call)
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.cpc-rfp.website.
@@ -1947,359 +1947,174 @@ Respond ONLY with JSON: {"is_proposal": true|false, "reason": "<one sentence, ma
     }
   }
 
-  const chunks = chunkText(proposalText)
-
-  // Parse scoring matrix
-  let scoringMatrix: any[] = []
-  try { scoringMatrix = JSON.parse(rfp.scoring_matrix || '[]') } catch (_) {}
-  if (!scoringMatrix.length) {
-    scoringMatrix = [
-      { criterion: 'Technical Approach', weight: 40 },
-      { criterion: 'Commercial / Price', weight: 30 },
-      { criterion: 'Compliance', weight: 20 },
-      { criterion: 'Company Experience', weight: 10 },
-    ]
-  }
-
-  // ── Build or parse requirement glossary ──────────────────────────────────────
-  // Priority 1: pre-saved glossary in DB (fastest, already vetted)
-  // Priority 2: parse the "Technical Requirements and Architecture" section from
-  //             rfp_full_text (plain text of RFP, no BRD, no HTML) — the authoritative
-  //             source, the exact document vendors received
-  // Priority 3: LLM extraction from rfp_full_text plain text
-  // Priority 4: last-resort line extraction from rfp_full_text
-  let glossary: any[] = []
-  try { glossary = JSON.parse(rfp.requirement_glossary || '[]') } catch (_) {}
-  console.log(`[eval-debug] proposalId=${proposal.id} proposalText.length=${proposalText.length} rfp_full_text.length=${(rfp.rfp_full_text||'').length} DB glossary count=${glossary.length}`)
-
-  if (!glossary.length && rfp.rfp_full_text) {
-    // Parse the Technical Requirements table from rfp_full_text (plain text of the RFP document).
-    // The table structure in plain text is:
-    //   <Area text> <Requirement text> Mandatory|Preferred|Desirable|Optional  (repeating)
-    // We split on Classification keywords to identify row boundaries.
-    try {
-      const plainText: string = rfp.rfp_full_text
-      // Find the "TECHNICAL REQUIREMENTS AND ARCHITECTURE" section (second occurrence —
-      // first is the TOC entry, second is the actual section heading with the table)
-      const sectionMarker = /technical requirements and architecture/gi
-      let sectionStart = -1
-      let match: RegExpExecArray | null
-      let count = 0
-      while ((match = sectionMarker.exec(plainText)) !== null) {
-        count++
-        if (count === 2) { sectionStart = match.index; break }
-      }
-      if (sectionStart === -1 && count === 1) {
-        // Only one occurrence — use it (some RFPs may not have a TOC)
-        sectionMarker.lastIndex = 0
-        const m = sectionMarker.exec(plainText)
-        if (m) sectionStart = m.index
-      }
-      // Also try broader section headings if the standard one is not found
-      if (sectionStart === -1) {
-        const broad = /technical requirements/gi
-        sectionMarker.lastIndex = 0
-        const bm = broad.exec(plainText)
-        if (bm) sectionStart = bm.index
-      }
-
-      if (sectionStart >= 0) {
-        // Extract up to 20K chars of the section (plain text, no HTML to strip)
-        const sectionText = plainText
-          .slice(sectionStart, sectionStart + 20000)
-          .replace(/\s{2,}/g, ' ')
-          .trim()
-
-        // Split on Classification values to get row chunks.
-        // After split(/(Mandatory|Preferred|Desirable|Optional)/):
-        //   chunks[0]       = text before first classification keyword
-        //   chunks[1]       = first classification keyword  (ODD index)
-        //   chunks[2]       = text between 1st and 2nd keyword
-        //   chunks[3]       = second classification keyword (ODD index)
-        //   ... and so on.
-        // We iterate ODD indices to get classification keywords, and the
-        // PRECEDING (even) index gives the text block for that requirement.
-        const chunks = sectionText.split(/(Mandatory|Preferred|Desirable|Optional)/)
-        for (let i = 1; i < chunks.length; i += 2) {
-          const classification = chunks[i].trim()  // ODD index = "Mandatory"|"Preferred"|"Desirable"|"Optional"
-          const textBefore = chunks[i - 1].trim()  // EVEN index = text block before this keyword
-          if (!classification.match(/^(Mandatory|Preferred|Desirable|Optional)$/)) continue
-          if (textBefore.length < 20) continue
-
-          // The textBefore contains: [area name] + [requirement sentence]
-          // The requirement sentence is the longer, more descriptive part.
-          // Heuristic: split into sentences, take the longest as the requirement text.
-          const sentences = textBefore.split(/(?<=[.!?])\s+/).map((s: string) => s.trim()).filter((s: string) => s.length > 20)
-          const reqText = sentences.length > 0
-            ? sentences.reduce((a: string, b: string) => b.length > a.length ? b : a)
-            : textBefore.slice(0, 300)
-
-          // Skip if this looks like a header/note rather than a requirement
-          if (/^(notes?|each mandatory|issuance|Crown Prince)/i.test(reqText)) continue
-
-          glossary.push({
-            id: `req_${glossary.length + 1}`,
-            text: reqText.slice(0, 400),
-            mandatory: classification === 'Mandatory',
-          })
-
-          if (glossary.length >= 30) break  // cap at 30 requirements
-        }
-      }
-
-      // If we successfully parsed requirements from the RFP plain text, save to DB
-      // so future evaluations skip this parsing step entirely
-      if (glossary.length > 0) {
-        console.log(`[eval-debug] rfp_full_text parse SUCCESS: ${glossary.length} requirements extracted`)
-        glossary.forEach((g: any, i: number) => console.log(`[eval-debug]   req[${i}] mandatory=${g.mandatory} text="${g.text.slice(0,80)}"`))
-        try {
-          await env.DB.prepare(
-            `UPDATE rfps SET requirement_glossary=?, updated_at=datetime('now') WHERE id=?`
-          ).bind(JSON.stringify(glossary), rfp.id).run()
-        } catch (_) { /* non-fatal */ }
-      } else {
-        console.log(`[eval-debug] rfp_full_text parse found 0 requirements — sectionStart=${sectionStart} rfp_full_text_len=${(rfp.rfp_full_text||'').length}`)
-      }
-    } catch (parseErr: any) {
-      console.log(`[eval-debug] rfp_full_text parse EXCEPTION: ${parseErr?.message || parseErr}`)
-    }
-  }
-
-  if (!glossary.length) {
-    // Priority 3: LLM extraction from rfp_full_text plain text (no BRD, no HTML fields)
-    const rfpSource = (rfp.rfp_full_text || '').trim()
-    const cleanedRfpText = rfpSource
-      .split(/[\n\r]+/)
-      .map((l: string) => l.trim())
-      .filter((l: string) => {
-        if (l.length < 15) return false
-        if (/^\d+\.?\s+.{5,60}\s{2,}\d{1,3}$/.test(l)) return false  // TOC entry
-        return true
-      })
-      .join('\n')
-
-    try {
-      const rawGlossary = await callLLM(
-        'You are a procurement analyst. Extract a list of concrete requirements from an RFP document.',
-        `Extract up to 10 specific, distinct requirements from this RFP. Each requirement must be a full sentence describing what the vendor must deliver or demonstrate.
-
-Do NOT include section headings, table of contents entries, boilerplate, or duplicates.
-Mark mandatory=true only if the text uses "must", "shall", "required", or "mandatory".
-
-Return ONLY a JSON array:
-[
-  { "id": "req_1", "text": "<full requirement sentence>", "mandatory": true },
-  ...
-]
-
-RFP Content:
-${cleanedRfpText}`,
-        env, 'gpt-5-mini', 1500
-      )
-      const jsonMatch = rawGlossary.match(/\[\s*\{[\s\S]*?\}\s*\]/)
-      if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0])
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          glossary = parsed.slice(0, 12).map((r: any, i: number) => ({
-            id: r.id || `req_${i + 1}`,
-            text: String(r.text || '').slice(0, 350),
-            mandatory: !!r.mandatory,
-          }))
-        }
-      }
-    } catch (_) { /* LLM failed */ }
-
-    // Priority 4: last-resort line extraction from rfp_full_text
-    if (!glossary.length && rfpSource) {
-      const fallbackLines = rfpSource.split('\n').filter((l: string) => l.length > 30).slice(0, 8)
-      glossary = fallbackLines.map((l: string, i: number) => ({
-        id: `req_${i + 1}`,
-        text: l.slice(0, 300),
-        mandatory: /\bmust\b|\bshall\b|\brequired\b|\bmandatory\b/i.test(l),
-      }))
-    }
-  }
-
-  // ── Phase 1+2: Compliance + AI depth scoring per requirement ────────────────
-  const complianceBreakdown: any[] = []
-  let totalAiScore = 0; let aiScoreCount = 0
-  const totalMandatory = glossary.filter((r: any) => r.mandatory).length
-  let mandatoryMet = 0; let mandatoryFailed: string[] = []
-
-  // ── Step 1: keyword-based compliance pass (no LLM, instant) ─────────────
-  const reqsToScore: any[] = []
-  for (const req of glossary.slice(0, 15)) {  // cap at 15 reqs
-    const complianceMet = checkCompliance(req.text, proposalText)
-    if (req.mandatory && complianceMet) mandatoryMet++
-    if (req.mandatory && !complianceMet) mandatoryFailed.push(req.text.slice(0, 80))
-    complianceBreakdown.push({
-      id: req.id, text: req.text, mandatory: req.mandatory,
-      compliance_met: complianceMet, ai_score: 0, justification: 'Not addressed',
-    })
-    if (complianceMet) reqsToScore.push(req)
-  }
-
-  console.log(`[eval-debug] glossary final count=${glossary.length} reqsToScore=${reqsToScore.length} proposalText.length=${proposalText.length}`)
-  glossary.slice(0, 5).forEach((g: any) => console.log(`[eval-debug]   glossary req: mandatory=${g.mandatory} "${g.text.slice(0,80)}"`))
-  complianceBreakdown.forEach((r: any) => console.log(`[eval-debug]   compliance: id=${r.id} met=${r.compliance_met}`))
-
-  // ── Step 2: single batch LLM call for all requirements (avoids serial timeout) ──
-  if (reqsToScore.length > 0) {
-    const pLen = proposalText.length
-
-    try {
-      const reqList = reqsToScore.map((r, i) => `${i + 1}. [${r.id}] ${r.text}`).join('\n')
-      console.log(`[eval-debug] Calling batch LLM with ${reqsToScore.length} reqs, proposalText.length=${pLen}`)
-      console.log(`[eval-debug] reqList:\n${reqList}`)
-      const rawBatch = await callLLM(
-        'You are an expert procurement evaluator. Score how well the vendor proposal addresses each listed requirement.',
-        `Requirements to evaluate:
-${reqList}
-
-Vendor Proposal (full text, ${pLen} chars):
-${proposalText}
-
-For each requirement, rate 0-100 how thoroughly it is addressed (depth, specificity, feasibility).
-- 0-30: Not addressed or only mentioned briefly
-- 31-60: Partially addressed, missing key details
-- 61-80: Well addressed with some gaps
-- 81-100: Fully and thoroughly addressed
-
-Return ONLY a JSON array — no markdown, no extra text:
-[{"id":"<req_id>","score":<0-100>,"justification":"<2-3 sentence explanation citing specific evidence from proposal>"}]`,
-        env, 'gpt-5-mini', 1500
-      )
-
-      console.log(`[eval-debug] Batch LLM raw response (${rawBatch.length} chars): ${rawBatch.slice(0, 500)}`)
-      // Parse batch result
-      const arrMatch = rawBatch.match(/\[[\s\S]*\]/)
-      if (arrMatch) {
-        const batchResults: Array<{ id: string; score: number; justification: string }> = JSON.parse(arrMatch[0])
-        const byId = new Map(batchResults.map(r => [r.id, r]))
-        for (const entry of complianceBreakdown) {
-          if (!entry.compliance_met) continue
-          const result = byId.get(entry.id)
-          if (result) {
-            entry.ai_score = Math.max(0, Math.min(100, Math.round(result.score) || 0))
-            entry.justification = result.justification || 'Addressed'
-            totalAiScore += entry.ai_score
-            aiScoreCount++
-          }
-        }
-      }
-    } catch (batchErr: any) {
-      // Batch failed — store the actual error message so it is visible in the UI
-      console.log(`[eval-debug] BATCH SCORING EXCEPTION: ${batchErr?.message || batchErr}`)
-      const errMsg = `AI scoring failed: ${batchErr?.message || batchErr}`
-      for (const entry of complianceBreakdown) {
-        if (entry.compliance_met) {
-          entry.justification = errMsg
-        }
-      }
-    }
-  }
-
   // ── Budget & Duration ────────────────────────────────────────────────────────
-  // NOTE: Full budget extraction (sidecar OCR + analytical LLM) is done in the
-  // separate /evaluate-budget endpoint to avoid exceeding the 30s Worker CPU limit.
-  // Here we do a fast regex pass on proposalText as a fallback only.
+  // Full budget extraction (analytical LLM) is handled by the separate
+  // /evaluate-budget endpoint. Here we just carry over any stored value.
   let budget = { amount: null as number | null, currency: 'AED', confidence: 0.0 }
   let duration: string | null = proposal.proposed_duration || null
 
-  // Fast regex pass on whatever text we already have (no extra network calls)
-  try {
-    const regexBudget = extractBudget(proposalText)
-    if (regexBudget.amount) {
-      budget = { ...regexBudget, confidence: Math.min(regexBudget.confidence, 0.35) }
-    }
-    const regexDuration = extractDuration(proposalText)
-    if (regexDuration) duration = regexDuration
-  } catch (_) {}
-
-  // NOTE: Deep budget enrichment (sidecar OCR + analytical LLM) is handled by the
-  // separate POST /rfps/:rfpId/proposals/:proposalId/evaluate-budget endpoint.
-
-  // Use stored budget_amount if we still have nothing
-  if (!budget.amount && proposal.budget_amount) {
+  if (proposal.budget_amount) {
     budget.amount = proposal.budget_amount
     budget.currency = proposal.budget_currency || 'AED'
     budget.confidence = 0.4
   }
 
-  // ── Score calculation ──────────────────────────────────────────────────────
-  const complianceScore = totalMandatory > 0 ? (mandatoryMet / totalMandatory) * 100 : (complianceBreakdown.filter(r => r.compliance_met).length / Math.max(1, complianceBreakdown.length)) * 100
-  const qualityScore = aiScoreCount > 0 ? totalAiScore / aiScoreCount : 0
+  // ── Single-call LLM scoring ──────────────────────────────────────────────────
+  // One gpt-5 call receives both full documents and returns structured scores
+  // for all criteria, strengths, and weaknesses in a single JSON response.
+  const rfpFullText   = (rfp.rfp_full_text || '').trim()
+  const scoringMatrix = (rfp.scoring_matrix || '').trim() || '(not configured — use standard procurement scoring criteria as defined in the RFP)'
 
-  let commercialScore: number | null = null
+  console.log(`[eval-v47] proposalId=${proposal.id} rfp_full_text=${rfpFullText.length} proposal_full_text=${proposalText.length}`)
+
+  const evalSystemPrompt = `You are a procurement evaluation expert. You will be given two documents:
+
+RFP Document: Contains project requirements, mandatory technical specifications
+Vendor Response: The submitted proposal.`
+
+  const evalUserPrompt = `Your task is to evaluate the vendor's proposal strictly against the RFP's evaluation criteria, excluding Commercial Proposal and Cost Competitiveness and project duration (which falls under Implementation Approach, but we exclude schedule/timeline assessment and focus only on methodology, risk management, and workstream quality).
+Scoring Instructions
+
+For each criterion, assign a score out of the criterion's weight (e.g., for Technical Compliance, score out of 30). Then calculate the total weighted score as the sum of all individual scores.
+
+Scoring scale per criterion (out of its weight):
+
+90-100% = Excellent - fully meets and exceeds requirements with clear evidence.
+70-89% = Good - meets core requirements with minor gaps.
+50-69% = Partial - meets some but lacks important mandatory elements.
+Below 50% = Poor - fails to address the criterion or critical non-compliance.
+Mandatory Requirements Check: If the proposal fails to provide mandatory evidence (e.g., project references, personnel CVs as explicitly required in RFP Section 7), reflect that in the score with a severe penalty (<=33% of the criterion weight).
+
+Output Format:
+Return a structured JSON object with the following fields:
+{
+  "scores": [
+    {
+      "criterion": "Technical Compliance and Architecture",
+      "weight": 30,
+      "score_achieved": 28,
+      "justification": "Detailed explanation..."
+    }
+  ],
+  "total_score": 65.0,
+  "strengths": ["strength 1", "strength 2"],
+  "weaknesses": ["weakness 1", "weakness 2"]
+}
+
+Evaluation Guidelines:
+Be factual - base all assessments solely on content present in the provided documents. Do not assume unstated capabilities.
+Check mandatory requirements - highlight missing mandatory deliverables (e.g., references, CVs, on-premise statement) in the justification and weakness list.
+Justification must be concise but substantive - tie each score to specific evidence (or lack thereof) from the vendor's response.
+Total score = sum of all score_achieved values (since weights sum to 90 after excluding cost).
+Strengths = max 5 items. Weaknesses = max 5 items, prioritizing mandatory omissions.
+
+Input Data:
+RFP Document:
+${rfpFullText}
+
+Vendor Response:
+${proposalText}
+
+Scoring Matrix:
+${scoringMatrix}
+
+Final Output:
+Now evaluate the proposal and return only the JSON object. Do not include any additional commentary outside the JSON.`
+
+  // Defaults in case LLM call fails
+  let totalScore = 0
+  let scoringBreakdown: any[] = []
+  let strengths: string[] = []
+  let weaknesses: any[] = []
+  let recommendation = 'NOT RECOMMENDED'
+  let reasoning = 'Evaluation could not be completed.'
   let validationStatus = 'EVALUATED'
-  if (budget.confidence < 0.8) {
-    validationStatus = 'PENDING_MANUAL_REVIEW'
-  } else if (budget.amount) {
-    // Compare against RFP budget ceiling if available
-    const rfpBudget = parseFloat((rfp.budget || '').replace(/[^0-9.]/g, '')) || 0
-    commercialScore = rfpBudget > 0 ? Math.min(100, (rfpBudget / budget.amount) * 100) : 70
-  }
+  let mandatoryFailed: string[] = []
+  let complianceBreakdown: any[] = []
 
-  let totalScore: number
-  if (commercialScore !== null) {
-    totalScore = (complianceScore * 0.3) + (qualityScore * 0.5) + (commercialScore * 0.2)
-  } else {
-    totalScore = (complianceScore * 0.4) + (qualityScore * 0.6)
-  }
-  totalScore = Math.round(totalScore * 10) / 10
+  try {
+    const rawEval = await callLLM(evalSystemPrompt, evalUserPrompt, env, 'gpt-5', 16000)
+    console.log(`[eval-v47] LLM raw response length=${rawEval.length} preview="${rawEval.slice(0, 200)}"`)
 
-  // ── Strengths & Weaknesses ─────────────────────────────────────────────────
-  const strengths = complianceBreakdown.filter(r => r.compliance_met && r.ai_score > 80).map(r => r.justification).filter(Boolean)
-  // Emit rich weakness objects so the UI can render criticality badges + expand/collapse
-  const weaknesses = complianceBreakdown
-    .filter(r => !r.compliance_met || r.ai_score < 40)
-    .map(r => ({
-      id: r.id,
-      text: r.text,
-      mandatory: r.mandatory,
-      compliance_met: r.compliance_met,
-      ai_score: r.ai_score,
-      justification: r.justification,
+    // Strip markdown fences if present
+    let clean = rawEval.trim()
+    if (clean.startsWith('```')) {
+      const lines = clean.split('\n')
+      clean = lines.slice(1).join('\n')
+      clean = clean.slice(0, clean.lastIndexOf('```')).trim()
+    }
+    // Extract outermost JSON object
+    const jsonMatch = clean.match(/\{[\s\S]*\}/)
+    if (!jsonMatch) throw new Error('No JSON object in LLM response')
+    const parsed = JSON.parse(jsonMatch[0])
+
+    // ── Map parsed fields ──────────────────────────────────────────────────────
+    const scores: Array<{ criterion: string; weight: number; score_achieved: number; justification: string }> =
+      Array.isArray(parsed.scores) ? parsed.scores : []
+
+    totalScore = typeof parsed.total_score === 'number'
+      ? Math.round(parsed.total_score * 10) / 10
+      : scores.reduce((sum: number, s: any) => sum + (Number(s.score_achieved) || 0), 0)
+
+    // scoring_breakdown — direct pass-through of LLM criterion scores
+    scoringBreakdown = scores.map((s: any) => ({
+      criterion: s.criterion || '',
+      weight: Number(s.weight) || 0,
+      score_achieved: Math.max(0, Math.min(Number(s.weight) || 100, Number(s.score_achieved) || 0)),
+      justification: s.justification || '',
+      // Derived % for UI progress bars
+      achieved_pct: s.weight > 0 ? Math.round((Number(s.score_achieved) / Number(s.weight)) * 100) : 0,
     }))
 
-  // ── AI Verdict ─────────────────────────────────────────────────────────────
-  let recommendation: string
-  let reasoning: string
-  if (mandatoryFailed.length > 0) {
-    recommendation = 'NOT RECOMMENDED'
-    reasoning = `Vendor failed ${mandatoryFailed.length} mandatory requirement(s): ${mandatoryFailed.slice(0, 2).join('; ')}`
-  } else if (totalScore >= 80) {
-    recommendation = 'RECOMMENDED'
-    reasoning = `Strong compliance (${Math.round(complianceScore)}%) and high quality scores (avg ${Math.round(qualityScore)}/100).`
-  } else if (totalScore >= 60) {
-    recommendation = 'CONDITIONAL'
-    reasoning = `Meets most requirements but some gaps exist. Review weaknesses before proceeding.`
-  } else {
-    recommendation = 'NOT RECOMMENDED'
-    reasoning = `Insufficient compliance or quality. Total score ${totalScore}/100 is below threshold.`
-  }
+    // strengths — array of strings
+    strengths = Array.isArray(parsed.strengths)
+      ? parsed.strengths.filter((x: any) => typeof x === 'string').slice(0, 5)
+      : []
 
-  // ── Scoring Matrix breakdown ───────────────────────────────────────────────
-  const scoringBreakdown = scoringMatrix.map((criterion: any) => {
-    const name = (criterion.criterion || criterion.name || '').toLowerCase()
-    let achieved: number
-    if (name.includes('technical') || name.includes('approach') || name.includes('methodology')) {
-      achieved = qualityScore
-    } else if (name.includes('commercial') || name.includes('price') || name.includes('financial') || name.includes('cost')) {
-      achieved = commercialScore ?? 0
-    } else if (name.includes('compliance') || name.includes('mandatory')) {
-      achieved = complianceScore
+    // weaknesses — keep as strings (UI already handles both string and object forms)
+    weaknesses = Array.isArray(parsed.weaknesses)
+      ? parsed.weaknesses.filter((x: any) => typeof x === 'string').slice(0, 5)
+      : []
+
+    // compliance_breakdown — synthesise from scores for backward compat with UI
+    complianceBreakdown = scores.map((s: any) => ({
+      id: `crit_${s.criterion?.replace(/\s+/g, '_').toLowerCase()}`,
+      text: s.criterion,
+      mandatory: false,
+      compliance_met: (Number(s.score_achieved) / Math.max(1, Number(s.weight))) >= 0.5,
+      ai_score: s.weight > 0 ? Math.round((Number(s.score_achieved) / Number(s.weight)) * 100) : 0,
+      justification: s.justification || '',
+    }))
+
+    // Identify any low-scoring criteria as "mandatory failed" for recommendation logic
+    mandatoryFailed = scores
+      .filter((s: any) => Number(s.weight) >= 10 && (Number(s.score_achieved) / Math.max(1, Number(s.weight))) < 0.34)
+      .map((s: any) => `${s.criterion} (${s.score_achieved}/${s.weight})`)
+
+    // ── Recommendation ────────────────────────────────────────────────────────
+    if (totalScore >= 72) {         // ≥80% of 90
+      recommendation = 'RECOMMENDED'
+      reasoning = `Strong overall score of ${totalScore}/90. Proposal meets most RFP criteria.`
+    } else if (totalScore >= 54) {  // ≥60% of 90
+      recommendation = 'CONDITIONAL'
+      reasoning = `Score of ${totalScore}/90 meets minimum threshold. Review weaknesses before proceeding.`
     } else {
-      achieved = (qualityScore + complianceScore) / 2
+      recommendation = 'NOT RECOMMENDED'
+      reasoning = `Score of ${totalScore}/90 is below acceptance threshold.`
     }
-    const weight = criterion.weight || 0
-    return {
-      criterion: criterion.criterion || criterion.name,
-      weight,
-      achieved: Math.round(achieved),
-      weighted: Math.round(achieved * weight / 100 * 10) / 10,
+    if (mandatoryFailed.length > 0) {
+      recommendation = 'NOT RECOMMENDED'
+      reasoning = `Critical criteria scored below 34%: ${mandatoryFailed.slice(0, 2).join('; ')}.`
     }
-  })
+
+    validationStatus = 'EVALUATED'
+    console.log(`[eval-v47] DONE total_score=${totalScore} criteria=${scores.length} strengths=${strengths.length} weaknesses=${weaknesses.length}`)
+
+  } catch (evalErr: any) {
+    console.log(`[eval-v47] LLM EXCEPTION: ${evalErr?.message || evalErr}`)
+    validationStatus = 'EVAL_FAILED'
+    reasoning = `Evaluation failed: ${evalErr?.message || evalErr}`
+  }
 
   return {
     evaluated_at: new Date().toISOString(),
@@ -2308,9 +2123,9 @@ Return ONLY a JSON array — no markdown, no extra text:
     total_score: totalScore,
     recommendation,
     validation_status: validationStatus,
-    compliance_score: Math.round(complianceScore),
-    quality_score: Math.round(qualityScore),
-    commercial_score: commercialScore !== null ? Math.round(commercialScore) : null,
+    compliance_score: totalScore,   // re-use total as unified score (no separate compliance pass)
+    quality_score: totalScore,
+    commercial_score: null,         // commercial excluded per prompt instructions
     budget_extracted: budget.amount,
     budget_currency: budget.currency,
     budget_confidence: budget.confidence,
@@ -2321,7 +2136,7 @@ Return ONLY a JSON array — no markdown, no extra text:
     mandatory_failed: mandatoryFailed,
     compliance_breakdown: complianceBreakdown,
     scoring_breakdown: scoringBreakdown,
-    glossary_used: glossary.length,
+    glossary_used: 0,
     text_chars_analyzed: proposalText.length,
   }
 }
@@ -2463,9 +2278,9 @@ apiRouter.post('/rfps/:rfpId/proposals/:proposalId/evaluate', async (c) => {
 
 // ── POST /api/callback/proposals/:proposalId/ocr-complete ─────────────────────
 // Called by the sidecar when OCR finishes (async callback pattern).
-// LEAN PIPELINE — does NOT call evaluateProposal() to avoid 30s re-timeout.
-// Steps: (1) store OCR text, (2) parse glossary from RFP HTML (CPU only),
-//        (3) keyword compliance pass (CPU), (4) ONE batch LLM call for scoring.
+// PIPELINE — (1) persist OCR text, (2) load proposal + RFP rows,
+//            (3) call evaluateProposal() — same single gpt-5 full-document
+//                scoring path used by the synchronous evaluate endpoint.
 apiRouter.post('/callback/proposals/:proposalId/ocr-complete', async (c) => {
   const proposalId = c.req.param('proposalId')
   const rfpId = c.req.query('rfp_id') || ''
@@ -2504,163 +2319,19 @@ apiRouter.post('/callback/proposals/:proposalId/ocr-complete', async (c) => {
       : await db.prepare('SELECT * FROM rfps WHERE id=?').bind(proposal.rfp_id).first<any>()
     if (!rfpRow) return c.json({ error: 'RFP not found' }, 404)
 
-    // 3. Build glossary — Priority 1: DB cache; Priority 2: parse rfp_full_text plain text (no BRD, no HTML)
-    let glossary: any[] = []
-    try { glossary = JSON.parse(rfpRow.requirement_glossary || '[]') } catch (_) {}
-    console.log(`[ocr-callback] DB glossary count=${glossary.length} rfp_full_text.length=${(rfpRow.rfp_full_text||'').length}`)
+    // 3. Run full evaluation using the same single gpt-5 call as evaluateProposal()
+    // proposal_full_text already includes ocrText merged in — pass the freshly stored row
+    // (reload so proposal_full_text reflects the newly written ocr text if needed)
+    const freshProposal = await db.prepare(
+      `SELECT p.*, v.name as vendor_name FROM proposals p LEFT JOIN vendors v ON p.vendor_id=v.id WHERE p.id=?`
+    ).bind(proposalId).first<any>()
 
-    if (!glossary.length && rfpRow.rfp_full_text) {
-      const plainText: string = rfpRow.rfp_full_text
-      const sectionMarker = /technical requirements and architecture/gi
-      let sectionStart = -1; let match: RegExpExecArray | null; let count = 0
-      while ((match = sectionMarker.exec(plainText)) !== null) {
-        count++; if (count === 2) { sectionStart = match.index; break }
-      }
-      if (sectionStart === -1 && count === 1) {
-        sectionMarker.lastIndex = 0
-        const m = sectionMarker.exec(plainText)
-        if (m) sectionStart = m.index
-      }
-      if (sectionStart === -1) {
-        // Try broader match
-        const broad = /technical requirements/gi
-        const bm = broad.exec(plainText)
-        if (bm) sectionStart = bm.index
-      }
-      if (sectionStart >= 0) {
-        // Plain text — no HTML stripping needed, just normalise whitespace
-        const sectionText = plainText.slice(sectionStart, sectionStart + 20000)
-          .replace(/\s{2,}/g,' ').trim()
-        // Split on Classification keywords (ODD indices = keywords, EVEN = text before)
-        const chunks = sectionText.split(/(Mandatory|Preferred|Desirable|Optional)/)
-        for (let i = 1; i < chunks.length; i += 2) {
-          const classification = chunks[i].trim()  // ODD = keyword
-          const textBefore = chunks[i - 1].trim()  // EVEN = text block before keyword
-          if (!classification.match(/^(Mandatory|Preferred|Desirable|Optional)$/)) continue
-          if (textBefore.length < 20) continue
-          const sentences = textBefore.split(/(?<=[.!?])\s+/).map((s:string) => s.trim()).filter((s:string) => s.length > 20)
-          const reqText = sentences.length > 0
-            ? sentences.reduce((a:string, b:string) => b.length > a.length ? b : a)
-            : textBefore.slice(0, 300)
-          if (/^(notes?|each mandatory|issuance|Crown Prince)/i.test(reqText)) continue
-          glossary.push({ id: `req_${glossary.length + 1}`, text: reqText.slice(0, 400), mandatory: classification === 'Mandatory' })
-          if (glossary.length >= 30) break
-        }
-      }
-      console.log(`[ocr-callback] rfp_full_text parse extracted ${glossary.length} requirements`)
-      if (glossary.length > 0) {
-        try { await db.prepare(`UPDATE rfps SET requirement_glossary=?, updated_at=datetime('now') WHERE id=?`)
-          .bind(JSON.stringify(glossary), rfpRow.id).run() } catch (_) {}
-      }
-    }
+    // evaluateProposal reads proposal_full_text (or falls back to ocr_job_text) internally
+    const evalData = await evaluateProposal(freshProposal || proposal, rfpRow, { DB: db })
 
-    // Fallback: simple line extraction from rfp_full_text if parse got nothing
-    if (!glossary.length) {
-      const rfpText = (rfpRow.rfp_full_text || rfpRow.scope || rfpRow.tech_requirements || '')
-        .split('\n').filter((l:string) => l.length > 30).slice(0, 8)
-      glossary = rfpText.map((l:string, i:number) => ({
-        id: `req_${i+1}`, text: l.slice(0, 300),
-        mandatory: /\bmust\b|\bshall\b|\brequired\b|\bmandatory\b/i.test(l)
-      }))
-    }
-
-    console.log(`[ocr-callback] final glossary count=${glossary.length}`)
-
-    // 4. Keyword compliance pass (CPU, instant)
-    const complianceBreakdown: any[] = []
-    const reqsToScore: any[] = []
-    let mandatoryMet = 0; const mandatoryFailed: string[] = []
-    const totalMandatory = glossary.filter((r:any) => r.mandatory).length
-
-    for (const req of glossary.slice(0, 15)) {
-      const met = checkCompliance(req.text, ocrText)
-      if (req.mandatory && met) mandatoryMet++
-      if (req.mandatory && !met) mandatoryFailed.push(req.text.slice(0, 80))
-      complianceBreakdown.push({ id: req.id, text: req.text, mandatory: req.mandatory, compliance_met: met, ai_score: 0, justification: 'Not addressed' })
-      if (met) reqsToScore.push(req)
-    }
-    console.log(`[ocr-callback] compliance: ${reqsToScore.length}/${glossary.length} met`)
-
-    // 5. ONE batch LLM call for scoring
-    let totalAiScore = 0; let aiScoreCount = 0
-    if (reqsToScore.length > 0) {
-      try {
-        const pLen = ocrText.length
-        const sampleMid = pLen > 10000 ? ocrText.slice(Math.floor(pLen/2)-1000, Math.floor(pLen/2)+1000) : ''
-        const proposalSample = ocrText.slice(0, 3000)
-          + (sampleMid ? '\n\n[...middle...]\n\n' + sampleMid : '')
-          + (pLen > 6000 ? '\n\n[...end...]\n\n' + ocrText.slice(-3000) : '')
-        const reqList = reqsToScore.map((r,i) => `${i+1}. [${r.id}] ${r.text}`).join('\n')
-        const rawBatch = await callLLM(
-          'You are an expert procurement evaluator. Score how well the vendor proposal addresses each listed requirement.',
-          `Requirements:\n${reqList}\n\nVendor Proposal (excerpts, ${pLen} chars total):\n${proposalSample.slice(0,7000)}\n\nFor each requirement rate 0-100 depth of coverage. Return ONLY JSON array:\n[{"id":"<req_id>","score":<0-100>,"justification":"<2-3 sentences citing evidence>"}]`,
-          c.env, 'gpt-5-mini', 1500
-        )
-        const arrMatch = rawBatch.match(/\[[\s\S]*\]/)
-        if (arrMatch) {
-          const batchResults: Array<{id:string;score:number;justification:string}> = JSON.parse(arrMatch[0])
-          const byId = new Map(batchResults.map(r => [r.id, r]))
-          for (const entry of complianceBreakdown) {
-            if (!entry.compliance_met) continue
-            const res = byId.get(entry.id)
-            if (res) {
-              entry.ai_score = Math.max(0, Math.min(100, Math.round(res.score) || 0))
-              entry.justification = res.justification || 'Addressed'
-              totalAiScore += entry.ai_score; aiScoreCount++
-            }
-          }
-        }
-        console.log(`[ocr-callback] batch LLM done: ${aiScoreCount} scored`)
-      } catch (batchErr:any) {
-        console.error(`[ocr-callback] batch LLM error: ${batchErr?.message}`)
-      }
-    }
-
-    // 6. Calculate scores
-    const complianceScore = totalMandatory > 0
-      ? (mandatoryMet / totalMandatory) * 100
-      : (complianceBreakdown.filter(r => r.compliance_met).length / Math.max(1, complianceBreakdown.length)) * 100
-    const qualityScore = aiScoreCount > 0 ? totalAiScore / aiScoreCount : 0
-    const totalScore = Math.round(((complianceScore * 0.4) + (qualityScore * 0.6)) * 10) / 10
-
-    let recommendation: string
-    if (mandatoryFailed.length > 0) recommendation = 'NOT RECOMMENDED'
-    else if (totalScore >= 80) recommendation = 'RECOMMENDED'
-    else if (totalScore >= 60) recommendation = 'CONDITIONAL'
-    else recommendation = 'NOT RECOMMENDED'
-
-    const strengths = complianceBreakdown.filter(r => r.compliance_met && r.ai_score > 80).map(r => r.justification).filter(Boolean)
-    const weaknesses = complianceBreakdown.filter(r => !r.compliance_met || r.ai_score < 40).map(r => ({
-      id: r.id, text: r.text, mandatory: r.mandatory, compliance_met: r.compliance_met, ai_score: r.ai_score, justification: r.justification
-    }))
-
-    const evalData = {
-      evaluated_at: new Date().toISOString(),
-      proposal_id: parseInt(proposalId),
-      vendor_name: proposal.vendor_name || '',
-      total_score: totalScore,
-      recommendation,
-      validation_status: 'EVALUATED',
-      compliance_score: Math.round(complianceScore),
-      quality_score: Math.round(qualityScore),
-      commercial_score: null,
-      budget_extracted: null,
-      budget_currency: 'AED',
-      budget_confidence: 0,
-      duration_extracted: null,
-      strengths,
-      weaknesses,
-      recommendation_reasoning: mandatoryFailed.length > 0
-        ? `Failed ${mandatoryFailed.length} mandatory requirement(s): ${mandatoryFailed.slice(0,2).join('; ')}`
-        : `Score ${totalScore}/100. Compliance ${Math.round(complianceScore)}%, Quality ${Math.round(qualityScore)}/100.`,
-      mandatory_failed: mandatoryFailed,
-      compliance_breakdown: complianceBreakdown,
-      scoring_breakdown: [],
-      glossary_used: glossary.length,
-      text_chars_analyzed: ocrText.length,
-    }
-
-    // 7. Save to DB
+    // 4. Save to DB
+    const totalScore = evalData.total_score ?? 0
+    const recommendation = evalData.recommendation ?? 'NOT RECOMMENDED'
     await db.prepare(`
       UPDATE proposals SET
         evaluation_data=?, ai_total_score=?, ai_recommendation=?,
@@ -2668,11 +2339,18 @@ apiRouter.post('/callback/proposals/:proposalId/ocr-complete', async (c) => {
         ai_compliance_score=?, ai_quality_score=?, ai_commercial_score=NULL,
         ocr_job_status='done', updated_at=datetime('now')
       WHERE id=?
-    `).bind(JSON.stringify(evalData), totalScore, recommendation, 'EVALUATED',
-      Math.round(complianceScore), Math.round(qualityScore), proposalId).run()
+    `).bind(
+      JSON.stringify(evalData),
+      totalScore,
+      recommendation,
+      evalData.validation_status ?? 'EVALUATED',
+      Math.round(evalData.compliance_score ?? totalScore),
+      Math.round(evalData.quality_score ?? totalScore),
+      proposalId
+    ).run()
 
-    console.log(`[ocr-callback] DONE score=${totalScore} recommendation=${recommendation} glossary=${glossary.length}`)
-    return c.json({ ok: true, score: totalScore, recommendation, glossary_used: glossary.length })
+    console.log(`[ocr-callback] DONE score=${totalScore} recommendation=${recommendation} chars=${evalData.text_chars_analyzed}`)
+    return c.json({ ok: true, score: totalScore, recommendation, chars_analyzed: evalData.text_chars_analyzed })
 
   } catch (e: any) {
     console.error(`[ocr-callback] error: ${e?.message}`)
