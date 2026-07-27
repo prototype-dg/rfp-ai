@@ -1798,10 +1798,10 @@ async function evaluateProposal(proposal: any, rfp: any, env: any): Promise<any>
       for (const att of attsToFetch) {
         if (!att.r2_key) continue
         const pdfUrl = `https://a7b32759-e743-4139-9bb0-4bae44886667.vip.gensparksite.com/api/proposals/pdf/${encodeURIComponent(att.r2_key)}`
-        // Cap pages to avoid OOM on VPS — large PDFs (>10MB) get fewer pages
-        const sizeMb = (att.size_bytes || 0) / 1024 / 1024
-        const maxPages = sizeMb > 10 ? 30 : sizeMb > 5 ? 50 : 80
-        const result = await callSidecar(pdfUrl, env, maxPages)
+        // Hard cap at 15 pages for scoring — enough to understand the proposal approach
+        // without blowing the 30s CPU budget. Budget extraction uses its own dedicated
+        // /evaluate-budget endpoint with no page limit.
+        const result = await callSidecar(pdfUrl, env, 15)
         if (result && result.chars >= 100) {
           textParts.push(`[${att.label || att.filename}, ${result.pages_extracted}/${result.pages_total} pages]\n${result.text}`)
         }
