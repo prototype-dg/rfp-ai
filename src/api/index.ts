@@ -2567,6 +2567,69 @@ ${proposalText}`
   }
 }
 
+// ── POST /api/rfps/:rfpId/proposals/:proposalId/budget-debug ────────────────
+// Temporary one-shot endpoint: runs the user-supplied budget/duration extraction
+// prompt against proposal_full_text and returns raw LLM JSON output.
+// TODO: remove after prompt validation.
+apiRouter.post('/rfps/:rfpId/proposals/:proposalId/budget-debug', async (c) => {
+  const proposalId = c.req.param('proposalId')
+  const db = c.env.DB
+  const proposal = await db.prepare(
+    `SELECT p.*, v.name as vendor_name FROM proposals p LEFT JOIN vendors v ON p.vendor_id=v.id WHERE p.id=?`
+  ).bind(proposalId).first<any>()
+  if (!proposal) return c.json({ error: 'Proposal not found' }, 404)
+
+  const proposalText = (proposal.proposal_full_text || proposal.ocr_job_text || '').trim()
+  if (!proposalText) return c.json({ error: 'No proposal text available' }, 400)
+
+  const systemPrompt = `You are a procurement expert AI. Your task is to analyze the provided vendor proposal text and extract the TOTAL PROJECT COST and TOTAL PROJECT DURATION.`
+
+  const userPrompt = `Follow these rules strictly:
+
+1.  **Total Cost Calculation**:
+    *   Identify all core project development phases (e.g., MVP1, MVP2, Phase 1, Phase 2, etc.) and sum their fixed-price costs.
+    *   Identify all mandatory third-party software licenses required for the base solution (e.g., Tableau, Power BI, Oracle, etc.) and add their annual/first-year subscription cost to the sum.
+    *   **STRICTLY EXCLUDE** the following from the total: Optional add-on services (e.g., separate training workshops), post-launch ongoing support/maintenance fees, Value Added Tax (VAT), and infrastructure/hosting costs (unless explicitly bundled into the mandatory phase totals).
+
+2.  **Duration Calculation**:
+    *   Identify the timeline. Sum the durations of all sequential phases (e.g., MVP1 + MVP2).
+    *   If the proposal states a total duration directly (e.g., "7 months"), use that.
+    *   Express the duration in months (e.g., "7 months") or weeks if months are not specified.
+
+3.  **Output Format**:
+    *   Return **ONLY** a valid JSON object.
+    *   Do not include any other text, explanations, or markdown formatting (like \`\`\`json) in your response.
+    *   The JSON must have exactly these two keys:
+        *   "total_cost": A string, including the currency code and the formatted number (e.g., "1,000,000 USD").
+        *   "duration": A string, specifying the total time (e.g., "7 months").
+
+Example Output:
+{"total_cost": "1,000,000 USD", "duration": "7 months"}
+
+Now, analyze the following vendor proposal text and output the JSON:
+
+${proposalText}`
+
+  const raw = await callLLM(systemPrompt, userPrompt, c.env, 'gpt-5', 16000)
+
+  let parsed: any = null
+  try {
+    let clean = raw.trim()
+    if (clean.startsWith('```')) {
+      clean = clean.split('\n').slice(1).join('\n').replace(/```\s*$/, '').trim()
+    }
+    parsed = JSON.parse(clean)
+  } catch (_) {}
+
+  return c.json({
+    ok: true,
+    proposal_id: parseInt(proposalId),
+    chars_analyzed: proposalText.length,
+    raw_llm_response: raw,
+    parsed,
+  })
+})
+
 // ── GET /api/rfps/:rfpId/proposals/:proposalId/evaluation — fetch results ────
 apiRouter.get('/rfps/:rfpId/proposals/:proposalId/evaluation', async (c) => {
   const proposalId = c.req.param('proposalId')
