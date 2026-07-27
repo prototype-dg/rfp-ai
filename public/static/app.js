@@ -5114,9 +5114,41 @@ function _buildEvalTabBodies(p, evalData) {
         + strengthLines.map(function(l){ return '<li><i class="fas fa-check" style="color:#059669;margin-right:4px"></i>' + escHtml(l) + '</li>'; }).join('')
         + '</ul></div>' : '')
       + (weakLines.length > 0 ? '<div style="margin-bottom:1.25rem"><div class="panel-section-title"><i class="fas fa-exclamation-triangle" style="color:#d97706"></i>' + t('panel_verdict_risks') + '</div>'
-        + '<ul style="margin:0;padding-left:1.25rem;font-size:0.82rem;line-height:1.8;color:#374151">'
-        + weakLines.map(function(l){ return '<li><i class="fas fa-exclamation-triangle" style="color:#d97706;margin-right:4px"></i>' + escHtml(l) + '</li>'; }).join('')
-        + '</ul></div>' : '')
+        + '<div style="display:flex;flex-direction:column;gap:0.5rem">'
+        + weakLines.map(function(w, idx) {
+            // Support both old string format and new rich object format
+            var isMandatory = false;
+            var titleText = '';
+            var detailText = '';
+            if (typeof w === 'string') {
+              isMandatory = w.indexOf('[MANDATORY]') === 0;
+              titleText = w.replace(/^\[MANDATORY\]\s*/, '').slice(0, 100);
+              detailText = w.replace(/^\[MANDATORY\]\s*/, '');
+            } else {
+              isMandatory = !!w.mandatory;
+              titleText = (w.text || '').slice(0, 100);
+              detailText = w.text || '';
+              if (w.justification && w.justification !== 'Not addressed' && w.justification !== 'AI scoring unavailable — manual review required') {
+                detailText = detailText + '\n\n' + w.justification;
+              }
+            }
+            var itemId = 'weakItem_' + idx + '_' + Date.now();
+            var badgeCss = isMandatory
+              ? 'background:#fee2e2;color:#991b1b;border:1px solid #fca5a5'
+              : 'background:#fef3c7;color:#92400e;border:1px solid #fcd34d';
+            var badgeIcon = isMandatory ? 'fa-ban' : 'fa-exclamation-triangle';
+            var badgeLabel = isMandatory ? 'Critical' : 'Warning';
+            var titlePreview = escHtml(titleText) + (titleText.length >= 100 ? '…' : '');
+            return '<div style="border:1px solid ' + (isMandatory ? '#fca5a5' : '#e5e7eb') + ';border-radius:8px;overflow:hidden;background:' + (isMandatory ? '#fff5f5' : '#fffdf7') + '">'
+              + '<div style="display:flex;align-items:flex-start;gap:0.5rem;padding:0.625rem 0.75rem;cursor:pointer" onclick="(function(el){var d=el.parentNode.querySelector(\'.weakDetail\');var btn=el.querySelector(\'.weakToggleBtn\');if(d.style.display===\'none\'){d.style.display=\'block\';btn.textContent=\'Show less\';}else{d.style.display=\'none\';btn.textContent=\'Show more\';}})(this)">'
+              + '<span style="font-size:0.7rem;font-weight:700;padding:2px 7px;border-radius:999px;white-space:nowrap;flex-shrink:0;' + badgeCss + '"><i class="fas ' + badgeIcon + '" style="margin-right:3px"></i>' + badgeLabel + '</span>'
+              + '<span style="font-size:0.82rem;color:#374151;flex:1;line-height:1.5">' + titlePreview + '</span>'
+              + '<button class="weakToggleBtn" style="font-size:0.72rem;color:#6b7280;background:none;border:none;cursor:pointer;white-space:nowrap;padding:0;flex-shrink:0">Show more</button>'
+              + '</div>'
+              + '<div class="weakDetail" style="display:none;padding:0 0.75rem 0.625rem 0.75rem;font-size:0.8rem;line-height:1.7;color:#374151;white-space:pre-wrap;border-top:1px solid ' + (isMandatory ? '#fecaca' : '#f3f4f6') + '">' + escHtml(detailText) + '</div>'
+              + '</div>';
+          }).join('')
+        + '</div></div>' : '')
       + '<details style="margin-top:0.75rem;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden">'
       + '<summary style="padding:0.75rem 1rem;cursor:pointer;font-size:0.82rem;font-weight:600;background:#f9fafb;list-style:none;display:flex;align-items:center;gap:0.5rem"><i class="fas fa-paperclip" style="color:#6b7280"></i>' + t('panel_verdict_orig_att') + ' (' + (attachments.length || (p.pdf_attachment_url ? 1 : 0)) + ')</summary>'
       + '<div>' + (attachHtml || '<div style="padding:0.75rem;text-align:center;color:#9ca3af;font-size:0.82rem">' + t('panel_verdict_no_docs') + '</div>') + '</div>'

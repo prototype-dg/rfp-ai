@@ -1959,32 +1959,73 @@ ${cleanedRfpText}`,
   const totalMandatory = glossary.filter((r: any) => r.mandatory).length
   let mandatoryMet = 0; let mandatoryFailed: string[] = []
 
-  for (const req of glossary.slice(0, 15)) {  // cap at 15 reqs to stay within CPU budget
+  // ── Step 1: keyword-based compliance pass (no LLM, instant) ─────────────
+  const reqsToScore: any[] = []
+  for (const req of glossary.slice(0, 15)) {  // cap at 15 reqs
     const complianceMet = checkCompliance(req.text, proposalText)
     if (req.mandatory && complianceMet) mandatoryMet++
     if (req.mandatory && !complianceMet) mandatoryFailed.push(req.text.slice(0, 80))
-
-    let aiScore = 0; let justification = 'Not addressed'
-    if (complianceMet && proposalText.length > 50) {
-      try {
-        const relevant = topChunks(req.text, chunks)
-        const raw = await callLLM(
-          'You are an expert procurement evaluator. Rate the vendor proposal strictly based on the given requirement.',
-          `Requirement: ${req.text}\n\nVendor Proposal Excerpt:\n${relevant.slice(0, 2500)}\n\nRate from 0-100 how thoroughly this specific requirement is addressed (depth, clarity, feasibility). Return ONLY valid JSON: {"score": <integer 0-100>, "justification": "<one sentence, max 25 words>"}`,
-          env, 'gpt-5-mini', 150
-        )
-        const parsed = parseLLMScore(raw)
-        aiScore = parsed.score
-        justification = parsed.justification
-      } catch (_) {
-        aiScore = 0; justification = 'AI scoring failed'
-      }
-    }
-    if (complianceMet) { totalAiScore += aiScore; aiScoreCount++ }
     complianceBreakdown.push({
       id: req.id, text: req.text, mandatory: req.mandatory,
-      compliance_met: complianceMet, ai_score: aiScore, justification,
+      compliance_met: complianceMet, ai_score: 0, justification: 'Not addressed',
     })
+    if (complianceMet && proposalText.length > 50) reqsToScore.push(req)
+  }
+
+  // ── Step 2: single batch LLM call for all requirements (avoids serial timeout) ──
+  if (reqsToScore.length > 0) {
+    // Build a representative sample: first 3K + middle 2K + last 3K chars
+    const pLen = proposalText.length
+    const sampleMid = pLen > 10000 ? proposalText.slice(Math.floor(pLen / 2) - 1000, Math.floor(pLen / 2) + 1000) : ''
+    const proposalSample = proposalText.slice(0, 3000)
+      + (sampleMid ? '\n\n[...middle excerpt...]\n\n' + sampleMid : '')
+      + (pLen > 6000 ? '\n\n[...end excerpt...]\n\n' + proposalText.slice(-3000) : '')
+
+    try {
+      const reqList = reqsToScore.map((r, i) => `${i + 1}. [${r.id}] ${r.text}`).join('\n')
+      const rawBatch = await callLLM(
+        'You are an expert procurement evaluator. Score how well the vendor proposal addresses each listed requirement.',
+        `Requirements to evaluate:
+${reqList}
+
+Vendor Proposal (key excerpts, ${pLen} chars total):
+${proposalSample.slice(0, 7000)}
+
+For each requirement, rate 0-100 how thoroughly it is addressed (depth, specificity, feasibility).
+- 0-30: Not addressed or only mentioned briefly
+- 31-60: Partially addressed, missing key details
+- 61-80: Well addressed with some gaps
+- 81-100: Fully and thoroughly addressed
+
+Return ONLY a JSON array — no markdown, no extra text:
+[{"id":"<req_id>","score":<0-100>,"justification":"<2-3 sentence explanation citing specific evidence from proposal>"}]`,
+        env, 'gpt-5-mini', 1500
+      )
+
+      // Parse batch result
+      const arrMatch = rawBatch.match(/\[[\s\S]*\]/)
+      if (arrMatch) {
+        const batchResults: Array<{ id: string; score: number; justification: string }> = JSON.parse(arrMatch[0])
+        const byId = new Map(batchResults.map(r => [r.id, r]))
+        for (const entry of complianceBreakdown) {
+          if (!entry.compliance_met) continue
+          const result = byId.get(entry.id)
+          if (result) {
+            entry.ai_score = Math.max(0, Math.min(100, Math.round(result.score) || 0))
+            entry.justification = result.justification || 'Addressed'
+            totalAiScore += entry.ai_score
+            aiScoreCount++
+          }
+        }
+      }
+    } catch (_) {
+      // Batch failed — mark all as scored=0 with error note (already default)
+      for (const entry of complianceBreakdown) {
+        if (entry.compliance_met) {
+          entry.justification = 'AI scoring unavailable — manual review required'
+        }
+      }
+    }
   }
 
   // ── Budget & Duration via LLM ────────────────────────────────────────────────
@@ -1994,23 +2035,39 @@ ${cleanedRfpText}`,
   let duration: string | null = proposal.proposed_duration || null
 
   try {
-    const budgetSample = proposalText.length > 6000
-      ? proposalText.slice(0, 5000) + '\n...\n' + proposalText.slice(-2000)
-      : proposalText
+    // Pricing tables are typically in the LATTER portion of the commercial PDF.
+    // The first ~5K chars is usually the company overview (revenue figures, company age)
+    // which confuses regex and LLM alike. Strategy:
+    //   - Skip first 4K (company intro)
+    //   - Send 4K from the middle (narrative + partial pricing)
+    //   - Send last 8K (pricing tables, totals, schedule — pages 5-9)
+    const pLen = proposalText.length
+    let budgetSample: string
+    if (pLen > 14000) {
+      const midStart = Math.max(4000, Math.floor(pLen / 2) - 2000)
+      budgetSample = '[MIDDLE SECTION]\n' + proposalText.slice(midStart, midStart + 4000)
+        + '\n\n[PRICING / FINAL PAGES]\n' + proposalText.slice(-8000)
+    } else if (pLen > 6000) {
+      budgetSample = proposalText.slice(4000)  // skip company intro
+    } else {
+      budgetSample = proposalText
+    }
 
     const rawBudget = await callLLM(
       'You are a financial analyst reading a vendor proposal. Extract the total proposed price and project duration.',
       `From the vendor proposal excerpt below, extract:
-1. The total proposed price (look for "Total", "Grand Total", "Total Cost", "Total Price", "Total Project Cost", pricing summary table)
-2. The project duration (timeline, delivery schedule, number of months/weeks)
+1. The total proposed price (look for "Total", "Grand Total", "Total Cost", "Total Price", "Total Project Cost", pricing summary table, grand total row)
+2. The project duration / delivery timeline (look for "Milestone", "Delivery in X months", "Phase", "MVP", "Timeline", "Schedule")
 
 Rules:
-- Use ONLY values explicitly stated as a total/final price — do NOT sum line items
+- Use ONLY values explicitly stated as a project total/final price
+- Do NOT use company revenue, turnover, or financial statements (these describe the vendor's size, not the project price)
+- Do NOT use company founding year or company age as duration
 - Ignore document sizes, page numbers, phone numbers, reference numbers
-- For duration: express as "X months" or "X weeks" — NOT years unless explicitly stated as years
+- For duration: look for delivery milestones — express as "X months" or "X weeks"
 - If a value is genuinely not present, set it to null
 
-Return ONLY JSON:
+Return ONLY JSON (no markdown):
 {
   "total_price": <number or null>,
   "currency": "AED"|"USD"|"EUR"|"GBP"|null,
@@ -2019,7 +2076,7 @@ Return ONLY JSON:
 }
 
 Proposal excerpt:
-${budgetSample.slice(0, 6000)}`,
+${budgetSample.slice(0, 8000)}`,
       env, 'gpt-5-mini', 200
     )
     const jsonMatch = rawBudget.match(/\{[\s\S]*?\}/)
@@ -2076,7 +2133,17 @@ ${budgetSample.slice(0, 6000)}`,
 
   // ── Strengths & Weaknesses ─────────────────────────────────────────────────
   const strengths = complianceBreakdown.filter(r => r.compliance_met && r.ai_score > 80).map(r => r.justification).filter(Boolean)
-  const weaknesses = complianceBreakdown.filter(r => !r.compliance_met || r.ai_score < 40).map(r => (r.mandatory ? '[MANDATORY] ' : '') + r.text.slice(0, 80))
+  // Emit rich weakness objects so the UI can render criticality badges + expand/collapse
+  const weaknesses = complianceBreakdown
+    .filter(r => !r.compliance_met || r.ai_score < 40)
+    .map(r => ({
+      id: r.id,
+      text: r.text,
+      mandatory: r.mandatory,
+      compliance_met: r.compliance_met,
+      ai_score: r.ai_score,
+      justification: r.justification,
+    }))
 
   // ── AI Verdict ─────────────────────────────────────────────────────────────
   let recommendation: string
