@@ -2258,7 +2258,7 @@ pages.rfp_detail = async function(opts) {
     var banner = document.getElementById('stageActionBanner');
     if (!banner) return;
     var msgs = {
-      draft: { icon: 'fa-pen', text: 'This RFP is a <strong>Draft</strong>. Complete the Generate tab then publish to invite vendors.', action: 'switchRfpTab(\'generate\','+rfpId+')', label: 'Go to Generate' },
+      draft: { icon: 'fa-pen', text: 'This RFP is a <strong>Draft</strong>. Generate the RFP document, then publish to invite vendors.', action: 'advanceRfpStage('+rfpId+',\'published\')', label: 'Publish RFP' },
       published: { icon: 'fa-paper-plane', text: 'RFP is <strong>Published</strong>. Invite vendors from the Vendors tab to start Q&A.', action: 'switchRfpTab(\'vendors\','+rfpId+')', label: 'Invite Vendors' },
       qa_open: { icon: 'fa-comments', text: 'Q&A is <strong>Open</strong>. Answer vendor questions, then close Q&A when ready.', action: 'switchRfpTab(\'qa\','+rfpId+')', label: 'Go to Q&A' },
       submissions_closed: { icon: 'fa-gavel', text: 'Submissions are <strong>Closed</strong>. Evaluate proposals and award the contract.', action: 'switchRfpTab(\'proposals\','+rfpId+')', label: 'Evaluate Proposals' },
@@ -2509,6 +2509,49 @@ async function saveScoringMatrix(rfpId) {
   } catch(e) { /* apiCall shows error */ }
 }
 
+// Helper: field-level auto-save with inline saved indicator
+// Debounced: waits 800ms after last keystroke then saves silently
+var _fieldSaveTimers = {};
+function scheduleFieldSave(rfpId, fieldId) {
+  clearTimeout(_fieldSaveTimers[fieldId]);
+  // Show "saving…" dot immediately
+  var ind = document.getElementById('fsi-' + fieldId);
+  if (ind) { ind.textContent = ''; ind.style.opacity = '0'; }
+  _fieldSaveTimers[fieldId] = setTimeout(function() {
+    var el = document.getElementById(fieldId);
+    if (!el) return;
+    var fieldMap = {
+      rfpTitle: 'title', rfpCategory: 'category', rfpBudget: 'budget',
+      rfpDeadline: 'deadline', rfpBackground: 'background',
+      rfpObjectives: 'objectives', rfpScope: 'scope', rfpTech: 'tech_requirements'
+    };
+    var apiField = fieldMap[fieldId];
+    if (!apiField) return;
+    var payload = {}; payload[apiField] = el.value;
+    apiCall('PUT', '/rfps/' + rfpId, payload).then(function() {
+      var ind2 = document.getElementById('fsi-' + fieldId);
+      if (ind2) {
+        ind2.innerHTML = '<i class="fas fa-check" style="font-size:0.65rem"></i> saved';
+        ind2.style.opacity = '1';
+        setTimeout(function() { if (ind2) ind2.style.opacity = '0'; }, 2000);
+      }
+      // Keep appState in sync
+      if (appState.currentRfp) appState.currentRfp[apiField] = el.value;
+    }).catch(function() {
+      var ind2 = document.getElementById('fsi-' + fieldId);
+      if (ind2) { ind2.innerHTML = '<i class="fas fa-exclamation-circle" style="font-size:0.65rem"></i> error'; ind2.style.opacity='1'; ind2.style.color='#ef4444'; }
+    });
+  }, 800);
+}
+
+// Wrap a label + field-save-indicator into a form-group label row
+function fgLabel(text, fieldId, required) {
+  return '<div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:4px">'
+    + '<label style="margin:0">' + text + (required ? ' <span style="color:#ef4444">*</span>' : '') + '</label>'
+    + '<span id="fsi-' + fieldId + '" style="font-size:0.68rem;color:var(--cpc-gold-deep);opacity:0;transition:opacity 0.3s;display:flex;align-items:center;gap:3px"></span>'
+    + '</div>';
+}
+
 rfpTabs.generate = function(rfpId, rfp) {
   const titleVal = (rfp && rfp.title) || '';
   const catVal = (rfp && rfp.category) || 'IT & Digital Transformation';
@@ -2523,8 +2566,7 @@ rfpTabs.generate = function(rfpId, rfp) {
   // Init scoring matrix from RFP or defaults
   var scoringMatrix = getScoringMatrix(rfp);
   window._currentScoringMatrix = JSON.parse(JSON.stringify(scoringMatrix));
-  // 5.2 start autosave + prompt restore
-  setTimeout(function(){ restoreAutoSave(rfpId); startAutoSave(rfpId); }, 500);
+  setTimeout(function(){ restoreAutoSave(rfpId); }, 200);
 
   const previewHtml = hasContent
     ? rfp.content
@@ -2533,24 +2575,64 @@ rfpTabs.generate = function(rfpId, rfp) {
       + '<p style="margin:0">Fill in the details and click <strong>Generate with AI</strong> to produce a professional RFP document</p>'
       + '</div>';
 
+  // Inline auto-save event attribute (scheduleFieldSave is global)
+  var asc = 'scheduleFieldSave(' + rfpId + ',this.id)';
+
   setContent(
     '<div class="generate-layout" style="display:grid;grid-template-columns:460px 1fr;gap:1.25rem;height:calc(100vh - 240px)">'
-    // LEFT: form
+    // ── LEFT: form — fields only, no action buttons ──
     + '<div class="card" style="padding:1.25rem;overflow-y:auto;display:flex;flex-direction:column;gap:0.875rem">'
     + '<h3 style="font-weight:700;color:#1f2937;font-size:0.9rem;margin:0"><i class="fas fa-magic cpc-gold" style="margin-right:6px"></i>' + t('gen_rfp_params') + '</h3>'
-    + '<div class="form-group"><label>' + t('form_project_title') + ' *</label><input id="rfpTitle" placeholder="e.g. New Oracle ERP Setup, Data Warehouse and Data Visualization" value="' + escHtml(titleVal) + '"></div>'
+
+    // Title
+    + '<div class="form-group" style="margin:0">'
+    + fgLabel(t('form_project_title'), 'rfpTitle', true)
+    + '<input id="rfpTitle" placeholder="e.g. New Oracle ERP Setup, Data Warehouse and Data Visualization" value="' + escHtml(titleVal) + '" oninput="' + asc + '" onchange="' + asc + '">'
+    + '</div>'
+
+    // Category + Budget
     + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem">'
-    + '<div class="form-group"><label>' + t('form_category') + '</label><select id="rfpCategory">'
+    + '<div class="form-group" style="margin:0">'
+    + fgLabel(t('form_category'), 'rfpCategory', false)
+    + '<select id="rfpCategory" onchange="' + asc + '">'
     + (_settingsCategories || DEFAULT_CATEGORIES).map(function(c){ return '<option value="' + c + '"' + (catVal===c?' selected':'') + '>' + c + '</option>'; }).join('')
     + '</select></div>'
-    + '<div class="form-group"><label>' + t('form_budget_aed') + '</label><input id="rfpBudget" placeholder="e.g. 5,000,000" value="' + escHtml(budgetVal) + '"></div>'
+    + '<div class="form-group" style="margin:0">'
+    + fgLabel(t('form_budget_aed'), 'rfpBudget', false)
+    + '<input id="rfpBudget" placeholder="e.g. 5,000,000" value="' + escHtml(budgetVal) + '" oninput="' + asc + '" onchange="' + asc + '">'
+    + '</div></div>'
+
+    // Deadline
+    + '<div class="form-group" style="margin:0">'
+    + fgLabel(t('form_deadline'), 'rfpDeadline', false)
+    + '<input type="date" id="rfpDeadline" value="' + escHtml(deadlineVal) + '" onchange="' + asc + '">'
     + '</div>'
-    + '<div class="form-group"><label>' + t('form_deadline') + '</label><input type="date" id="rfpDeadline" value="' + escHtml(deadlineVal) + '"></div>'
-    + '<div class="form-group"><label>' + t('form_background') + ' <span style="color:#ef4444">*</span></label><textarea id="rfpBackground" rows="3" placeholder="Describe the current situation, business problem, and strategic drivers...">' + escHtml(bgVal) + '</textarea></div>'
-    + '<div class="form-group"><label>' + t('form_objectives') + ' <span style="color:#ef4444">*</span></label><textarea id="rfpObjectives" rows="3" placeholder="List 4-6 measurable objectives for this project...">' + escHtml(objVal) + '</textarea></div>'
-    + '<div class="form-group"><label>' + t('form_scope') + ' <span style="color:#ef4444">*</span></label><textarea id="rfpScope" rows="4" placeholder="Detail the work phases, deliverables, and what is in/out of scope...">' + escHtml(scopeVal) + '</textarea></div>'
-    + '<div class="form-group"><label>' + t('form_tech_req') + '</label><textarea id="rfpTech" rows="3" placeholder="Infrastructure, hosting, security, compliance, integration specs...">' + escHtml(techVal) + '</textarea></div>'
-    // SCORING MATRIX SECTION — read-only summary + Edit Matrix modal button
+
+    // Background
+    + '<div class="form-group" style="margin:0">'
+    + fgLabel(t('form_background'), 'rfpBackground', true)
+    + '<textarea id="rfpBackground" rows="3" placeholder="Describe the current situation, business problem, and strategic drivers..." oninput="' + asc + '">' + escHtml(bgVal) + '</textarea>'
+    + '</div>'
+
+    // Objectives
+    + '<div class="form-group" style="margin:0">'
+    + fgLabel(t('form_objectives'), 'rfpObjectives', true)
+    + '<textarea id="rfpObjectives" rows="3" placeholder="List 4-6 measurable objectives for this project..." oninput="' + asc + '">' + escHtml(objVal) + '</textarea>'
+    + '</div>'
+
+    // Scope
+    + '<div class="form-group" style="margin:0">'
+    + fgLabel(t('form_scope'), 'rfpScope', true)
+    + '<textarea id="rfpScope" rows="4" placeholder="Detail the work phases, deliverables, and what is in/out of scope..." oninput="' + asc + '">' + escHtml(scopeVal) + '</textarea>'
+    + '</div>'
+
+    // Technical requirements
+    + '<div class="form-group" style="margin:0">'
+    + fgLabel(t('form_tech_req'), 'rfpTech', false)
+    + '<textarea id="rfpTech" rows="3" placeholder="Infrastructure, hosting, security, compliance, integration specs..." oninput="' + asc + '">' + escHtml(techVal) + '</textarea>'
+    + '</div>'
+
+    // Scoring matrix — read-only summary + edit button (unchanged)
     + '<div style="border-top:1px solid var(--cpc-line);padding-top:0.875rem;margin-top:0.25rem">'
     + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">'
     + '<label style="margin:0;font-weight:600;color:var(--cpc-ink);font-size:0.82rem"><i class="fas fa-balance-scale cpc-gold" style="margin-right:6px"></i>' + t('gen_scoring_matrix') + '</label>'
@@ -2558,24 +2640,23 @@ rfpTabs.generate = function(rfpId, rfp) {
     + '</div>'
     + '<div id="scoringMatrixSummary">' + renderScoringMatrixSummary(window._currentScoringMatrix) + '</div>'
     + '</div>'
-    // END SCORING MATRIX SECTION
-    + '<div style="display:flex;gap:0.5rem;padding-top:0.25rem">'
-    + '<button class="btn-primary" id="genBtn" style="flex:1" onclick="generateRfpDoc(' + rfpId + ')"><i class="fas fa-robot"></i>' + t('gen_generate_ai') + '</button>'
-    + '<button class="btn-secondary" onclick="saveRfpFields(' + rfpId + ')"><i class="fas fa-save"></i>Save</button>'
     + '</div>'
-    + '<div id="genActionButtons" style="' + (hasContent ? 'display:flex' : 'display:none') + ';gap:0.5rem">'
-      + '<button class="btn-ghost" style="flex:1" onclick="downloadRfpPdf(' + rfpId + ')"><i class="fas fa-file-pdf"></i>Download PDF</button>'
-      + advanceStageButton(rfp)
-      + '</div>'
-    + '</div>'
-    // RIGHT: preview — 5.1 sticky toolbar
+    // ── RIGHT: preview with sticky toolbar ──
     + '<div class="card" style="overflow-y:auto;padding:0;display:flex;flex-direction:column">'
-    + '<div style="position:sticky;top:0;z-index:10;padding:0.75rem 1.25rem;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between;background:#f9fafb">'
-    + '<span style="font-weight:600;color:#374151;font-size:0.88rem"><i class="fas fa-eye cpc-gold" style="margin-right:6px"></i>' + t('gen_rfp_preview') + '</span>'
-    + '<div style="display:flex;gap:0.4rem">'
+    + '<div style="position:sticky;top:0;z-index:10;padding:0.625rem 1rem;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;gap:0.5rem;background:#f9fafb;flex-wrap:wrap">'
+    // Left label
+    + '<span style="font-weight:600;color:#374151;font-size:0.88rem;margin-right:4px"><i class="fas fa-eye cpc-gold" style="margin-right:6px"></i>' + t('gen_rfp_preview') + '</span>'
+    // Generate with AI — primary action, always visible
+    + '<button id="genBtn" class="btn-primary btn-sm" style="display:flex;align-items:center;gap:5px;padding:0.3rem 0.75rem;font-size:0.78rem" onclick="generateRfpDoc(' + rfpId + ')"><i class="fas fa-robot" style="font-size:0.72rem"></i>' + t('gen_generate_ai') + '</button>'
+    // Publish RFP — only for draft stage, mirrors other tab stage buttons
+    + (rfp && rfp.stage === 'draft'
+        ? '<button id="genPublishBtn" class="btn-ghost btn-sm" style="display:flex;align-items:center;gap:5px;padding:0.3rem 0.75rem;font-size:0.78rem;' + (hasContent ? '' : 'opacity:0.45;pointer-events:none') + '" onclick="advanceRfpStage(' + rfpId + ',\x27published\x27)" title="' + (hasContent ? 'Publish this RFP' : 'Generate document first') + '"><i class="fas fa-rocket" style="font-size:0.72rem"></i>Publish RFP</button>'
+        : '')
+    // Spacer
+    + '<div style="flex:1"></div>'
+    // Copy + PDF (right side, shown only when content exists)
     + (hasContent ? '<button class="btn-ghost btn-sm" onclick="copyRfpPreview()" title="Copy all text"><i class="fas fa-copy"></i>Copy All</button>' : '')
     + '<button id="genPreviewPdfBtn" class="btn-ghost btn-sm" onclick="downloadRfpPdf(' + rfpId + ')" style="' + (hasContent ? '' : 'display:none') + '"><i class="fas fa-download"></i>PDF</button>'
-    + '</div>'
     + '</div>'
     + '<div id="rfpPreviewArea" style="padding:0;flex:1;overflow-y:auto">' + previewHtml + '</div>'
     + '</div>'
@@ -2729,11 +2810,11 @@ async function generateRfpDoc(rfpId) {
 
     // 1. Update the preview area immediately (fast path)
     if (previewEl) previewEl.innerHTML = result.content || '';
-    // 2. Show the action buttons
-    var actionDiv = document.getElementById('genActionButtons');
-    if (actionDiv) actionDiv.style.display = 'flex';
+    // 2. Show PDF button + enable Publish button in toolbar
     var pdfBtn = document.getElementById('genPreviewPdfBtn');
     if (pdfBtn) pdfBtn.style.display = '';
+    var pubBtn = document.getElementById('genPublishBtn');
+    if (pubBtn) { pubBtn.style.opacity = '1'; pubBtn.style.pointerEvents = 'auto'; pubBtn.title = 'Publish this RFP'; }
     // 3. Full re-render as reliable fallback
     renderRfpTabs('generate', rfpId, appState.unreadQA);
     rfpTabs.generate(rfpId, result);
