@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 import { emblemPngBase64 } from '../emblem-data'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-07-27-v44'
+const WORKER_VERSION = '2026-07-27-v45'
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.cpc-rfp.website.
@@ -1744,26 +1744,27 @@ apiRouter.post('/rfps/:rfpId/proposals/:proposalId/award', async (c) => {
  *  We never try to parse a raw PDF binary at runtime (Worker memory limits). */
 function extractProposalText(proposal: any): string {
   // v28: priority order — proposal_full_text (OCR at upload) > ocr_job_text (legacy async) > legacy fields
+  // No slicing — pass the full extracted text to the LLM.
   if (proposal.proposal_full_text && proposal.proposal_full_text.length > 200) {
-    return proposal.proposal_full_text.slice(0, 80000)
+    return proposal.proposal_full_text
   }
   if (proposal.ocr_job_text && proposal.ocr_job_text.length > 200) {
-    return proposal.ocr_job_text.slice(0, 80000)
+    return proposal.ocr_job_text
   }
   // Legacy fallback: assemble from individual text fields
   const parts: string[] = []
   if (proposal.technical_proposal && typeof proposal.technical_proposal === 'string') {
-    parts.push(proposal.technical_proposal.slice(0, 12000))
+    parts.push(proposal.technical_proposal)
   }
   if (proposal.executive_summary) parts.push(proposal.executive_summary)
   if (proposal.key_strengths) parts.push(proposal.key_strengths)
   try {
     const atts: any[] = JSON.parse(proposal.proposal_attachments || '[]')
     for (const a of atts) {
-      if (a.extracted_text) parts.push(String(a.extracted_text).slice(0, 4000))
+      if (a.extracted_text) parts.push(String(a.extracted_text))
     }
   } catch (_) {}
-  return parts.join('\n\n').slice(0, 20000)
+  return parts.join('\n\n')
 }
 
 /** Chunk text into ~4000-char blocks */
@@ -2138,24 +2139,19 @@ ${cleanedRfpText}`,
 
   // ── Step 2: single batch LLM call for all requirements (avoids serial timeout) ──
   if (reqsToScore.length > 0) {
-    // Build a representative sample: first 3K + middle 2K + last 3K chars
     const pLen = proposalText.length
-    const sampleMid = pLen > 10000 ? proposalText.slice(Math.floor(pLen / 2) - 1000, Math.floor(pLen / 2) + 1000) : ''
-    const proposalSample = proposalText.slice(0, 3000)
-      + (sampleMid ? '\n\n[...middle excerpt...]\n\n' + sampleMid : '')
-      + (pLen > 6000 ? '\n\n[...end excerpt...]\n\n' + proposalText.slice(-3000) : '')
 
     try {
       const reqList = reqsToScore.map((r, i) => `${i + 1}. [${r.id}] ${r.text}`).join('\n')
-      console.log(`[eval-debug] Calling batch LLM with ${reqsToScore.length} reqs, proposalSample.length=${proposalSample.length}`)
+      console.log(`[eval-debug] Calling batch LLM with ${reqsToScore.length} reqs, proposalText.length=${pLen}`)
       console.log(`[eval-debug] reqList:\n${reqList}`)
       const rawBatch = await callLLM(
         'You are an expert procurement evaluator. Score how well the vendor proposal addresses each listed requirement.',
         `Requirements to evaluate:
 ${reqList}
 
-Vendor Proposal (key excerpts, ${pLen} chars total):
-${proposalSample.slice(0, 7000)}
+Vendor Proposal (full text, ${pLen} chars):
+${proposalText}
 
 For each requirement, rate 0-100 how thoroughly it is addressed (depth, specificity, feasibility).
 - 0-30: Not addressed or only mentioned briefly
@@ -2833,7 +2829,7 @@ Return ONLY valid JSON (no markdown, no extra text):
 }
 
 **Here is the OCR text to analyze:**
-${proposalText.slice(0, 14000)}`
+${proposalText}`
 
   const rawBudget = await callLLM(systemPrompt, userPrompt, env || {}, 'gpt-5-mini', 1200)
 
