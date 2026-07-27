@@ -2258,7 +2258,7 @@ pages.rfp_detail = async function(opts) {
     var banner = document.getElementById('stageActionBanner');
     if (!banner) return;
     var msgs = {
-      draft: { icon: 'fa-pen', text: 'This RFP is a <strong>Draft</strong>. Generate the RFP document, then publish to invite vendors.', action: 'advanceRfpStage('+rfpId+',\'published\')', label: 'Publish RFP' },
+      draft: { icon: 'fa-pen', text: 'This RFP is a <strong>Draft</strong>. Generate the RFP document, then publish to invite vendors.', action: 'switchRfpTab(\'generate\','+rfpId+')', label: 'Go to Generate' },
       published: { icon: 'fa-paper-plane', text: 'RFP is <strong>Published</strong>. Invite vendors from the Vendors tab to start Q&A.', action: 'switchRfpTab(\'vendors\','+rfpId+')', label: 'Invite Vendors' },
       qa_open: { icon: 'fa-comments', text: 'Q&A is <strong>Open</strong>. Answer vendor questions, then close Q&A when ready.', action: 'switchRfpTab(\'qa\','+rfpId+')', label: 'Go to Q&A' },
       submissions_closed: { icon: 'fa-gavel', text: 'Submissions are <strong>Closed</strong>. Evaluate proposals and award the contract.', action: 'switchRfpTab(\'proposals\','+rfpId+')', label: 'Evaluate Proposals' },
@@ -2578,8 +2578,20 @@ rfpTabs.generate = function(rfpId, rfp) {
   // Inline auto-save event attribute (scheduleFieldSave is global)
   var asc = 'scheduleFieldSave(' + rfpId + ',this.id)';
 
+  // Stage-action bar — shown at top when stage requires an action in this tab
+  var genStageBar = '';
+  if (rfp && rfp.stage === 'draft') {
+    genStageBar = '<div style="background:linear-gradient(90deg,#fffbeb,#fef3c7);border:1.5px solid var(--cpc-gold);border-radius:10px;padding:0.65rem 1rem;display:flex;align-items:center;gap:0.75rem;margin-bottom:1rem">'
+      + '<i class="fas fa-rocket" style="color:var(--cpc-gold-deep);font-size:1rem;flex-shrink:0"></i>'
+      + '<div style="flex:1"><span style="font-weight:700;color:var(--cpc-ink);font-size:0.88rem">Ready to publish?</span>'
+      + '<span style="color:#92400e;font-size:0.82rem;margin-left:0.5rem">Generate the RFP document first, then publish to make it visible to vendors.</span></div>'
+      + '<button class="btn-primary" style="flex-shrink:0;white-space:nowrap;display:flex;align-items:center;gap:6px;padding:0.4rem 1rem;font-size:0.82rem' + (hasContent ? '' : ';opacity:0.45;pointer-events:none') + '" onclick="advanceRfpStage(' + rfpId + ',\x27published\x27)" title="' + (hasContent ? 'Publish this RFP' : 'Generate the document first') + '"><i class="fas fa-paper-plane" style="font-size:0.78rem"></i>Publish RFP</button>'
+      + '</div>';
+  }
+
   setContent(
-    '<div class="generate-layout" style="display:grid;grid-template-columns:460px 1fr;gap:1.25rem;height:calc(100vh - 240px)">'
+    genStageBar
+    + '<div class="generate-layout" style="display:grid;grid-template-columns:460px 1fr;gap:1.25rem;height:calc(100vh - 240px)">'
     // ── LEFT: form — fields only, no action buttons ──
     + '<div class="card" style="padding:1.25rem;overflow-y:auto;display:flex;flex-direction:column;gap:0.875rem">'
     + '<h3 style="font-weight:700;color:#1f2937;font-size:0.9rem;margin:0"><i class="fas fa-magic cpc-gold" style="margin-right:6px"></i>' + t('gen_rfp_params') + '</h3>'
@@ -2648,10 +2660,6 @@ rfpTabs.generate = function(rfpId, rfp) {
     + '<span style="font-weight:600;color:#374151;font-size:0.88rem;margin-right:4px"><i class="fas fa-eye cpc-gold" style="margin-right:6px"></i>' + t('gen_rfp_preview') + '</span>'
     // Generate with AI — primary action, always visible
     + '<button id="genBtn" class="btn-primary btn-sm" style="display:flex;align-items:center;gap:5px;padding:0.3rem 0.75rem;font-size:0.78rem" onclick="generateRfpDoc(' + rfpId + ')"><i class="fas fa-robot" style="font-size:0.72rem"></i>' + t('gen_generate_ai') + '</button>'
-    // Publish RFP — only for draft stage, mirrors other tab stage buttons
-    + (rfp && rfp.stage === 'draft'
-        ? '<button id="genPublishBtn" class="btn-ghost btn-sm" style="display:flex;align-items:center;gap:5px;padding:0.3rem 0.75rem;font-size:0.78rem;' + (hasContent ? '' : 'opacity:0.45;pointer-events:none') + '" onclick="advanceRfpStage(' + rfpId + ',\x27published\x27)" title="' + (hasContent ? 'Publish this RFP' : 'Generate document first') + '"><i class="fas fa-rocket" style="font-size:0.72rem"></i>Publish RFP</button>'
-        : '')
     // Spacer
     + '<div style="flex:1"></div>'
     // Copy + PDF (right side, shown only when content exists)
@@ -2810,10 +2818,11 @@ async function generateRfpDoc(rfpId) {
 
     // 1. Update the preview area immediately (fast path)
     if (previewEl) previewEl.innerHTML = result.content || '';
-    // 2. Show PDF button + enable Publish button in toolbar
+    // 2. Show PDF button
     var pdfBtn = document.getElementById('genPreviewPdfBtn');
     if (pdfBtn) pdfBtn.style.display = '';
-    var pubBtn = document.getElementById('genPublishBtn');
+    // Enable Publish RFP button in stage-action bar (if present)
+    var pubBtn = document.querySelector('[onclick*="advanceRfpStage"][onclick*="published"]');
     if (pubBtn) { pubBtn.style.opacity = '1'; pubBtn.style.pointerEvents = 'auto'; pubBtn.title = 'Publish this RFP'; }
     // 3. Full re-render as reliable fallback
     renderRfpTabs('generate', rfpId, appState.unreadQA);
@@ -3319,8 +3328,20 @@ rfpTabs.vendors = async function(rfpId, rfp) {
 
   const tableHead = '<thead><tr><th>' + t('th_vendor') + '</th><th>' + t('th_specializations') + '</th><th>' + t('th_fit_score') + '</th><th>' + t('th_participation') + '</th><th style="text-align:center">' + t('th_shortlist') + '</th><th></th></tr></thead>';
 
+  // Stage-action bar for Vendors tab — shown when stage is 'published' (ready to invite)
+  var vendorStageBar = '';
+  if (rfp && rfp.stage === 'published') {
+    vendorStageBar = '<div style="background:linear-gradient(90deg,#eff6ff,#dbeafe);border:1.5px solid #3b82f6;border-radius:10px;padding:0.65rem 1rem;display:flex;align-items:center;gap:0.75rem">'
+      + '<i class="fas fa-paper-plane" style="color:#2563eb;font-size:1rem;flex-shrink:0"></i>'
+      + '<div style="flex:1"><span style="font-weight:700;color:#1e3a8a;font-size:0.88rem">RFP is Published</span>'
+      + '<span style="color:#1d4ed8;font-size:0.82rem;margin-left:0.5rem">Shortlist vendors and send invitations to start the Q&amp;A phase.</span></div>'
+      + '<button class="btn-primary" style="flex-shrink:0;white-space:nowrap;display:flex;align-items:center;gap:6px;padding:0.4rem 1rem;font-size:0.82rem" onclick="sendRfpInvitations(' + rfpId + ')"><i class="fas fa-paper-plane" style="font-size:0.78rem"></i>Send Invitations</button>'
+      + '</div>';
+  }
+
   setContent(
     '<div class="space-y-4">'
+    + vendorStageBar
 
     // Header with actions
     + '<div style="display:flex;align-items:center;justify-content:space-between">'
@@ -3330,7 +3351,7 @@ rfpTabs.vendors = async function(rfpId, rfp) {
     + '</div>'
     + '<div style="display:flex;gap:0.5rem">'
     + '<button class="btn-secondary" id="aiShortlistBtn" onclick="aiShortlistVendors(' + rfpId + ')"><i class="fas fa-robot"></i>' + t('vendors_ai_suggest') + '</button>'
-    + '<button class="btn-primary" onclick="sendRfpInvitations(' + rfpId + ')"><i class="fas fa-paper-plane"></i>' + t('vendors_send_inv') + '</button>'
+    + '<button class="btn-ghost btn-sm" onclick="sendRfpInvitations(' + rfpId + ')"><i class="fas fa-paper-plane"></i>' + t('vendors_send_inv') + '</button>'
     + '</div>'
     + '</div>'
 
@@ -4073,8 +4094,27 @@ rfpTabs.qa = async function(rfpId) {
     if (cardEl) filteredCardsHtml += cardEl.outerHTML;
   });
 
+  // Stage-action bar for Q&A tab — shown when stage is 'qa_open'
+  var qaRfp = appState.currentRfp;
+  var qaStageBar = '';
+  if (qaRfp && qaRfp.stage === 'qa_open') {
+    qaStageBar = '<div style="background:linear-gradient(90deg,#faf5ff,#ede9fe);border:1.5px solid #7c3aed;border-radius:10px;padding:0.65rem 1rem;display:flex;align-items:center;gap:0.75rem">'
+      + '<i class="fas fa-comments" style="color:#7c3aed;font-size:1rem;flex-shrink:0"></i>'
+      + '<div style="flex:1"><span style="font-weight:700;color:#4c1d95;font-size:0.88rem">Q&amp;A is Open</span>'
+      + '<span style="color:#5b21b6;font-size:0.82rem;margin-left:0.5rem">Answer and publish vendor questions, then close Q&amp;A when ready to receive proposals.</span></div>'
+      + '<button style="flex-shrink:0;white-space:nowrap;display:flex;align-items:center;gap:6px;padding:0.4rem 1rem;font-size:0.82rem;background:#7c3aed;color:#fff;border:none;border-radius:7px;cursor:pointer;font-weight:600" onclick="closeQA(' + rfpId + ')"><i class="fas fa-lock" style="font-size:0.78rem"></i>Close Q&amp;A</button>'
+      + '</div>';
+  } else if (qaRfp && ['submissions_closed','evaluation','awarded'].includes(qaRfp.stage)) {
+    qaStageBar = '<div style="background:#f0fdf4;border:1.5px solid #16a34a;border-radius:10px;padding:0.65rem 1rem;display:flex;align-items:center;gap:0.75rem">'
+      + '<i class="fas fa-lock" style="color:#16a34a;font-size:1rem;flex-shrink:0"></i>'
+      + '<span style="font-weight:600;color:#14532d;font-size:0.88rem">Q&amp;A is Closed</span>'
+      + '<span style="color:#166534;font-size:0.82rem;margin-left:0.5rem">Vendor questions are no longer accepted. Proposal evaluation is in progress.</span>'
+      + '</div>';
+  }
+
   setContent(
     '<div class="space-y-4">'
+    + qaStageBar
     + qaStatusBar
     + '<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:0.5rem">'
     + '<div style="display:flex;gap:1rem;flex-wrap:wrap">'
@@ -4087,11 +4127,6 @@ rfpTabs.qa = async function(rfpId) {
     + '<button class="btn-ghost btn-sm" id="reprocessQBtn" onclick="reprocessQuestions(' + rfpId + ')" title="Re-extract questions from received emails"><i class="fas fa-sync"></i>' + t('qa_re_extract_btn') + '</button>'
     + '<button class="btn-secondary" id="draftAllBtn" onclick="draftAllQAnswers(' + rfpId + ')"><i class="fas fa-robot"></i>' + t('qa_ai_answer_all') + '</button>'
     + '<button class="btn-primary" onclick="publishAllQAnswers(' + rfpId + ')" ' + (manualNeeded > 0 ? 'title="' + t('qa_blocked_title') + ' ' + manualNeeded + ' ' + t('qa_need_manual_answers') + '" style="opacity:0.6"' : '') + '><i class="fas fa-paper-plane"></i>' + t('qa_publish_approved') + '</button>'
-    + (appState.currentRfp && appState.currentRfp.stage === 'qa_open'
-        ? '<button class="btn-danger" onclick="closeQA(' + rfpId + ')" title="Stop accepting vendor questions and mark Q&amp;A stage as complete" style="background:#dc2626;color:#fff;border:none;padding:0.35rem 0.75rem;border-radius:6px;font-size:0.82rem;cursor:pointer;display:flex;align-items:center;gap:0.35rem"><i class="fas fa-lock"></i>' + t('qa_close_qa') + '</button>'
-        : (appState.currentRfp && ['submissions_closed','evaluation','awarded'].includes(appState.currentRfp.stage)
-            ? '<span style="font-size:0.78rem;color:#065f46;font-weight:600;display:flex;align-items:center;gap:0.35rem;padding:0.35rem 0.5rem"><i class="fas fa-lock" style="margin-right:0.25rem"></i>' + t('qa_closed_label') + '</span>'
-            : ''))
     + '</div>'
     + '</div>'
     + manualWarning
@@ -4363,8 +4398,35 @@ rfpTabs.proposals = async function(rfpId) {
       : '<button class="btn-primary" id="evaluateAllBtn" onclick="evaluateAllProposals(' + rfpId + ')" style="background:linear-gradient(135deg,var(--cpc-gold-deep),var(--cpc-gold));border:none"><i class="fas fa-robot"></i>' + t('prop_evaluate_ai') + ' (' + (proposals.length - evaluated) + ' remaining)</button>')
     : '';
 
+  // Stage-action bar for Proposals tab
+  var propRfp = appState.currentRfp;
+  var propStageBar = '';
+  var propAwarded = proposals.some(function(pp){ return pp.status === 'awarded'; });
+  if (propRfp && propRfp.stage === 'submissions_closed' && !propAwarded) {
+    var unevaluated = proposals.filter(function(p){ return !p.ai_recommendation; }).length;
+    propStageBar = '<div style="background:linear-gradient(90deg,#fffbeb,#fef9c3);border:1.5px solid var(--cpc-gold);border-radius:10px;padding:0.65rem 1rem;display:flex;align-items:center;gap:0.75rem">'
+      + '<i class="fas fa-gavel" style="color:var(--cpc-gold-deep);font-size:1rem;flex-shrink:0"></i>'
+      + '<div style="flex:1"><span style="font-weight:700;color:var(--cpc-ink);font-size:0.88rem">Submissions Closed</span>'
+      + '<span style="color:#92400e;font-size:0.82rem;margin-left:0.5rem">'
+      + (unevaluated > 0
+          ? unevaluated + ' proposal(s) not yet evaluated. Run AI evaluation, then award the contract.'
+          : 'All proposals evaluated. Select a winner and award the contract.')
+      + '</span></div>'
+      + (unevaluated > 0
+          ? '<button class="btn-primary" style="flex-shrink:0;white-space:nowrap;display:flex;align-items:center;gap:6px;padding:0.4rem 1rem;font-size:0.82rem;background:linear-gradient(135deg,var(--cpc-gold-deep),var(--cpc-gold));border:none" id="stageEvalBtn" onclick="evaluateAllProposals(' + rfpId + ')"><i class="fas fa-robot" style="font-size:0.78rem"></i>Evaluate with AI</button>'
+          : '')
+      + '</div>';
+  } else if (propAwarded) {
+    propStageBar = '<div style="background:linear-gradient(90deg,#f0fdf4,#dcfce7);border:1.5px solid #16a34a;border-radius:10px;padding:0.65rem 1rem;display:flex;align-items:center;gap:0.75rem">'
+      + '<i class="fas fa-trophy" style="color:#16a34a;font-size:1rem;flex-shrink:0"></i>'
+      + '<span style="font-weight:700;color:#14532d;font-size:0.88rem">Contract Awarded</span>'
+      + '<span style="color:#166534;font-size:0.82rem;margin-left:0.5rem">This RFP is complete. A winner has been selected.</span>'
+      + '</div>';
+  }
+
   setContent(
     '<div class="space-y-4">'
+    + propStageBar
     + '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem">'
     + '<div><h3 style="font-weight:700;font-size:0.95rem;color:#1f2937;margin:0">' + t('proposals_submitted') + '</h3>'
     + '<p style="font-size:0.8rem;color:#9ca3af;margin:0">' + proposals.length + ' ' + t('proposals_received')
