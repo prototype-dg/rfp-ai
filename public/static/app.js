@@ -2282,26 +2282,8 @@ pages.rfp_detail = async function(opts) {
   }
   renderLifecycleBar(rfp);
 
-  // 4.2 Stage action banner — show contextual guidance per stage
-  (function() {
-    var banner = document.getElementById('stageActionBanner');
-    if (!banner) return;
-    var msgs = {
-      draft: { icon: 'fa-pen', text: 'This RFP is a <strong>Draft</strong>. Generate the RFP document, then publish to invite vendors.', action: 'switchRfpTab(\'generate\','+rfpId+')', label: 'Go to Generate' },
-      published: { icon: 'fa-paper-plane', text: 'RFP is <strong>Published</strong>. Invite vendors from the Vendors tab to start Q&A.', action: 'switchRfpTab(\'vendors\','+rfpId+')', label: 'Invite Vendors' },
-      qa_open: { icon: 'fa-comments', text: 'Q&A is <strong>Open</strong>. Answer vendor questions, then close Q&A when ready.', action: 'switchRfpTab(\'qa\','+rfpId+')', label: 'Go to Q&A' },
-      submissions_closed: { icon: 'fa-gavel', text: 'Submissions are <strong>Closed</strong>. Evaluate proposals and award the contract.', action: 'switchRfpTab(\'proposals\','+rfpId+')', label: 'Evaluate Proposals' },
-      awarded: { icon: 'fa-trophy', text: 'Contract <strong>Awarded</strong>. This RFP is complete.', action: null, label: null }
-    };
-    var m = msgs[rfp.stage];
-    if (m) {
-      banner.innerHTML = '<i class="fas ' + m.icon + '" style="margin-right:0.5rem;color:var(--cpc-gold)"></i><span>' + m.text + '</span>'
-        + (m.action ? '<button class="btn-ghost" style="margin-left:auto;padding:0.25rem 0.75rem;font-size:0.8rem;white-space:nowrap" onclick="'+m.action+'">'+m.label+' <i class="fas fa-arrow-right" style="font-size:0.7rem"></i></button>' : '');
-      banner.classList.add('visible');
-    } else {
-      banner.classList.remove('visible');
-    }
-  })();
+  // 4.2 Stage action banner — delegate to shared helper (also called after stage transitions)
+  refreshStageBanner(rfpId, rfp);
 
   renderRfpTabs(opts.tab || appState.currentRfpTab, rfpId, appState.unreadQA);
 
@@ -2910,23 +2892,91 @@ async function saveRfpFields(rfpId) {
   showToast('RFP saved!', 'success');
 }
 
+// ── Shared banner renderer — call any time the RFP stage changes ──────────────
+function refreshStageBanner(rfpId, rfp) {
+  var banner = document.getElementById('stageActionBanner');
+  if (!banner) return;
+  var msgs = {
+    draft: {
+      icon: 'fa-pen',
+      text: 'This RFP is a <strong>Draft</strong>. Generate the RFP document, then publish to invite vendors.',
+      action: 'switchRfpTab(\x27generate\x27,' + rfpId + ')',
+      label: 'Go to Generate'
+    },
+    published: {
+      icon: 'fa-paper-plane',
+      text: 'RFP is <strong>Published</strong>. Shortlist vendors and send invitations to open the Q&amp;A phase.',
+      action: 'switchRfpTab(\x27vendors\x27,' + rfpId + ')',
+      label: 'Go to Vendors'
+    },
+    qa_open: {
+      icon: 'fa-comments',
+      text: 'Invitations sent — Q&amp;A is <strong>Open</strong>. Answer vendor questions, then close Q&amp;A when ready to receive proposals.',
+      action: 'switchRfpTab(\x27qa\x27,' + rfpId + ')',
+      label: 'Go to Q&A'
+    },
+    submissions_closed: {
+      icon: 'fa-gavel',
+      text: 'Submissions are <strong>Closed</strong>. Evaluate proposals with AI and award the contract.',
+      action: 'switchRfpTab(\x27proposals\x27,' + rfpId + ')',
+      label: 'Go to Proposals'
+    },
+    awarded: {
+      icon: 'fa-trophy',
+      text: 'Contract <strong>Awarded</strong>. This RFP is complete.',
+      action: null,
+      label: null
+    }
+  };
+  var m = msgs[rfp.stage];
+  if (m) {
+    banner.innerHTML = '<i class="fas ' + m.icon + '" style="margin-right:0.5rem;color:var(--cpc-gold)"></i>'
+      + '<span>' + m.text + '</span>'
+      + (m.action
+          ? '<button class="btn-ghost" style="margin-left:auto;padding:0.25rem 0.75rem;font-size:0.8rem;white-space:nowrap" onclick="' + m.action + '">'
+            + m.label + ' <i class="fas fa-arrow-right" style="font-size:0.7rem"></i></button>'
+          : '');
+    banner.classList.add('visible');
+  } else {
+    banner.classList.remove('visible');
+  }
+}
+
 async function advanceRfpStage(rfpId, stage) {
   await apiCall('POST', '/rfps/' + rfpId + '/stage', { stage: stage });
-  // reload RFP detail
+  // Reload RFP and update all header elements
   const rfp = await apiCall('GET', '/rfps/' + rfpId);
   appState.currentRfp = rfp;
-  document.getElementById('pageSubtitle').textContent = (rfp.ref_number||'') + ' \u2022 ' + stageLabelMap(rfp.stage||'draft');
-  renderLifecycleBar(rfp);
+  var subtitleEl = document.getElementById('pageSubtitle');
+  if (subtitleEl) subtitleEl.textContent = (rfp.ref_number||'') + ' \u2022 ' + stageLabelMap(rfp.stage||'draft');
 
-  // Mark Publish RFP stage complete; Invite becomes active next
+  // Lifecycle bar
   if (stage === 'published') {
     markStageCompleted(rfpId, 'publish');
     markStageActive(rfpId, 'invite');
-    renderLifecycleBar(rfp);
+  } else if (stage === 'qa_open') {
+    markStageCompleted(rfpId, 'publish');
+    markStageCompleted(rfpId, 'invite');
+    markStageActive(rfpId, 'qa');
+    markStageActive(rfpId, 'proposals');
+  } else if (stage === 'submissions_closed') {
+    markStageCompleted(rfpId, 'publish');
+    markStageCompleted(rfpId, 'invite');
+    markStageCompleted(rfpId, 'qa');
+    markStageActive(rfpId, 'proposals');
+  }
+  renderLifecycleBar(rfp);
+
+  // Banner — always refresh to new stage message
+  refreshStageBanner(rfpId, rfp);
+
+  if (stage === 'published') {
     showToast('\uD83C\uDF89 RFP Published! Now proceed to the Vendors tab to invite vendors.', 'success', 5000);
   }
   renderRfpTabs(appState.currentRfpTab, rfpId, appState.unreadQA);
-  switchRfpTab(appState.currentRfpTab, rfpId);
+  // Re-render the current tab content so stage bars update too
+  var tabFn = rfpTabs[appState.currentRfpTab];
+  if (tabFn) tabFn(rfpId, rfp);
 }
 
 // Fetch the letterhead image and return a base64 data URI so html2canvas
@@ -3535,20 +3585,22 @@ async function confirmSendInvitations(rfpId) {
     if (currentStage === 'published') {
       await apiCall('POST', '/rfps/' + rfpId + '/stage', { stage: 'qa_open' }).catch(function(){});
     }
-    // Refresh RFP state and lifecycle bar
+    // Refresh RFP state and all header elements
     var rfp = await apiCall('GET', '/rfps/' + rfpId);
     appState.currentRfp = rfp;
-    document.getElementById('pageSubtitle').textContent = (rfp.ref_number||'') + ' \u2022 ' + stageLabelMap(rfp.stage||'draft');
-    renderLifecycleBar(rfp);
-    renderRfpTabs('vendors', rfpId, appState.unreadQA);
-    // Count shortlisted vendors from local state (avoid undefined reference)
-    var sentCount = (result && result.results) ? result.results.length : (appState.rfpVendors ? appState.rfpVendors.filter(function(v){ return v.shortlisted; }).length : 0);
+    var subtitleEl = document.getElementById('pageSubtitle');
+    if (subtitleEl) subtitleEl.textContent = (rfp.ref_number||'') + ' \u2022 ' + stageLabelMap(rfp.stage||'draft');
     // Publish + Invite are now done; Q&A and Proposals become ACTIVE (we wait for both)
     markStageCompleted(rfpId, 'publish');
     markStageCompleted(rfpId, 'invite');
     markStageActive(rfpId, 'qa');
     markStageActive(rfpId, 'proposals');
     renderLifecycleBar(rfp);
+    // Update banner to qa_open guidance
+    refreshStageBanner(rfpId, rfp);
+    renderRfpTabs('vendors', rfpId, appState.unreadQA);
+    // Count shortlisted vendors from local state (avoid undefined reference)
+    var sentCount = (result && result.results) ? result.results.length : (appState.rfpVendors ? appState.rfpVendors.filter(function(v){ return v.shortlisted; }).length : 0);
     var pdfNote = pdfBase64 ? ' with PDF attachment' : '';
     showToast('\u2709\uFE0F Invitations sent to ' + sentCount + ' vendor(s)' + pdfNote + '!', 'success', 5000);
     addNotification('email', 'Invitations Sent', 'RFP invitations sent to ' + sentCount + ' vendor(s)' + pdfNote, rfpId, 'vendors', null);
@@ -4302,8 +4354,12 @@ async function closeQA(rfpId) {
     const rfp = await apiCall('GET', '/rfps/' + rfpId).catch(function(){ return null; });
     if (rfp) {
       appState.currentRfp = rfp;
+      markStageCompleted(rfpId, 'qa');
+      markStageActive(rfpId, 'proposals');
       renderLifecycleBar(rfp);
-      document.getElementById('pageSubtitle').textContent = (rfp.ref_number||'') + ' \u2022 ' + stageLabelMap(rfp.stage||'draft');
+      var subtitleEl = document.getElementById('pageSubtitle');
+      if (subtitleEl) subtitleEl.textContent = (rfp.ref_number||'') + ' \u2022 ' + stageLabelMap(rfp.stage||'draft');
+      refreshStageBanner(rfpId, rfp);
     }
     showToast('\uD83D\uDD12 Q&A closed. Vendor questions will be rejected with an auto-reply. Proposals are now being accepted.', 'success', 6000);
     addNotification('info', '\uD83D\uDD12 Q&A Closed', 'Q&A stage complete. Vendors will receive auto-rejection for any new questions.', rfpId, 'qa', null);
@@ -4558,7 +4614,9 @@ async function awardProposal(rfpId, proposalId, vendorName) {
     if (rfp) {
       appState.currentRfp = rfp;
       renderLifecycleBar(rfp);
-      document.getElementById('pageSubtitle').textContent = (rfp.ref_number||'') + ' \u2022 ' + stageLabelMap(rfp.stage||'awarded');
+      var subtitleEl = document.getElementById('pageSubtitle');
+      if (subtitleEl) subtitleEl.textContent = (rfp.ref_number||'') + ' \u2022 ' + stageLabelMap(rfp.stage||'awarded');
+      refreshStageBanner(rfpId, rfp);
     }
     showToast('\uD83C\uDFC6 Contract awarded to ' + vendorName + '! RFP is now complete. Submissions and email replies are disabled.', 'success', 7000);
     addNotification('info', '\uD83C\uDFC6 Contract Awarded', 'Contract awarded to ' + vendorName + '. RFP procurement cycle is complete.', rfpId, 'proposals', null);
