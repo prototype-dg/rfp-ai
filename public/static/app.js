@@ -1630,7 +1630,8 @@ function renderLifecycleBar(rfp) {
     html += '</div>';
   }
 
-  document.getElementById('lifecycleBar').innerHTML = '<div class="lifecycle-bar">' + html + '</div>';
+  var lcStyle = '<style>.lc-step::before{content:\'\';position:absolute;top:0;left:0;right:0;height:3px;background:transparent;border-radius:0 0 2px 2px;transition:background 0.18s}.lc-step:hover::before{background:var(--cpc-gold)}.lc-done.lc-step::before{background:var(--cpc-gold);opacity:0.5}.lc-active.lc-step::before{background:var(--cpc-ink)}</style>';
+  document.getElementById('lifecycleBar').innerHTML = lcStyle + '<div class="lifecycle-bar">' + html + '</div>';
   document.getElementById('lifecycleBar').style.display = 'block';
 }
 
@@ -1657,7 +1658,7 @@ function renderRfpTabs(activeTab, rfpId, qaBadge) {
     // 4.3 — Comms (vendors tab) badge
     const commsBadgeCount = appState.unreadComms || 0;
     const commsBadgeHtml = (tab.id === 'vendors' && commsBadgeCount > 0) ? '<span style="background:var(--cpc-gold);color:white;border-radius:10px;padding:1px 6px;font-size:0.68rem;margin-left:4px;font-weight:700">' + commsBadgeCount + '</span>' : '';
-    html += '<div class="rfp-tab' + (isActive ? ' active' : '') + '" onclick="switchRfpTab(\\x27' + tab.id + '\\x27,' + rfpId + ')">';
+    html += '<div class="rfp-tab' + (isActive ? ' active' : '') + '" onclick="switchRfpTab(\x27' + tab.id + '\x27,' + rfpId + ')">';
     html += '<i class="fas ' + tab.icon + '"></i>' + escHtml(tab.label) + qaBadgeHtml + propsBadgeHtml + commsBadgeHtml;
     html += '</div>';
   });
@@ -2154,9 +2155,9 @@ pages.rfps = async function() {
     + '<option value="oldest"' + (_rfpFilter.sort==='oldest'?' selected':'') + '>Oldest</option>'
     + '<option value="az"' + (_rfpFilter.sort==='az'?' selected':'') + '>A–Z</option>'
     + '</select>'
-    + '<div style="display:flex;border:1px solid #e5e7eb;border-radius:6px;overflow:hidden;height:26px">'
-    + '<button onclick="window._rfpFilter.view=\x27grid\x27;pages.rfps()" style="border:none;width:28px;background:' + (_rfpFilter.view==='grid'?'var(--cpc-ink)':'white') + ';color:' + (_rfpFilter.view==='grid'?'white':'#9ca3af') + ';cursor:pointer" title="Grid view"><i class="fas fa-th-large" style="font-size:0.68rem"></i></button>'
-    + '<button onclick="window._rfpFilter.view=\x27list\x27;pages.rfps()" style="border:none;border-left:1px solid #e5e7eb;width:28px;background:' + (_rfpFilter.view==='list'?'var(--cpc-ink)':'white') + ';color:' + (_rfpFilter.view==='list'?'white':'#9ca3af') + ';cursor:pointer" title="List view"><i class="fas fa-list" style="font-size:0.68rem"></i></button>'
+    + '<div style="display:flex;border:1px solid #e5e7eb;border-radius:6px;overflow:hidden;height:30px">'
+    + '<button onclick="window._rfpFilter.view=\x27grid\x27;pages.rfps()" style="border:none;padding:0 10px;display:flex;align-items:center;gap:4px;background:' + (_rfpFilter.view==='grid'?'var(--cpc-ink)':'white') + ';color:' + (_rfpFilter.view==='grid'?'white':'#6b7280') + ';cursor:pointer;font-size:0.75rem;font-weight:500;white-space:nowrap" title="Grid view"><i class="fas fa-th-large" style="font-size:0.7rem"></i> Grid</button>'
+    + '<button onclick="window._rfpFilter.view=\x27list\x27;pages.rfps()" style="border:none;border-left:1px solid #e5e7eb;padding:0 10px;display:flex;align-items:center;gap:4px;background:' + (_rfpFilter.view==='list'?'var(--cpc-ink)':'white') + ';color:' + (_rfpFilter.view==='list'?'white':'#6b7280') + ';cursor:pointer;font-size:0.75rem;font-weight:500;white-space:nowrap" title="List view"><i class="fas fa-list" style="font-size:0.7rem"></i> List</button>'
     + '</div>'
     + '</div>';
 
@@ -2263,7 +2264,7 @@ pages.rfp_detail = async function(opts) {
     var m = msgs[rfp.stage];
     if (m) {
       banner.innerHTML = '<i class="fas ' + m.icon + '" style="margin-right:0.5rem;color:var(--cpc-gold)"></i><span>' + m.text + '</span>'
-        + (m.action ? '<button class="btn-ghost" style="margin-left:auto;padding:0.25rem 0.75rem;font-size:0.8rem;white-space:nowrap" onclick="\x27+m.action+\x27">'+m.label+' <i class="fas fa-arrow-right" style="font-size:0.7rem"></i></button>' : '');
+        + (m.action ? '<button class="btn-ghost" style="margin-left:auto;padding:0.25rem 0.75rem;font-size:0.8rem;white-space:nowrap" onclick="'+m.action+'">'+m.label+' <i class="fas fa-arrow-right" style="font-size:0.7rem"></i></button>' : '');
       banner.classList.add('visible');
     } else {
       banner.classList.remove('visible');
@@ -2537,7 +2538,7 @@ rfpTabs.generate = function(rfpId, rfp) {
     + '<div class="form-group"><label>' + t('form_project_title') + ' *</label><input id="rfpTitle" placeholder="e.g. New Oracle ERP Setup, Data Warehouse and Data Visualization" value="' + escHtml(titleVal) + '"></div>'
     + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem">'
     + '<div class="form-group"><label>' + t('form_category') + '</label><select id="rfpCategory">'
-    + getSettingsCategories().map(function(c){ return '<option value="' + c + '"' + (catVal===c?' selected':'') + '>' + c + '</option>'; }).join('')
+    + (_settingsCategories || DEFAULT_CATEGORIES).map(function(c){ return '<option value="' + c + '"' + (catVal===c?' selected':'') + '>' + c + '</option>'; }).join('')
     + '</select></div>'
     + '<div class="form-group"><label>' + t('form_budget_aed') + '</label><input id="rfpBudget" placeholder="e.g. 5,000,000" value="' + escHtml(budgetVal) + '"></div>'
     + '</div>'
@@ -5498,7 +5499,7 @@ function showCreateRfpModal() {
     // Category / Budget / Deadline in one row
     + '<div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:0.625rem;margin-bottom:0.75rem">'
     + '<div class="form-group" style="margin:0"><label>Category</label><select id="newRfpCat">'
-    + (getSettingsCategories()).map(function(c){ return '<option>' + c + '</option>'; }).join('')
+    + (_settingsCategories || DEFAULT_CATEGORIES).map(function(c){ return '<option>' + c + '</option>'; }).join('')
     + '</select></div>'
     + '<div class="form-group" style="margin:0"><label>Budget (AED)</label><input id="newRfpBudget" placeholder="5,000,000"></div>'
     + '<div class="form-group" style="margin:0"><label>Deadline</label><input type="date" id="newRfpDeadline" value="' + getDateOffset(30) + '"></div>'
