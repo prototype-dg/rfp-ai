@@ -1958,12 +1958,20 @@ function validateRequired(fieldId, label) {
 var pages = {};
 
 pages.dashboard = async function() {
-  let stats;
-  try {
-    stats = await apiCall('GET', '/stats');
-  } catch(e) {
-    stats = { totalRfps:0, activeRfps:0, awardedRfps:0, winRate:0, totalVendors:0, totalProposals:0, totalEmails:0, avgDuration:null, stageBreakdown:[] };
-  }
+  // Show skeleton immediately — no blank page while waiting for API
+  setContent(skeletonCards(6));
+
+  // Fetch stats AND rfps in parallel — only fetch rfps if not already cached
+  var defaultStats = { totalRfps:0, activeRfps:0, awardedRfps:0, winRate:0, totalVendors:0, totalProposals:0, totalEmails:0, avgDuration:null, stageBreakdown:[] };
+  var statsPromise = apiCall('GET', '/stats').catch(function(){ return defaultStats; });
+  var rfpsPromise = (appState.rfps && appState.rfps.length)
+    ? Promise.resolve(appState.rfps)
+    : apiCall('GET', '/rfps').catch(function(){ return []; });
+
+  var results = await Promise.all([statsPromise, rfpsPromise]);
+  var stats = results[0];
+  var rfps  = results[1];
+  appState.rfps = rfps; // cache so context cards are accurate
 
   const stageBreakdown = stats.stageBreakdown || [];
   const maxStage = stageBreakdown.reduce(function(m,s){ return Math.max(m, s.cnt); }, 1);
@@ -1996,21 +2004,6 @@ pages.dashboard = async function() {
       + '<div style="font-size:0.72rem;color:#9ca3af;margin-top:2px">' + k.sub + '</div>'
       + '</div>';
   });
-
-  // Stage breakdown mini chart
-  let stageChart = '';
-  if (stageBreakdown.length > 0) {
-    stageBreakdown.forEach(function(s) {
-      const h = Math.max(8, Math.round((s.cnt / maxStage) * 50));
-      stageChart += '<div style="display:flex;flex-direction:column;align-items:center;gap:4px;flex:1">'
-        + '<div style="font-size:0.7rem;font-weight:700;color:#374151">' + s.cnt + '</div>'
-        + '<div class="mini-bar-item" style="height:' + h + 'px" title="' + stageLabelMap(s.stage) + ': ' + s.cnt + '"></div>'
-        + '<div style="font-size:0.65rem;color:#9ca3af;text-align:center">' + stageLabelMap(s.stage) + '</div>'
-        + '</div>';
-    });
-  } else {
-    stageChart = '<div style="color:#9ca3af;font-size:0.85rem;padding:1rem">' + t('dash_no_rfp_data') + '</div>';
-  }
 
   // Build clickable stage bars (2.3)
   var stageBarClickable = '';
