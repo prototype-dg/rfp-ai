@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 import { emblemPngBase64 } from '../emblem-data'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-07-27-v45'
+const WORKER_VERSION = '2026-07-27-v46'
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.cpc-rfp.website.
@@ -1963,58 +1963,67 @@ Respond ONLY with JSON: {"is_proposal": true|false, "reason": "<one sentence, ma
 
   // ── Build or parse requirement glossary ──────────────────────────────────────
   // Priority 1: pre-saved glossary in DB (fastest, already vetted)
-  // Priority 2: parse the "Technical Requirements and Architecture" table from the
-  //             generated RFP document (rfps.content) — this is the authoritative source,
-  //             the exact same document vendors received
-  // Priority 3: LLM extraction from structured fields (scope / tech_requirements / objectives)
-  // Priority 4: last-resort line extraction
+  // Priority 2: parse the "Technical Requirements and Architecture" section from
+  //             rfp_full_text (plain text of RFP, no BRD, no HTML) — the authoritative
+  //             source, the exact document vendors received
+  // Priority 3: LLM extraction from rfp_full_text plain text
+  // Priority 4: last-resort line extraction from rfp_full_text
   let glossary: any[] = []
   try { glossary = JSON.parse(rfp.requirement_glossary || '[]') } catch (_) {}
-  console.log(`[eval-debug] proposalId=${proposal.id} proposalText.length=${proposalText.length} rfp.content.length=${(rfp.content||'').length} DB glossary count=${glossary.length}`)
+  console.log(`[eval-debug] proposalId=${proposal.id} proposalText.length=${proposalText.length} rfp_full_text.length=${(rfp.rfp_full_text||'').length} DB glossary count=${glossary.length}`)
 
-  if (!glossary.length && rfp.content) {
-    // Parse the Technical Requirements table from the generated RFP HTML.
-    // The table structure after HTML-stripping is:
-    //   <Area text> <Requirement text> Mandatory|Desirable|Optional  (repeating)
+  if (!glossary.length && rfp.rfp_full_text) {
+    // Parse the Technical Requirements table from rfp_full_text (plain text of the RFP document).
+    // The table structure in plain text is:
+    //   <Area text> <Requirement text> Mandatory|Preferred|Desirable|Optional  (repeating)
     // We split on Classification keywords to identify row boundaries.
     try {
-      const htmlContent: string = rfp.content
+      const plainText: string = rfp.rfp_full_text
       // Find the "TECHNICAL REQUIREMENTS AND ARCHITECTURE" section (second occurrence —
       // first is the TOC entry, second is the actual section heading with the table)
       const sectionMarker = /technical requirements and architecture/gi
       let sectionStart = -1
       let match: RegExpExecArray | null
       let count = 0
-      while ((match = sectionMarker.exec(htmlContent)) !== null) {
+      while ((match = sectionMarker.exec(plainText)) !== null) {
         count++
         if (count === 2) { sectionStart = match.index; break }
       }
       if (sectionStart === -1 && count === 1) {
         // Only one occurrence — use it (some RFPs may not have a TOC)
         sectionMarker.lastIndex = 0
-        const m = sectionMarker.exec(htmlContent)
+        const m = sectionMarker.exec(plainText)
         if (m) sectionStart = m.index
+      }
+      // Also try broader section headings if the standard one is not found
+      if (sectionStart === -1) {
+        const broad = /technical requirements/gi
+        sectionMarker.lastIndex = 0
+        const bm = broad.exec(plainText)
+        if (bm) sectionStart = bm.index
       }
 
       if (sectionStart >= 0) {
-        // Extract up to 16K chars of the section, strip HTML tags
-        const sectionHtml = htmlContent.slice(sectionStart, sectionStart + 16000)
-        const sectionText = sectionHtml
-          .replace(/<[^>]+>/g, ' ')
-          .replace(/&amp;/g, '&').replace(/&mdash;/g, '-').replace(/&nbsp;/g, ' ')
-          .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
+        // Extract up to 20K chars of the section (plain text, no HTML to strip)
+        const sectionText = plainText
+          .slice(sectionStart, sectionStart + 20000)
           .replace(/\s{2,}/g, ' ')
           .trim()
 
-        // Split on Classification values to get row chunks
-        // Pattern: [area text] [requirement text] Mandatory|Desirable|Optional
-        const chunks = sectionText.split(/(Mandatory|Desirable|Optional)/)
-        // chunks[0] = header, chunks[1] = first classification, chunks[2] = text before next, etc.
-        // Pairs: (chunks[2i], chunks[2i+1]) = (text_before_classification, classification)
-        for (let i = 0; i + 1 < chunks.length; i += 2) {
-          const classification = chunks[i].trim()  // "Mandatory" | "Desirable" | "Optional"
-          const textBefore = (i === 0 ? '' : chunks[i - 1]).trim()
-          if (!classification.match(/^(Mandatory|Desirable|Optional)$/)) continue
+        // Split on Classification values to get row chunks.
+        // After split(/(Mandatory|Preferred|Desirable|Optional)/):
+        //   chunks[0]       = text before first classification keyword
+        //   chunks[1]       = first classification keyword  (ODD index)
+        //   chunks[2]       = text between 1st and 2nd keyword
+        //   chunks[3]       = second classification keyword (ODD index)
+        //   ... and so on.
+        // We iterate ODD indices to get classification keywords, and the
+        // PRECEDING (even) index gives the text block for that requirement.
+        const chunks = sectionText.split(/(Mandatory|Preferred|Desirable|Optional)/)
+        for (let i = 1; i < chunks.length; i += 2) {
+          const classification = chunks[i].trim()  // ODD index = "Mandatory"|"Preferred"|"Desirable"|"Optional"
+          const textBefore = chunks[i - 1].trim()  // EVEN index = text block before this keyword
+          if (!classification.match(/^(Mandatory|Preferred|Desirable|Optional)$/)) continue
           if (textBefore.length < 20) continue
 
           // The textBefore contains: [area name] + [requirement sentence]
@@ -2034,14 +2043,14 @@ Respond ONLY with JSON: {"is_proposal": true|false, "reason": "<one sentence, ma
             mandatory: classification === 'Mandatory',
           })
 
-          if (glossary.length >= 20) break  // cap at 20 requirements
+          if (glossary.length >= 30) break  // cap at 30 requirements
         }
       }
 
-      // If we successfully parsed requirements from the document, save them to DB
+      // If we successfully parsed requirements from the RFP plain text, save to DB
       // so future evaluations skip this parsing step entirely
       if (glossary.length > 0) {
-        console.log(`[eval-debug] HTML parse SUCCESS: ${glossary.length} requirements extracted from rfps.content`)
+        console.log(`[eval-debug] rfp_full_text parse SUCCESS: ${glossary.length} requirements extracted`)
         glossary.forEach((g: any, i: number) => console.log(`[eval-debug]   req[${i}] mandatory=${g.mandatory} text="${g.text.slice(0,80)}"`))
         try {
           await env.DB.prepare(
@@ -2049,18 +2058,16 @@ Respond ONLY with JSON: {"is_proposal": true|false, "reason": "<one sentence, ma
           ).bind(JSON.stringify(glossary), rfp.id).run()
         } catch (_) { /* non-fatal */ }
       } else {
-        console.log(`[eval-debug] HTML parse found 0 requirements — sectionStart=${sectionStart} content_len=${(rfp.content||'').length}`)
+        console.log(`[eval-debug] rfp_full_text parse found 0 requirements — sectionStart=${sectionStart} rfp_full_text_len=${(rfp.rfp_full_text||'').length}`)
       }
-    } catch (htmlErr: any) {
-      console.log(`[eval-debug] HTML parse EXCEPTION: ${htmlErr?.message || htmlErr}`)
+    } catch (parseErr: any) {
+      console.log(`[eval-debug] rfp_full_text parse EXCEPTION: ${parseErr?.message || parseErr}`)
     }
   }
 
   if (!glossary.length) {
-    // Priority 3: LLM extraction from structured fields
-    const structuredText = [rfp.scope || '', rfp.tech_requirements || '', rfp.objectives || ''].join('\n\n').trim()
-    const contentStripped = (rfp.content || '').replace(/<[^>]+>/g, ' ').replace(/\s{2,}/g, ' ').trim()
-    const rfpSource = structuredText.length > 200 ? structuredText : contentStripped
+    // Priority 3: LLM extraction from rfp_full_text plain text (no BRD, no HTML fields)
+    const rfpSource = (rfp.rfp_full_text || '').trim()
     const cleanedRfpText = rfpSource
       .split(/[\n\r]+/)
       .map((l: string) => l.trim())
@@ -2070,7 +2077,6 @@ Respond ONLY with JSON: {"is_proposal": true|false, "reason": "<one sentence, ma
         return true
       })
       .join('\n')
-      .slice(0, 6000)
 
     try {
       const rawGlossary = await callLLM(
@@ -2103,7 +2109,7 @@ ${cleanedRfpText}`,
       }
     } catch (_) { /* LLM failed */ }
 
-    // Priority 4: last-resort line extraction
+    // Priority 4: last-resort line extraction from rfp_full_text
     if (!glossary.length && rfpSource) {
       const fallbackLines = rfpSource.split('\n').filter((l: string) => l.length > 30).slice(0, 8)
       glossary = fallbackLines.map((l: string, i: number) => ({
@@ -2498,33 +2504,39 @@ apiRouter.post('/callback/proposals/:proposalId/ocr-complete', async (c) => {
       : await db.prepare('SELECT * FROM rfps WHERE id=?').bind(proposal.rfp_id).first<any>()
     if (!rfpRow) return c.json({ error: 'RFP not found' }, 404)
 
-    // 3. Build glossary — Priority 1: DB cache; Priority 2: parse RFP HTML (CPU only, no LLM)
+    // 3. Build glossary — Priority 1: DB cache; Priority 2: parse rfp_full_text plain text (no BRD, no HTML)
     let glossary: any[] = []
     try { glossary = JSON.parse(rfpRow.requirement_glossary || '[]') } catch (_) {}
-    console.log(`[ocr-callback] DB glossary count=${glossary.length}`)
+    console.log(`[ocr-callback] DB glossary count=${glossary.length} rfp_full_text.length=${(rfpRow.rfp_full_text||'').length}`)
 
-    if (!glossary.length && rfpRow.content) {
-      const htmlContent: string = rfpRow.content
+    if (!glossary.length && rfpRow.rfp_full_text) {
+      const plainText: string = rfpRow.rfp_full_text
       const sectionMarker = /technical requirements and architecture/gi
       let sectionStart = -1; let match: RegExpExecArray | null; let count = 0
-      while ((match = sectionMarker.exec(htmlContent)) !== null) {
+      while ((match = sectionMarker.exec(plainText)) !== null) {
         count++; if (count === 2) { sectionStart = match.index; break }
       }
       if (sectionStart === -1 && count === 1) {
         sectionMarker.lastIndex = 0
-        const m = sectionMarker.exec(htmlContent)
+        const m = sectionMarker.exec(plainText)
         if (m) sectionStart = m.index
       }
+      if (sectionStart === -1) {
+        // Try broader match
+        const broad = /technical requirements/gi
+        const bm = broad.exec(plainText)
+        if (bm) sectionStart = bm.index
+      }
       if (sectionStart >= 0) {
-        const sectionText = htmlContent.slice(sectionStart, sectionStart + 16000)
-          .replace(/<[^>]+>/g, ' ').replace(/&amp;/g,'&').replace(/&mdash;/g,'-')
-          .replace(/&nbsp;/g,' ').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"')
+        // Plain text — no HTML stripping needed, just normalise whitespace
+        const sectionText = plainText.slice(sectionStart, sectionStart + 20000)
           .replace(/\s{2,}/g,' ').trim()
-        const chunks = sectionText.split(/(Mandatory|Desirable|Optional)/)
-        for (let i = 0; i + 1 < chunks.length; i += 2) {
-          const classification = chunks[i].trim()
-          const textBefore = (i === 0 ? '' : chunks[i - 1]).trim()
-          if (!classification.match(/^(Mandatory|Desirable|Optional)$/)) continue
+        // Split on Classification keywords (ODD indices = keywords, EVEN = text before)
+        const chunks = sectionText.split(/(Mandatory|Preferred|Desirable|Optional)/)
+        for (let i = 1; i < chunks.length; i += 2) {
+          const classification = chunks[i].trim()  // ODD = keyword
+          const textBefore = chunks[i - 1].trim()  // EVEN = text block before keyword
+          if (!classification.match(/^(Mandatory|Preferred|Desirable|Optional)$/)) continue
           if (textBefore.length < 20) continue
           const sentences = textBefore.split(/(?<=[.!?])\s+/).map((s:string) => s.trim()).filter((s:string) => s.length > 20)
           const reqText = sentences.length > 0
@@ -2532,19 +2544,19 @@ apiRouter.post('/callback/proposals/:proposalId/ocr-complete', async (c) => {
             : textBefore.slice(0, 300)
           if (/^(notes?|each mandatory|issuance|Crown Prince)/i.test(reqText)) continue
           glossary.push({ id: `req_${glossary.length + 1}`, text: reqText.slice(0, 400), mandatory: classification === 'Mandatory' })
-          if (glossary.length >= 20) break
+          if (glossary.length >= 30) break
         }
       }
-      console.log(`[ocr-callback] HTML parse extracted ${glossary.length} requirements`)
+      console.log(`[ocr-callback] rfp_full_text parse extracted ${glossary.length} requirements`)
       if (glossary.length > 0) {
         try { await db.prepare(`UPDATE rfps SET requirement_glossary=?, updated_at=datetime('now') WHERE id=?`)
           .bind(JSON.stringify(glossary), rfpRow.id).run() } catch (_) {}
       }
     }
 
-    // Fallback: simple line extraction if HTML parse got nothing
+    // Fallback: simple line extraction from rfp_full_text if parse got nothing
     if (!glossary.length) {
-      const rfpText = (rfpRow.scope || rfpRow.tech_requirements || rfpRow.objectives || '')
+      const rfpText = (rfpRow.rfp_full_text || rfpRow.scope || rfpRow.tech_requirements || '')
         .split('\n').filter((l:string) => l.length > 30).slice(0, 8)
       glossary = rfpText.map((l:string, i:number) => ({
         id: `req_${i+1}`, text: l.slice(0, 300),
