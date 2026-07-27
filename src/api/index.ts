@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 import { emblemPngBase64 } from '../emblem-data'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-07-26-v41'
+const WORKER_VERSION = '2026-07-27-v42'
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.cpc-rfp.website.
@@ -2467,7 +2467,9 @@ apiRouter.post('/rfps/:rfpId/proposals/:proposalId/evaluate', async (c) => {
 
 // ── POST /api/callback/proposals/:proposalId/ocr-complete ─────────────────────
 // Called by the sidecar when OCR finishes (async callback pattern).
-// Receives the full OCR text, runs scoring, saves results to DB.
+// LEAN PIPELINE — does NOT call evaluateProposal() to avoid 30s re-timeout.
+// Steps: (1) store OCR text, (2) parse glossary from RFP HTML (CPU only),
+//        (3) keyword compliance pass (CPU), (4) ONE batch LLM call for scoring.
 apiRouter.post('/callback/proposals/:proposalId/ocr-complete', async (c) => {
   const proposalId = c.req.param('proposalId')
   const rfpId = c.req.query('rfp_id') || ''
@@ -2476,69 +2478,203 @@ apiRouter.post('/callback/proposals/:proposalId/ocr-complete', async (c) => {
 
   try {
     const body: any = await c.req.json()
-    console.log(`[ocr-callback] received for proposalId=${proposalId} ok=${body.ok} chars=${body.chars}`)
+    console.log(`[ocr-callback] received proposalId=${proposalId} ok=${body.ok} chars=${body.chars}`)
 
-    // Verify callback secret to prevent spoofing
     if (expectedSecret && body.callback_secret !== expectedSecret) {
       console.error(`[ocr-callback] invalid callback_secret`)
       return c.json({ error: 'Unauthorized' }, 401)
     }
 
     if (!body.ok) {
-      console.error(`[ocr-callback] sidecar reported error: ${body.error}`)
-      await db.prepare(`
-        UPDATE proposals SET ocr_job_status='error', updated_at=datetime('now') WHERE id=?
-      `).bind(proposalId).run()
+      await db.prepare(`UPDATE proposals SET ocr_job_status='error', updated_at=datetime('now') WHERE id=?`).bind(proposalId).run()
       return c.json({ ok: false, error: body.error })
     }
 
-    const ocrText: string = body.text || ''
-    console.log(`[ocr-callback] OCR text: ${ocrText.length} chars, pages ${body.pages_extracted}/${body.pages_total}`)
+    const ocrText: string = (body.text || '').slice(0, 50000)
+    console.log(`[ocr-callback] OCR chars=${ocrText.length}`)
 
-    // Fetch full proposal + RFP rows
-    const proposal = await db.prepare(`
-      SELECT p.*, v.name as vendor_name FROM proposals p
-      LEFT JOIN vendors v ON p.vendor_id = v.id WHERE p.id=?
-    `).bind(proposalId).first<any>()
+    // 1. Persist OCR text immediately
+    await db.prepare(`UPDATE proposals SET ocr_job_text=?, updated_at=datetime('now') WHERE id=?`)
+      .bind(ocrText, proposalId).run()
+
+    // 2. Load proposal + RFP
+    const proposal = await db.prepare(
+      `SELECT p.*, v.name as vendor_name FROM proposals p LEFT JOIN vendors v ON p.vendor_id=v.id WHERE p.id=?`
+    ).bind(proposalId).first<any>()
     if (!proposal) return c.json({ error: 'Proposal not found' }, 404)
 
-    const rfp = rfpId
+    const rfpRow = rfpId
       ? await db.prepare('SELECT * FROM rfps WHERE id=?').bind(rfpId).first<any>()
       : await db.prepare('SELECT * FROM rfps WHERE id=?').bind(proposal.rfp_id).first<any>()
-    if (!rfp) return c.json({ error: 'RFP not found' }, 404)
+    if (!rfpRow) return c.json({ error: 'RFP not found' }, 404)
 
-    // Store OCR text on proposal so evaluateProposal() can use it directly
-    await db.prepare(`
-      UPDATE proposals SET ocr_job_text=?, updated_at=datetime('now') WHERE id=?
-    `).bind(ocrText.slice(0, 50000), proposalId).run()
+    // 3. Build glossary — Priority 1: DB cache; Priority 2: parse RFP HTML (CPU only, no LLM)
+    let glossary: any[] = []
+    try { glossary = JSON.parse(rfpRow.requirement_glossary || '[]') } catch (_) {}
+    console.log(`[ocr-callback] DB glossary count=${glossary.length}`)
 
-    // Patch proposal object in memory so evaluateProposal sees the OCR text
-    const patchedProposal = { ...proposal, executive_summary: ocrText.slice(0, 50000) }
+    if (!glossary.length && rfpRow.content) {
+      const htmlContent: string = rfpRow.content
+      const sectionMarker = /technical requirements and architecture/gi
+      let sectionStart = -1; let match: RegExpExecArray | null; let count = 0
+      while ((match = sectionMarker.exec(htmlContent)) !== null) {
+        count++; if (count === 2) { sectionStart = match.index; break }
+      }
+      if (sectionStart === -1 && count === 1) {
+        sectionMarker.lastIndex = 0
+        const m = sectionMarker.exec(htmlContent)
+        if (m) sectionStart = m.index
+      }
+      if (sectionStart >= 0) {
+        const sectionText = htmlContent.slice(sectionStart, sectionStart + 16000)
+          .replace(/<[^>]+>/g, ' ').replace(/&amp;/g,'&').replace(/&mdash;/g,'-')
+          .replace(/&nbsp;/g,' ').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"')
+          .replace(/\s{2,}/g,' ').trim()
+        const chunks = sectionText.split(/(Mandatory|Desirable|Optional)/)
+        for (let i = 0; i + 1 < chunks.length; i += 2) {
+          const classification = chunks[i].trim()
+          const textBefore = (i === 0 ? '' : chunks[i - 1]).trim()
+          if (!classification.match(/^(Mandatory|Desirable|Optional)$/)) continue
+          if (textBefore.length < 20) continue
+          const sentences = textBefore.split(/(?<=[.!?])\s+/).map((s:string) => s.trim()).filter((s:string) => s.length > 20)
+          const reqText = sentences.length > 0
+            ? sentences.reduce((a:string, b:string) => b.length > a.length ? b : a)
+            : textBefore.slice(0, 300)
+          if (/^(notes?|each mandatory|issuance|Crown Prince)/i.test(reqText)) continue
+          glossary.push({ id: `req_${glossary.length + 1}`, text: reqText.slice(0, 400), mandatory: classification === 'Mandatory' })
+          if (glossary.length >= 20) break
+        }
+      }
+      console.log(`[ocr-callback] HTML parse extracted ${glossary.length} requirements`)
+      if (glossary.length > 0) {
+        try { await db.prepare(`UPDATE rfps SET requirement_glossary=?, updated_at=datetime('now') WHERE id=?`)
+          .bind(JSON.stringify(glossary), rfpRow.id).run() } catch (_) {}
+      }
+    }
 
-    // Run full scoring (fast — no sidecar call needed, text already in hand)
-    const evalData = await evaluateProposal(patchedProposal, rfp, c.env)
+    // Fallback: simple line extraction if HTML parse got nothing
+    if (!glossary.length) {
+      const rfpText = (rfpRow.scope || rfpRow.tech_requirements || rfpRow.objectives || '')
+        .split('\n').filter((l:string) => l.length > 30).slice(0, 8)
+      glossary = rfpText.map((l:string, i:number) => ({
+        id: `req_${i+1}`, text: l.slice(0, 300),
+        mandatory: /\bmust\b|\bshall\b|\brequired\b|\bmandatory\b/i.test(l)
+      }))
+    }
 
+    console.log(`[ocr-callback] final glossary count=${glossary.length}`)
+
+    // 4. Keyword compliance pass (CPU, instant)
+    const complianceBreakdown: any[] = []
+    const reqsToScore: any[] = []
+    let mandatoryMet = 0; const mandatoryFailed: string[] = []
+    const totalMandatory = glossary.filter((r:any) => r.mandatory).length
+
+    for (const req of glossary.slice(0, 15)) {
+      const met = checkCompliance(req.text, ocrText)
+      if (req.mandatory && met) mandatoryMet++
+      if (req.mandatory && !met) mandatoryFailed.push(req.text.slice(0, 80))
+      complianceBreakdown.push({ id: req.id, text: req.text, mandatory: req.mandatory, compliance_met: met, ai_score: 0, justification: 'Not addressed' })
+      if (met) reqsToScore.push(req)
+    }
+    console.log(`[ocr-callback] compliance: ${reqsToScore.length}/${glossary.length} met`)
+
+    // 5. ONE batch LLM call for scoring
+    let totalAiScore = 0; let aiScoreCount = 0
+    if (reqsToScore.length > 0) {
+      try {
+        const pLen = ocrText.length
+        const sampleMid = pLen > 10000 ? ocrText.slice(Math.floor(pLen/2)-1000, Math.floor(pLen/2)+1000) : ''
+        const proposalSample = ocrText.slice(0, 3000)
+          + (sampleMid ? '\n\n[...middle...]\n\n' + sampleMid : '')
+          + (pLen > 6000 ? '\n\n[...end...]\n\n' + ocrText.slice(-3000) : '')
+        const reqList = reqsToScore.map((r,i) => `${i+1}. [${r.id}] ${r.text}`).join('\n')
+        const rawBatch = await callLLM(
+          'You are an expert procurement evaluator. Score how well the vendor proposal addresses each listed requirement.',
+          `Requirements:\n${reqList}\n\nVendor Proposal (excerpts, ${pLen} chars total):\n${proposalSample.slice(0,7000)}\n\nFor each requirement rate 0-100 depth of coverage. Return ONLY JSON array:\n[{"id":"<req_id>","score":<0-100>,"justification":"<2-3 sentences citing evidence>"}]`,
+          c.env, 'gpt-5-mini', 1500
+        )
+        const arrMatch = rawBatch.match(/\[[\s\S]*\]/)
+        if (arrMatch) {
+          const batchResults: Array<{id:string;score:number;justification:string}> = JSON.parse(arrMatch[0])
+          const byId = new Map(batchResults.map(r => [r.id, r]))
+          for (const entry of complianceBreakdown) {
+            if (!entry.compliance_met) continue
+            const res = byId.get(entry.id)
+            if (res) {
+              entry.ai_score = Math.max(0, Math.min(100, Math.round(res.score) || 0))
+              entry.justification = res.justification || 'Addressed'
+              totalAiScore += entry.ai_score; aiScoreCount++
+            }
+          }
+        }
+        console.log(`[ocr-callback] batch LLM done: ${aiScoreCount} scored`)
+      } catch (batchErr:any) {
+        console.error(`[ocr-callback] batch LLM error: ${batchErr?.message}`)
+      }
+    }
+
+    // 6. Calculate scores
+    const complianceScore = totalMandatory > 0
+      ? (mandatoryMet / totalMandatory) * 100
+      : (complianceBreakdown.filter(r => r.compliance_met).length / Math.max(1, complianceBreakdown.length)) * 100
+    const qualityScore = aiScoreCount > 0 ? totalAiScore / aiScoreCount : 0
+    const totalScore = Math.round(((complianceScore * 0.4) + (qualityScore * 0.6)) * 10) / 10
+
+    let recommendation: string
+    if (mandatoryFailed.length > 0) recommendation = 'NOT RECOMMENDED'
+    else if (totalScore >= 80) recommendation = 'RECOMMENDED'
+    else if (totalScore >= 60) recommendation = 'CONDITIONAL'
+    else recommendation = 'NOT RECOMMENDED'
+
+    const strengths = complianceBreakdown.filter(r => r.compliance_met && r.ai_score > 80).map(r => r.justification).filter(Boolean)
+    const weaknesses = complianceBreakdown.filter(r => !r.compliance_met || r.ai_score < 40).map(r => ({
+      id: r.id, text: r.text, mandatory: r.mandatory, compliance_met: r.compliance_met, ai_score: r.ai_score, justification: r.justification
+    }))
+
+    const evalData = {
+      evaluated_at: new Date().toISOString(),
+      proposal_id: parseInt(proposalId),
+      vendor_name: proposal.vendor_name || '',
+      total_score: totalScore,
+      recommendation,
+      validation_status: 'EVALUATED',
+      compliance_score: Math.round(complianceScore),
+      quality_score: Math.round(qualityScore),
+      commercial_score: null,
+      budget_extracted: null,
+      budget_currency: 'AED',
+      budget_confidence: 0,
+      duration_extracted: null,
+      strengths,
+      weaknesses,
+      recommendation_reasoning: mandatoryFailed.length > 0
+        ? `Failed ${mandatoryFailed.length} mandatory requirement(s): ${mandatoryFailed.slice(0,2).join('; ')}`
+        : `Score ${totalScore}/100. Compliance ${Math.round(complianceScore)}%, Quality ${Math.round(qualityScore)}/100.`,
+      mandatory_failed: mandatoryFailed,
+      compliance_breakdown: complianceBreakdown,
+      scoring_breakdown: [],
+      glossary_used: glossary.length,
+      text_chars_analyzed: ocrText.length,
+    }
+
+    // 7. Save to DB
     await db.prepare(`
       UPDATE proposals SET
         evaluation_data=?, ai_total_score=?, ai_recommendation=?,
         ai_validation_status=?, ai_evaluated_at=datetime('now'),
-        ai_compliance_score=?, ai_quality_score=?, ai_commercial_score=?,
+        ai_compliance_score=?, ai_quality_score=?, ai_commercial_score=NULL,
         ocr_job_status='done', updated_at=datetime('now')
       WHERE id=?
-    `).bind(
-      JSON.stringify(evalData), evalData.total_score, evalData.recommendation,
-      evalData.validation_status, evalData.compliance_score, evalData.quality_score,
-      evalData.commercial_score, proposalId
-    ).run()
+    `).bind(JSON.stringify(evalData), totalScore, recommendation, 'EVALUATED',
+      Math.round(complianceScore), Math.round(qualityScore), proposalId).run()
 
-    console.log(`[ocr-callback] scoring complete: score=${evalData.total_score} recommendation=${evalData.recommendation}`)
-    return c.json({ ok: true, score: evalData.total_score, recommendation: evalData.recommendation })
+    console.log(`[ocr-callback] DONE score=${totalScore} recommendation=${recommendation} glossary=${glossary.length}`)
+    return c.json({ ok: true, score: totalScore, recommendation, glossary_used: glossary.length })
 
   } catch (e: any) {
     console.error(`[ocr-callback] error: ${e?.message}`)
-    await db.prepare(`
-      UPDATE proposals SET ocr_job_status='error', updated_at=datetime('now') WHERE id=?
-    `).bind(proposalId).run()
+    await db.prepare(`UPDATE proposals SET ocr_job_status='error', updated_at=datetime('now') WHERE id=?`).bind(proposalId).run()
     return c.json({ ok: false, error: e?.message }, 500)
   }
 })
