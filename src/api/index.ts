@@ -1888,16 +1888,101 @@ Respond ONLY with JSON: {"is_proposal": true|false, "reason": "<one sentence, ma
     ]
   }
 
-  // Build or parse requirement glossary
+  // ── Build or parse requirement glossary ──────────────────────────────────────
+  // Priority 1: pre-saved glossary in DB (fastest, already vetted)
+  // Priority 2: parse the "Technical Requirements and Architecture" table from the
+  //             generated RFP document (rfps.content) — this is the authoritative source,
+  //             the exact same document vendors received
+  // Priority 3: LLM extraction from structured fields (scope / tech_requirements / objectives)
+  // Priority 4: last-resort line extraction
   let glossary: any[] = []
   try { glossary = JSON.parse(rfp.requirement_glossary || '[]') } catch (_) {}
+
+  if (!glossary.length && rfp.content) {
+    // Parse the Technical Requirements table from the generated RFP HTML.
+    // The table structure after HTML-stripping is:
+    //   <Area text> <Requirement text> Mandatory|Desirable|Optional  (repeating)
+    // We split on Classification keywords to identify row boundaries.
+    try {
+      const htmlContent: string = rfp.content
+      // Find the "TECHNICAL REQUIREMENTS AND ARCHITECTURE" section (second occurrence —
+      // first is the TOC entry, second is the actual section heading with the table)
+      const sectionMarker = /technical requirements and architecture/gi
+      let sectionStart = -1
+      let match: RegExpExecArray | null
+      let count = 0
+      while ((match = sectionMarker.exec(htmlContent)) !== null) {
+        count++
+        if (count === 2) { sectionStart = match.index; break }
+      }
+      if (sectionStart === -1 && count === 1) {
+        // Only one occurrence — use it (some RFPs may not have a TOC)
+        sectionMarker.lastIndex = 0
+        const m = sectionMarker.exec(htmlContent)
+        if (m) sectionStart = m.index
+      }
+
+      if (sectionStart >= 0) {
+        // Extract up to 16K chars of the section, strip HTML tags
+        const sectionHtml = htmlContent.slice(sectionStart, sectionStart + 16000)
+        const sectionText = sectionHtml
+          .replace(/<[^>]+>/g, ' ')
+          .replace(/&amp;/g, '&').replace(/&mdash;/g, '-').replace(/&nbsp;/g, ' ')
+          .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
+          .replace(/\s{2,}/g, ' ')
+          .trim()
+
+        // Split on Classification values to get row chunks
+        // Pattern: [area text] [requirement text] Mandatory|Desirable|Optional
+        const chunks = sectionText.split(/(Mandatory|Desirable|Optional)/)
+        // chunks[0] = header, chunks[1] = first classification, chunks[2] = text before next, etc.
+        // Pairs: (chunks[2i], chunks[2i+1]) = (text_before_classification, classification)
+        for (let i = 0; i + 1 < chunks.length; i += 2) {
+          const classification = chunks[i].trim()  // "Mandatory" | "Desirable" | "Optional"
+          const textBefore = (i === 0 ? '' : chunks[i - 1]).trim()
+          if (!classification.match(/^(Mandatory|Desirable|Optional)$/)) continue
+          if (textBefore.length < 20) continue
+
+          // The textBefore contains: [area name] + [requirement sentence]
+          // The requirement sentence is the longer, more descriptive part.
+          // Heuristic: split into sentences, take the longest as the requirement text.
+          const sentences = textBefore.split(/(?<=[.!?])\s+/).map((s: string) => s.trim()).filter((s: string) => s.length > 20)
+          const reqText = sentences.length > 0
+            ? sentences.reduce((a: string, b: string) => b.length > a.length ? b : a)
+            : textBefore.slice(0, 300)
+
+          // Skip if this looks like a header/note rather than a requirement
+          if (/^(notes?|each mandatory|issuance|Crown Prince)/i.test(reqText)) continue
+
+          glossary.push({
+            id: `req_${glossary.length + 1}`,
+            text: reqText.slice(0, 400),
+            mandatory: classification === 'Mandatory',
+          })
+
+          if (glossary.length >= 20) break  // cap at 20 requirements
+        }
+      }
+
+      // If we successfully parsed requirements from the document, save them to DB
+      // so future evaluations skip this parsing step entirely
+      if (glossary.length > 0) {
+        try {
+          await env.DB.prepare(
+            `UPDATE rfps SET requirement_glossary=?, updated_at=datetime('now') WHERE id=?`
+          ).bind(JSON.stringify(glossary), rfp.id).run()
+        } catch (_) { /* non-fatal */ }
+      }
+    } catch (_) {
+      // HTML parsing failed — fall through to LLM extraction
+    }
+  }
+
   if (!glossary.length) {
-    // Use LLM to extract real requirements from the RFP — avoids pulling HTML/TOC garbage.
-    // Prefer structured fields over raw HTML content.
+    // Priority 3: LLM extraction from structured fields
     const structuredText = [rfp.scope || '', rfp.tech_requirements || '', rfp.objectives || ''].join('\n\n').trim()
     const contentStripped = (rfp.content || '').replace(/<[^>]+>/g, ' ').replace(/\s{2,}/g, ' ').trim()
     const rfpSource = structuredText.length > 200 ? structuredText : contentStripped
-    // Remove TOC-style lines: e.g. "1. Section Title  2" (heading + trailing page number)
     const cleanedRfpText = rfpSource
       .split(/[\n\r]+/)
       .map((l: string) => l.trim())
@@ -1938,13 +2023,11 @@ ${cleanedRfpText}`,
           }))
         }
       }
-    } catch (_) {
-      // LLM failed — fall back to simple line extraction
-    }
+    } catch (_) { /* LLM failed */ }
 
-    // Last resort fallback
-    if (!glossary.length && cleanedRfpText) {
-      const fallbackLines = cleanedRfpText.split('\n').filter((l: string) => l.length > 30).slice(0, 8)
+    // Priority 4: last-resort line extraction
+    if (!glossary.length && rfpSource) {
+      const fallbackLines = rfpSource.split('\n').filter((l: string) => l.length > 30).slice(0, 8)
       glossary = fallbackLines.map((l: string, i: number) => ({
         id: `req_${i + 1}`,
         text: l.slice(0, 300),
@@ -2028,67 +2111,106 @@ Return ONLY a JSON array — no markdown, no extra text:
     }
   }
 
-  // ── Budget & Duration via LLM ────────────────────────────────────────────────
-  // Regex-based extraction is unreliable on OCR'd PDFs (phone numbers, page sizes,
-  // reference numbers all look like large amounts). Use LLM to find the real totals.
+  // ── Budget & Duration via LLM (analytical prompt on commercial PDF) ──────────
+  // Strategy:
+  //   1. Identify the commercial PDF attachment (label contains "commercial")
+  //   2. Fetch its FULL text via the sidecar (no slicing — we need all pricing pages)
+  //   3. Run the analytical budget prompt that sums all cost clusters
+  //   4. Also scan the full proposalText for duration clues
   let budget = { amount: null as number | null, currency: 'AED', confidence: 0.0 }
   let duration: string | null = proposal.proposed_duration || null
 
   try {
-    // Pricing tables are typically in the LATTER portion of the commercial PDF.
-    // The first ~5K chars is usually the company overview (revenue figures, company age)
-    // which confuses regex and LLM alike. Strategy:
-    //   - Skip first 4K (company intro)
-    //   - Send 4K from the middle (narrative + partial pricing)
-    //   - Send last 8K (pricing tables, totals, schedule — pages 5-9)
-    const pLen = proposalText.length
-    let budgetSample: string
-    if (pLen > 14000) {
-      const midStart = Math.max(4000, Math.floor(pLen / 2) - 2000)
-      budgetSample = '[MIDDLE SECTION]\n' + proposalText.slice(midStart, midStart + 4000)
-        + '\n\n[PRICING / FINAL PAGES]\n' + proposalText.slice(-8000)
-    } else if (pLen > 6000) {
-      budgetSample = proposalText.slice(4000)  // skip company intro
-    } else {
-      budgetSample = proposalText
-    }
+    // ── Step 1: get commercial PDF text ──────────────────────────────────────
+    let commercialText = ''
+    try {
+      const atts: any[] = JSON.parse(proposal.proposal_attachments || '[]')
+      // Prefer attachment labelled "commercial"; fall back to first attachment
+      const commercialAtt = atts.find((a: any) =>
+        (a.label || '').toLowerCase().includes('commercial') ||
+        (a.filename || '').toLowerCase().includes('commercial')
+      ) || atts[0]
 
+      if (commercialAtt?.r2_key) {
+        const pdfUrl = `https://a7b32759-e743-4139-9bb0-4bae44886667.vip.gensparksite.com/api/proposals/pdf/${encodeURIComponent(commercialAtt.r2_key)}`
+        const result = await callSidecar(pdfUrl, env, 100)  // all pages, no cap
+        if (result && result.chars >= 100) {
+          commercialText = result.text
+        }
+      }
+    } catch (_) { /* non-fatal — fall through to proposalText */ }
+
+    // Fall back to full proposalText if we couldn't isolate the commercial PDF
+    const budgetSourceText = commercialText.length > 100 ? commercialText : proposalText
+
+    // ── Step 2: analytical budget extraction prompt ───────────────────────────
     const rawBudget = await callLLM(
-      'You are a financial analyst reading a vendor proposal. Extract the total proposed price and project duration.',
-      `From the vendor proposal excerpt below, extract:
-1. The total proposed price (look for "Total", "Grand Total", "Total Cost", "Total Price", "Total Project Cost", pricing summary table, grand total row)
-2. The project duration / delivery timeline (look for "Milestone", "Delivery in X months", "Phase", "MVP", "Timeline", "Schedule")
+      'You are a financial extraction analyst. I will provide you with the raw OCR text of a commercial proposal.',
+      `Your task is to find, categorize, and sum all costs to calculate the total budget.
+Do not assume any specific section titles (like "MVP1" or "Tableau"). Instead, use the following logical methodology to parse the text dynamically:
 
-Rules:
-- Use ONLY values explicitly stated as a project total/final price
-- Do NOT use company revenue, turnover, or financial statements (these describe the vendor's size, not the project price)
-- Do NOT use company founding year or company age as duration
-- Ignore document sizes, page numbers, phone numbers, reference numbers
-- For duration: look for delivery milestones — express as "X months" or "X weeks"
-- If a value is genuinely not present, set it to null
+**Step 1: Identify all monetary values**
+- Scan the entire text and locate every figure that includes a currency symbol or code (e.g., AED, USD, EUR, SAR, $, etc.).
+- For each monetary value, read the 3–5 lines of text immediately before and after it to understand its context.
 
-Return ONLY JSON (no markdown):
+**Step 2: Group monetary values into cost clusters**
+- **Implementation/Phase Clusters**: If a monetary value appears after a long list of technical tasks, deliverables, or work items, treat that value as the total cost for that specific phase or workstream. There may be multiple such clusters (e.g., Phase 1, Phase 2).
+- **Auxiliary One-Time Clusters**: If a monetary value appears near words like "License", "Subscription", "Training", "Workshop", "Enablement", or "Setup", treat it as an additional one-time fixed cost.
+- **Recurring Support Clusters**: If a monetary value appears near words like "Support", "Maintenance", "Managed Services", or contains phrases like "per month", "monthly", or "hours per month", calculate the total monthly recurring cost by summing the individual line items in that cluster.
+
+**Step 3: Determine the project timeline (for recurring costs)**
+- Scan the text for any phrases indicating duration (e.g., "in X months", "X weeks", "quarter", "by QX").
+- If the total project duration or support period is explicitly stated, use that.
+- If the support duration is missing, use a baseline assumption of 12 months, but clearly flag this as an assumption in your output.
+
+**Step 4: Detect currency and tax rules**
+- Identify the dominant currency code/symbol used.
+- Look for mentions of "VAT", "GST", or "tax" and note the percentage. If found, calculate the inclusive total.
+
+**Step 5: Perform the calculations**
+- **Total Fixed (One-Time) Budget** = Sum of all Implementation/Phase clusters + Sum of all Auxiliary one-time clusters.
+- **Total Budget with Support** = Total Fixed Budget + (Monthly Recurring Support Cost * number of support months, or the 12-month baseline assumption).
+- **Tax-Inclusive Total** = Add the detected tax percentage to the final total.
+
+**Step 6: Output your findings as JSON**
+Return ONLY valid JSON (no markdown, no extra text):
 {
-  "total_price": <number or null>,
-  "currency": "AED"|"USD"|"EUR"|"GBP"|null,
-  "duration": "<e.g. 3.5 months>"|null,
-  "confidence": 0.0-1.0
+  "clusters": [
+    {"description": "<cluster name>", "type": "fixed|recurring_monthly", "amount": <number>, "currency": "<AED|USD|EUR>", "how_identified": "<brief explanation>"}
+  ],
+  "total_fixed": <number or null>,
+  "total_with_support": <number or null>,
+  "support_months": <number>,
+  "support_months_assumed": <true|false>,
+  "tax_rate": <0.05 for 5% VAT, or 0 if none>,
+  "tax_inclusive_total": <number or null>,
+  "currency": "<dominant currency>",
+  "duration": "<e.g. 3.5 months or next quarter>"|null,
+  "confidence": <0.0-1.0>,
+  "missing_info": ["<list any missing data that prevents definitive answer>"]
 }
 
-Proposal excerpt:
-${budgetSample.slice(0, 8000)}`,
-      env, 'gpt-5-mini', 200
+**Here is the OCR text to analyze:**
+${budgetSourceText.slice(0, 14000)}`,
+      env, 'gpt-5-mini', 1200
     )
-    const jsonMatch = rawBudget.match(/\{[\s\S]*?\}/)
+
+    // ── Step 3: parse LLM response ────────────────────────────────────────────
+    const jsonMatch = rawBudget.match(/\{[\s\S]*\}/)
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0])
-      if (parsed.total_price && parsed.total_price > 0 && parsed.total_price < 1e10) {
+
+      // Pick the best total: prefer tax-inclusive if available, else with-support, else fixed
+      const bestTotal = parsed.tax_inclusive_total || parsed.total_with_support || parsed.total_fixed
+      if (bestTotal && bestTotal > 0 && bestTotal < 1e10) {
         budget = {
-          amount: parsed.total_price,
+          amount: Math.round(bestTotal),
           currency: parsed.currency || 'AED',
           confidence: Math.min(1.0, Math.max(0.0, parseFloat(parsed.confidence) || 0.5)),
         }
       }
+
+      // Duration from LLM
       if (parsed.duration && typeof parsed.duration === 'string') {
         duration = parsed.duration
       }
