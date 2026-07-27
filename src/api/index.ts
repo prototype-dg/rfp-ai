@@ -140,6 +140,38 @@ apiRouter.get('/rfps', async (c) => {
   return c.json(results)
 })
 
+// GET /rfps/summary — per-RFP activity counts for dashboard cards
+// Returns { rfpId: { unanswered_questions, unread_emails, declined_vendors, unevaluated_proposals } }
+apiRouter.get('/rfps/summary', async (c) => {
+  try {
+    const db = c.env.DB
+    const [qRows, eRows, vRows, pRows] = await Promise.all([
+      // Unanswered (not yet published) questions per RFP
+      db.prepare(`SELECT rfp_id, COUNT(*) as cnt FROM questions WHERE published=0 GROUP BY rfp_id`).all(),
+      // Unread received emails per RFP (status='received' = inbound from vendor)
+      db.prepare(`SELECT rfp_id, COUNT(*) as cnt FROM email_log WHERE status='received' AND email_type != 'invitation' GROUP BY rfp_id`).all(),
+      // Declined vendors per RFP
+      db.prepare(`SELECT rfp_id, COUNT(*) as cnt FROM rfp_vendors WHERE status='declined' GROUP BY rfp_id`).all(),
+      // Proposals without AI evaluation per RFP
+      db.prepare(`SELECT rfp_id, COUNT(*) as cnt FROM proposals WHERE ai_recommendation IS NULL GROUP BY rfp_id`).all(),
+    ])
+    const summary: Record<string, any> = {}
+    const merge = (rows: any[], key: string) => {
+      rows.forEach((r: any) => {
+        if (!summary[r.rfp_id]) summary[r.rfp_id] = {}
+        summary[r.rfp_id][key] = r.cnt
+      })
+    }
+    merge(qRows.results, 'unanswered_questions')
+    merge(eRows.results, 'unread_emails')
+    merge(vRows.results, 'declined_vendors')
+    merge(pRows.results, 'unevaluated_proposals')
+    return c.json(summary)
+  } catch (e: any) {
+    return c.json({}, 200) // non-fatal — cards just won't show counts
+  }
+})
+
 apiRouter.get('/rfps/:id', async (c) => {
   const id = c.req.param('id')
   const rfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(id).first()

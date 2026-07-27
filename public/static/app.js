@@ -2056,8 +2056,12 @@ pages.dashboard = async function() {
 // ============================================================
 pages.rfps = async function() {
   setContent(skeletonCards(6));
-  const rfps = await apiCall('GET', '/rfps').catch(function(){ return []; });
+  const [rfps, rfpSummary] = await Promise.all([
+    apiCall('GET', '/rfps').catch(function(){ return []; }),
+    apiCall('GET', '/rfps/summary').catch(function(){ return {}; })
+  ]);
   appState.rfps = rfps;
+  appState.rfpSummary = rfpSummary || {};
 
   if (rfps.length === 0) {
     setContent(
@@ -2082,14 +2086,32 @@ pages.rfps = async function() {
     const badgeCls = stageBadgeClass(stage);
     const stageLabel = stageLabelMap(stage);
     const stageIdx = STAGES.indexOf(stage);
-    const progress = Math.round(((stageIdx + 1) / STAGES.length) * 100);
     const dateStr = rfp.created_at ? new Date(rfp.created_at).toLocaleDateString('en-AE', {year:'numeric',month:'short',day:'numeric'}) : '-';
-
     const progressPct = isArchived ? 100 : Math.round(((stageIdx + 1) / STAGES.length) * 100);
+
+    // Per-RFP activity counts from summary endpoint
+    var sm = (appState.rfpSummary || {})[rfp.id] || {};
+    var unansweredQ    = sm.unanswered_questions   || 0;
+    var unreadEmails   = sm.unread_emails           || 0;
+    var declinedV      = sm.declined_vendors        || 0;
+    var unevaluatedP   = sm.unevaluated_proposals   || 0;
+
+    // Activity pill builder — only shown when count > 0
+    function actPill(icon, count, color, title) {
+      if (!count) return '';
+      return '<span title="' + title + '" style="display:inline-flex;align-items:center;gap:3px;background:' + color + '1a;color:' + color + ';border:1px solid ' + color + '33;border-radius:20px;padding:2px 7px;font-size:0.7rem;font-weight:700">'
+        + '<i class="fas ' + icon + '" style="font-size:0.62rem"></i>' + count + '</span>';
+    }
+
+    var activityPills = actPill('fa-question-circle', unansweredQ, '#7c3aed', unansweredQ + ' unanswered question(s)')
+      + actPill('fa-envelope',       unreadEmails,  '#2563eb', unreadEmails  + ' unread email(s)')
+      + actPill('fa-times-circle',   declinedV,     '#dc2626', declinedV     + ' vendor(s) declined')
+      + actPill('fa-robot',          unevaluatedP,  '#d97706', unevaluatedP  + ' proposal(s) not evaluated');
+
     return '<div class="rfp-card" onclick="openRfp(' + rfp.id + ')" style="' + (isArchived ? 'opacity:0.85;border-left:4px solid var(--cpc-gold)' : '') + '">'
       + '<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:0.75rem">'
       + '<div style="flex:1;min-width:0">'
-      + '<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.3rem">'
+      + '<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.3rem;flex-wrap:wrap">'
       + '<span style="font-size:0.72rem;color:#9ca3af;font-family:monospace">' + escHtml(rfp.ref_number||'') + '</span>'
       + '<span class="stage-badge ' + badgeCls + '">' + stageLabel + '</span>'
       + (isArchived ? '<span style="background:#d1fae5;color:#065f46;border-radius:4px;padding:1px 6px;font-size:0.68rem;font-weight:700"><i class="fas fa-trophy" style="margin-right:0.25rem"></i>' + t('card_awarded_badge') + '</span>' : '')
@@ -2103,10 +2125,13 @@ pages.rfps = async function() {
         : '<div style="font-size:1.5rem;font-weight:700;color:var(--cpc-ink)">' + progressPct + '%</div><div style="font-size:0.7rem;color:#9ca3af">' + t('card_complete') + '</div>')
       + '</div>'
       + '</div>'
+      // Progress bar
       + '<div style="margin-bottom:0.5rem">'
       + '<div style="height:4px;border-radius:2px;background:#e5e7eb;overflow:hidden">'
       + '<div style="height:100%;background:' + (isArchived ? 'var(--cpc-gold)' : 'linear-gradient(90deg,var(--cpc-ink),var(--cpc-gold))') + ';width:' + progressPct + '%;border-radius:2px;transition:width 0.3s ease"></div>'
       + '</div></div>'
+      // Activity pills row — only rendered when there's something to show
+      + (activityPills ? '<div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:0.5rem">' + activityPills + '</div>' : '')
       + '<div style="display:flex;align-items:center;justify-content:space-between">'
       + '<div style="font-size:0.78rem;color:#9ca3af">'
       + (rfp.deadline ? '<i class="fas fa-calendar-alt" style="margin-right:4px"></i>' + t('card_deadline') + ' ' + new Date(rfp.deadline).toLocaleDateString(_currentLang === 'ar' ? 'ar-AE' : 'en-AE') : '<i class="fas fa-infinity" style="margin-right:4px"></i>' + t('card_no_deadline'))
@@ -3920,21 +3945,25 @@ async function silentCheckInbox(rfpId) {
     var newestVendorId = newest ? (newest.vendor_id || null) : null;
 
     // Determine what kind of email arrived (use email_category set by LLM in webhook)
+    // Widen detection: also catch 'inbound' emails that have attachments (questions without explicit category)
     var isDeclineEmail   = newest && (newest.email_category === 'decline'   || newest.email_type === 'decline');
-    var isQuestionsEmail = newest && (newest.email_category === 'questions' || newest.email_type === 'qa_questions');
-    var isProposalEmail  = newest && (newest.email_category === 'proposal'  || newest.email_type === 'proposal');
+    var isQuestionsEmail = newest && (newest.email_category === 'questions' || newest.email_type === 'qa_questions'
+                                      || (newest.has_attachment && !newest.email_category && newest.email_type !== 'decline'));
+    var isProposalEmail  = newest && !isDeclineEmail && !isQuestionsEmail
+                                  && (newest.email_category === 'proposal'  || newest.email_type === 'proposal');
+
+    // ── Always bump vendors badge for ANY incoming email (they're all vendor comms) ──
+    if (appState.currentRfpTab !== 'vendors') {
+      appState.unreadVendors = (appState.unreadVendors || 0) + newEmails.length;
+    }
 
     if (isDeclineEmail) {
       addNotification('decline',
         '⛔ Vendor Declined — ' + senderName,
-        senderName + ' has declined participation in this RFP. Shown in red in Vendors tab.',
+        senderName + ' has declined participation in this RFP. They are now shown in red in the Vendors tab.',
         rfpId, 'vendors', newestVendorId
       );
-      showToast('⛔ ' + senderName + ' declined participation in this RFP.', 'warning', 5000);
-      // Increment vendors badge (only if user isn't already on Vendors tab)
-      if (appState.currentRfpTab !== 'vendors') {
-        appState.unreadVendors = (appState.unreadVendors || 0) + 1;
-      }
+      showToast('⛔ ' + senderName + ' has declined participation in this RFP.', 'warning', 6000);
       if (appState.currentRfpId && String(appState.currentRfpId) === String(rfpId)) {
         renderRfpTabs(appState.currentRfpTab, rfpId, appState.unreadQA);
         if (appState.currentRfpTab === 'vendors') rfpTabs.vendors(rfpId, appState.currentRfp);
@@ -3944,50 +3973,53 @@ async function silentCheckInbox(rfpId) {
       var questions = await apiCall('GET', '/rfps/' + rfpId + '/questions').catch(function(){ return []; });
       var unanswered = questions.filter(function(q){ return !q.published; }).length;
       var emailQs = questions.filter(function(q){ return q.source === 'email'; }).length;
+      var newQCount = emailQs > 0 ? emailQs : newEmails.length;
 
-      // Increment badge count — only cleared when user opens Q&A tab
-      appState.unreadQA = unanswered > 0 ? unanswered : (appState.unreadQA || 0) + newEmails.length;
+      // Increment Q&A badge — only cleared when user opens Q&A tab
+      if (appState.currentRfpTab !== 'qa') {
+        appState.unreadQA = unanswered > 0 ? unanswered : (appState.unreadQA || 0) + newQCount;
+      }
       pulseQATab();
+
+      addNotification('email', '📨 New Email from ' + senderName,
+        (newest.subject || 'No Subject') + attachBadge, rfpId, 'vendors', newestVendorId);
       addNotification('questions',
-        '📋 New vendor question(s) — Q&A tab',
-        (emailQs > 0 ? emailQs + ' question(s)' : 'Questions') + ' from ' + senderName + ' added automatically.',
+        '📋 ' + newQCount + ' vendor question(s) from ' + senderName,
+        newQCount + ' question(s) extracted and added to the Q&A tab for review.',
         rfpId, 'qa', null
       );
-      addNotification('email', '📨 New Email from ' + senderName,
-        (newest.subject || 'No Subject') + attachBadge, rfpId, null, newestVendorId);
-      // Show a visible toast so the user is aware of incoming questions
-      showToast('📋 ' + (emailQs > 0 ? emailQs : 'New') + ' vendor question(s) from ' + senderName + ' — check Q&A tab', 'info', 7000);
+      showToast('📋 ' + newQCount + ' vendor question(s) from ' + senderName + ' — check Q&A tab', 'info', 7000);
 
-      // Update the tab bar badge but do NOT switch tabs (that would clear the badge)
       if (appState.currentRfpId && String(appState.currentRfpId) === String(rfpId)) {
         renderRfpTabs(appState.currentRfpTab, rfpId, appState.unreadQA);
+        // If already on Q&A tab, refresh it live
+        if (appState.currentRfpTab === 'qa') rfpTabs.qa(rfpId);
       }
 
     } else if (isProposalEmail) {
+      addNotification('email', '📨 New Email from ' + senderName,
+        (newest.subject || 'No Subject') + ' (PDF proposal)', rfpId, 'vendors', newestVendorId);
       addNotification('proposal',
         '📄 Proposal Received — ' + senderName,
         senderName + ' submitted a proposal with PDF. Added to Proposals tab.',
         rfpId, 'proposals', newestVendorId
       );
-      addNotification('email', '📨 New Email from ' + senderName,
-        (newest.subject || 'No Subject') + ' (PDF proposal)', rfpId, null, newestVendorId);
-      showToast('Proposal received from ' + senderName + '. Redirecting to Proposals tab...', 'success', 4000);
+      showToast('📄 Proposal received from ' + senderName + ' — added to Proposals tab.', 'success', 5000);
 
       if (appState.currentRfpId && String(appState.currentRfpId) === String(rfpId)) {
-        renderRfpTabs('proposals', rfpId, appState.unreadQA);
-        rfpTabs.proposals(rfpId);
+        renderRfpTabs(appState.currentRfpTab, rfpId, appState.unreadQA);
+        if (appState.currentRfpTab === 'proposals') rfpTabs.proposals(rfpId);
       }
 
     } else {
-      // Generic incoming vendor email — bump vendors badge
+      // Generic incoming vendor email
       addNotification('email', '📨 New Email from ' + senderName,
         (newest && newest.subject ? newest.subject : 'No Subject') + attachBadge,
-        rfpId, null, newestVendorId);
-      if (appState.currentRfpTab !== 'vendors') {
-        appState.unreadVendors = (appState.unreadVendors || 0) + newEmails.length;
-      }
+        rfpId, 'vendors', newestVendorId);
+      showToast('📨 New email from ' + senderName + ' — check Vendors tab.', 'info', 5000);
       if (appState.currentRfpId && String(appState.currentRfpId) === String(rfpId)) {
         renderRfpTabs(appState.currentRfpTab, rfpId, appState.unreadQA);
+        if (appState.currentRfpTab === 'vendors') rfpTabs.vendors(rfpId, appState.currentRfp);
       }
     }
 
