@@ -805,9 +805,12 @@ apiRouter.post('/rfps/:rfpId/questions/:id/draft', async (c) => {
 apiRouter.post('/rfps/:id/questions/draft-all', async (c) => {
   const rfpId = c.req.param('id')
   const rfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(rfpId).first<any>()
-  // Target ALL unpublished questions — re-generates answers that were already drafted
-  // but not yet approved, so the user can always get fresh AI answers on a second run.
-  const { results: qs } = await c.env.DB.prepare('SELECT * FROM questions WHERE published=0 AND rfp_id=?').bind(rfpId).all<any>()
+  // Target ALL questions NOT yet emailed to vendors (emailed_at IS NULL).
+  // This includes: unanswered, draft-answered, and approved-but-not-sent questions.
+  // Questions already sent (emailed_at IS NOT NULL) are excluded — they are locked.
+  const { results: qs } = await c.env.DB.prepare(
+    `SELECT * FROM questions WHERE (emailed_at IS NULL OR emailed_at='') AND rfp_id=?`
+  ).bind(rfpId).all<any>()
 
   const BATCH_SIZE = 5
   let manualCount = 0
@@ -849,7 +852,9 @@ apiRouter.post('/rfps/:id/questions/approve-all', async (c) => {
 apiRouter.put('/rfps/:rfpId/questions/:id/answer', async (c) => {
   const id = c.req.param('id')
   const { answer } = await c.req.json()
-  await c.env.DB.prepare('UPDATE questions SET answer=?, published=1 WHERE id=?').bind(answer, id).run()
+  // Save the edited answer and clear needs_manual flag.
+  // Do NOT auto-approve (published=1) — the user must explicitly click Approve.
+  await c.env.DB.prepare('UPDATE questions SET answer=?, needs_manual=0 WHERE id=?').bind(answer, id).run()
   return c.json({ ok: true })
 })
 

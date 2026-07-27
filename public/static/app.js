@@ -4214,33 +4214,51 @@ rfpTabs.qa = async function(rfpId) {
 
       let answerBlock = '';
       if (needsManual && !q.answer) {
+        // needs_manual=1 and no answer — AI could not answer, needs manual input
         answerBlock = '<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:8px;padding:0.75rem;margin-top:0.75rem">'
           + '<div style="font-size:0.72rem;font-weight:700;color:#991b1b;margin-bottom:4px"><i class="fas fa-robot" style="margin-right:0.25rem"></i>' + t('qa_ai_no_answer') + '</div>'
           + '<p style="font-size:0.82rem;color:#7f1d1d;margin:0">' + t('qa_manual_input_msg') + '</p>'
           + '</div>';
       } else if (q.answer) {
-        answerBlock = '<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:0.75rem;margin-top:0.75rem">'
-          + '<div style="font-size:0.72rem;font-weight:700;color:#92400e;margin-bottom:4px"><i class="fas fa-robot" style="margin-right:0.25rem"></i>' + t('qa_ai_draft_label') + '</div>'
-          + '<p style="font-size:0.875rem;color:#374151;margin:0">' + escHtml(q.answer) + '</p>'
+        // Determine answer box color/label based on state
+        var answerBg, answerBorder, answerLabelColor, answerIcon, answerLabel;
+        if (q.emailed_at) {
+          // Sent — green box
+          answerBg = '#f0fdf4'; answerBorder = '#86efac'; answerLabelColor = '#166534';
+          answerIcon = 'fa-paper-plane'; answerLabel = 'Sent to Vendors';
+        } else if (q.published) {
+          // Approved, awaiting send — amber box
+          answerBg = '#fffbeb'; answerBorder = '#fde68a'; answerLabelColor = '#92400e';
+          answerIcon = 'fa-check-circle'; answerLabel = 'Approved — Awaiting Send';
+        } else {
+          // Draft answer
+          answerBg = '#f0f9ff'; answerBorder = '#bae6fd'; answerLabelColor = '#0369a1';
+          answerIcon = 'fa-robot'; answerLabel = t('qa_ai_draft_label');
+        }
+        answerBlock = '<div style="background:' + answerBg + ';border:1px solid ' + answerBorder + ';border-radius:8px;padding:0.75rem;margin-top:0.75rem">'
+          + '<div style="font-size:0.72rem;font-weight:700;color:' + answerLabelColor + ';margin-bottom:4px"><i class="fas ' + answerIcon + '" style="margin-right:0.25rem"></i>' + answerLabel + '</div>'
+          + '<p style="font-size:0.875rem;color:#374151;margin:0;white-space:pre-wrap">' + escHtml(q.answer) + '</p>'
           + '</div>';
       }
 
       const isFromEmail = q.source === 'email';
-      const btns = (!q.answer || needsManual
+      // Button visibility rules (clean, no overlaps):
+      //   emailed   → Edit only (re-open for amendment)
+      //   approved (published=1) + not emailed → Approve (idempotent re-approve OK) + Edit
+      //   has answer + needs_manual cleared (needs_manual=0) + not emailed → Approve + Edit
+      //   needs_manual=1 (red card, no answer or AI failed) → AI Draft + Manual Edit
+      //   no answer → AI Draft + Manual Edit
+      const canApprove = !!q.answer && !q.emailed_at && !q.needs_manual;
+      const needsDraftOrEdit = !q.answer || q.needs_manual;
+
+      const btns = (needsDraftOrEdit
         ? '<button class="btn-secondary btn-sm" onclick="draftOneAnswer(' + rfpId + ',' + q.id + ')"><i class="fas fa-robot"></i>' + t('qa_ai_draft_btn') + '</button>'
           + '<button class="btn-ghost btn-sm" onclick="editQAnswer(' + q.id + ')"><i class="fas fa-edit"></i>' + t('qa_manual_edit_btn') + '</button>'
-        : '') + (q.answer && !q.published && !needsManual
-        ? '<button class="btn-primary btn-sm" onclick="approveQAnswer(' + rfpId + ',' + q.id + ')"><i class="fas fa-check"></i>' + t('qa_approve_send_btn') + '</button>'
-          + '<button class="btn-ghost btn-sm" onclick="editQAnswer(' + q.id + ')"><i class="fas fa-edit"></i>' + t('btn_edit') + '</button>'
-        : '') + (q.answer && !q.published && needsManual
+        : '') + (canApprove
         ? '<button class="btn-primary btn-sm" onclick="approveQAnswer(' + rfpId + ',' + q.id + ')"><i class="fas fa-check"></i>' + t('qa_approve_btn') + '</button>'
-        : '')
-        // Edit button: show on emailed answers (allows re-editing before next send)
-        + (q.published && !q.emailed_at
-        ? '<button class="btn-ghost btn-sm" onclick="editQAnswer(' + q.id + ')" title="Edit approved answer"><i class="fas fa-edit"></i> ' + t('btn_edit') + '</button>'
-        : '')
-        + (q.emailed_at
-        ? '<button class="btn-ghost btn-sm" onclick="editQAnswer(' + q.id + ')" title="Edit sent answer (will mark as pending re-send)"><i class="fas fa-edit"></i> ' + t('btn_edit') + '</button>'
+          + '<button class="btn-ghost btn-sm" onclick="editQAnswer(' + q.id + ')"><i class="fas fa-edit"></i>' + t('btn_edit') + '</button>'
+        : '') + (!needsDraftOrEdit && !canApprove
+        ? '<button class="btn-ghost btn-sm" onclick="editQAnswer(' + q.id + ')" title="Edit sent answer"><i class="fas fa-edit"></i> ' + t('btn_edit') + '</button>'
         : '');
 
       qCards += '<div class="card" style="padding:1rem;' + cardBg + '" id="q-' + q.id + '">'
@@ -4374,12 +4392,18 @@ async function approveQAnswer(rfpId, qId) {
 
 async function approveAllQAnswers(rfpId) {
   var qs = appState.questions || [];
-  // Only approve questions that have a drafted answer, are not yet published, and don't need manual review
+  // Approve all questions that have an answer, are not yet emailed, and don't need manual review.
+  // published=1 is idempotent — the approve-all backend UPDATE is safe to re-run.
   var approvable = qs.filter(function(q) {
-    return q.answer && q.answer.trim() !== '' && !q.published && !q.needs_manual;
+    return q.answer && q.answer.trim() !== '' && !q.emailed_at && !q.needs_manual;
   });
   if (approvable.length === 0) {
-    showToast('No AI-drafted answers to approve yet. Run "AI Answer All" first.', 'warning', 5000);
+    var unanswered = qs.filter(function(q){ return !q.answer || q.answer.trim() === ''; }).length;
+    if (unanswered > 0) {
+      showToast('No answers to approve yet. Run \u201cAI Answer All\u201d first.', 'warning', 5000);
+    } else {
+      showToast('All answered questions have already been sent to vendors.', 'info', 4000);
+    }
     return;
   }
   var btn = document.getElementById('approveAllBtn');
@@ -4419,19 +4443,19 @@ async function saveQAnswer(rfpId, qId) {
 
 async function publishAllQAnswers(rfpId) {
   try {
-    // Guard: check for answered + approved (answer set, not yet published, not needs_manual)
+    // Guard: check for answered questions not yet emailed to vendors
     var qs = appState.questions || [];
     var readyToPublish = qs.filter(function(q) {
-      return q.answer && q.answer.trim() !== '' && !q.published && !q.needs_manual;
+      return q.answer && q.answer.trim() !== '' && !q.emailed_at && !q.needs_manual;
     });
     if (readyToPublish.length === 0) {
-      var unanswered = qs.filter(function(q){ return !q.published && (!q.answer || q.answer.trim() === ''); }).length;
+      var unanswered = qs.filter(function(q){ return !q.answer || q.answer.trim() === ''; }).length;
       if (unanswered > 0) {
-        showToast('⚠️ No approved answers to publish yet. Use "AI Answer All" to draft answers, then approve them first.', 'warning', 8000);
+        showToast('⚠️ No approved answers to send yet. Use "AI Answer All" to draft answers, then approve them first.', 'warning', 8000);
       } else if (qs.length === 0) {
-        showToast('⚠️ No questions in Q&A yet. Nothing to publish.', 'warning', 6000);
+        showToast('⚠️ No questions in Q&A yet. Nothing to send.', 'warning', 6000);
       } else {
-        showToast('⚠️ All questions are already published or still awaiting answers. Nothing new to send.', 'info', 6000);
+        showToast('⚠️ All answers have already been sent to vendors. Nothing new to send.', 'info', 6000);
       }
       return; // do NOT call the API — no emails sent
     }
