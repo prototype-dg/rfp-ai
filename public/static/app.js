@@ -2161,13 +2161,17 @@ pages.rfps = async function() {
     + '</div>';
 
   let content = '<div style="display:flex;flex-direction:column;gap:1.5rem">'
-    + '<div style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap">'
+    // Row 1: title + New RFP button (these two never compete for space)
+    + '<div style="display:flex;align-items:center;gap:0.75rem">'
     + '<div><h2 style="font-weight:700;color:#1f2937;font-size:1rem;margin:0">' + t('active_procurements') + '</h2>'
     + '<p style="color:#9ca3af;font-size:0.82rem;margin:0">' + activeRfps.length + ' ' + t('rfps_in_progress') + '</p></div>'
-    + '<div style="margin-left:auto;display:flex;align-items:center;gap:8px;flex-shrink:0">'
-    + filterStrip
-    + '<button class="btn-primary" style="flex-shrink:0;white-space:nowrap" onclick="showCreateRfpModal()"><i class="fas fa-plus"></i>' + t('btn_new_rfp') + '</button>'
+    + '<div style="margin-left:auto">'
+    + '<button class="btn-primary" style="white-space:nowrap" onclick="showCreateRfpModal()"><i class="fas fa-plus"></i>' + t('btn_new_rfp') + '</button>'
     + '</div>'
+    + '</div>'
+    // Row 2: filter strip on its own line — always has full width, never squeezes
+    + '<div style="display:flex;align-items:center;gap:8px">'
+    + filterStrip
     + '</div>';
 
   var filteredActiveCards = '';
