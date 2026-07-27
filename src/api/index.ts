@@ -1780,12 +1780,22 @@ async function evaluateProposal(proposal: any, rfp: any, env: any): Promise<any>
   // Step 1: Try to get text from DB fields (fast path — already extracted at upload time)
   let proposalText = extractProposalText(proposal)
 
-  // Step 2: If DB text fields are empty, fetch PDFs from R2 via the sidecar
+  // Step 2: If DB text fields are empty, fetch PDFs from R2 via the sidecar.
+  // IMPORTANT: skip the commercial PDF here — it is fetched separately in /evaluate-budget.
+  // Fetching both large PDFs (15MB technical + 9MB commercial) serially exceeds the 30s limit.
   if (proposalText.length < 200) {
     const textParts: string[] = []
     try {
       const atts: any[] = JSON.parse(proposal.proposal_attachments || '[]')
-      for (const att of atts) {
+      // Prefer the technical attachment; skip anything labelled 'commercial'
+      const scoringAtts = atts.filter((a: any) => {
+        const lbl = (a.label || '').toLowerCase()
+        const fn  = (a.filename || '').toLowerCase()
+        return !lbl.includes('commercial') && !fn.includes('commercial')
+      })
+      // Fall back to all attachments only if there is no non-commercial one
+      const attsToFetch = scoringAtts.length > 0 ? scoringAtts : atts.slice(0, 1)
+      for (const att of attsToFetch) {
         if (!att.r2_key) continue
         const pdfUrl = `https://a7b32759-e743-4139-9bb0-4bae44886667.vip.gensparksite.com/api/proposals/pdf/${encodeURIComponent(att.r2_key)}`
         // Cap pages to avoid OOM on VPS — large PDFs (>10MB) get fewer pages
@@ -1897,6 +1907,7 @@ Respond ONLY with JSON: {"is_proposal": true|false, "reason": "<one sentence, ma
   // Priority 4: last-resort line extraction
   let glossary: any[] = []
   try { glossary = JSON.parse(rfp.requirement_glossary || '[]') } catch (_) {}
+  console.log(`[eval-debug] proposalId=${proposal.id} proposalText.length=${proposalText.length} rfp.content.length=${(rfp.content||'').length} DB glossary count=${glossary.length}`)
 
   if (!glossary.length && rfp.content) {
     // Parse the Technical Requirements table from the generated RFP HTML.
@@ -1967,14 +1978,18 @@ Respond ONLY with JSON: {"is_proposal": true|false, "reason": "<one sentence, ma
       // If we successfully parsed requirements from the document, save them to DB
       // so future evaluations skip this parsing step entirely
       if (glossary.length > 0) {
+        console.log(`[eval-debug] HTML parse SUCCESS: ${glossary.length} requirements extracted from rfps.content`)
+        glossary.forEach((g: any, i: number) => console.log(`[eval-debug]   req[${i}] mandatory=${g.mandatory} text="${g.text.slice(0,80)}"`))
         try {
           await env.DB.prepare(
             `UPDATE rfps SET requirement_glossary=?, updated_at=datetime('now') WHERE id=?`
           ).bind(JSON.stringify(glossary), rfp.id).run()
         } catch (_) { /* non-fatal */ }
+      } else {
+        console.log(`[eval-debug] HTML parse found 0 requirements — sectionStart=${sectionStart} content_len=${(rfp.content||'').length}`)
       }
-    } catch (_) {
-      // HTML parsing failed — fall through to LLM extraction
+    } catch (htmlErr: any) {
+      console.log(`[eval-debug] HTML parse EXCEPTION: ${htmlErr?.message || htmlErr}`)
     }
   }
 
@@ -2052,8 +2067,12 @@ ${cleanedRfpText}`,
       id: req.id, text: req.text, mandatory: req.mandatory,
       compliance_met: complianceMet, ai_score: 0, justification: 'Not addressed',
     })
-    if (complianceMet && proposalText.length > 50) reqsToScore.push(req)
+    if (complianceMet) reqsToScore.push(req)
   }
+
+  console.log(`[eval-debug] glossary final count=${glossary.length} reqsToScore=${reqsToScore.length} proposalText.length=${proposalText.length}`)
+  glossary.slice(0, 5).forEach((g: any) => console.log(`[eval-debug]   glossary req: mandatory=${g.mandatory} "${g.text.slice(0,80)}"`))
+  complianceBreakdown.forEach((r: any) => console.log(`[eval-debug]   compliance: id=${r.id} met=${r.compliance_met}`))
 
   // ── Step 2: single batch LLM call for all requirements (avoids serial timeout) ──
   if (reqsToScore.length > 0) {
@@ -2066,6 +2085,8 @@ ${cleanedRfpText}`,
 
     try {
       const reqList = reqsToScore.map((r, i) => `${i + 1}. [${r.id}] ${r.text}`).join('\n')
+      console.log(`[eval-debug] Calling batch LLM with ${reqsToScore.length} reqs, proposalSample.length=${proposalSample.length}`)
+      console.log(`[eval-debug] reqList:\n${reqList}`)
       const rawBatch = await callLLM(
         'You are an expert procurement evaluator. Score how well the vendor proposal addresses each listed requirement.',
         `Requirements to evaluate:
@@ -2085,6 +2106,7 @@ Return ONLY a JSON array — no markdown, no extra text:
         env, 'gpt-5-mini', 1500
       )
 
+      console.log(`[eval-debug] Batch LLM raw response (${rawBatch.length} chars): ${rawBatch.slice(0, 500)}`)
       // Parse batch result
       const arrMatch = rawBatch.match(/\[[\s\S]*\]/)
       if (arrMatch) {
@@ -2101,11 +2123,13 @@ Return ONLY a JSON array — no markdown, no extra text:
           }
         }
       }
-    } catch (_) {
-      // Batch failed — mark all as scored=0 with error note (already default)
+    } catch (batchErr: any) {
+      // Batch failed — store the actual error message so it is visible in the UI
+      console.log(`[eval-debug] BATCH SCORING EXCEPTION: ${batchErr?.message || batchErr}`)
+      const errMsg = `AI scoring failed: ${batchErr?.message || batchErr}`
       for (const entry of complianceBreakdown) {
         if (entry.compliance_met) {
-          entry.justification = 'AI scoring unavailable — manual review required'
+          entry.justification = errMsg
         }
       }
     }
@@ -2321,13 +2345,17 @@ apiRouter.post('/rfps/:rfpId/proposals/:proposalId/evaluate', async (c) => {
 
 // ── POST /api/rfps/:rfpId/proposals/:proposalId/evaluate-budget ──────────────
 // Standalone budget enrichment: runs sidecar OCR on the commercial PDF attachment,
-// then runs the 6-step analytical LLM prompt. Designed as a separate request so
-// the main /evaluate stays well within the 30s Worker CPU limit.
-// The frontend should fire this call immediately after /evaluate returns.
+// then runs the 6-step analytical LLM prompt. Separate request to avoid 30s limit.
+// Returns full debug info: chosen file, full OCR text, full prompt, full LLM response.
 apiRouter.post('/rfps/:rfpId/proposals/:proposalId/evaluate-budget', async (c) => {
   const rfpId = c.req.param('rfpId')
   const proposalId = c.req.param('proposalId')
   const db = c.env.DB
+
+  // Collect debug log entries throughout the process
+  const debugLog: string[] = []
+  const dbg = (msg: string) => { debugLog.push(`[${new Date().toISOString()}] ${msg}`); console.log('[budget-debug]', msg) }
+
   try {
     const proposal = await db.prepare(`
       SELECT p.*, v.name as vendor_name FROM proposals p
@@ -2339,31 +2367,53 @@ apiRouter.post('/rfps/:rfpId/proposals/:proposalId/evaluate-budget', async (c) =
     let duration: string | null = proposal.proposed_duration || null
 
     // ── Step 1: Identify the commercial PDF attachment ────────────────────────
+    dbg(`STEP 1: parsing proposal_attachments`)
     let commercialText = ''
     const atts: any[] = JSON.parse(proposal.proposal_attachments || '[]')
+    dbg(`  Total attachments: ${atts.length}`)
+    atts.forEach((a: any, i: number) => {
+      dbg(`  [${i}] filename="${a.filename}" label="${a.label}" size=${a.size_bytes} r2_key="${a.r2_key}"`)
+    })
+
     const commercialAtt = atts.find((a: any) =>
       (a.label || '').toLowerCase().includes('commercial') ||
       (a.filename || '').toLowerCase().includes('commercial')
     ) || atts[0]
 
+    dbg(`  CHOSEN file: filename="${commercialAtt?.filename}" label="${commercialAtt?.label}" r2_key="${commercialAtt?.r2_key}"`)
+
     if (commercialAtt?.r2_key) {
       const pdfUrl = `https://a7b32759-e743-4139-9bb0-4bae44886667.vip.gensparksite.com/api/proposals/pdf/${encodeURIComponent(commercialAtt.r2_key)}`
+      dbg(`STEP 2: calling sidecar with pdf_url="${pdfUrl}" maxPages=100`)
       try {
         const result = await callSidecar(pdfUrl, c.env, 100)
-        if (result && result.chars >= 100) commercialText = result.text
-      } catch (_) {}
+        dbg(`  Sidecar result: chars=${result?.chars} pages_extracted=${result?.pages_extracted} pages_total=${result?.pages_total}`)
+        if (result && result.chars >= 100) {
+          commercialText = result.text
+          dbg(`  OCR TEXT (full, ${commercialText.length} chars):\n${'='.repeat(60)}\n${commercialText}\n${'='.repeat(60)}`)
+        } else {
+          dbg(`  WARNING: sidecar returned <100 chars — OCR may have failed (image-only PDF with no text layer?)`)
+          dbg(`  Raw sidecar response: ${JSON.stringify(result)}`)
+        }
+      } catch (sidecarErr: any) {
+        dbg(`  ERROR calling sidecar: ${sidecarErr?.message || sidecarErr}`)
+      }
+    } else {
+      dbg(`  SKIP: no r2_key on chosen attachment`)
     }
 
     // Fall back to stored text fields if sidecar returned nothing
     const proposalText = commercialText.length > 100 ? commercialText : extractProposalText(proposal)
+    dbg(`  Text source: ${commercialText.length > 100 ? 'commercial_pdf_ocr' : 'stored_fields'}, length=${proposalText.length}`)
+
     if (proposalText.length < 50) {
-      return c.json({ ok: false, error: 'No text extracted from commercial PDF', budget: null, duration })
+      dbg(`  ABORT: no usable text (length ${proposalText.length} < 50)`)
+      return c.json({ ok: false, error: 'No text extracted from commercial PDF', budget: null, duration, debug_log: debugLog })
     }
 
     // ── Step 2: 6-step analytical budget prompt ───────────────────────────────
-    const rawBudget = await callLLM(
-      'You are a financial extraction analyst. I will provide you with the raw OCR text of a commercial proposal.',
-      `Your task is to find, categorize, and sum all costs to calculate the total budget.
+    const systemPrompt = 'You are a financial extraction analyst. I will provide you with the raw OCR text of a commercial proposal.'
+    const userPrompt = `Your task is to find, categorize, and sum all costs to calculate the total budget.
 Do not assume any specific section titles (like "MVP1" or "Tableau"). Instead, use the following logical methodology to parse the text dynamically:
 
 **Step 1: Identify all monetary values**
@@ -2408,15 +2458,28 @@ Return ONLY valid JSON (no markdown, no extra text):
 }
 
 **Here is the OCR text to analyze:**
-${proposalText.slice(0, 14000)}`,
-      c.env, 'gpt-5-mini', 1200
-    )
+${proposalText.slice(0, 14000)}`
+
+    dbg(`STEP 3: calling LLM with full prompt`)
+    dbg(`  SYSTEM PROMPT:\n${systemPrompt}`)
+    dbg(`  USER PROMPT (${userPrompt.length} chars):\n${'='.repeat(60)}\n${userPrompt}\n${'='.repeat(60)}`)
+
+    const rawBudget = await callLLM(systemPrompt, userPrompt, c.env, 'gpt-5-mini', 1200)
+
+    dbg(`  LLM RAW RESPONSE (${rawBudget.length} chars):\n${'='.repeat(60)}\n${rawBudget}\n${'='.repeat(60)}`)
 
     // ── Step 3: parse LLM response ────────────────────────────────────────────
     const jsonMatch = rawBudget.match(/\{[\s\S]*\}/)
     if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0])
+      let parsed: any
+      try { parsed = JSON.parse(jsonMatch[0]) } catch (parseErr: any) {
+        dbg(`  ERROR parsing LLM JSON: ${parseErr?.message}`)
+        dbg(`  Matched JSON string: ${jsonMatch[0].slice(0, 500)}`)
+        return c.json({ ok: false, error: 'LLM JSON parse failed', raw_response: rawBudget, debug_log: debugLog })
+      }
+      dbg(`  Parsed LLM JSON: ${JSON.stringify(parsed)}`)
       const bestTotal = parsed.tax_inclusive_total || parsed.total_with_support || parsed.total_fixed
+      dbg(`  bestTotal=${bestTotal} (tax_inclusive=${parsed.tax_inclusive_total}, with_support=${parsed.total_with_support}, fixed=${parsed.total_fixed})`)
       if (bestTotal && bestTotal > 0 && bestTotal < 1e10) {
         budget = {
           amount: Math.round(bestTotal),
@@ -2425,6 +2488,8 @@ ${proposalText.slice(0, 14000)}`,
         }
       }
       if (parsed.duration && typeof parsed.duration === 'string') duration = parsed.duration
+      dbg(`  Final budget: amount=${budget.amount} currency=${budget.currency} confidence=${budget.confidence}`)
+      dbg(`  Duration: ${duration}`)
 
       // ── Step 4: patch the saved evaluation_data and top-level columns ─────
       const rfpBudget = 0  // commercial score recalc happens at main eval time
@@ -2462,12 +2527,15 @@ ${proposalText.slice(0, 14000)}`,
         missing_info: parsed.missing_info || [],
         text_source: commercialText.length > 100 ? 'commercial_pdf_ocr' : 'stored_text',
         text_chars: proposalText.length,
+        debug_log: debugLog,
       })
     }
 
-    return c.json({ ok: false, error: 'LLM returned no parseable JSON', raw: rawBudget.slice(0, 300) })
+    dbg(`LLM returned no parseable JSON. Raw (first 500): ${rawBudget.slice(0, 500)}`)
+    return c.json({ ok: false, error: 'LLM returned no parseable JSON', raw_response: rawBudget, debug_log: debugLog })
   } catch (e: any) {
-    return c.json({ ok: false, error: e?.message }, 500)
+    dbg(`TOP-LEVEL ERROR: ${e?.message || e}`)
+    return c.json({ ok: false, error: e?.message, debug_log: debugLog }, 500)
   }
 })
 
