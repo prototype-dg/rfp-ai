@@ -1154,7 +1154,7 @@ let appState = {
   previousPage: null,
   unreadQA: 0,         // count of unanswered questions (> 0 shows badge on Q&A tab)
   unreadProposals: 0,  // count of new portal submissions (> 0 shows badge on Proposals tab)
-  unreadComms: 0,      // 4.3 — count of new vendor comms messages
+  unreadVendors: 0,    // count of new vendor events (declines + incoming emails) → red badge on Vendors tab
   notifications: [],
   unreadNotifications: 0,
 };
@@ -1654,9 +1654,9 @@ function renderRfpTabs(activeTab, rfpId, qaBadge) {
     // Proposals badge
     const propsBadgeCount = appState.unreadProposals || 0;
     const propsBadgeHtml = (tab.id === 'proposals' && propsBadgeCount > 0) ? '<span style="background:#ef4444;color:white;border-radius:10px;padding:1px 6px;font-size:0.68rem;margin-left:4px;font-weight:700">' + propsBadgeCount + '</span>' : '';
-    // 4.3 — Comms (vendors tab) badge
-    const commsBadgeCount = appState.unreadComms || 0;
-    const commsBadgeHtml = (tab.id === 'vendors' && commsBadgeCount > 0) ? '<span style="background:var(--cpc-gold);color:white;border-radius:10px;padding:1px 6px;font-size:0.68rem;margin-left:4px;font-weight:700">' + commsBadgeCount + '</span>' : '';
+    // Vendors tab badge — new declines or incoming emails
+    const vendorsBadgeCount = appState.unreadVendors || 0;
+    const commsBadgeHtml = (tab.id === 'vendors' && vendorsBadgeCount > 0) ? '<span style="background:#ef4444;color:white;border-radius:10px;padding:1px 6px;font-size:0.68rem;margin-left:4px;font-weight:700">' + vendorsBadgeCount + '</span>' : '';
     html += '<div class="rfp-tab' + (isActive ? ' active' : '') + '" onclick="switchRfpTab(\x27' + tab.id + '\x27,' + rfpId + ')">';
     html += '<i class="fas ' + tab.icon + '"></i>' + escHtml(tab.label) + qaBadgeHtml + propsBadgeHtml + commsBadgeHtml;
     html += '</div>';
@@ -1675,6 +1675,10 @@ function switchRfpTab(tab, rfpId) {
   // Clear proposals badge when user navigates to the Proposals tab
   if (tab === 'proposals' && appState.unreadProposals) {
     appState.unreadProposals = 0;
+  }
+  // Clear vendors badge when user navigates to the Vendors tab
+  if (tab === 'vendors' && appState.unreadVendors) {
+    appState.unreadVendors = 0;
   }
   renderRfpTabs(tab, rfpId, appState.unreadQA);
   const rfp = appState.currentRfp;
@@ -3926,8 +3930,13 @@ async function silentCheckInbox(rfpId) {
         senderName + ' has declined participation in this RFP. Shown in red in Vendors tab.',
         rfpId, 'vendors', newestVendorId
       );
-      showToast(senderName + ' declined participation in this RFP.', 'warning', 5000);
+      showToast('⛔ ' + senderName + ' declined participation in this RFP.', 'warning', 5000);
+      // Increment vendors badge (only if user isn't already on Vendors tab)
+      if (appState.currentRfpTab !== 'vendors') {
+        appState.unreadVendors = (appState.unreadVendors || 0) + 1;
+      }
       if (appState.currentRfpId && String(appState.currentRfpId) === String(rfpId)) {
+        renderRfpTabs(appState.currentRfpTab, rfpId, appState.unreadQA);
         if (appState.currentRfpTab === 'vendors') rfpTabs.vendors(rfpId, appState.currentRfp);
       }
 
@@ -3970,9 +3979,13 @@ async function silentCheckInbox(rfpId) {
       }
 
     } else {
+      // Generic incoming vendor email — bump vendors badge
       addNotification('email', '📨 New Email from ' + senderName,
         (newest && newest.subject ? newest.subject : 'No Subject') + attachBadge,
         rfpId, null, newestVendorId);
+      if (appState.currentRfpTab !== 'vendors') {
+        appState.unreadVendors = (appState.unreadVendors || 0) + newEmails.length;
+      }
       if (appState.currentRfpId && String(appState.currentRfpId) === String(rfpId)) {
         renderRfpTabs(appState.currentRfpTab, rfpId, appState.unreadQA);
       }
