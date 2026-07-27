@@ -5261,49 +5261,38 @@ async function evaluateSingleProposal(rfpId, proposalId) {
     var btn = document.getElementById(id);
     if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> ' + t('prop_evaluating'); }
   });
+
   try {
-    showToast('🤖 AI evaluation running — scoring compliance & quality…', 'info', 20000);
+    showToast('🤖 Sending PDF to OCR engine — this may take 1–2 minutes…', 'info', 120000);
+
     var result = await apiCall('POST', '/rfps/' + rfpId + '/proposals/' + proposalId + '/evaluate', {});
-    if (result && (result.ok || result.evaluation_data || result.compliance_breakdown)) {
-      showToast('✅ Compliance evaluation complete! Extracting budget from commercial PDF…', 'success', 6000);
-      // Update local proposal state with scalar fields
+
+    // ── Fast path: got scores immediately (text was already in DB) ─────────
+    if (result && result.ok && result.status !== 'processing' && result.compliance_breakdown) {
+      showToast('✅ Evaluation complete! Extracting budget…', 'success', 6000);
       var p = appState.proposals ? appState.proposals.find(function(pp){ return pp.id === proposalId; }) : null;
       if (p) {
         p.ai_recommendation    = result.recommendation;
         p.ai_total_score       = result.total_score;
         p.ai_validation_status = result.validation_status;
         p.ai_evaluated_at      = result.evaluated_at || new Date().toISOString();
+        _renderProposalPanel(p, result.evaluation_data || result);
       }
-      // Re-render panel with fresh eval data (budget will be null/low confidence for now)
-      if (p) _renderProposalPanel(p, result.evaluation_data);
-
-      // ── Fire budget enrichment as a background call ───────────────────────
-      // This is a separate Worker request that does sidecar OCR + analytical LLM
-      // on the commercial PDF. It will update the DB when done.
-      apiCall('POST', '/rfps/' + rfpId + '/proposals/' + proposalId + '/evaluate-budget', {})
-        .then(function(budgetResult) {
-          if (budgetResult && budgetResult.ok && budgetResult.budget_amount) {
-            showToast('💰 Budget extracted: ' + (budgetResult.budget_currency || 'AED') + ' ' + budgetResult.budget_amount.toLocaleString() + ' (confidence: ' + Math.round((budgetResult.budget_confidence || 0) * 100) + '%)', 'success', 8000);
-            // Refresh the panel with updated budget from DB
-            if (p) {
-              p.budget_amount   = budgetResult.budget_amount;
-              p.budget_currency = budgetResult.budget_currency;
-              p.proposed_duration = budgetResult.duration || p.proposed_duration;
-            }
-            apiCall('GET', '/rfps/' + rfpId + '/proposals/' + proposalId + '/evaluation')
-              .then(function(ev) { if (p && ev && ev.evaluation_data) _renderProposalPanel(p, ev.evaluation_data); })
-              .catch(function() {});
-          } else if (budgetResult && !budgetResult.ok) {
-            showToast('⚠️ Budget extraction: ' + (budgetResult.error || 'no pricing found in commercial PDF'), 'info', 8000);
-          }
-        })
-        .catch(function(e) {
-          showToast('⚠️ Budget extraction failed: ' + (e.message || e), 'info', 6000);
-        });
-
-    } else {
-      showToast('Evaluation finished — refresh to see results.', 'info');
+      // Fire budget extraction as separate async call
+      _fireBudgetExtraction(rfpId, proposalId);
+      return;
     }
+
+    // ── Async path: 202 — OCR is running, start polling ───────────────────
+    if (result && result.status === 'processing') {
+      showToast('🔍 OCR started! Polling for results every 5 seconds…', 'info', 120000);
+      _pollEvaluationResult(rfpId, proposalId, 'scoring');
+      return;
+    }
+
+    // Unexpected response
+    showToast('Evaluation started — refresh in a minute to see results.', 'info');
+
   } catch(e) {
     showToast('Evaluation failed: ' + (e.message || e), 'error');
     ['evalSingleBtn_' + proposalId, 'evalSingleBtnFooter_' + proposalId].forEach(function(id) {
@@ -5311,6 +5300,104 @@ async function evaluateSingleProposal(rfpId, proposalId) {
       if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-robot"></i> ' + t('panel_eval_footer_btn'); }
     });
   }
+}
+
+// ── Poll /evaluation until ai_evaluated_at appears ────────────────────────────
+function _pollEvaluationResult(rfpId, proposalId, phase) {
+  var maxAttempts = 40; // 40 × 5s = 3m20s max wait
+  var attempts = 0;
+  var interval = setInterval(async function() {
+    attempts++;
+    try {
+      var ev = await apiCall('GET', '/rfps/' + rfpId + '/proposals/' + proposalId + '/evaluation');
+      if (ev && ev.ai_evaluated_at && ev.evaluation_data) {
+        clearInterval(interval);
+        showToast('✅ Evaluation complete! Score: ' + (ev.ai_total_score || 0) + '/100', 'success', 8000);
+        // Update local proposal state
+        var p = appState.proposals ? appState.proposals.find(function(pp){ return pp.id === proposalId; }) : null;
+        if (p) {
+          p.ai_recommendation    = ev.evaluation_data.recommendation || ev.ai_recommendation;
+          p.ai_total_score       = ev.ai_total_score;
+          p.ai_validation_status = ev.ai_validation_status;
+          p.ai_evaluated_at      = ev.ai_evaluated_at;
+          _renderProposalPanel(p, ev.evaluation_data);
+        }
+        // Now fire budget extraction
+        _fireBudgetExtraction(rfpId, proposalId);
+      } else if (attempts >= maxAttempts) {
+        clearInterval(interval);
+        showToast('⚠️ OCR is taking longer than expected. Refresh the page in a few minutes.', 'info', 10000);
+      }
+      // else: still processing, keep polling
+    } catch(e) {
+      // ignore transient errors, keep polling
+    }
+  }, 5000);
+}
+
+// ── Fire budget extraction (async, then poll for result) ──────────────────────
+function _fireBudgetExtraction(rfpId, proposalId) {
+  apiCall('POST', '/rfps/' + rfpId + '/proposals/' + proposalId + '/evaluate-budget', {})
+    .then(function(budgetResult) {
+      if (!budgetResult) return;
+
+      // Fast path: budget extracted immediately (cached OCR text or stored fields)
+      if (budgetResult.ok && budgetResult.status !== 'processing' && budgetResult.budget_amount) {
+        showToast('💰 Budget: ' + (budgetResult.budget_currency || 'AED') + ' ' + budgetResult.budget_amount.toLocaleString() + ' (confidence ' + Math.round((budgetResult.budget_confidence || 0) * 100) + '%)', 'success', 8000);
+        _refreshPanelFromDB(rfpId, proposalId);
+        return;
+      }
+
+      // Async path: 202 — budget OCR started, poll for it
+      if (budgetResult.status === 'processing') {
+        showToast('💰 Budget OCR started — will update when ready…', 'info', 60000);
+        _pollBudgetResult(rfpId, proposalId);
+      }
+    })
+    .catch(function(e) {
+      showToast('⚠️ Budget extraction: ' + (e.message || e), 'info', 6000);
+    });
+}
+
+// ── Poll until budget_amount appears in DB ────────────────────────────────────
+function _pollBudgetResult(rfpId, proposalId) {
+  var maxAttempts = 30; // 30 × 6s = 3 min max
+  var attempts = 0;
+  var lastBudget = null;
+  var interval = setInterval(async function() {
+    attempts++;
+    try {
+      var ev = await apiCall('GET', '/rfps/' + rfpId + '/proposals/' + proposalId + '/evaluation');
+      var budget = ev && ev.evaluation_data && ev.evaluation_data.budget_extracted;
+      if (budget && budget !== lastBudget) {
+        clearInterval(interval);
+        var currency = (ev.evaluation_data && ev.evaluation_data.budget_currency) || 'AED';
+        var conf = (ev.evaluation_data && ev.evaluation_data.budget_confidence) || 0;
+        showToast('💰 Budget extracted: ' + currency + ' ' + budget.toLocaleString() + ' (confidence ' + Math.round(conf * 100) + '%)', 'success', 8000);
+        _refreshPanelFromDB(rfpId, proposalId);
+      } else if (attempts >= maxAttempts) {
+        clearInterval(interval);
+        showToast('⚠️ Budget extraction taking longer than expected — check back later.', 'info', 8000);
+      }
+    } catch(e) { /* keep polling */ }
+  }, 6000);
+}
+
+// ── Helper: reload evaluation from DB and re-render panel ────────────────────
+async function _refreshPanelFromDB(rfpId, proposalId) {
+  try {
+    var ev = await apiCall('GET', '/rfps/' + rfpId + '/proposals/' + proposalId + '/evaluation');
+    var p = appState.proposals ? appState.proposals.find(function(pp){ return pp.id === proposalId; }) : null;
+    if (p && ev && ev.evaluation_data) {
+      p.ai_recommendation    = ev.evaluation_data.recommendation || ev.ai_recommendation || p.ai_recommendation;
+      p.ai_total_score       = ev.ai_total_score != null ? ev.ai_total_score : p.ai_total_score;
+      p.ai_validated_at      = ev.ai_evaluated_at || p.ai_evaluated_at;
+      if (ev.evaluation_data.budget_extracted) p.budget_amount = ev.evaluation_data.budget_extracted;
+      if (ev.evaluation_data.budget_currency)  p.budget_currency = ev.evaluation_data.budget_currency;
+      if (ev.evaluation_data.duration_extracted) p.proposed_duration = ev.evaluation_data.duration_extracted;
+      _renderProposalPanel(p, ev.evaluation_data);
+    }
+  } catch(e) { /* non-fatal */ }
 }
 
 // ── Manual budget override ─────────────────────────────────────────────────────

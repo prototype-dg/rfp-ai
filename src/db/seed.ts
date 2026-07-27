@@ -198,6 +198,13 @@ export async function initDb(db: D1Database) {
     // questions.emailed_at — timestamp when Q&A answer was actually emailed to vendors via Send Answers
     // NULL = not yet sent; non-null = sent. Used for "published" count in status bar.
     `ALTER TABLE questions ADD COLUMN emailed_at TEXT`,
+    // async OCR job tracking — v27
+    // ocr_job_status: null | 'pending_scoring' | 'pending_budget' | 'done'
+    // ocr_job_text: raw OCR text from sidecar (stored so callback can score it)
+    // ocr_budget_text: raw OCR text from commercial PDF sidecar
+    `ALTER TABLE proposals ADD COLUMN ocr_job_status TEXT`,
+    `ALTER TABLE proposals ADD COLUMN ocr_job_text TEXT`,
+    `ALTER TABLE proposals ADD COLUMN ocr_budget_text TEXT`,
   ]
   for (const sql of alterMigrations) {
     try {

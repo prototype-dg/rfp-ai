@@ -10,6 +10,8 @@ const WORKER_VERSION = '2026-07-26-v41'
 // Calls the Python/pdfplumber sidecar running at api.cpc-rfp.website.
 // The sidecar fetches the PDF from the given URL and returns extracted text.
 // Requires env.PDF_SIDECAR_URL and env.PDF_SIDECAR_SECRET to be set as Worker secrets.
+
+// SYNC mode: waits for OCR result (use only for small/text-layer PDFs < 3MB)
 async function callSidecar(
   pdfUrl: string,
   env: any,
@@ -39,6 +41,50 @@ async function callSidecar(
   } catch (e: any) {
     console.error('[sidecar] fetch error:', e.message)
     return null
+  }
+}
+
+// ASYNC mode: fires sidecar with callback_url, returns immediately (202).
+// The sidecar will POST OCR results back to callbackUrl when done.
+// Returns true if the request was accepted, false on config/network error.
+async function callSidecarAsync(
+  pdfUrl: string,
+  env: any,
+  maxPages: number,
+  callbackUrl: string,
+  callbackSecret: string
+): Promise<boolean> {
+  const sidecarUrl = env?.PDF_SIDECAR_URL || (globalThis as any).PDF_SIDECAR_URL || ''
+  const sidecarSecret = env?.PDF_SIDECAR_SECRET || (globalThis as any).PDF_SIDECAR_SECRET || ''
+  if (!sidecarUrl || !sidecarSecret) {
+    console.warn('[sidecar-async] PDF_SIDECAR_URL or PDF_SIDECAR_SECRET not configured')
+    return false
+  }
+  try {
+    const res = await fetch(`${sidecarUrl}/extract-pdf`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${sidecarSecret}`,
+      },
+      body: JSON.stringify({
+        pdf_url: pdfUrl,
+        max_pages: maxPages,
+        callback_url: callbackUrl,
+        callback_secret: callbackSecret,
+      }),
+    })
+    if (!res.ok) {
+      const err = await res.text().catch(() => '')
+      console.error(`[sidecar-async] HTTP ${res.status}: ${err.slice(0, 200)}`)
+      return false
+    }
+    const body: any = await res.json()
+    console.log(`[sidecar-async] accepted async_mode=${body.async_mode} method=${body.method}`)
+    return true
+  } catch (e: any) {
+    console.error('[sidecar-async] fetch error:', e.message)
+    return false
   }
 }
 
@@ -2311,6 +2357,10 @@ apiRouter.post('/rfps/:id/proposals/evaluate-all', async (c) => {
 })
 
 // ── POST /api/rfps/:rfpId/proposals/:proposalId/evaluate — single evaluation ─
+// New async flow for image-based PDFs:
+//   1. If proposalText is available in DB → run scoring synchronously as before (fast path)
+//   2. If proposalText is empty → fire sidecar async with callback_url, return 202 immediately
+//      Sidecar will POST back to /api/callback/proposals/:id/ocr-complete when done
 apiRouter.post('/rfps/:rfpId/proposals/:proposalId/evaluate', async (c) => {
   const rfpId = c.req.param('rfpId')
   const proposalId = c.req.param('proposalId')
@@ -2324,37 +2374,182 @@ apiRouter.post('/rfps/:rfpId/proposals/:proposalId/evaluate', async (c) => {
     `).bind(proposalId, rfpId).first<any>()
     if (!proposal) return c.json({ error: 'Proposal not found' }, 404)
 
-    const evalData = await evaluateProposal(proposal, rfp, c.env)
+    // Fast path: text already in DB — score immediately
+    const existingText = extractProposalText(proposal)
+    if (existingText.length >= 200) {
+      console.log(`[evaluate] fast path: proposalText.length=${existingText.length}`)
+      const evalData = await evaluateProposal(proposal, rfp, c.env)
+      await db.prepare(`
+        UPDATE proposals SET
+          evaluation_data=?, ai_total_score=?, ai_recommendation=?,
+          ai_validation_status=?, ai_evaluated_at=datetime('now'),
+          ai_compliance_score=?, ai_quality_score=?, ai_commercial_score=?,
+          ocr_job_status='done', updated_at=datetime('now')
+        WHERE id=?
+      `).bind(
+        JSON.stringify(evalData), evalData.total_score, evalData.recommendation,
+        evalData.validation_status, evalData.compliance_score, evalData.quality_score,
+        evalData.commercial_score, proposal.id
+      ).run()
+      return c.json({ ok: true, ...evalData })
+    }
+
+    // Async path: no text in DB — find the technical PDF and fire sidecar with callback
+    console.log(`[evaluate] async path: no text in DB, firing sidecar with callback`)
+    const atts: any[] = JSON.parse(proposal.proposal_attachments || '[]')
+    const scoringAtts = atts.filter((a: any) => {
+      const lbl = (a.label || '').toLowerCase()
+      const fn  = (a.filename || '').toLowerCase()
+      return !lbl.includes('commercial') && !fn.includes('commercial')
+    })
+    const attToFetch = scoringAtts.length > 0 ? scoringAtts[0] : atts[0]
+
+    if (!attToFetch?.r2_key) {
+      // No attachment at all — run evaluate with empty text (will use fallback glossary)
+      const evalData = await evaluateProposal(proposal, rfp, c.env)
+      await db.prepare(`
+        UPDATE proposals SET
+          evaluation_data=?, ai_total_score=?, ai_recommendation=?,
+          ai_validation_status=?, ai_evaluated_at=datetime('now'),
+          ai_compliance_score=?, ai_quality_score=?, ai_commercial_score=?,
+          ocr_job_status='done', updated_at=datetime('now')
+        WHERE id=?
+      `).bind(
+        JSON.stringify(evalData), evalData.total_score, evalData.recommendation,
+        evalData.validation_status, evalData.compliance_score, evalData.quality_score,
+        evalData.commercial_score, proposal.id
+      ).run()
+      return c.json({ ok: true, ...evalData })
+    }
+
+    const pdfUrl = `https://a7b32759-e743-4139-9bb0-4bae44886667.vip.gensparksite.com/api/proposals/pdf/${encodeURIComponent(attToFetch.r2_key)}`
+    const workerBase = `https://a7b32759-e743-4139-9bb0-4bae44886667.vip.gensparksite.com/api`
+    const callbackUrl = `${workerBase}/callback/proposals/${proposalId}/ocr-complete?rfp_id=${rfpId}`
+    const callbackSecret = c.env.PDF_SIDECAR_SECRET || (globalThis as any).PDF_SIDECAR_SECRET || ''
+
+    // Mark as pending in DB so UI knows OCR is running
     await db.prepare(`
-      UPDATE proposals SET
-        evaluation_data=?, ai_total_score=?, ai_recommendation=?,
-        ai_validation_status=?, ai_evaluated_at=datetime('now'),
-        ai_compliance_score=?, ai_quality_score=?, ai_commercial_score=?,
-        updated_at=datetime('now')
-      WHERE id=?
-    `).bind(
-      JSON.stringify(evalData), evalData.total_score, evalData.recommendation,
-      evalData.validation_status, evalData.compliance_score, evalData.quality_score,
-      evalData.commercial_score, proposal.id
-    ).run()
-    return c.json({ ok: true, ...evalData })
+      UPDATE proposals SET ocr_job_status='pending_scoring', updated_at=datetime('now') WHERE id=?
+    `).bind(proposalId).run()
+
+    const fired = await callSidecarAsync(pdfUrl, c.env, 100, callbackUrl, callbackSecret)
+    if (!fired) {
+      // Sidecar config error — fall back to sync evaluate with empty text
+      const evalData = await evaluateProposal(proposal, rfp, c.env)
+      await db.prepare(`
+        UPDATE proposals SET
+          evaluation_data=?, ai_total_score=?, ai_recommendation=?,
+          ai_validation_status=?, ai_evaluated_at=datetime('now'),
+          ai_compliance_score=?, ai_quality_score=?, ai_commercial_score=?,
+          ocr_job_status='done', updated_at=datetime('now')
+        WHERE id=?
+      `).bind(
+        JSON.stringify(evalData), evalData.total_score, evalData.recommendation,
+        evalData.validation_status, evalData.compliance_score, evalData.quality_score,
+        evalData.commercial_score, proposal.id
+      ).run()
+      return c.json({ ok: true, ...evalData })
+    }
+
+    // Return 202 — OCR is running in background, client should poll
+    return c.json({
+      ok: true,
+      status: 'processing',
+      message: 'OCR started — proposal text is being extracted. Poll /evaluation to check progress.',
+      proposal_id: parseInt(proposalId),
+      ocr_job_status: 'pending_scoring',
+    }, 202)
+
   } catch (e: any) {
     return c.json({ ok: false, error: e?.message }, 500)
   }
 })
 
+// ── POST /api/callback/proposals/:proposalId/ocr-complete ─────────────────────
+// Called by the sidecar when OCR finishes (async callback pattern).
+// Receives the full OCR text, runs scoring, saves results to DB.
+apiRouter.post('/callback/proposals/:proposalId/ocr-complete', async (c) => {
+  const proposalId = c.req.param('proposalId')
+  const rfpId = c.req.query('rfp_id') || ''
+  const db = c.env.DB
+  const expectedSecret = c.env.PDF_SIDECAR_SECRET || (globalThis as any).PDF_SIDECAR_SECRET || ''
+
+  try {
+    const body: any = await c.req.json()
+    console.log(`[ocr-callback] received for proposalId=${proposalId} ok=${body.ok} chars=${body.chars}`)
+
+    // Verify callback secret to prevent spoofing
+    if (expectedSecret && body.callback_secret !== expectedSecret) {
+      console.error(`[ocr-callback] invalid callback_secret`)
+      return c.json({ error: 'Unauthorized' }, 401)
+    }
+
+    if (!body.ok) {
+      console.error(`[ocr-callback] sidecar reported error: ${body.error}`)
+      await db.prepare(`
+        UPDATE proposals SET ocr_job_status='error', updated_at=datetime('now') WHERE id=?
+      `).bind(proposalId).run()
+      return c.json({ ok: false, error: body.error })
+    }
+
+    const ocrText: string = body.text || ''
+    console.log(`[ocr-callback] OCR text: ${ocrText.length} chars, pages ${body.pages_extracted}/${body.pages_total}`)
+
+    // Fetch full proposal + RFP rows
+    const proposal = await db.prepare(`
+      SELECT p.*, v.name as vendor_name FROM proposals p
+      LEFT JOIN vendors v ON p.vendor_id = v.id WHERE p.id=?
+    `).bind(proposalId).first<any>()
+    if (!proposal) return c.json({ error: 'Proposal not found' }, 404)
+
+    const rfp = rfpId
+      ? await db.prepare('SELECT * FROM rfps WHERE id=?').bind(rfpId).first<any>()
+      : await db.prepare('SELECT * FROM rfps WHERE id=?').bind(proposal.rfp_id).first<any>()
+    if (!rfp) return c.json({ error: 'RFP not found' }, 404)
+
+    // Store OCR text on proposal so evaluateProposal() can use it directly
+    await db.prepare(`
+      UPDATE proposals SET ocr_job_text=?, updated_at=datetime('now') WHERE id=?
+    `).bind(ocrText.slice(0, 50000), proposalId).run()
+
+    // Patch proposal object in memory so evaluateProposal sees the OCR text
+    const patchedProposal = { ...proposal, executive_summary: ocrText.slice(0, 50000) }
+
+    // Run full scoring (fast — no sidecar call needed, text already in hand)
+    const evalData = await evaluateProposal(patchedProposal, rfp, c.env)
+
+    await db.prepare(`
+      UPDATE proposals SET
+        evaluation_data=?, ai_total_score=?, ai_recommendation=?,
+        ai_validation_status=?, ai_evaluated_at=datetime('now'),
+        ai_compliance_score=?, ai_quality_score=?, ai_commercial_score=?,
+        ocr_job_status='done', updated_at=datetime('now')
+      WHERE id=?
+    `).bind(
+      JSON.stringify(evalData), evalData.total_score, evalData.recommendation,
+      evalData.validation_status, evalData.compliance_score, evalData.quality_score,
+      evalData.commercial_score, proposalId
+    ).run()
+
+    console.log(`[ocr-callback] scoring complete: score=${evalData.total_score} recommendation=${evalData.recommendation}`)
+    return c.json({ ok: true, score: evalData.total_score, recommendation: evalData.recommendation })
+
+  } catch (e: any) {
+    console.error(`[ocr-callback] error: ${e?.message}`)
+    await db.prepare(`
+      UPDATE proposals SET ocr_job_status='error', updated_at=datetime('now') WHERE id=?
+    `).bind(proposalId).run()
+    return c.json({ ok: false, error: e?.message }, 500)
+  }
+})
+
 // ── POST /api/rfps/:rfpId/proposals/:proposalId/evaluate-budget ──────────────
-// Standalone budget enrichment: runs sidecar OCR on the commercial PDF attachment,
-// then runs the 6-step analytical LLM prompt. Separate request to avoid 30s limit.
-// Returns full debug info: chosen file, full OCR text, full prompt, full LLM response.
+// Async budget enrichment: fires sidecar OCR on the commercial PDF with callback_url.
+// Returns 202 immediately. Sidecar calls back to /callback/proposals/:id/budget-complete.
 apiRouter.post('/rfps/:rfpId/proposals/:proposalId/evaluate-budget', async (c) => {
   const rfpId = c.req.param('rfpId')
   const proposalId = c.req.param('proposalId')
   const db = c.env.DB
-
-  // Collect debug log entries throughout the process
-  const debugLog: string[] = []
-  const dbg = (msg: string) => { debugLog.push(`[${new Date().toISOString()}] ${msg}`); console.log('[budget-debug]', msg) }
 
   try {
     const proposal = await db.prepare(`
@@ -2363,57 +2558,110 @@ apiRouter.post('/rfps/:rfpId/proposals/:proposalId/evaluate-budget', async (c) =
     `).bind(proposalId, rfpId).first<any>()
     if (!proposal) return c.json({ error: 'Proposal not found' }, 404)
 
-    let budget = { amount: null as number | null, currency: 'AED', confidence: 0.0 }
-    let duration: string | null = proposal.proposed_duration || null
+    // If we already have cached OCR budget text, skip sidecar and run LLM directly
+    if (proposal.ocr_budget_text && proposal.ocr_budget_text.length > 100) {
+      console.log(`[eval-budget] using cached ocr_budget_text (${proposal.ocr_budget_text.length} chars)`)
+      const result = await runBudgetLLM(proposal.ocr_budget_text, proposal, db, c.env)
+      return c.json({ ok: true, ...result, text_source: 'cached_ocr' })
+    }
 
-    // ── Step 1: Identify the commercial PDF attachment ────────────────────────
-    dbg(`STEP 1: parsing proposal_attachments`)
-    let commercialText = ''
+    // Find commercial PDF attachment
     const atts: any[] = JSON.parse(proposal.proposal_attachments || '[]')
-    dbg(`  Total attachments: ${atts.length}`)
-    atts.forEach((a: any, i: number) => {
-      dbg(`  [${i}] filename="${a.filename}" label="${a.label}" size=${a.size_bytes} r2_key="${a.r2_key}"`)
-    })
-
     const commercialAtt = atts.find((a: any) =>
       (a.label || '').toLowerCase().includes('commercial') ||
       (a.filename || '').toLowerCase().includes('commercial')
     ) || atts[0]
 
-    dbg(`  CHOSEN file: filename="${commercialAtt?.filename}" label="${commercialAtt?.label}" r2_key="${commercialAtt?.r2_key}"`)
+    console.log(`[eval-budget] chosen attachment: filename="${commercialAtt?.filename}" label="${commercialAtt?.label}"`)
 
-    if (commercialAtt?.r2_key) {
-      const pdfUrl = `https://a7b32759-e743-4139-9bb0-4bae44886667.vip.gensparksite.com/api/proposals/pdf/${encodeURIComponent(commercialAtt.r2_key)}`
-      dbg(`STEP 2: calling sidecar with pdf_url="${pdfUrl}" maxPages=100`)
-      try {
-        const result = await callSidecar(pdfUrl, c.env, 100)
-        dbg(`  Sidecar result: chars=${result?.chars} pages_extracted=${result?.pages_extracted} pages_total=${result?.pages_total}`)
-        if (result && result.chars >= 100) {
-          commercialText = result.text
-          dbg(`  OCR TEXT (full, ${commercialText.length} chars):\n${'='.repeat(60)}\n${commercialText}\n${'='.repeat(60)}`)
-        } else {
-          dbg(`  WARNING: sidecar returned <100 chars — OCR may have failed (image-only PDF with no text layer?)`)
-          dbg(`  Raw sidecar response: ${JSON.stringify(result)}`)
-        }
-      } catch (sidecarErr: any) {
-        dbg(`  ERROR calling sidecar: ${sidecarErr?.message || sidecarErr}`)
-      }
-    } else {
-      dbg(`  SKIP: no r2_key on chosen attachment`)
+    if (!commercialAtt?.r2_key) {
+      // No PDF — run LLM on stored text fields
+      const storedText = extractProposalText(proposal)
+      if (storedText.length < 50) return c.json({ ok: false, error: 'No commercial PDF and no stored text' })
+      const result = await runBudgetLLM(storedText, proposal, db, c.env)
+      return c.json({ ok: true, ...result, text_source: 'stored_text' })
     }
 
-    // Fall back to stored text fields if sidecar returned nothing
-    const proposalText = commercialText.length > 100 ? commercialText : extractProposalText(proposal)
-    dbg(`  Text source: ${commercialText.length > 100 ? 'commercial_pdf_ocr' : 'stored_fields'}, length=${proposalText.length}`)
+    const pdfUrl = `https://a7b32759-e743-4139-9bb0-4bae44886667.vip.gensparksite.com/api/proposals/pdf/${encodeURIComponent(commercialAtt.r2_key)}`
+    const workerBase = `https://a7b32759-e743-4139-9bb0-4bae44886667.vip.gensparksite.com/api`
+    const callbackUrl = `${workerBase}/callback/proposals/${proposalId}/budget-complete?rfp_id=${rfpId}`
+    const callbackSecret = c.env.PDF_SIDECAR_SECRET || (globalThis as any).PDF_SIDECAR_SECRET || ''
 
-    if (proposalText.length < 50) {
-      dbg(`  ABORT: no usable text (length ${proposalText.length} < 50)`)
-      return c.json({ ok: false, error: 'No text extracted from commercial PDF', budget: null, duration, debug_log: debugLog })
+    // Mark budget extraction as pending
+    await db.prepare(`
+      UPDATE proposals SET ocr_job_status='pending_budget', updated_at=datetime('now') WHERE id=?
+    `).bind(proposalId).run()
+
+    const fired = await callSidecarAsync(pdfUrl, c.env, 100, callbackUrl, callbackSecret)
+    if (!fired) {
+      return c.json({ ok: false, error: 'Sidecar not configured or unreachable' }, 500)
     }
 
-    // ── Step 2: 6-step analytical budget prompt ───────────────────────────────
-    const systemPrompt = 'You are a financial extraction analyst. I will provide you with the raw OCR text of a commercial proposal.'
-    const userPrompt = `Your task is to find, categorize, and sum all costs to calculate the total budget.
+    return c.json({
+      ok: true,
+      status: 'processing',
+      message: 'Budget OCR started — commercial PDF is being extracted. Poll /evaluation to check progress.',
+      proposal_id: parseInt(proposalId),
+      ocr_job_status: 'pending_budget',
+    }, 202)
+
+  } catch (e: any) {
+    return c.json({ ok: false, error: e?.message }, 500)
+  }
+})
+
+// ── POST /api/callback/proposals/:proposalId/budget-complete ──────────────────
+// Called by sidecar when commercial PDF OCR finishes.
+// Runs the 6-step budget LLM prompt and saves result to DB.
+apiRouter.post('/callback/proposals/:proposalId/budget-complete', async (c) => {
+  const proposalId = c.req.param('proposalId')
+  const db = c.env.DB
+  const expectedSecret = c.env.PDF_SIDECAR_SECRET || (globalThis as any).PDF_SIDECAR_SECRET || ''
+
+  try {
+    const body: any = await c.req.json()
+    console.log(`[budget-callback] received for proposalId=${proposalId} ok=${body.ok} chars=${body.chars}`)
+
+    if (expectedSecret && body.callback_secret !== expectedSecret) {
+      return c.json({ error: 'Unauthorized' }, 401)
+    }
+
+    if (!body.ok) {
+      await db.prepare(`UPDATE proposals SET ocr_job_status='error', updated_at=datetime('now') WHERE id=?`).bind(proposalId).run()
+      return c.json({ ok: false, error: body.error })
+    }
+
+    const ocrText: string = body.text || ''
+    console.log(`[budget-callback] OCR text: ${ocrText.length} chars`)
+
+    const proposal = await db.prepare(`
+      SELECT p.*, v.name as vendor_name FROM proposals p
+      LEFT JOIN vendors v ON p.vendor_id = v.id WHERE p.id=?
+    `).bind(proposalId).first<any>()
+    if (!proposal) return c.json({ error: 'Proposal not found' }, 404)
+
+    // Cache OCR text so future calls skip sidecar
+    await db.prepare(`UPDATE proposals SET ocr_budget_text=?, updated_at=datetime('now') WHERE id=?`)
+      .bind(ocrText.slice(0, 50000), proposalId).run()
+
+    const result = await runBudgetLLM(ocrText, proposal, db, undefined)
+
+    await db.prepare(`UPDATE proposals SET ocr_job_status='done', updated_at=datetime('now') WHERE id=?`).bind(proposalId).run()
+
+    console.log(`[budget-callback] budget extracted: amount=${result.budget_amount} currency=${result.budget_currency}`)
+    return c.json({ ok: true, ...result })
+
+  } catch (e: any) {
+    console.error(`[budget-callback] error: ${e?.message}`)
+    await db.prepare(`UPDATE proposals SET ocr_job_status='error', updated_at=datetime('now') WHERE id=?`).bind(proposalId).run()
+    return c.json({ ok: false, error: e?.message }, 500)
+  }
+})
+
+// ── Shared budget LLM function ────────────────────────────────────────────────
+async function runBudgetLLM(proposalText: string, proposal: any, db: D1Database, env?: any): Promise<any> {
+  const systemPrompt = 'You are a financial extraction analyst. I will provide you with the raw OCR text of a commercial proposal.'
+  const userPrompt = `Your task is to find, categorize, and sum all costs to calculate the total budget.
 Do not assume any specific section titles (like "MVP1" or "Tableau"). Instead, use the following logical methodology to parse the text dynamically:
 
 **Step 1: Identify all monetary values**
@@ -2460,84 +2708,51 @@ Return ONLY valid JSON (no markdown, no extra text):
 **Here is the OCR text to analyze:**
 ${proposalText.slice(0, 14000)}`
 
-    dbg(`STEP 3: calling LLM with full prompt`)
-    dbg(`  SYSTEM PROMPT:\n${systemPrompt}`)
-    dbg(`  USER PROMPT (${userPrompt.length} chars):\n${'='.repeat(60)}\n${userPrompt}\n${'='.repeat(60)}`)
+  const rawBudget = await callLLM(systemPrompt, userPrompt, env || {}, 'gpt-5-mini', 1200)
 
-    const rawBudget = await callLLM(systemPrompt, userPrompt, c.env, 'gpt-5-mini', 1200)
+  const jsonMatch = rawBudget.match(/\{[\s\S]*\}/)
+  if (!jsonMatch) return { budget_amount: null, budget_currency: 'AED', budget_confidence: 0, duration: null, clusters: [], missing_info: ['LLM returned no JSON'] }
 
-    dbg(`  LLM RAW RESPONSE (${rawBudget.length} chars):\n${'='.repeat(60)}\n${rawBudget}\n${'='.repeat(60)}`)
-
-    // ── Step 3: parse LLM response ────────────────────────────────────────────
-    const jsonMatch = rawBudget.match(/\{[\s\S]*\}/)
-    if (jsonMatch) {
-      let parsed: any
-      try { parsed = JSON.parse(jsonMatch[0]) } catch (parseErr: any) {
-        dbg(`  ERROR parsing LLM JSON: ${parseErr?.message}`)
-        dbg(`  Matched JSON string: ${jsonMatch[0].slice(0, 500)}`)
-        return c.json({ ok: false, error: 'LLM JSON parse failed', raw_response: rawBudget, debug_log: debugLog })
-      }
-      dbg(`  Parsed LLM JSON: ${JSON.stringify(parsed)}`)
-      const bestTotal = parsed.tax_inclusive_total || parsed.total_with_support || parsed.total_fixed
-      dbg(`  bestTotal=${bestTotal} (tax_inclusive=${parsed.tax_inclusive_total}, with_support=${parsed.total_with_support}, fixed=${parsed.total_fixed})`)
-      if (bestTotal && bestTotal > 0 && bestTotal < 1e10) {
-        budget = {
-          amount: Math.round(bestTotal),
-          currency: parsed.currency || 'AED',
-          confidence: Math.min(1.0, Math.max(0.0, parseFloat(parsed.confidence) || 0.5)),
-        }
-      }
-      if (parsed.duration && typeof parsed.duration === 'string') duration = parsed.duration
-      dbg(`  Final budget: amount=${budget.amount} currency=${budget.currency} confidence=${budget.confidence}`)
-      dbg(`  Duration: ${duration}`)
-
-      // ── Step 4: patch the saved evaluation_data and top-level columns ─────
-      const rfpBudget = 0  // commercial score recalc happens at main eval time
-      if (budget.amount) {
-        // Update proposal top-level columns
-        await db.prepare(`
-          UPDATE proposals SET
-            budget_amount=?, budget_currency=?, proposed_duration=?,
-            updated_at=datetime('now')
-          WHERE id=?
-        `).bind(budget.amount, budget.currency, duration, proposal.id).run()
-
-        // Also patch evaluation_data JSON so the UI reflects the new budget
-        try {
-          let evalData: any = {}
-          try { evalData = JSON.parse(proposal.evaluation_data || '{}') } catch (_) {}
-          evalData.budget_extracted = budget.amount
-          evalData.budget_currency = budget.currency
-          evalData.budget_confidence = budget.confidence
-          evalData.duration_extracted = duration
-          evalData.budget_clusters = parsed.clusters || []
-          evalData.budget_missing_info = parsed.missing_info || []
-          await db.prepare(`UPDATE proposals SET evaluation_data=? WHERE id=?`)
-            .bind(JSON.stringify(evalData), proposal.id).run()
-        } catch (_) {}
-      }
-
-      return c.json({
-        ok: true,
-        budget_amount: budget.amount,
-        budget_currency: budget.currency,
-        budget_confidence: budget.confidence,
-        duration,
-        clusters: parsed.clusters || [],
-        missing_info: parsed.missing_info || [],
-        text_source: commercialText.length > 100 ? 'commercial_pdf_ocr' : 'stored_text',
-        text_chars: proposalText.length,
-        debug_log: debugLog,
-      })
-    }
-
-    dbg(`LLM returned no parseable JSON. Raw (first 500): ${rawBudget.slice(0, 500)}`)
-    return c.json({ ok: false, error: 'LLM returned no parseable JSON', raw_response: rawBudget, debug_log: debugLog })
-  } catch (e: any) {
-    dbg(`TOP-LEVEL ERROR: ${e?.message || e}`)
-    return c.json({ ok: false, error: e?.message, debug_log: debugLog }, 500)
+  let parsed: any
+  try { parsed = JSON.parse(jsonMatch[0]) } catch (_) {
+    return { budget_amount: null, budget_currency: 'AED', budget_confidence: 0, duration: null, clusters: [], missing_info: ['JSON parse failed'] }
   }
-})
+
+  const bestTotal = parsed.tax_inclusive_total || parsed.total_with_support || parsed.total_fixed
+  const budget = {
+    amount: (bestTotal && bestTotal > 0 && bestTotal < 1e10) ? Math.round(bestTotal) : null,
+    currency: parsed.currency || 'AED',
+    confidence: Math.min(1.0, Math.max(0.0, parseFloat(parsed.confidence) || 0.5)),
+  }
+  const duration: string | null = (parsed.duration && typeof parsed.duration === 'string') ? parsed.duration : (proposal.proposed_duration || null)
+
+  if (budget.amount) {
+    await db.prepare(`
+      UPDATE proposals SET budget_amount=?, budget_currency=?, proposed_duration=?, updated_at=datetime('now') WHERE id=?
+    `).bind(budget.amount, budget.currency, duration, proposal.id).run()
+    try {
+      let evalData: any = {}
+      try { evalData = JSON.parse(proposal.evaluation_data || '{}') } catch (_) {}
+      evalData.budget_extracted = budget.amount
+      evalData.budget_currency = budget.currency
+      evalData.budget_confidence = budget.confidence
+      evalData.duration_extracted = duration
+      evalData.budget_clusters = parsed.clusters || []
+      evalData.budget_missing_info = parsed.missing_info || []
+      await db.prepare(`UPDATE proposals SET evaluation_data=? WHERE id=?`).bind(JSON.stringify(evalData), proposal.id).run()
+    } catch (_) {}
+  }
+
+  return {
+    budget_amount: budget.amount,
+    budget_currency: budget.currency,
+    budget_confidence: budget.confidence,
+    duration,
+    clusters: parsed.clusters || [],
+    missing_info: parsed.missing_info || [],
+    text_chars: proposalText.length,
+  }
+}
 
 // ── GET /api/rfps/:rfpId/proposals/:proposalId/evaluation — fetch results ────
 apiRouter.get('/rfps/:rfpId/proposals/:proposalId/evaluation', async (c) => {
