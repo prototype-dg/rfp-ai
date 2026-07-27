@@ -2111,118 +2111,25 @@ Return ONLY a JSON array — no markdown, no extra text:
     }
   }
 
-  // ── Budget & Duration via LLM (analytical prompt on commercial PDF) ──────────
-  // Strategy:
-  //   1. Identify the commercial PDF attachment (label contains "commercial")
-  //   2. Fetch its FULL text via the sidecar (no slicing — we need all pricing pages)
-  //   3. Run the analytical budget prompt that sums all cost clusters
-  //   4. Also scan the full proposalText for duration clues
+  // ── Budget & Duration ────────────────────────────────────────────────────────
+  // NOTE: Full budget extraction (sidecar OCR + analytical LLM) is done in the
+  // separate /evaluate-budget endpoint to avoid exceeding the 30s Worker CPU limit.
+  // Here we do a fast regex pass on proposalText as a fallback only.
   let budget = { amount: null as number | null, currency: 'AED', confidence: 0.0 }
   let duration: string | null = proposal.proposed_duration || null
 
+  // Fast regex pass on whatever text we already have (no extra network calls)
   try {
-    // ── Step 1: get commercial PDF text ──────────────────────────────────────
-    let commercialText = ''
-    try {
-      const atts: any[] = JSON.parse(proposal.proposal_attachments || '[]')
-      // Prefer attachment labelled "commercial"; fall back to first attachment
-      const commercialAtt = atts.find((a: any) =>
-        (a.label || '').toLowerCase().includes('commercial') ||
-        (a.filename || '').toLowerCase().includes('commercial')
-      ) || atts[0]
-
-      if (commercialAtt?.r2_key) {
-        const pdfUrl = `https://a7b32759-e743-4139-9bb0-4bae44886667.vip.gensparksite.com/api/proposals/pdf/${encodeURIComponent(commercialAtt.r2_key)}`
-        const result = await callSidecar(pdfUrl, env, 100)  // all pages, no cap
-        if (result && result.chars >= 100) {
-          commercialText = result.text
-        }
-      }
-    } catch (_) { /* non-fatal — fall through to proposalText */ }
-
-    // Fall back to full proposalText if we couldn't isolate the commercial PDF
-    const budgetSourceText = commercialText.length > 100 ? commercialText : proposalText
-
-    // ── Step 2: analytical budget extraction prompt ───────────────────────────
-    const rawBudget = await callLLM(
-      'You are a financial extraction analyst. I will provide you with the raw OCR text of a commercial proposal.',
-      `Your task is to find, categorize, and sum all costs to calculate the total budget.
-Do not assume any specific section titles (like "MVP1" or "Tableau"). Instead, use the following logical methodology to parse the text dynamically:
-
-**Step 1: Identify all monetary values**
-- Scan the entire text and locate every figure that includes a currency symbol or code (e.g., AED, USD, EUR, SAR, $, etc.).
-- For each monetary value, read the 3–5 lines of text immediately before and after it to understand its context.
-
-**Step 2: Group monetary values into cost clusters**
-- **Implementation/Phase Clusters**: If a monetary value appears after a long list of technical tasks, deliverables, or work items, treat that value as the total cost for that specific phase or workstream. There may be multiple such clusters (e.g., Phase 1, Phase 2).
-- **Auxiliary One-Time Clusters**: If a monetary value appears near words like "License", "Subscription", "Training", "Workshop", "Enablement", or "Setup", treat it as an additional one-time fixed cost.
-- **Recurring Support Clusters**: If a monetary value appears near words like "Support", "Maintenance", "Managed Services", or contains phrases like "per month", "monthly", or "hours per month", calculate the total monthly recurring cost by summing the individual line items in that cluster.
-
-**Step 3: Determine the project timeline (for recurring costs)**
-- Scan the text for any phrases indicating duration (e.g., "in X months", "X weeks", "quarter", "by QX").
-- If the total project duration or support period is explicitly stated, use that.
-- If the support duration is missing, use a baseline assumption of 12 months, but clearly flag this as an assumption in your output.
-
-**Step 4: Detect currency and tax rules**
-- Identify the dominant currency code/symbol used.
-- Look for mentions of "VAT", "GST", or "tax" and note the percentage. If found, calculate the inclusive total.
-
-**Step 5: Perform the calculations**
-- **Total Fixed (One-Time) Budget** = Sum of all Implementation/Phase clusters + Sum of all Auxiliary one-time clusters.
-- **Total Budget with Support** = Total Fixed Budget + (Monthly Recurring Support Cost * number of support months, or the 12-month baseline assumption).
-- **Tax-Inclusive Total** = Add the detected tax percentage to the final total.
-
-**Step 6: Output your findings as JSON**
-Return ONLY valid JSON (no markdown, no extra text):
-{
-  "clusters": [
-    {"description": "<cluster name>", "type": "fixed|recurring_monthly", "amount": <number>, "currency": "<AED|USD|EUR>", "how_identified": "<brief explanation>"}
-  ],
-  "total_fixed": <number or null>,
-  "total_with_support": <number or null>,
-  "support_months": <number>,
-  "support_months_assumed": <true|false>,
-  "tax_rate": <0.05 for 5% VAT, or 0 if none>,
-  "tax_inclusive_total": <number or null>,
-  "currency": "<dominant currency>",
-  "duration": "<e.g. 3.5 months or next quarter>"|null,
-  "confidence": <0.0-1.0>,
-  "missing_info": ["<list any missing data that prevents definitive answer>"]
-}
-
-**Here is the OCR text to analyze:**
-${budgetSourceText.slice(0, 14000)}`,
-      env, 'gpt-5-mini', 1200
-    )
-
-    // ── Step 3: parse LLM response ────────────────────────────────────────────
-    const jsonMatch = rawBudget.match(/\{[\s\S]*\}/)
-    if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0])
-
-      // Pick the best total: prefer tax-inclusive if available, else with-support, else fixed
-      const bestTotal = parsed.tax_inclusive_total || parsed.total_with_support || parsed.total_fixed
-      if (bestTotal && bestTotal > 0 && bestTotal < 1e10) {
-        budget = {
-          amount: Math.round(bestTotal),
-          currency: parsed.currency || 'AED',
-          confidence: Math.min(1.0, Math.max(0.0, parseFloat(parsed.confidence) || 0.5)),
-        }
-      }
-
-      // Duration from LLM
-      if (parsed.duration && typeof parsed.duration === 'string') {
-        duration = parsed.duration
-      }
-    }
-  } catch (_) {
-    // LLM failed — fall back to regex (better than nothing)
     const regexBudget = extractBudget(proposalText)
     if (regexBudget.amount) {
-      budget = { ...regexBudget, confidence: Math.min(regexBudget.confidence, 0.4) }
+      budget = { ...regexBudget, confidence: Math.min(regexBudget.confidence, 0.35) }
     }
-    duration = extractDuration(proposalText) || duration
-  }
+    const regexDuration = extractDuration(proposalText)
+    if (regexDuration) duration = regexDuration
+  } catch (_) {}
+
+  // NOTE: Deep budget enrichment (sidecar OCR + analytical LLM) is handled by the
+  // separate POST /rfps/:rfpId/proposals/:proposalId/evaluate-budget endpoint.
 
   // Use stored budget_amount if we still have nothing
   if (!budget.amount && proposal.budget_amount) {
@@ -2407,6 +2314,158 @@ apiRouter.post('/rfps/:rfpId/proposals/:proposalId/evaluate', async (c) => {
       evalData.commercial_score, proposal.id
     ).run()
     return c.json({ ok: true, ...evalData })
+  } catch (e: any) {
+    return c.json({ ok: false, error: e?.message }, 500)
+  }
+})
+
+// ── POST /api/rfps/:rfpId/proposals/:proposalId/evaluate-budget ──────────────
+// Standalone budget enrichment: runs sidecar OCR on the commercial PDF attachment,
+// then runs the 6-step analytical LLM prompt. Designed as a separate request so
+// the main /evaluate stays well within the 30s Worker CPU limit.
+// The frontend should fire this call immediately after /evaluate returns.
+apiRouter.post('/rfps/:rfpId/proposals/:proposalId/evaluate-budget', async (c) => {
+  const rfpId = c.req.param('rfpId')
+  const proposalId = c.req.param('proposalId')
+  const db = c.env.DB
+  try {
+    const proposal = await db.prepare(`
+      SELECT p.*, v.name as vendor_name FROM proposals p
+      LEFT JOIN vendors v ON p.vendor_id = v.id WHERE p.id=? AND p.rfp_id=?
+    `).bind(proposalId, rfpId).first<any>()
+    if (!proposal) return c.json({ error: 'Proposal not found' }, 404)
+
+    let budget = { amount: null as number | null, currency: 'AED', confidence: 0.0 }
+    let duration: string | null = proposal.proposed_duration || null
+
+    // ── Step 1: Identify the commercial PDF attachment ────────────────────────
+    let commercialText = ''
+    const atts: any[] = JSON.parse(proposal.proposal_attachments || '[]')
+    const commercialAtt = atts.find((a: any) =>
+      (a.label || '').toLowerCase().includes('commercial') ||
+      (a.filename || '').toLowerCase().includes('commercial')
+    ) || atts[0]
+
+    if (commercialAtt?.r2_key) {
+      const pdfUrl = `https://a7b32759-e743-4139-9bb0-4bae44886667.vip.gensparksite.com/api/proposals/pdf/${encodeURIComponent(commercialAtt.r2_key)}`
+      try {
+        const result = await callSidecar(pdfUrl, c.env, 100)
+        if (result && result.chars >= 100) commercialText = result.text
+      } catch (_) {}
+    }
+
+    // Fall back to stored text fields if sidecar returned nothing
+    const proposalText = commercialText.length > 100 ? commercialText : extractProposalText(proposal)
+    if (proposalText.length < 50) {
+      return c.json({ ok: false, error: 'No text extracted from commercial PDF', budget: null, duration })
+    }
+
+    // ── Step 2: 6-step analytical budget prompt ───────────────────────────────
+    const rawBudget = await callLLM(
+      'You are a financial extraction analyst. I will provide you with the raw OCR text of a commercial proposal.',
+      `Your task is to find, categorize, and sum all costs to calculate the total budget.
+Do not assume any specific section titles (like "MVP1" or "Tableau"). Instead, use the following logical methodology to parse the text dynamically:
+
+**Step 1: Identify all monetary values**
+- Scan the entire text and locate every figure that includes a currency symbol or code (e.g., AED, USD, EUR, SAR, $, etc.).
+- For each monetary value, read the 3-5 lines of text immediately before and after it to understand its context.
+
+**Step 2: Group monetary values into cost clusters**
+- **Implementation/Phase Clusters**: If a monetary value appears after a long list of technical tasks, deliverables, or work items, treat that value as the total cost for that specific phase or workstream. There may be multiple such clusters (e.g., Phase 1, Phase 2).
+- **Auxiliary One-Time Clusters**: If a monetary value appears near words like "License", "Subscription", "Training", "Workshop", "Enablement", or "Setup", treat it as an additional one-time fixed cost.
+- **Recurring Support Clusters**: If a monetary value appears near words like "Support", "Maintenance", "Managed Services", or contains phrases like "per month", "monthly", or "hours per month", calculate the total monthly recurring cost by summing the individual line items in that cluster.
+
+**Step 3: Determine the project timeline (for recurring costs)**
+- Scan the text for any phrases indicating duration (e.g., "in X months", "X weeks", "quarter", "by QX").
+- If the total project duration or support period is explicitly stated, use that.
+- If the support duration is missing, use a baseline assumption of 12 months, but clearly flag this as an assumption in your output.
+
+**Step 4: Detect currency and tax rules**
+- Identify the dominant currency code/symbol used.
+- Look for mentions of "VAT", "GST", or "tax" and note the percentage. If found, calculate the inclusive total.
+
+**Step 5: Perform the calculations**
+- **Total Fixed (One-Time) Budget** = Sum of all Implementation/Phase clusters + Sum of all Auxiliary one-time clusters.
+- **Total Budget with Support** = Total Fixed Budget + (Monthly Recurring Support Cost * number of support months, or the 12-month baseline assumption).
+- **Tax-Inclusive Total** = Add the detected tax percentage to the final total.
+
+**Step 6: Output your findings as JSON**
+Return ONLY valid JSON (no markdown, no extra text):
+{
+  "clusters": [
+    {"description": "<cluster name>", "type": "fixed|recurring_monthly", "amount": <number>, "currency": "<AED|USD|EUR>", "how_identified": "<brief explanation>"}
+  ],
+  "total_fixed": <number or null>,
+  "total_with_support": <number or null>,
+  "support_months": <number>,
+  "support_months_assumed": <true|false>,
+  "tax_rate": <0.05 for 5% VAT, or 0 if none>,
+  "tax_inclusive_total": <number or null>,
+  "currency": "<dominant currency>",
+  "duration": "<e.g. 3.5 months or next quarter>"|null,
+  "confidence": <0.0-1.0>,
+  "missing_info": ["<list any missing data that prevents definitive answer>"]
+}
+
+**Here is the OCR text to analyze:**
+${proposalText.slice(0, 14000)}`,
+      c.env, 'gpt-5-mini', 1200
+    )
+
+    // ── Step 3: parse LLM response ────────────────────────────────────────────
+    const jsonMatch = rawBudget.match(/\{[\s\S]*\}/)
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0])
+      const bestTotal = parsed.tax_inclusive_total || parsed.total_with_support || parsed.total_fixed
+      if (bestTotal && bestTotal > 0 && bestTotal < 1e10) {
+        budget = {
+          amount: Math.round(bestTotal),
+          currency: parsed.currency || 'AED',
+          confidence: Math.min(1.0, Math.max(0.0, parseFloat(parsed.confidence) || 0.5)),
+        }
+      }
+      if (parsed.duration && typeof parsed.duration === 'string') duration = parsed.duration
+
+      // ── Step 4: patch the saved evaluation_data and top-level columns ─────
+      const rfpBudget = 0  // commercial score recalc happens at main eval time
+      if (budget.amount) {
+        // Update proposal top-level columns
+        await db.prepare(`
+          UPDATE proposals SET
+            budget_amount=?, budget_currency=?, proposed_duration=?,
+            updated_at=datetime('now')
+          WHERE id=?
+        `).bind(budget.amount, budget.currency, duration, proposal.id).run()
+
+        // Also patch evaluation_data JSON so the UI reflects the new budget
+        try {
+          let evalData: any = {}
+          try { evalData = JSON.parse(proposal.evaluation_data || '{}') } catch (_) {}
+          evalData.budget_extracted = budget.amount
+          evalData.budget_currency = budget.currency
+          evalData.budget_confidence = budget.confidence
+          evalData.duration_extracted = duration
+          evalData.budget_clusters = parsed.clusters || []
+          evalData.budget_missing_info = parsed.missing_info || []
+          await db.prepare(`UPDATE proposals SET evaluation_data=? WHERE id=?`)
+            .bind(JSON.stringify(evalData), proposal.id).run()
+        } catch (_) {}
+      }
+
+      return c.json({
+        ok: true,
+        budget_amount: budget.amount,
+        budget_currency: budget.currency,
+        budget_confidence: budget.confidence,
+        duration,
+        clusters: parsed.clusters || [],
+        missing_info: parsed.missing_info || [],
+        text_source: commercialText.length > 100 ? 'commercial_pdf_ocr' : 'stored_text',
+        text_chars: proposalText.length,
+      })
+    }
+
+    return c.json({ ok: false, error: 'LLM returned no parseable JSON', raw: rawBudget.slice(0, 300) })
   } catch (e: any) {
     return c.json({ ok: false, error: e?.message }, 500)
   }

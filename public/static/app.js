@@ -5262,10 +5262,10 @@ async function evaluateSingleProposal(rfpId, proposalId) {
     if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> ' + t('prop_evaluating'); }
   });
   try {
-    showToast('🤖 AI evaluation running for this proposal — please wait…', 'info', 12000);
+    showToast('🤖 AI evaluation running — scoring compliance & quality…', 'info', 20000);
     var result = await apiCall('POST', '/rfps/' + rfpId + '/proposals/' + proposalId + '/evaluate', {});
-    if (result && result.evaluation_data) {
-      showToast('✅ Evaluation complete!', 'success', 4000);
+    if (result && (result.ok || result.evaluation_data || result.compliance_breakdown)) {
+      showToast('✅ Compliance evaluation complete! Extracting budget from commercial PDF…', 'success', 6000);
       // Update local proposal state with scalar fields
       var p = appState.proposals ? appState.proposals.find(function(pp){ return pp.id === proposalId; }) : null;
       if (p) {
@@ -5274,8 +5274,33 @@ async function evaluateSingleProposal(rfpId, proposalId) {
         p.ai_validation_status = result.validation_status;
         p.ai_evaluated_at      = result.evaluated_at || new Date().toISOString();
       }
-      // Re-render panel with fresh eval data
+      // Re-render panel with fresh eval data (budget will be null/low confidence for now)
       if (p) _renderProposalPanel(p, result.evaluation_data);
+
+      // ── Fire budget enrichment as a background call ───────────────────────
+      // This is a separate Worker request that does sidecar OCR + analytical LLM
+      // on the commercial PDF. It will update the DB when done.
+      apiCall('POST', '/rfps/' + rfpId + '/proposals/' + proposalId + '/evaluate-budget', {})
+        .then(function(budgetResult) {
+          if (budgetResult && budgetResult.ok && budgetResult.budget_amount) {
+            showToast('💰 Budget extracted: ' + (budgetResult.budget_currency || 'AED') + ' ' + budgetResult.budget_amount.toLocaleString() + ' (confidence: ' + Math.round((budgetResult.budget_confidence || 0) * 100) + '%)', 'success', 8000);
+            // Refresh the panel with updated budget from DB
+            if (p) {
+              p.budget_amount   = budgetResult.budget_amount;
+              p.budget_currency = budgetResult.budget_currency;
+              p.proposed_duration = budgetResult.duration || p.proposed_duration;
+            }
+            apiCall('GET', '/rfps/' + rfpId + '/proposals/' + proposalId + '/evaluation')
+              .then(function(ev) { if (p && ev && ev.evaluation_data) _renderProposalPanel(p, ev.evaluation_data); })
+              .catch(function() {});
+          } else if (budgetResult && !budgetResult.ok) {
+            showToast('⚠️ Budget extraction: ' + (budgetResult.error || 'no pricing found in commercial PDF'), 'info', 8000);
+          }
+        })
+        .catch(function(e) {
+          showToast('⚠️ Budget extraction failed: ' + (e.message || e), 'info', 6000);
+        });
+
     } else {
       showToast('Evaluation finished — refresh to see results.', 'info');
     }
