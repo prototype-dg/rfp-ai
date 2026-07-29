@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 import { emblemPngBase64 } from '../emblem-data'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-07-29-v49'  // v49: OCR readiness status gating — ocr_pending_files counter, ready_for_evaluation + evaluated statuses, UI readiness badges + auto-poll
+const WORKER_VERSION = '2026-07-29-v50'  // v50: fix scoring_matrix not sent to /generate — include in pre-flush PUT and generate body; backend prefers body value over stale DB read
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.cpc-rfp.website.
@@ -444,7 +444,13 @@ apiRouter.post('/rfps/:id/generate', async (c) => {
     } catch (_) { /* non-fatal — generate without doc context */ }
   }
 
-  const existingScoringMatrix = existingRfp?.scoring_matrix || null
+  // v50: prefer scoring_matrix from request body (sent by browser from window._currentScoringMatrix)
+  // so the matrix the user set in the modal is always used even if the DB write hasn't landed yet.
+  // Fall back to the existing DB value if the body doesn't include one.
+  const bodyScoringMatrix = body.scoring_matrix
+    ? (typeof body.scoring_matrix === 'string' ? body.scoring_matrix : JSON.stringify(body.scoring_matrix))
+    : null
+  const existingScoringMatrix = bodyScoringMatrix || existingRfp?.scoring_matrix || null
 
   // Build the prompts (same as generateRFPWithLLM but without calling callLLM yet)
   const { systemPrompt, userPrompt } = buildRFPPrompt(body, archDocText, brdDocText, existingScoringMatrix)

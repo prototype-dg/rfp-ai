@@ -2779,7 +2779,8 @@ async function generateRfpDoc(rfpId) {
     background:        background,
     objectives:        objectives,
     scope:             scope,
-    tech_requirements: (document.getElementById('rfpTech')       || {}).value || ''
+    tech_requirements: (document.getElementById('rfpTech')       || {}).value || '',
+    scoring_matrix:    window._currentScoringMatrix || null
   };
   try {
     var saved = await apiCall('PUT', '/rfps/' + rfpId, genPayload);
@@ -2811,6 +2812,7 @@ async function generateRfpDoc(rfpId) {
     tech_requirements: document.getElementById('rfpTech').value,
     objectives:        objectives,
     background:        background,
+    scoring_matrix:    window._currentScoringMatrix || null
   };
 
   try {
