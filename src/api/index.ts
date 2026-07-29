@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 import { emblemPngBase64 } from '../emblem-data'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-07-29-v51'  // v51: Puppeteer-based PDF generation via sidecar — real text PDF with per-page letterhead header
+const WORKER_VERSION = '2026-07-29-v52'  // v52: PDF fixes — correct page-break-after, robust footer regex (both property orders), single+double quote padding strip
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.cpc-rfp.website.
@@ -262,25 +262,68 @@ apiRouter.get('/rfps/:id/pdf', async (c) => {
   // ── Puppeteer path ────────────────────────────────────────────────────────
   if (renderUrl && renderSecret) {
     try {
-      // Strip the LLM's page-div background images — Puppeteer injects the
-      // letterhead via headerTemplate so we don't want it duplicated in the body.
-      // Also remove page-div wrapper inline styles (background-image, min-height)
-      // so the content flows naturally across Puppeteer's native A4 pages.
+      // Fix 1 — Fetch letterhead from R2 and encode as base64 data URI.
+      // Puppeteer headerTemplate runs in an isolated context and CANNOT load
+      // external images via URL — they always fail silently showing a broken
+      // image icon. The only reliable approach is inlining as a data URI.
+      let letterheadDataUri = ''
+      try {
+        const bucket: R2Bucket | undefined = (c.env as any).PROPOSALS_BUCKET
+        if (bucket) {
+          const lhObj = await bucket.get('letterhead/bg_a4.png')
+          if (lhObj) {
+            const lhBytes = await lhObj.arrayBuffer()
+            const lhBase64 = btoa(String.fromCharCode(...new Uint8Array(lhBytes)))
+            const lhMime = lhObj.httpMetadata?.contentType || 'image/png'
+            letterheadDataUri = `data:${lhMime};base64,${lhBase64}`
+            console.log(`[pdf-render] Letterhead fetched from R2: ${lhBytes.byteLength} bytes`)
+          } else {
+            console.warn('[pdf-render] Letterhead not found in R2 at letterhead/bg_a4.png')
+          }
+        }
+      } catch (lhErr: any) {
+        console.warn('[pdf-render] Failed to fetch letterhead from R2:', lhErr.message)
+      }
+
+      // Fix 2 — Clean up LLM HTML for Puppeteer rendering.
+      // Remove: background images (letterhead moves to Puppeteer headerTemplate),
+      //         absolute-positioned LLM footer divs (Puppeteer footerTemplate handles them),
+      //         min-height:297mm (prevents extra blank space at bottom of each page div),
+      //         overflow:hidden (was clipping content at the page div boundary).
+      // DO NOT strip page-break-after:always — the LLM inline styles already have it,
+      // and it is the only thing that forces one PDF page per LLM page div. Stripping it
+      // would collapse all pages into one continuous flow with arbitrary split points.
       const continuous = content
-        // Remove background-image from every page div's inline style
+        // Remove background-image declarations (letterhead moves to headerTemplate)
         .replace(/background-image\s*:\s*url\([^)]*\)\s*;?\s*/gi, '')
-        // Remove background-size / background-repeat / background-position
         .replace(/background-size\s*:[^;]+;\s*/gi, '')
         .replace(/background-repeat\s*:[^;]+;\s*/gi, '')
         .replace(/background-position\s*:[^;]+;\s*/gi, '')
-        // Remove fixed min-height (let content flow freely)
+        // Remove fixed min-height — prevents blank space at bottom of short pages
         .replace(/min-height\s*:\s*297mm\s*;?\s*/gi, '')
-        // Remove page-break-after on page divs (Puppeteer handles breaks via CSS sections)
-        .replace(/page-break-after\s*:\s*always\s*;?\s*/gi, '')
-        // Remove overflow:hidden that was clipping content
+        // Remove overflow:hidden — was clipping content that extended past page div height
         .replace(/overflow\s*:\s*hidden\s*;?\s*/gi, '')
+        // Fix 2b — Remove LLM absolute-positioned footer divs entirely.
+        // LLM produces: <div style="position:absolute; bottom:10mm; ...">Crown Prince's Court...</div>
+        // In print/PDF flow position:absolute is ignored → text renders mid-content.
+        // Two patterns needed because LLM may order CSS properties either way.
+        .replace(/<div[^>]*position\s*:\s*absolute[^>]*bottom\s*:\s*\d+mm[^>]*>[\s\S]*?<\/div>/gi, '')
+        .replace(/<div[^>]*bottom\s*:\s*\d+mm[^>]*position\s*:\s*absolute[^>]*>[\s\S]*?<\/div>/gi, '')
 
-      // Wrap in a clean HTML document with section-level page breaks
+      // Fix 3 — Remove the LLM inner content wrapper's inline padding-top:72mm.
+      // The LLM adds padding-top:72mm to clear the letterhead background image.
+      // In Puppeteer, margin.top already reserves 72mm for the headerTemplate, so
+      // keeping this padding doubles the gap (144mm blank at top of every page).
+      // CSS !important cannot beat inline styles — must strip with regex.
+      // Handle both double-quoted and single-quoted style attributes.
+      const cleanHtml = continuous
+        .replace(/(style=["'][^"'>]*?)padding-top\s*:\s*72mm\s*;?\s*/gi, '$1')
+        .replace(/(style=["'][^"'>]*?)padding-bottom\s*:\s*28mm\s*;?\s*/gi, '$1')
+
+      // Wrap in a minimal HTML document.
+      // page-break-after:always is preserved in LLM page div inline styles (see Fix 2 note above).
+      // The CSS below adds a safety net using the body > div > div selector which correctly
+      // targets the LLM page divs (body > outer-wrapper-div > page-divs).
       const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -288,23 +331,19 @@ apiRouter.get('/rfps/:id/pdf', async (c) => {
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: Arial, Calibri, 'Segoe UI', sans-serif; font-size: 11pt; color: #1A1A1A; background: #fff; }
-  /* Each LLM page div becomes a natural flow block.
-     Top padding accounts for the Puppeteer headerTemplate (letterhead image ~72mm tall). */
-  .rfp-doc > div { padding-top: 72mm; padding-bottom: 28mm; padding-left: 25mm; padding-right: 25mm; page-break-after: always; }
-  .rfp-doc > div:last-child { page-break-after: avoid; }
-  /* Inner content wrapper — override the LLM's padding-top since we set it on the outer div */
-  .rfp-doc > div > div[style*="padding-top"] { padding-top: 0 !important; }
+  /* Safety net: ensure every LLM page div forces a page break.
+     LLM structure: <body><div>  ← outer wrapper
+                            <div style="...page-break-after:always">  ← page div
+     body > div > div targets each page div regardless of LLM class names. */
+  body > div > div { page-break-after: always; }
+  body > div > div:last-child { page-break-after: avoid; }
   h1, h2, h3 { color: #1A1A1A; }
   table { border-collapse: collapse; width: 100%; }
   td, th { border: 1px solid #d1d5db; padding: 6px 10px; }
 </style>
 </head>
-<body>${continuous}</body>
+<body>${cleanHtml}</body>
 </html>`
-
-      // The letterhead is served from the Worker itself — use the absolute public URL
-      const workerBase = 'https://a7b32759-e743-4139-9bb0-4bae44886667.vip.gensparksite.com/api'
-      const letterheadUrl = `${workerBase}/proposals/pdf/letterhead/bg_a4.png`
 
       const renderRes = await fetch(`${renderUrl}/render-pdf`, {
         method: 'POST',
@@ -312,7 +351,7 @@ apiRouter.get('/rfps/:id/pdf', async (c) => {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${renderSecret}`,
         },
-        body: JSON.stringify({ html, letterhead_url: letterheadUrl }),
+        body: JSON.stringify({ html, letterhead_data_uri: letterheadDataUri }),
       })
 
       if (!renderRes.ok) {
