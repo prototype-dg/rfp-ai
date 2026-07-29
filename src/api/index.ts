@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 import { emblemPngBase64 } from '../emblem-data'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-07-29-v51'  // v51: fix PDF pagination — Fix A: clamp LLM page divs to exact A4 height in iframe CSS; Fix B: slice canvas by actual div offsetTop boundaries instead of fixed arithmetic
+const WORKER_VERSION = '2026-07-29-v51'  // v51: Puppeteer-based PDF generation via sidecar — real text PDF with per-page letterhead header
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.cpc-rfp.website.
@@ -241,7 +241,11 @@ apiRouter.get('/rfps/:id/pdf-content', async (c) => {
   })
 })
 
-// GET /rfps/:id/pdf — returns a print-ready HTML page (kept for legacy/fallback)
+// GET /rfps/:id/pdf — generate a real PDF via the Puppeteer render service on the sidecar VPS.
+// Strips the LLM's page-div wrappers into a continuous HTML document, then calls
+// POST https://api.cpc-rfp.website/pdf/render-pdf which returns application/pdf bytes.
+// The letterhead is passed as a public URL so Puppeteer can fetch it directly.
+// Falls back to the legacy print-HTML page if the render service is unavailable.
 apiRouter.get('/rfps/:id/pdf', async (c) => {
   const id = c.req.param('id')
   const rfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(id).first()
@@ -250,67 +254,124 @@ apiRouter.get('/rfps/:id/pdf', async (c) => {
 
   const safeRef = ((rfp as any).ref_number || String(id)).replace(/\//g, '_').replace(/[^a-zA-Z0-9_\-]/g, '')
   const filename = `CPC_RFP_${safeRef}.pdf`
-  const content = (rfp as any).content || ''
+  const content = (rfp as any).content as string
 
-  // Build a self-contained print-ready HTML page
-  // The LLM generates each A4 page as a div with background-image letterhead + correct padding
-  // Browser print preserves all of this perfectly — no reflow or layout loss
+  const renderUrl = c.env.PDF_RENDER_URL || (globalThis as any).PDF_RENDER_URL || ''
+  const renderSecret = c.env.PDF_RENDER_SECRET || (globalThis as any).PDF_RENDER_SECRET || ''
+
+  // ── Puppeteer path ────────────────────────────────────────────────────────
+  if (renderUrl && renderSecret) {
+    try {
+      // Strip the LLM's page-div background images — Puppeteer injects the
+      // letterhead via headerTemplate so we don't want it duplicated in the body.
+      // Also remove page-div wrapper inline styles (background-image, min-height)
+      // so the content flows naturally across Puppeteer's native A4 pages.
+      const continuous = content
+        // Remove background-image from every page div's inline style
+        .replace(/background-image\s*:\s*url\([^)]*\)\s*;?\s*/gi, '')
+        // Remove background-size / background-repeat / background-position
+        .replace(/background-size\s*:[^;]+;\s*/gi, '')
+        .replace(/background-repeat\s*:[^;]+;\s*/gi, '')
+        .replace(/background-position\s*:[^;]+;\s*/gi, '')
+        // Remove fixed min-height (let content flow freely)
+        .replace(/min-height\s*:\s*297mm\s*;?\s*/gi, '')
+        // Remove page-break-after on page divs (Puppeteer handles breaks via CSS sections)
+        .replace(/page-break-after\s*:\s*always\s*;?\s*/gi, '')
+        // Remove overflow:hidden that was clipping content
+        .replace(/overflow\s*:\s*hidden\s*;?\s*/gi, '')
+
+      // Wrap in a clean HTML document with section-level page breaks
+      const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, Calibri, 'Segoe UI', sans-serif; font-size: 11pt; color: #1A1A1A; background: #fff; }
+  /* Each LLM page div becomes a natural flow block.
+     Top padding accounts for the Puppeteer headerTemplate (letterhead image ~72mm tall). */
+  .rfp-doc > div { padding-top: 72mm; padding-bottom: 28mm; padding-left: 25mm; padding-right: 25mm; page-break-after: always; }
+  .rfp-doc > div:last-child { page-break-after: avoid; }
+  /* Inner content wrapper — override the LLM's padding-top since we set it on the outer div */
+  .rfp-doc > div > div[style*="padding-top"] { padding-top: 0 !important; }
+  h1, h2, h3 { color: #1A1A1A; }
+  table { border-collapse: collapse; width: 100%; }
+  td, th { border: 1px solid #d1d5db; padding: 6px 10px; }
+</style>
+</head>
+<body>${continuous}</body>
+</html>`
+
+      // The letterhead is served from the Worker itself — use the absolute public URL
+      const workerBase = 'https://a7b32759-e743-4139-9bb0-4bae44886667.vip.gensparksite.com/api'
+      const letterheadUrl = `${workerBase}/proposals/pdf/letterhead/bg_a4.png`
+
+      const renderRes = await fetch(`${renderUrl}/render-pdf`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${renderSecret}`,
+        },
+        body: JSON.stringify({ html, letterhead_url: letterheadUrl }),
+      })
+
+      if (!renderRes.ok) {
+        const errText = await renderRes.text().catch(() => 'unknown error')
+        console.error(`[pdf-render] HTTP ${renderRes.status}: ${errText.slice(0, 200)}`)
+        throw new Error(`Render service returned ${renderRes.status}`)
+      }
+
+      const pdfBytes = await renderRes.arrayBuffer()
+      console.log(`[pdf-render] Generated PDF for RFP ${id}: ${pdfBytes.byteLength} bytes`)
+
+      return new Response(pdfBytes, {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/pdf',
+          'Content-Disposition': `attachment; filename="${filename}"`,
+          'Cache-Control': 'no-cache',
+        },
+      })
+    } catch (err: any) {
+      console.error('[pdf-render] Puppeteer render failed, falling back to print-HTML:', err.message)
+      // Fall through to legacy path below
+    }
+  }
+
+  // ── Legacy fallback: print-ready HTML page (browser prints to PDF) ────────
   const printHtml = `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${((rfp as any).title || 'RFP').replace(/</g,'&lt;')}</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
-    background: #e8e8e8;
-    font-family: Arial, 'Segoe UI', sans-serif;
-  }
-  /* Each A4 page div from LLM output is already styled with background-image, padding, etc. */
-  /* Just ensure pages are displayed correctly and separated */
-  .rfp-doc > div {
-    display: block;
-    box-shadow: 0 2px 12px rgba(0,0,0,0.18);
-    margin: 20px auto !important;
-  }
-  /* Print styles: remove browser chrome, render pages exactly */
+  body { background: #e8e8e8; font-family: Arial, 'Segoe UI', sans-serif; }
+  .rfp-doc > div { display: block; box-shadow: 0 2px 12px rgba(0,0,0,0.18); margin: 20px auto !important; }
   @media print {
-    * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color-adjust: exact !important; }
+    * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
     html, body { background: white; margin: 0; padding: 0; }
     .no-print { display: none !important; }
-    .rfp-doc > div {
-      box-shadow: none !important;
-      margin: 0 !important;
-      page-break-after: always;
-    }
+    .rfp-doc > div { box-shadow: none !important; margin: 0 !important; page-break-after: always; }
     .rfp-doc > div:last-child { page-break-after: avoid; }
   }
 </style>
 </head>
 <body>
-<!-- Print toolbar (hidden on print) -->
 <div class="no-print" style="position:fixed;top:0;left:0;right:0;z-index:9999;background:#1B1712;color:white;padding:10px 24px;display:flex;align-items:center;justify-content:space-between;font-family:Arial,sans-serif;font-size:13px;box-shadow:0 2px 8px rgba(0,0,0,0.3)">
   <div style="display:flex;align-items:center;gap:12px">
     <span style="font-weight:700;letter-spacing:0.05em">Crown Prince&apos;s Court — RFP Document</span>
     <span style="opacity:0.6;font-size:11px">${((rfp as any).ref_number||'').replace(/</g,'&lt;')}</span>
   </div>
   <div style="display:flex;gap:10px">
-    <button onclick="window.print()" style="background:#BA9765;color:white;border:none;padding:7px 20px;border-radius:5px;font-size:13px;font-weight:600;cursor:pointer;letter-spacing:0.04em">&#x2193; Save as PDF / Print</button>
+    <button onclick="window.print()" style="background:#BA9765;color:white;border:none;padding:7px 20px;border-radius:5px;font-size:13px;font-weight:600;cursor:pointer;">&#x2193; Save as PDF / Print</button>
     <button onclick="window.close()" style="background:transparent;color:#ccc;border:1px solid #555;padding:7px 14px;border-radius:5px;font-size:12px;cursor:pointer">Close</button>
   </div>
 </div>
-<!-- Page content area — shifted down to clear the toolbar -->
 <div class="no-print" style="height:52px"></div>
 ${content}
-<script>
-// Auto-open print dialog after a short delay for fonts/images to load
-window.addEventListener('load', function() {
-  setTimeout(function() { window.print(); }, 800);
-});
-</script>
+<script>window.addEventListener('load', function() { setTimeout(function() { window.print(); }, 800); });</script>
 </body>
 </html>`
 

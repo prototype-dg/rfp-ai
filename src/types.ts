@@ -6,6 +6,8 @@ export type Bindings = {
   OPENAI_BASE_URL?: string
   GSK_API_KEY?: string
   GSK_PROJECT_ID?: string
+  PDF_RENDER_URL?: string    // e.g. https://api.cpc-rfp.website/pdf
+  PDF_RENDER_SECRET?: string // shared secret for the Puppeteer render service
 }
 
 // Payload for async large-file processing jobs (passed to ctx.waitUntil / internal endpoint)

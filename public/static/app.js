@@ -3240,28 +3240,24 @@ function downloadRfpPdf(rfpId) {
     return;
   }
 
-  // Check html2pdf.js is loaded
-  if (typeof html2pdf === 'undefined') {
-    showToast('PDF library not loaded — opening print preview instead', 'warning');
-    window.open('/api/rfps/' + rfpId + '/pdf', '_blank');
-    return;
-  }
+  var safeRef = (rfp.ref_number || rfp.title || String(rfpId)).replace(/[^a-zA-Z0-9_\-]/g, '_');
+  var filename = 'CPC_RFP_' + safeRef + '.pdf';
 
-  showToast('Generating PDF — please wait (this may take 10–20 seconds)…', 'info', 25000);
-  generateRfpPdfBlob(rfpId)
-    .then(function(result) {
-      // Trigger browser download
-      var url = URL.createObjectURL(result.blob);
+  showToast('Generating PDF — please wait…', 'info', 25000);
+  fetch('/api/rfps/' + rfpId + '/pdf')
+    .then(function(res) {
+      if (!res.ok) throw new Error('Server returned ' + res.status);
+      return res.blob();
+    })
+    .then(function(blob) {
+      var url = URL.createObjectURL(blob);
       var a = document.createElement('a');
       a.href = url;
-      a.download = result.filename;
+      a.download = filename;
       document.body.appendChild(a);
       a.click();
-      setTimeout(function() {
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      }, 1000);
-      showToast('PDF downloaded: ' + result.filename, 'success');
+      setTimeout(function() { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
+      showToast('PDF downloaded: ' + filename, 'success');
     })
     .catch(function(err) {
       console.error('PDF generation error:', err);
@@ -3270,125 +3266,6 @@ function downloadRfpPdf(rfpId) {
     });
   return;
 
-  // LEGACY html2pdf path (kept for reference — no longer used):
-  // Use a hidden iframe approach: inject a full HTML document with embedded
-  // styles so html2canvas sees a properly rendered page (not an offscreen div).
-  // This reliably captures all CSS-styled content including tables and colours.
-  var safeTitle = (rfp.ref_number || rfp.title || 'RFP').replace(/[^a-zA-Z0-9_\-]/g, '_');
-  var filename = 'CPC_RFP_' + safeTitle + '.pdf';
-
-  // Build a self-contained HTML document string with all styles inlined
-  var rfpCss = [
-    'body{margin:0;padding:0;font-family:Arial,Calibri,sans-serif;font-size:11pt;color:#1a1a1a;background:#fff;}',
-    '.rfp-doc{max-width:794px;margin:0 auto;}',
-    '.rfp-header-band{height:20pt;width:100%;background:#A79C7F;background-image:repeating-linear-gradient(90deg,rgba(255,255,255,0.15) 0,rgba(255,255,255,0.15) 2px,transparent 2px,transparent 10px),repeating-linear-gradient(0deg,rgba(255,255,255,0.15) 0,rgba(255,255,255,0.15) 2px,transparent 2px,transparent 10px);}',
-    '.rfp-circle-divider{height:8pt;border-top:2px solid #1A1A1A;background:white;}',
-    '.rfp-cover{background:white;page-break-after:always;min-height:220mm;}',
-    '.rfp-cover-logo{display:flex;align-items:center;justify-content:center;gap:18pt;padding:18pt 36pt 12pt;}',
-    '.rfp-logo-emblem{flex-shrink:0;width:56pt;height:56pt;border-radius:50%;border:2pt solid #1A1A1A;display:flex;align-items:center;justify-content:center;background:white;}',
-    '.rfp-logo-emblem svg{width:40pt;height:40pt;}',
-    '.rfp-logo-text{display:flex;flex-direction:column;gap:4pt;}',
-    '.rfp-logo-text .rfp-org-arabic{font-size:16pt;font-weight:700;color:#1a1a1a;direction:rtl;font-family:serif;}',
-    '.rfp-logo-text .rfp-org-name{font-size:9pt;font-weight:700;color:#1a1a1a;letter-spacing:2px;text-transform:uppercase;font-family:Arial,sans-serif;}',
-    '.rfp-cover-divider{width:calc(100% - 72pt);height:0.5pt;background:#d1d5db;margin:0 36pt;}',
-    '.rfp-cover-body{padding:36pt 36pt 24pt;}',
-    '.rfp-cover-body .rfp-doc-type{font-size:10pt;font-weight:700;letter-spacing:0.1em;color:#BA9765;text-transform:uppercase;margin-bottom:6pt;}',
-    '.rfp-cover-body .rfp-doc-title{font-size:22pt;font-weight:700;line-height:1.25;color:#1a1a1a;margin-bottom:12pt;}',
-    '.rfp-cover-body .rfp-doc-date{font-size:9pt;color:#745B35;font-weight:600;}',
-    '.rfp-cover-footer-bar{display:none;}',
-    '.rfp-page-header{display:flex;align-items:center;justify-content:space-between;padding:4pt 24pt;border-bottom:1.5pt solid #BA9765;background:white;}',
-    '.rfp-page-header-logo{font-size:8pt;font-weight:700;color:#745B35;}',
-    '.rfp-page-header-ref{font-size:7.5pt;color:#9ca3af;}',
-    '.rfp-meta-table{width:100%;border-collapse:collapse;font-size:9pt;margin:8pt 0;}',
-    '.rfp-meta-table th{background:#745B35;color:white;padding:6pt 10pt;font-weight:700;border:0.5pt solid #E9DCC4;}',
-    '.rfp-meta-table td{background:white;padding:6pt 10pt;border:0.5pt solid #d1d5db;vertical-align:top;}',
-    '.rfp-toc{padding:14pt 24pt 10pt;}',
-    '.rfp-toc-title{font-size:13pt;font-weight:700;color:#BA9765;margin-bottom:8pt;border-bottom:1pt solid #BA9765;padding-bottom:4pt;}',
-    '.rfp-toc-item{display:flex;justify-content:space-between;padding:3pt 0;font-size:9pt;color:#745B35;border-bottom:0.5pt dotted #d1d5db;}',
-    '.rfp-toc-item.bold{font-weight:700;}',
-    '.rfp-toc-item.indent{padding-left:14pt;color:#374151;font-weight:400;}',
-    '.rfp-section{padding:12pt 24pt;border-bottom:0.5pt solid #e5e7eb;}',
-    '.rfp-section-title{font-size:12pt;font-weight:700;color:#1a1a1a;margin-bottom:7pt;border-bottom:1.5pt solid #BA9765;padding-bottom:3pt;}',
-    '.rfp-section-num{display:inline-block;width:18pt;height:18pt;border-radius:50%;background:#BA9765;color:white;text-align:center;line-height:18pt;font-weight:700;font-size:8pt;margin-right:4pt;vertical-align:middle;}',
-    '.rfp-section p{font-size:10pt;line-height:1.5;margin:0 0 6pt;}',
-    '.rfp-section ul{margin:3pt 0 6pt 16pt;}',
-    '.rfp-section li{font-size:9.5pt;line-height:1.5;margin-bottom:2pt;}',
-    '.rfp-subsection{margin:9pt 0 4pt;}',
-    '.rfp-subsection-title{font-size:10pt;font-weight:700;color:#745B35;margin-bottom:4pt;}',
-    '.rfp-deliverables{background:var(--cpc-gold-tint);border-left:2.5pt solid #BA9765;padding:5pt 9pt;font-size:9pt;color:#374151;margin-top:4pt;line-height:1.5;}',
-    '.rfp-spec-table{width:100%;border-collapse:collapse;margin:7pt 0;font-size:9pt;}',
-    '.rfp-spec-table th{background:#745B35;color:white;padding:5pt 9pt;font-weight:700;border:0.5pt solid #E9DCC4;}',
-    '.rfp-spec-table td{padding:4.5pt 9pt;border:0.5pt solid #d1d5db;line-height:1.5;vertical-align:top;background:white;}',
-    '.rfp-spec-table tr:nth-child(even) td{background:var(--cpc-gold-tint);}',
-    '.rfp-footer{background:#745B35;color:white;padding:10pt 24pt;text-align:center;font-size:8pt;line-height:1.8;}',
-    'table{border-collapse:collapse;}',
-    'h1,h2,h3,h4{color:#1a1a1a;}',
-  ].join('\n');
-
-  var fullHtml = '<!DOCTYPE html><html><head><meta charset="UTF-8">'
-    + '<style>' + rfpCss + '</style>'
-    + '</head><body><div class="rfp-doc">'
-    + rfp.content
-    + '</div></body></html>';
-
-  // Build a wrapper div with content rendered in a hidden but on-screen container.
-  // html2canvas requires the element to be in the viewport or visible in DOM.
-  var container = document.createElement('div');
-  container.style.cssText = [
-    'position:fixed',
-    'left:-9999px',
-    'top:0',
-    'width:794px',
-    'min-height:1123px',
-    'background:#ffffff',
-    'z-index:-1',
-    'overflow:visible',
-  ].join(';');
-
-  container.innerHTML = fullHtml
-    .replace('<!DOCTYPE html><html><head><meta charset="UTF-8"><style>', '<style>')
-    .replace('</style></head><body><div class="rfp-doc">', '</style><div class="rfp-doc">')
-    .replace('</div></body></html>', '</div>');
-
-  // Alternatively, just inject the full HTML as-is inside the div
-  container.innerHTML = '<div style="font-family:Arial,Calibri,sans-serif;font-size:11pt;color:#1a1a1a;background:#fff;padding:20px">'
-    + '<style>' + rfpCss + '</style>'
-    + '<div class="rfp-doc">' + rfp.content + '</div>'
-    + '</div>';
-
-  document.body.appendChild(container);
-
-  // Give browser time to lay out the element before capturing
-  requestAnimationFrame(function() {
-    setTimeout(function() {
-      var opt = {
-        margin:      [12, 12, 12, 12],
-        filename:    filename,
-        image:       { type: 'jpeg', quality: 0.97 },
-        html2canvas: {
-          scale: 2,
-          useCORS: true,
-          allowTaint: true,
-          backgroundColor: '#ffffff',
-          logging: false,
-          windowWidth: 794,
-        },
-        jsPDF:       { unit: 'mm', format: 'a4', orientation: 'portrait' },
-        pagebreak:   { mode: ['css', 'legacy'] },
-      };
-
-      html2pdf().set(opt).from(container.firstChild || container).save()
-        .then(function() {
-          document.body.removeChild(container);
-          showToast('PDF downloaded successfully!', 'success');
-        })
-        .catch(function(err) {
-          document.body.removeChild(container);
-          console.error('html2pdf error:', err);
-          showToast('PDF generation failed: ' + (err && err.message ? err.message : err), 'error');
-        });
-    }, 400);
-  });
 }
 
 // --- TAB: VENDORS ---
@@ -3619,16 +3496,19 @@ async function confirmSendInvitations(rfpId) {
     var sDeadline = document.getElementById('invSDeadline').value;
     var notes = document.getElementById('invNotes').value;
 
-    // Generate PDF and attach to email if html2pdf is available and RFP has content
+    // Generate PDF via server-side Puppeteer and attach to email as base64
     var pdfBase64 = null;
     var pdfFilename = null;
     var rfp = appState.currentRfp;
-    if (rfp && rfp.content && typeof window.html2canvas !== 'undefined' && typeof window.jspdf !== 'undefined') {
+    if (rfp && rfp.content) {
       try {
         setLoading(btn, true, 'Generating PDF…');
-        var pdfResult = await generateRfpPdfBlob(rfpId);
-        pdfBase64 = await blobToBase64(pdfResult.blob);
-        pdfFilename = pdfResult.filename;
+        var safeRef = (rfp.ref_number || rfp.title || String(rfpId)).replace(/[^a-zA-Z0-9_\-]/g, '_');
+        pdfFilename = 'CPC_RFP_' + safeRef + '.pdf';
+        var pdfRes = await fetch('/api/rfps/' + rfpId + '/pdf');
+        if (!pdfRes.ok) throw new Error('PDF service returned ' + pdfRes.status);
+        var pdfBlob = await pdfRes.blob();
+        pdfBase64 = await blobToBase64(pdfBlob);
         setLoading(btn, true, 'Sending…');
       } catch(pdfErr) {
         console.warn('PDF generation for email failed, sending without attachment:', pdfErr);
