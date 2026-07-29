@@ -266,7 +266,7 @@ var I18N = {
     // Form labels (generate tab)
     form_project_title: 'Project Title',
     form_category:      'Category',
-    form_budget_aed:    'Evaluation Budget Cap (AED)',
+    form_budget_aed:    'Budget Cap — AED',
     form_deadline:      'Submission Deadline',
     form_background:    'Project Background',
     form_objectives:    'Objectives',
@@ -737,7 +737,7 @@ var I18N = {
     // Form labels (generate tab)
     form_project_title: 'عنوان المشروع',
     form_category:      'الفئة',
-    form_budget_aed:    'سقف ميزانية التقييم (درهم)',
+    form_budget_aed:    'سقف الميزانية — درهم',
     form_deadline:      'الموعد النهائي للتقديم',
     form_background:    'خلفية المشروع',
     form_objectives:    'الأهداف',
