@@ -3097,9 +3097,13 @@ async function generateRfpPdfBlob(rfpId) {
     // Reset only inside the iframe — does NOT affect main page
     '* { box-sizing:border-box; margin:0; padding:0; }',
     'body { width:' + PAGE_W_PX + 'px; background:#ffffff; overflow:visible; }',
-    // Page divs: strip auto-margins so they stack flush, enforce exact A4 width
+    // Fix A: clamp every LLM page div to EXACTLY one A4 page height.
+    // The LLM uses min-height:297mm which lets divs grow taller when content overflows.
+    // Setting height + max-height to the exact pixel equivalent of 297mm (1123px at 96dpi)
+    // and overflow:hidden ensures no div can exceed one page, preventing the letterhead
+    // from appearing mid-page in the output PDF.
     '.rfp-doc { margin:0; padding:0; }',
-    '.rfp-doc > div { margin:0 !important; display:block !important; width:' + PAGE_W_PX + 'px !important; }',
+    '.rfp-doc > div { margin:0 !important; display:block !important; width:' + PAGE_W_PX + 'px !important; height:' + PAGE_H_PX + 'px !important; max-height:' + PAGE_H_PX + 'px !important; overflow:hidden !important; }',
     '</style>',
     '</head><body>', inlined, '</body></html>',
   ].join(''));
@@ -3125,7 +3129,34 @@ async function generateRfpPdfBlob(rfpId) {
     var rfpDoc = iframeDoc.querySelector('.rfp-doc') || iframeDoc.body;
     var totalH = rfpDoc.scrollHeight || rfpDoc.offsetHeight || contentH;
 
-    console.log('[PDF] iframe totalH:', contentH, 'px  rfpDoc totalH:', totalH, 'px  expected pages:', Math.ceil(totalH / PAGE_H_PX));
+    // Fix B: Build page-boundary list from actual div offsetTop measurements.
+    // With Fix A applied (each div clamped to exactly PAGE_H_PX), each child div
+    // starts at offsetTop = N * PAGE_H_PX.  Reading the live DOM values rather than
+    // computing them arithmetically means we are always in sync with whatever the
+    // browser laid out — no rounding drift, no surprises from LLM markup variation.
+    //
+    // pageBoundaries[i] = { sy: pixelTop, sh: pixelHeight } in UN-scaled pixels.
+    // The canvas slicer then multiplies by SCALE to convert to canvas coordinates.
+    var pageDivs = rfpDoc.children ? Array.prototype.slice.call(rfpDoc.children) : [];
+    var pageBoundaries = [];
+    if (pageDivs.length > 0) {
+      for (var d = 0; d < pageDivs.length; d++) {
+        var divEl = pageDivs[d];
+        var divTop = divEl.offsetTop;
+        var divH   = divEl.offsetHeight || PAGE_H_PX;
+        pageBoundaries.push({ sy: divTop, sh: divH });
+      }
+    }
+    // Fallback: no child divs found (e.g. LLM returned plain rfpDoc body without
+    // wrapper divs) — fall back to the original fixed-interval arithmetic.
+    if (pageBoundaries.length === 0) {
+      var fbPages = Math.ceil(totalH / PAGE_H_PX) || 1;
+      for (var fi = 0; fi < fbPages; fi++) {
+        pageBoundaries.push({ sy: fi * PAGE_H_PX, sh: PAGE_H_PX });
+      }
+    }
+
+    console.log('[PDF] iframe totalH:', contentH, 'px  rfpDoc totalH:', totalH, 'px  divs found:', pageDivs.length, '  pages:', pageBoundaries.length);
 
     // ── ONE html2canvas pass over the full document height ────────────────
     // scale:1.5 — good quality without crashing on 10+ page documents
@@ -3148,20 +3179,21 @@ async function generateRfpPdfBlob(rfpId) {
 
     console.log('[PDF] Full canvas:', fullCanvas.width, '×', fullCanvas.height);
 
-    // ── Slice into A4 strips and assemble PDF ─────────────────────────────
+    // ── Slice by div boundaries and assemble PDF ──────────────────────────
+    // Each entry in pageBoundaries maps to exactly one PDF page.
+    // sy / sh are in un-scaled CSS pixels; multiply by SCALE to get canvas coords.
     var pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
     var A4_W_MM = 210;
     var A4_H_MM = 297;
+    var pageH_scaled = Math.round(PAGE_H_PX * SCALE);   // canvas height of one A4 page
 
-    var pageH_scaled = Math.round(PAGE_H_PX * SCALE);
-    var totalPages = Math.ceil(fullCanvas.height / pageH_scaled);
-    if (totalPages < 1) totalPages = 1;
+    console.log('[PDF] Slicing into', pageBoundaries.length, 'page(s), page canvas height:', pageH_scaled, 'px');
 
-    console.log('[PDF] Slicing into', totalPages, 'page(s), strip height:', pageH_scaled, 'px');
-
-    for (var i = 0; i < totalPages; i++) {
-      var sy = i * pageH_scaled;
-      var sh = Math.min(pageH_scaled, fullCanvas.height - sy);
+    for (var i = 0; i < pageBoundaries.length; i++) {
+      var b  = pageBoundaries[i];
+      var sy = Math.round(b.sy * SCALE);
+      var sh = Math.min(Math.round(b.sh * SCALE), fullCanvas.height - sy);
+      if (sh <= 0) { console.log('[PDF] Skipping page', i + 1, '— zero height'); continue; }
 
       var pageCanvas = document.createElement('canvas');
       pageCanvas.width  = fullCanvas.width;
@@ -3169,12 +3201,15 @@ async function generateRfpPdfBlob(rfpId) {
       var ctx = pageCanvas.getContext('2d');
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
+      // Draw this div's canvas strip at the top of the page canvas.
+      // sh may be slightly less than pageH_scaled on the last page — the white fill
+      // above ensures the remainder of the canvas is clean white.
       ctx.drawImage(fullCanvas, 0, sy, fullCanvas.width, sh, 0, 0, fullCanvas.width, sh);
 
       var imgData = pageCanvas.toDataURL('image/jpeg', 0.92);
       if (i > 0) pdf.addPage('a4', 'portrait');
       pdf.addImage(imgData, 'JPEG', 0, 0, A4_W_MM, A4_H_MM, '', 'FAST');
-      console.log('[PDF] Added page', i + 1, '— sy:', sy, 'sh:', sh);
+      console.log('[PDF] Added page', i + 1, '— divTop:', b.sy, 'px  divH:', b.sh, 'px  canvas sy:', sy, 'sh:', sh);
     }
 
     var blob = pdf.output('blob');

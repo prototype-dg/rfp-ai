@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 import { emblemPngBase64 } from '../emblem-data'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-07-29-v50'  // v50: fix scoring_matrix not sent to /generate — include in pre-flush PUT and generate body; backend prefers body value over stale DB read
+const WORKER_VERSION = '2026-07-29-v51'  // v51: fix PDF pagination — Fix A: clamp LLM page divs to exact A4 height in iframe CSS; Fix B: slice canvas by actual div offsetTop boundaries instead of fixed arithmetic
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.cpc-rfp.website.
