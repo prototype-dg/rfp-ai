@@ -3410,7 +3410,7 @@ ${'='.repeat(60)}
 RFP Reference:          ${data.ref_number || 'CPC/PROC/' + new Date().getFullYear() + '/TBD'}
 Title:                  ${data.title || 'Not specified'}
 Category:               ${data.category || 'IT & Digital Transformation'}
-Budget Envelope:        ${data.budget ? 'AED ' + data.budget + ' (indicative ceiling)' : 'Confidential — to be disclosed to shortlisted vendors'}
+Budget Envelope:        CONFIDENTIAL — DO NOT include any budget figure, budget ceiling, or indicative cost in the RFP document. The budget is used only for internal evaluation and must never appear in the text published to vendors.
 RFP Issue Date:         ${rfpIssueDate}
 Proposal Deadline:      ${data.deadline || fmtDate(deadlineDate)}
 

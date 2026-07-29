@@ -266,7 +266,7 @@ var I18N = {
     // Form labels (generate tab)
     form_project_title: 'Project Title',
     form_category:      'Category',
-    form_budget_aed:    'Budget (AED)',
+    form_budget_aed:    'Evaluation Budget Cap (AED)',
     form_deadline:      'Submission Deadline',
     form_background:    'Project Background',
     form_objectives:    'Objectives',
@@ -737,7 +737,7 @@ var I18N = {
     // Form labels (generate tab)
     form_project_title: 'عنوان المشروع',
     form_category:      'الفئة',
-    form_budget_aed:    'الميزانية (درهم)',
+    form_budget_aed:    'سقف ميزانية التقييم (درهم)',
     form_deadline:      'الموعد النهائي للتقديم',
     form_background:    'خلفية المشروع',
     form_objectives:    'الأهداف',
@@ -2651,7 +2651,8 @@ rfpTabs.generate = function(rfpId, rfp) {
     + '</select></div>'
     + '<div class="form-group" style="margin:0">'
     + fgLabel(t('form_budget_aed'), 'rfpBudget', false)
-    + '<input id="rfpBudget" placeholder="e.g. 5,000,000" value="' + escHtml(budgetVal) + '" oninput="' + asc + '" onchange="' + asc + '">'
+    + '<input id="rfpBudget" placeholder="e.g. 5,000,000" value="' + escHtml(budgetVal) + '" oninput="' + asc + '" onchange="' + asc + '" title="Internal evaluation cap only — used to score vendor proposals commercially. This value is never published in the RFP document sent to vendors.">'
+    + '<div style="font-size:0.7rem;color:#6b7280;margin-top:3px;line-height:1.35"><i class="fas fa-lock" style="font-size:0.65rem;margin-right:3px;color:#9ca3af"></i>Internal only — not published in the RFP document</div>'
     + '</div></div>'
 
     // Deadline
