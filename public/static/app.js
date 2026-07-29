@@ -4562,6 +4562,19 @@ function attachmentApiUrl(urlOrKey, forDownload) {
   return urlOrKey;
 }
 
+// v49: Global helper — is this proposal ready for AI evaluation?
+// Statuses that allow evaluation: ready_for_evaluation, evaluated, awarded, not_awarded, simulated
+// Legacy grace: if status='submitted' but proposal already has text extracted (ocr_job_status='done'
+// or proposal_full_text present), treat as ready so existing proposals keep working.
+function isEvalReady(p) {
+  var s = p.status || 'submitted';
+  if (s === 'ready_for_evaluation' || s === 'evaluated' || s === 'awarded' || s === 'not_awarded' || s === 'simulated') return true;
+  // Legacy: submitted proposals that already have OCR text are considered ready
+  if (s === 'submitted' && (p.ocr_job_status === 'done' || (p.proposal_full_text && p.proposal_full_text.length > 100))) return true;
+  // submitted with no text yet — OCR is still running
+  return false;
+}
+
 rfpTabs.proposals = async function(rfpId) {
   const proposals = await apiCall('GET', '/rfps/' + rfpId + '/proposals').catch(function(){ return []; });
   appState.proposals = proposals;
@@ -4571,10 +4584,22 @@ rfpTabs.proposals = async function(rfpId) {
     if (s === 'awarded') return '<span style="background:#d1fae5;color:#065f46;border-radius:20px;padding:3px 10px;font-size:0.73rem;font-weight:700"><i class="fas fa-trophy" style="margin-right:0.25rem"></i>' + t('prop_awarded_badge') + '</span>';
     if (s === 'recommended') return '<span style="background:#fef3c7;color:#92400e;border-radius:20px;padding:3px 10px;font-size:0.73rem;font-weight:700"><i class="fas fa-star" style="margin-right:0.25rem"></i>' + t('prop_recommended') + '</span>';
     if (s === 'not_awarded') return '<span style="background:#f3f4f6;color:#6b7280;border-radius:20px;padding:3px 10px;font-size:0.73rem;font-weight:500">' + t('prop_not_awarded') + '</span>';
+    // v49 statuses
+    if (s === 'ready_for_evaluation') return '<span style="background:#dbeafe;color:#1e40af;border-radius:20px;padding:3px 10px;font-size:0.73rem;font-weight:600"><i class="fas fa-check" style="margin-right:0.25rem"></i>Ready</span>';
+    if (s === 'evaluated') return '<span style="background:#ede9fe;color:#5b21b6;border-radius:20px;padding:3px 10px;font-size:0.73rem;font-weight:600"><i class="fas fa-robot" style="margin-right:0.25rem"></i>Evaluated</span>';
+    // submitted / default — could be waiting for OCR
     return '<span style="background:#e0f2fe;color:#0369a1;border-radius:20px;padding:3px 10px;font-size:0.73rem;font-weight:500">' + t('prop_submitted') + '</span>';
   }
 
+  // v49: Badge shown in the AI score column when OCR is still in progress
+  function processingBadge() {
+    return '<span style="background:#fef9c3;color:#92400e;border-radius:20px;padding:3px 10px;font-size:0.73rem;font-weight:600;display:inline-flex;align-items:center;gap:5px">'
+      + '<i class="fas fa-hourglass-half fa-spin" style="font-size:0.7rem"></i>Preparing…</span>';
+  }
+
   function aiBadge(p) {
+    // v49: Show processing indicator when OCR is not yet complete
+    if (!isEvalReady(p)) return processingBadge();
     if (!p.ai_recommendation) return '<span style="color:#9ca3af;font-size:0.75rem">—</span>';
     var score = p.ai_total_score != null ? Math.round(p.ai_total_score) : '?';
     // Derive max_score from stored evaluation_data if available
@@ -4653,23 +4678,42 @@ rfpTabs.proposals = async function(rfpId) {
       + '<td>' + statusBadge(p) + '</td>'
       + '<td style="white-space:nowrap">'
       + '<button class="btn-ghost btn-sm" onclick="viewProposalDetail(' + p.id + ')" style="margin-right:4px" title="View details"><i class="fas fa-eye"></i>' + t('prop_view_btn') + '</button>'
-      + (p.ai_recommendation ? '<button class="btn-ghost btn-sm" onclick="evaluateSingleProposal(' + rfpId + ',' + p.id + ')" style="margin-right:4px" title="Re-evaluate with AI"><i class="fas fa-sync-alt"></i> ' + t('panel_save_reevaluate').replace('Save & ','') + '</button>' : '')
+      + (p.ai_recommendation && isEvalReady(p)
+          ? '<button class="btn-ghost btn-sm" onclick="evaluateSingleProposal(' + rfpId + ',' + p.id + ')" style="margin-right:4px" title="Re-evaluate with AI"><i class="fas fa-sync-alt"></i> ' + t('panel_save_reevaluate').replace('Save & ','') + '</button>'
+          : (!isEvalReady(p)
+              ? '<button class="btn-ghost btn-sm" disabled style="margin-right:4px;opacity:0.45;cursor:not-allowed" title="Documents are still being prepared — please wait"><i class="fas fa-hourglass-half"></i> Preparing…</button>'
+              : ''))
       + awardBtn
       + '</td>'
       + '</tr>';
   });
 
   var evaluated = proposals.filter(function(p){ return p.ai_recommendation; }).length;
+  var notReadyProposals = proposals.filter(function(p){ return !isEvalReady(p); });
+  var notReadyCount = notReadyProposals.length;
   var bulkDone = proposals.length > 0 && evaluated === proposals.length;
-  // Show bulk "Evaluate with AI" only if no proposals have been evaluated yet.
-  // Once bulk eval is done (all have ai_recommendation), replace with nothing here —
-  // individual "Re-evaluate" buttons appear in the row actions instead.
-  // 8.1 — always show evaluate/re-evaluate all button
-  var evalBtn = proposals.length > 0
-    ? (evaluated === proposals.length
-      ? '<button class="btn-secondary" id="evaluateAllBtn" onclick="evaluateAllProposals(' + rfpId + ')"><i class="fas fa-sync-alt"></i>Re-evaluate All (' + proposals.length + ')</button>'
-      : '<button class="btn-primary" id="evaluateAllBtn" onclick="evaluateAllProposals(' + rfpId + ')" style="background:linear-gradient(135deg,var(--cpc-gold-deep),var(--cpc-gold));border:none"><i class="fas fa-robot"></i>' + t('prop_evaluate_ai') + ' (' + (proposals.length - evaluated) + ' remaining)</button>')
-    : '';
+  // v49: If any proposals are still being prepared, show a friendly blocking message instead of the evaluate button.
+  // If ALL ready and all evaluated → Re-evaluate All. Otherwise → Evaluate remaining.
+  var evalBtn = '';
+  if (proposals.length > 0) {
+    if (notReadyCount === proposals.length) {
+      // All proposals are still being processed
+      evalBtn = '<div style="display:inline-flex;align-items:center;gap:8px;background:#fffbeb;border:1.5px solid #f59e0b;border-radius:8px;padding:0.4rem 0.9rem;font-size:0.82rem;color:#92400e">'
+        + '<i class="fas fa-hourglass-half fa-spin" style="color:#d97706"></i>'
+        + '<span>Your documents are being prepared for evaluation. This usually takes just a minute — please wait.</span>'
+        + '</div>';
+    } else if (notReadyCount > 0) {
+      // Partial — some ready, some not
+      evalBtn = '<div style="display:inline-flex;flex-direction:column;gap:6px">'
+        + '<button class="btn-primary" id="evaluateAllBtn" onclick="evaluateAllProposals(' + rfpId + ')" style="background:linear-gradient(135deg,var(--cpc-gold-deep),var(--cpc-gold));border:none"><i class="fas fa-robot"></i>' + t('prop_evaluate_ai') + ' (' + (proposals.length - evaluated - notReadyCount) + ' ready)</button>'
+        + '<span style="font-size:0.75rem;color:#92400e"><i class="fas fa-hourglass-half" style="margin-right:3px"></i>' + notReadyCount + ' proposal(s) still being prepared — will be skipped for now.</span>'
+        + '</div>';
+    } else if (evaluated === proposals.length) {
+      evalBtn = '<button class="btn-secondary" id="evaluateAllBtn" onclick="evaluateAllProposals(' + rfpId + ')"><i class="fas fa-sync-alt"></i>Re-evaluate All (' + proposals.length + ')</button>';
+    } else {
+      evalBtn = '<button class="btn-primary" id="evaluateAllBtn" onclick="evaluateAllProposals(' + rfpId + ')" style="background:linear-gradient(135deg,var(--cpc-gold-deep),var(--cpc-gold));border:none"><i class="fas fa-robot"></i>' + t('prop_evaluate_ai') + ' (' + (proposals.length - evaluated) + ' remaining)</button>';
+    }
+  }
 
   // Stage-action bar for Proposals tab
   var propRfp = appState.currentRfp;
@@ -4677,17 +4721,22 @@ rfpTabs.proposals = async function(rfpId) {
   var propAwarded = proposals.some(function(pp){ return pp.status === 'awarded'; });
   if (propRfp && propRfp.stage === 'submissions_closed' && !propAwarded) {
     var unevaluated = proposals.filter(function(p){ return !p.ai_recommendation; }).length;
+    var stageNotReady = proposals.filter(function(p){ return !isEvalReady(p); }).length;
     propStageBar = '<div style="background:linear-gradient(90deg,#fffbeb,#fef9c3);border:1.5px solid var(--cpc-gold);border-radius:10px;padding:0.65rem 1rem;display:flex;align-items:center;gap:0.75rem">'
       + '<i class="fas fa-gavel" style="color:var(--cpc-gold-deep);font-size:1rem;flex-shrink:0"></i>'
       + '<div style="flex:1"><span style="font-weight:700;color:var(--cpc-ink);font-size:0.88rem">Submissions Closed</span>'
       + '<span style="color:#92400e;font-size:0.82rem;margin-left:0.5rem">'
-      + (unevaluated > 0
-          ? unevaluated + ' proposal(s) not yet evaluated. Run AI evaluation, then award the contract.'
-          : 'All proposals evaluated. Select a winner and award the contract.')
+      + (stageNotReady > 0
+          ? stageNotReady + ' proposal(s) are still being prepared. Evaluation will be available shortly.'
+          : unevaluated > 0
+              ? unevaluated + ' proposal(s) not yet evaluated. Run AI evaluation, then award the contract.'
+              : 'All proposals evaluated. Select a winner and award the contract.')
       + '</span></div>'
-      + (unevaluated > 0
-          ? '<button class="btn-primary" style="flex-shrink:0;white-space:nowrap;display:flex;align-items:center;gap:6px;padding:0.4rem 1rem;font-size:0.82rem;background:linear-gradient(135deg,var(--cpc-gold-deep),var(--cpc-gold));border:none" id="stageEvalBtn" onclick="evaluateAllProposals(' + rfpId + ')"><i class="fas fa-robot" style="font-size:0.78rem"></i>Evaluate with AI</button>'
-          : '')
+      + (stageNotReady === proposals.length
+          ? '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;font-size:0.8rem;color:#92400e"><i class="fas fa-hourglass-half fa-spin"></i>Preparing…</div>'
+          : unevaluated > 0
+              ? '<button class="btn-primary" style="flex-shrink:0;white-space:nowrap;display:flex;align-items:center;gap:6px;padding:0.4rem 1rem;font-size:0.82rem;background:linear-gradient(135deg,var(--cpc-gold-deep),var(--cpc-gold));border:none" id="stageEvalBtn" onclick="evaluateAllProposals(' + rfpId + ')"><i class="fas fa-robot" style="font-size:0.78rem"></i>Evaluate with AI</button>'
+              : '')
       + '</div>';
   } else if (propAwarded) {
     propStageBar = '<div style="background:linear-gradient(90deg,#f0fdf4,#dcfce7);border:1.5px solid #16a34a;border-radius:10px;padding:0.65rem 1rem;display:flex;align-items:center;gap:0.75rem">'
@@ -4723,7 +4772,37 @@ rfpTabs.proposals = async function(rfpId) {
     + '</div>'
     + '</div>'
   );
+
+  // v49: Auto-poll every 5s if any proposal is still being processed
+  if (notReadyCount > 0) {
+    _startProposalReadinessPoll(rfpId, notReadyCount);
+  }
 };
+
+// ── v49: Poll proposals list until all are ready_for_evaluation (or max attempts) ──
+var _proposalsReadinessPollTimer = null;
+function _startProposalReadinessPoll(rfpId, initialNotReadyCount) {
+  if (_proposalsReadinessPollTimer) clearInterval(_proposalsReadinessPollTimer);
+  var attempts = 0;
+  var maxAttempts = 24; // 24 × 5s = 2 minutes max
+  _proposalsReadinessPollTimer = setInterval(async function() {
+    attempts++;
+    try {
+      var fresh = await apiCall('GET', '/rfps/' + rfpId + '/proposals');
+      if (!fresh || !Array.isArray(fresh)) return;
+      var stillNotReady = fresh.filter(function(p) { return !isEvalReady(p); }).length;
+      if (stillNotReady < initialNotReadyCount || attempts >= maxAttempts) {
+        clearInterval(_proposalsReadinessPollTimer);
+        _proposalsReadinessPollTimer = null;
+        appState.proposals = fresh;
+        rfpTabs.proposals(rfpId);
+        if (stillNotReady === 0) {
+          showToast('✅ All proposal documents are ready — you can now start AI evaluation.', 'success', 6000);
+        }
+      }
+    } catch(e) { /* ignore transient errors */ }
+  }, 5000);
+}
 
 // ── Evaluate all proposals with AI ────────────────────────────────────────────
 async function evaluateAllProposals(rfpId) {
@@ -4732,8 +4811,17 @@ async function evaluateAllProposals(rfpId) {
   try {
     showToast('🤖 AI evaluation started — this may take 1–2 minutes for all proposals…', 'info', 10000);
     var result = await apiCall('POST', '/rfps/' + rfpId + '/proposals/evaluate-all', {});
+    // v49: Handle blocked response (all proposals still processing)
+    if (result && result.blocked) {
+      showToast('⏳ ' + (result.message || 'Proposals are still being prepared. Please wait a moment.'), 'info', 8000);
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-robot"></i>' + t('prop_evaluate_ai'); }
+      return;
+    }
     var count = result.evaluated || 0;
-    showToast('✅ AI evaluation complete — ' + count + ' proposal(s) scored!', 'success', 7000);
+    var skipped = result.skipped || 0;
+    var msg = '✅ AI evaluation complete — ' + count + ' proposal(s) scored!';
+    if (skipped > 0) msg += ' (' + skipped + ' skipped — still preparing)';
+    showToast(msg, 'success', 7000);
     addNotification('info', '🤖 AI Evaluation Complete', count + ' proposal(s) scored and ranked by AI.', rfpId, 'proposals', null);
     // Award stage becomes ACTIVE now that bulk evaluation is done
     markStageActive(rfpId, 'award');
@@ -5309,6 +5397,16 @@ async function evaluateSingleProposal(rfpId, proposalId) {
     showToast('🤖 Sending PDF to OCR engine — this may take 1–2 minutes…', 'info', 120000);
 
     var result = await apiCall('POST', '/rfps/' + rfpId + '/proposals/' + proposalId + '/evaluate', {});
+
+    // ── v49: Blocked — documents still being prepared ──────────────────────
+    if (result && result.blocked) {
+      showToast('⏳ This proposal\'s documents are still being prepared for evaluation. Please wait a moment and try again.', 'info', 8000);
+      ['evalSingleBtn_' + proposalId, 'evalSingleBtnFooter_' + proposalId].forEach(function(id) {
+        var btn2 = document.getElementById(id);
+        if (btn2) { btn2.disabled = false; btn2.innerHTML = '<i class="fas fa-robot"></i> ' + t('panel_eval_footer_btn'); }
+      });
+      return;
+    }
 
     // ── Fast path: got scores immediately (text was already in DB) ─────────
     if (result && result.ok && result.status !== 'processing' && result.compliance_breakdown) {

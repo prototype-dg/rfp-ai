@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 import { emblemPngBase64 } from '../emblem-data'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-07-27-v48'  // v48: new budget prompt (gpt-5/16k), inline budget in evaluateProposal, commercial score added to total
+const WORKER_VERSION = '2026-07-29-v49'  // v49: OCR readiness status gating — ocr_pending_files counter, ready_for_evaluation + evaluated statuses, UI readiness badges + auto-poll
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.cpc-rfp.website.
@@ -2299,7 +2299,26 @@ apiRouter.post('/callback/proposals/:proposalId/file-ocr-complete', async (c) =>
 
     await db.prepare(`UPDATE proposals SET proposal_full_text=?, updated_at=datetime('now') WHERE id=?`).bind(merged, proposalId).run()
     console.log(`[file-ocr-callback] proposalId=${proposalId} label=${label} chars=${body.chars} total_merged=${merged.length}`)
-    return c.json({ ok: true, merged_chars: merged.length })
+
+    // v49: Decrement ocr_pending_files counter. When it hits 0 and we have text, mark ready_for_evaluation.
+    await db.prepare(`
+      UPDATE proposals
+      SET ocr_pending_files = MAX(0, COALESCE(ocr_pending_files, 1) - 1),
+          updated_at = datetime('now')
+      WHERE id=?
+    `).bind(proposalId).run()
+
+    const fresh = await db.prepare(`SELECT ocr_pending_files, proposal_full_text FROM proposals WHERE id=?`).bind(proposalId).first<any>()
+    const pending = fresh?.ocr_pending_files ?? 0
+    const hasText = (fresh?.proposal_full_text?.length || 0) > 100
+    if (pending === 0 && hasText) {
+      await db.prepare(`UPDATE proposals SET status='ready_for_evaluation', updated_at=datetime('now') WHERE id=?`).bind(proposalId).run()
+      console.log(`[file-ocr-callback] proposalId=${proposalId} → status=ready_for_evaluation`)
+    } else {
+      console.log(`[file-ocr-callback] proposalId=${proposalId} pending_files=${pending} hasText=${hasText} — not yet ready`)
+    }
+
+    return c.json({ ok: true, merged_chars: merged.length, pending_files: pending })
   } catch (e: any) {
     console.error(`[file-ocr-callback] error: ${e?.message}`)
     return c.json({ ok: false, error: e?.message }, 500)
@@ -2322,8 +2341,36 @@ apiRouter.post('/rfps/:id/proposals/evaluate-all', async (c) => {
 
     if (!proposals.length) return c.json({ ok: true, evaluated: 0, message: 'No proposals to evaluate' })
 
+    // v49: Gate on OCR readiness — only evaluate proposals with status in the allowed set.
+    // Legacy grace: submitted proposals with OCR text already extracted are also allowed.
+    const EVAL_READY_STATUSES = ['ready_for_evaluation', 'evaluated', 'awarded', 'not_awarded', 'simulated']
+    const isReadyP = (p: any) => {
+      const st = p.status || 'submitted'
+      if (EVAL_READY_STATUSES.includes(st)) return true
+      // Legacy: text already extracted
+      return (p.proposal_full_text?.length || 0) > 100 || p.ocr_job_status === 'done'
+    }
+    const notReady = proposals.filter((p: any) => !isReadyP(p))
+    if (notReady.length > 0) {
+      // If ALL proposals are not ready, block entirely
+      if (notReady.length === proposals.length) {
+        return c.json({
+          ok: false,
+          blocked: true,
+          not_ready_count: notReady.length,
+          message: `${notReady.length} proposal(s) are still being prepared for evaluation — their documents are being processed. Please wait a moment and try again.`,
+        }, 202)
+      }
+      // Partial: filter to only ready proposals and continue
+    }
+    const readyProposals = proposals.filter((p: any) => isReadyP(p))
+
     const results: any[] = []
-    for (const proposal of proposals) {
+    // Add skipped entries for not-ready proposals
+    for (const p of notReady) {
+      results.push({ id: p.id, vendor: p.vendor_name, skipped: true, reason: 'Documents still being processed' })
+    }
+    for (const proposal of readyProposals) {
       try {
         const evalData = await evaluateProposal(proposal, rfp, c.env)
         await db.prepare(`
@@ -2331,7 +2378,7 @@ apiRouter.post('/rfps/:id/proposals/evaluate-all', async (c) => {
             evaluation_data=?, ai_total_score=?, ai_recommendation=?,
             ai_validation_status=?, ai_evaluated_at=datetime('now'),
             ai_compliance_score=?, ai_quality_score=?, ai_commercial_score=?,
-            updated_at=datetime('now')
+            status='evaluated', updated_at=datetime('now')
           WHERE id=?
         `).bind(
           JSON.stringify(evalData),
@@ -2348,7 +2395,7 @@ apiRouter.post('/rfps/:id/proposals/evaluate-all', async (c) => {
         results.push({ id: proposal.id, vendor: proposal.vendor_name, error: e?.message || 'failed' })
       }
     }
-    return c.json({ ok: true, evaluated: results.length, results })
+    return c.json({ ok: true, evaluated: results.filter((r: any) => !r.skipped).length, skipped: notReady.length, results })
   } catch (e: any) {
     return c.json({ ok: false, error: e?.message }, 500)
   }
@@ -2372,6 +2419,22 @@ apiRouter.post('/rfps/:rfpId/proposals/:proposalId/evaluate', async (c) => {
     `).bind(proposalId, rfpId).first<any>()
     if (!proposal) return c.json({ error: 'Proposal not found' }, 404)
 
+    // v49: Gate on OCR readiness — block evaluation if documents are still being processed.
+    // Legacy grace: if status='submitted' but OCR text already exists (ocr_job_status='done' or
+    // proposal_full_text present), allow evaluation so existing proposals keep working.
+    const SINGLE_EVAL_READY = ['ready_for_evaluation', 'evaluated', 'awarded', 'not_awarded', 'simulated']
+    const propStatus = proposal.status || 'submitted'
+    const hasText = (proposal.proposal_full_text?.length || 0) > 100 || proposal.ocr_job_status === 'done'
+    if (!SINGLE_EVAL_READY.includes(propStatus) && !hasText) {
+      return c.json({
+        ok: false,
+        blocked: true,
+        status: propStatus,
+        message: 'This proposal\'s documents are still being prepared for evaluation. Please wait a moment and try again.',
+        proposal_id: parseInt(proposalId),
+      }, 202)
+    }
+
     // v28: text must already be in DB (extracted at upload time)
     // evaluateProposal() returns OCR_PENDING if proposal_full_text is empty
     const evalData = await evaluateProposal(proposal, rfp, c.env)
@@ -2392,7 +2455,7 @@ apiRouter.post('/rfps/:rfpId/proposals/:proposalId/evaluate', async (c) => {
         evaluation_data=?, ai_total_score=?, ai_recommendation=?,
         ai_validation_status=?, ai_evaluated_at=datetime('now'),
         ai_compliance_score=?, ai_quality_score=?, ai_commercial_score=?,
-        ocr_job_status='done', updated_at=datetime('now')
+        ocr_job_status='done', status='evaluated', updated_at=datetime('now')
       WHERE id=?
     `).bind(
       JSON.stringify(evalData), evalData.total_score, evalData.recommendation,
@@ -2467,7 +2530,7 @@ apiRouter.post('/callback/proposals/:proposalId/ocr-complete', async (c) => {
         evaluation_data=?, ai_total_score=?, ai_recommendation=?,
         ai_validation_status=?, ai_evaluated_at=datetime('now'),
         ai_compliance_score=?, ai_quality_score=?, ai_commercial_score=NULL,
-        ocr_job_status='done', updated_at=datetime('now')
+        ocr_job_status='done', status='evaluated', updated_at=datetime('now')
       WHERE id=?
     `).bind(
       JSON.stringify(evalData),
@@ -2981,6 +3044,20 @@ apiRouter.post('/submit/:rfpId', async (c) => {
       } catch (_) {}
     }
     console.log(`[submit] OCR fired for ${ocrFired}/${storedAttachments.length} files`)
+
+    // v49: Track how many file-ocr-complete callbacks are still expected.
+    // When all arrive, the callback sets status='ready_for_evaluation'.
+    // If no files were OCR'd (e.g. no attachments), mark ready immediately.
+    if (ocrFired > 0) {
+      await c.env.DB.prepare(
+        `UPDATE proposals SET ocr_pending_files=?, updated_at=datetime('now') WHERE id=?`
+      ).bind(ocrFired, proposalId).run()
+    } else {
+      // No OCR to wait for — proposal is immediately ready for evaluation
+      await c.env.DB.prepare(
+        `UPDATE proposals SET ocr_pending_files=0, status='ready_for_evaluation', updated_at=datetime('now') WHERE id=?`
+      ).bind(proposalId).run()
+    }
 
     return c.json({
       ok: true,

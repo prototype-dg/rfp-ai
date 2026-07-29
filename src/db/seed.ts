@@ -213,6 +213,10 @@ export async function initDb(db: D1Database) {
     `ALTER TABLE rfps ADD COLUMN rfp_full_text TEXT`,
     `ALTER TABLE rfps ADD COLUMN arch_doc_r2_key TEXT`,
     `ALTER TABLE rfps ADD COLUMN brd_doc_r2_key TEXT`,
+    // v49: OCR readiness tracking — how many file-ocr-complete callbacks are still expected
+    // Set to ocrFired at submission time; decremented by each file-ocr-complete callback.
+    // When it reaches 0 → status is set to 'ready_for_evaluation'.
+    `ALTER TABLE proposals ADD COLUMN ocr_pending_files INTEGER DEFAULT 0`,
   ]
   for (const sql of alterMigrations) {
     try {
