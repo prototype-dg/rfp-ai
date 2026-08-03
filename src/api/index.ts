@@ -115,7 +115,28 @@ apiRouter.post('/init', async (c) => {
 apiRouter.post('/admin/reset-rfps', async (c) => {
   try {
     const db = c.env.DB
-    // Delete in dependency order
+    const bucket: R2Bucket | undefined = (c.env as any).PROPOSALS_BUCKET
+
+    // --- 1. Purge R2 objects for all RFP-related prefixes ---
+    // Collect all R2 keys under arch-docs/ and proposals/ then delete in batches
+    const r2Prefixes = ['arch-docs/', 'proposals/']
+    let r2Deleted = 0
+    if (bucket) {
+      for (const prefix of r2Prefixes) {
+        let cursor: string | undefined = undefined
+        do {
+          const listed = await bucket.list({ prefix, limit: 1000, ...(cursor ? { cursor } : {}) })
+          const keys = listed.objects.map((o: any) => o.key as string)
+          if (keys.length > 0) {
+            await Promise.all(keys.map((k: string) => bucket.delete(k)))
+            r2Deleted += keys.length
+          }
+          cursor = listed.truncated ? (listed as any).cursor : undefined
+        } while (cursor)
+      }
+    }
+
+    // --- 2. Purge all DB tables in dependency order ---
     await db.prepare('DELETE FROM recommendations').run()
     await db.prepare('DELETE FROM evaluations').run()
     await db.prepare('DELETE FROM proposals').run()
@@ -126,7 +147,8 @@ apiRouter.post('/admin/reset-rfps', async (c) => {
     await db.prepare('DELETE FROM rfps').run()
     // Reset autoincrement sequences
     await db.prepare("DELETE FROM sqlite_sequence WHERE name IN ('rfps','rfp_vendors','scoring_models','email_log','questions','proposals','evaluations','recommendations')").run().catch(() => {})
-    return c.json({ ok: true, message: 'All RFPs and related data cleared.' })
+
+    return c.json({ ok: true, message: 'All RFPs, documents, scores and evaluations cleared.', r2_deleted: r2Deleted })
   } catch (e: any) {
     return c.json({ ok: false, error: e.message }, 500)
   }
