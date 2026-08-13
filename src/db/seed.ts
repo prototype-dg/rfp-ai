@@ -231,7 +231,7 @@ export async function seedVendors(db: D1Database) {
   const count = await db.prepare('SELECT COUNT(*) as cnt FROM vendors').first<{ cnt: number }>()
   if ((count?.cnt || 0) > 0) return
 
-  // Vendor list from vendors_db.csv (uploaded 2025-07-24) — 15 vendors from CPC preferred supplier pool
+  // Vendor list from vendors_db.csv (uploaded 2025-07-24) — 15 vendors from Andersen preferred supplier pool
   const vendors = [
     {
       name: 'Andersen',
@@ -242,7 +242,7 @@ export async function seedVendors(db: D1Database) {
       contact_email: 'd.gibert@andersenlab.com',
       specializations: 'Custom software development; Oracle EBS Implementation; ERP (Oracle EBS R12); CRM development; AI/ML development; AI & data platforms; Data warehouse; ETL; Tableau; Data engineering; Cloud migration; IT transformation; Digital transformation; Managed services; IT staff augmentation; Government solutions',
       certifications: 'ISO 9001; CMMI Level 3; Current supplier — 3 projects completed, working for past 12 months',
-      erp_experience: 'Government Oracle EBS R12 implementations — 8 years UAE government experience; Medallion DWH — 4 years data warehouse delivery; CRM platform development for government entities — Salesforce and custom CRM; AI/ML development and data platform engineering for UAE public sector; IT transformation and digital modernisation projects for Abu Dhabi government; MENA government project delivery track record',
+      erp_experience: 'Government Oracle EBS R12 implementations — 8 years professional services experience; Medallion DWH — 4 years data warehouse delivery; CRM platform development for government entities — Salesforce and custom CRM; AI/ML development and data platform engineering for enterprise sector; IT transformation and digital modernisation projects for global enterprise; MENA government project delivery track record',
     },
     {
       name: 'EPAM Systems',
@@ -253,7 +253,7 @@ export async function seedVendors(db: D1Database) {
       contact_email: 'sarah.epam@epam.ae',
       specializations: 'Custom software development; Oracle EBS Implementation; ERP (Oracle EBS R12); CRM development; AI/ML development; AI & data platforms; Data warehouse; ETL; Tableau; Data engineering; Cloud migration; IT transformation; Digital transformation; Managed services; Staff augmentation; Government solutions',
       certifications: 'ISO 27001; ISO 9001; CMMI Level 5; Oracle Gold Partner',
-      erp_experience: 'Oracle EBS ERP implementations worldwide — 12+ years; MENA government projects — 5 years; Medallion DWH and data engineering for government entities; CRM platform development — Salesforce and custom CRM for public sector; AI/ML development and data platform engineering; IT transformation and digital modernisation for UAE government clients; UAE government project delivery track record; Abu Dhabi public sector experience',
+      erp_experience: 'Oracle EBS ERP implementations worldwide — 12+ years; MENA government projects — 5 years; Medallion DWH and data engineering for government entities; CRM platform development — Salesforce and custom CRM for public sector; AI/ML development and data platform engineering; IT transformation and digital modernisation for enterprise clients; UAE government project delivery track record; global enterprise experience',
     },
     {
       name: 'Oracle Corporation',
@@ -275,7 +275,7 @@ export async function seedVendors(db: D1Database) {
       contact_email: 'layla.accenture@accenture.ae',
       specializations: 'Oracle EBS Implementation; SAP ERP; Managed services; AI solutions; Cloud strategy; IT consulting',
       certifications: '',
-      erp_experience: 'Global professional services firm driving digital transformation. TRN: 1004567890, Abu Dhabi',
+      erp_experience: 'Global professional services firm driving digital transformation. TRN: 1004567890, Warsaw',
     },
     {
       name: 'IBM Middle East',
@@ -308,7 +308,7 @@ export async function seedVendors(db: D1Database) {
       contact_email: 'vikram.tcs@tcs.ae',
       specializations: 'Software development; ERP solutions (SAP/Oracle); Cloud migration; Managed services; Data analytics',
       certifications: '',
-      erp_experience: 'Global IT services and business solutions provider. TRN: 1007890123, Abu Dhabi',
+      erp_experience: 'Global IT services and business solutions provider. TRN: 1007890123, Warsaw',
     },
     {
       name: 'Wipro Technologies',
@@ -330,7 +330,7 @@ export async function seedVendors(db: D1Database) {
       contact_email: 'fatima.hcl@hcltech.ae',
       specializations: 'Digital transformation; Engineering services; Cloud solutions; Managed services; Application development',
       certifications: '',
-      erp_experience: 'Global technology company specializing in digital and engineering. TRN: 1009012345, Abu Dhabi',
+      erp_experience: 'Global technology company specializing in digital and engineering. TRN: 1009012345, Warsaw',
     },
     {
       name: 'Tech Mahindra',
@@ -352,7 +352,7 @@ export async function seedVendors(db: D1Database) {
       contact_email: 'hassan.dxc@dxc.ae',
       specializations: 'Managed services; IT outsourcing; Multi-cloud management; Cybersecurity; Application modernization',
       certifications: '',
-      erp_experience: 'Global IT services and multi-cloud environment specialist. TRN: 1001234568, Abu Dhabi',
+      erp_experience: 'Global IT services and multi-cloud environment specialist. TRN: 1001234568, Warsaw',
     },
     {
       name: 'Cognizant Technology Solutions',
@@ -374,7 +374,7 @@ export async function seedVendors(db: D1Database) {
       contact_email: 'pierre.capgemini@capgemini.ae',
       specializations: 'Cloud; Data & AI; Application development; Managed services; Intelligent automation',
       certifications: '',
-      erp_experience: 'Global leader in consulting and technology services. TRN: 1003456780, Abu Dhabi',
+      erp_experience: 'Global leader in consulting and technology services. TRN: 1003456780, Warsaw',
     },
     {
       name: 'Deloitte Digital Middle East',
@@ -407,7 +407,7 @@ export async function seedVendors(db: D1Database) {
       contact_email: 'samir.microsoft@microsoft.ae',
       specializations: 'Azure cloud; Dynamics 365 ERP; Power Platform; AI services; Managed cloud operations; Custom development (.NET)',
       certifications: '',
-      erp_experience: 'Global leader in enterprise software and cloud platforms. TRN: 1006789013, Abu Dhabi',
+      erp_experience: 'Global leader in enterprise software and cloud platforms. TRN: 1006789013, Warsaw',
     },
   ]
 

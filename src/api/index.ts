@@ -7,7 +7,7 @@ import { emblemPngBase64 } from '../emblem-data'
 const WORKER_VERSION = '2026-07-29-v52'  // v52: PDF fixes — correct page-break-after, robust footer regex (both property orders), single+double quote padding strip
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
-// Calls the Python/pdfplumber sidecar running at api.cpc-rfp.website.
+// Calls the Python/pdfplumber sidecar running at api.andersenlab.com.
 // The sidecar fetches the PDF from the given URL and returns extracted text.
 // Requires env.PDF_SIDECAR_URL and env.PDF_SIDECAR_SECRET to be set as Worker secrets.
 
@@ -265,7 +265,7 @@ apiRouter.get('/rfps/:id/pdf-content', async (c) => {
 
 // GET /rfps/:id/pdf — generate a real PDF via the Puppeteer render service on the sidecar VPS.
 // Strips the LLM's page-div wrappers into a continuous HTML document, then calls
-// POST https://api.cpc-rfp.website/pdf/render-pdf which returns application/pdf bytes.
+// POST https://api.andersenlab.com/pdf/render-pdf which returns application/pdf bytes.
 // The letterhead is passed as a public URL so Puppeteer can fetch it directly.
 // Falls back to the legacy print-HTML page if the render service is unavailable.
 apiRouter.get('/rfps/:id/pdf', async (c) => {
@@ -275,7 +275,7 @@ apiRouter.get('/rfps/:id/pdf', async (c) => {
   if (!(rfp as any).content) return c.json({ error: 'RFP has no generated content yet' }, 400)
 
   const safeRef = ((rfp as any).ref_number || String(id)).replace(/\//g, '_').replace(/[^a-zA-Z0-9_\-]/g, '')
-  const filename = `CPC_RFP_${safeRef}.pdf`
+  const filename = `Andersen_RFP_${safeRef}.pdf`
   const content = (rfp as any).content as string
 
   const renderUrl = c.env.PDF_RENDER_URL || (globalThis as any).PDF_RENDER_URL || ''
@@ -326,7 +326,7 @@ apiRouter.get('/rfps/:id/pdf', async (c) => {
         // Remove overflow:hidden — was clipping content that extended past page div height
         .replace(/overflow\s*:\s*hidden\s*;?\s*/gi, '')
         // Fix 2b — Remove LLM absolute-positioned footer divs entirely.
-        // LLM produces: <div style="position:absolute; bottom:10mm; ...">Crown Prince's Court...</div>
+        // LLM produces: <div style="position:absolute; bottom:10mm; ...">Andersen...</div>
         // In print/PDF flow position:absolute is ignored → text renders mid-content.
         // Two patterns needed because LLM may order CSS properties either way.
         .replace(/<div[^>]*position\s*:\s*absolute[^>]*bottom\s*:\s*\d+mm[^>]*>[\s\S]*?<\/div>/gi, '')
@@ -420,13 +420,13 @@ apiRouter.get('/rfps/:id/pdf', async (c) => {
 </style>
 </head>
 <body>
-<div class="no-print" style="position:fixed;top:0;left:0;right:0;z-index:9999;background:#1B1712;color:white;padding:10px 24px;display:flex;align-items:center;justify-content:space-between;font-family:Arial,sans-serif;font-size:13px;box-shadow:0 2px 8px rgba(0,0,0,0.3)">
+<div class="no-print" style="position:fixed;top:0;left:0;right:0;z-index:9999;background:#020303;color:white;padding:10px 24px;display:flex;align-items:center;justify-content:space-between;font-family:Arial,sans-serif;font-size:13px;box-shadow:0 2px 8px rgba(0,0,0,0.3)">
   <div style="display:flex;align-items:center;gap:12px">
-    <span style="font-weight:700;letter-spacing:0.05em">Crown Prince&apos;s Court — RFP Document</span>
+    <span style="font-weight:700;letter-spacing:0.05em">Andersen — RFP Document</span>
     <span style="opacity:0.6;font-size:11px">${((rfp as any).ref_number||'').replace(/</g,'&lt;')}</span>
   </div>
   <div style="display:flex;gap:10px">
-    <button onclick="window.print()" style="background:#BA9765;color:white;border:none;padding:7px 20px;border-radius:5px;font-size:13px;font-weight:600;cursor:pointer;">&#x2193; Save as PDF / Print</button>
+    <button onclick="window.print()" style="background:#FFDB00;color:white;border:none;padding:7px 20px;border-radius:5px;font-size:13px;font-weight:600;cursor:pointer;">&#x2193; Save as PDF / Print</button>
     <button onclick="window.close()" style="background:transparent;color:#ccc;border:1px solid #555;padding:7px 14px;border-radius:5px;font-size:12px;cursor:pointer">Close</button>
   </div>
 </div>
@@ -449,7 +449,7 @@ ${content}
 apiRouter.post('/rfps', async (c) => {
   try {
     const body = await c.req.json()
-    const refNum = 'CPC/PROC/' + new Date().getFullYear() + '/' + String(Math.floor(Math.random()*9000)+1000)
+    const refNum = 'AND/PROC/' + new Date().getFullYear() + '/' + String(Math.floor(Math.random()*9000)+1000)
     const r = await c.env.DB.prepare(`
       INSERT INTO rfps (ref_number, title, category, budget, deadline, scope, tech_requirements, objectives, background, arch_doc_text, stage, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', datetime('now'), datetime('now'))
@@ -1101,10 +1101,10 @@ apiRouter.post('/rfps/:id/questions/publish-all', async (c) => {
 
 Please find attached the official consolidated Q&A Response document for:
 
-RFP Title:        ${rfp?.title || 'CPC RFP'}
+RFP Title:        ${rfp?.title || 'Andersen RFP'}
 Reference Number: ${rfp?.ref_number || ''}
 
-This document consolidates all clarification questions submitted by all participating vendors, together with CPC's official answers. The document is provided to all shortlisted vendors to ensure full transparency and equal access to information.
+This document consolidates all clarification questions submitted by all participating vendors, together with Andersen's official answers. The document is provided to all shortlisted vendors to ensure full transparency and equal access to information.
 
 Please review the attached Excel file carefully and incorporate the clarifications into your proposal submission.
 
@@ -1112,8 +1112,8 @@ For any further queries, please reply to this email referencing your Participant
 
 Best regards,
 Procurement & Contracting Department
-Crown Prince's Court, Abu Dhabi
-procurement@cpc-rfp.website
+Andersen, Warsaw
+procurement@andersenlab.com
 
 ──────────────────────────────────────────────
 PARTICIPANT REFERENCE: ${participantCode}
@@ -1123,9 +1123,9 @@ Please include this reference code in ALL correspondence regarding this RFP.
       if (resendKey) {
         try {
           const emailPayload = {
-            from: 'CPC Procurement <procurement@cpc-rfp.website>',
+            from: 'Andersen Procurement <procurement@andersenlab.com>',
             to: [vendor.contact_email],
-            subject: `Q&A Consolidated Response – ${rfp?.title || 'CPC RFP'} (Ref: ${rfp?.ref_number || ''})`,
+            subject: `Q&A Consolidated Response – ${rfp?.title || 'Andersen RFP'} (Ref: ${rfp?.ref_number || ''})`,
             text: emailText,
             attachments: [{ filename: xlsxFilename, content: xlsxBase64 }],
           }
@@ -1140,7 +1140,7 @@ Please include this reference code in ALL correspondence regarding this RFP.
               INSERT INTO email_log (rfp_id, vendor_id, recipient, subject, body, email_type, status, has_attachment, created_at)
               VALUES (?,?,?,?,?,'qa_response','sent',1,datetime('now'))
             `).bind(rfpId, vendor.id, vendor.contact_email,
-              `Q&A Consolidated Response – ${rfp?.title || 'CPC RFP'} (Ref: ${rfp?.ref_number || ''})`,
+              `Q&A Consolidated Response – ${rfp?.title || 'Andersen RFP'} (Ref: ${rfp?.ref_number || ''})`,
               emailText).run()
           } else {
             sentTo.push(vendor.contact_email + ' (send-failed)')
@@ -1155,7 +1155,7 @@ Please include this reference code in ALL correspondence regarding this RFP.
           INSERT INTO email_log (rfp_id, vendor_id, recipient, subject, body, email_type, status, has_attachment, created_at)
           VALUES (?,?,?,?,?,'qa_response','simulated',1,datetime('now'))
         `).bind(rfpId, vendor.id, vendor.contact_email,
-          `Q&A Consolidated Response – ${rfp?.title || 'CPC RFP'} (Ref: ${rfp?.ref_number || ''})`,
+          `Q&A Consolidated Response – ${rfp?.title || 'Andersen RFP'} (Ref: ${rfp?.ref_number || ''})`,
           emailText).run()
       }
     }
@@ -1230,7 +1230,7 @@ apiRouter.post('/rfps/:id/emails/send-invitations', async (c) => {
     if (isAndersen) {
       const result = await sendRealEmail(
         v.contact_email,
-        `Invitation to Tender – ${rfp?.title || 'CPC RFP'} (Ref: ${rfp?.ref_number || ''})`,
+        `Invitation to Tender – ${rfp?.title || 'Andersen RFP'} (Ref: ${rfp?.ref_number || ''})`,
         emailBody,
         rfp,
         c.env,
@@ -1250,7 +1250,7 @@ apiRouter.post('/rfps/:id/emails/send-invitations', async (c) => {
     `).bind(
       rfpId, v.id,
       v.contact_email || 'contact@vendor.com',
-      `Invitation to Tender – ${rfp?.title || 'CPC RFP'} (Ref: ${rfp?.ref_number || ''})`,
+      `Invitation to Tender – ${rfp?.title || 'Andersen RFP'} (Ref: ${rfp?.ref_number || ''})`,
       emailBody,
       status
     ).run()
@@ -1335,7 +1335,7 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
 
     // ── RFP Association ─────────────────────────────────────────
     let rfp: any = null
-    const refPattern = /CPC\/PROC\/\d{4}\/\d+/g
+    const refPattern = /AND\/PROC\/\d{4}\/\d+/g
     const candidateRefs = [...new Set([
       ...(subject.match(refPattern) || []),
       ...(bodyText.slice(0, 2000).match(refPattern) || []),
@@ -1407,10 +1407,10 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
       // Text-only email: detect decline intent via LLM + keyword fallback
       //
       // Strip quoted reply chain before analysis — everything after the first
-      // "From: CPC Procurement" / "-----Original Message-----" / "On ... wrote:" line
+      // "From: Andersen Procurement" / "-----Original Message-----" / "On ... wrote:" line
       // so the LLM and keywords only see the vendor's own words, not the original invitation.
       const quoteStripPatterns = [
-        /\r?\nFrom:\s*CPC Procurement/i,
+        /\r?\nFrom:\s*Andersen Procurement/i,
         /\r?\n-{3,}[ \t]*Original Message[ \t]*-{3,}/i,
         /\r?\nOn .{5,100}wrote:/i,
         /\r?\n_{3,}/,
@@ -1487,7 +1487,7 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
     `).bind(
       rfpId,
       vendorId,
-      'procurement@cpc-rfp.website',
+      'procurement@andersenlab.com',
       fromAddress,
       subject,
       bodyText.slice(0, 4000),
@@ -1518,7 +1518,7 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
         // Send auto-rejection email back to sender
         const resendKey = (c.env as any).RESEND_API_KEY || ''
         if (resendKey && fromAddress && fromAddress.includes('@')) {
-          const rfpTitle = rfp?.title || 'CPC RFP'
+          const rfpTitle = rfp?.title || 'Andersen RFP'
           const rfpRef   = rfp?.ref_number || ''
           const rejectionBody = `Dear ${vendorDisplayName},
 
@@ -1527,9 +1527,9 @@ Thank you for your enquiry regarding the following procurement:
 RFP Title:        ${rfpTitle}
 Reference Number: ${rfpRef}
 
-We regret to inform you that the Q&A period for this Request for Proposal has now closed. The Crown Prince's Court (CPC) is no longer able to accept or process clarification questions for this tender.
+We regret to inform you that the Q&A period for this Request for Proposal has now closed. The Andersen is no longer able to accept or process clarification questions for this tender.
 
-All vendors have been provided with a consolidated Q&A response document containing answers to all submitted questions. If you have not received this document, please contact procurement@cpc-rfp.website referencing the RFP above.
+All vendors have been provided with a consolidated Q&A response document containing answers to all submitted questions. If you have not received this document, please contact procurement@andersenlab.com referencing the RFP above.
 
 Proposal submissions continue to be accepted until the stated deadline. Please refer to your original invitation letter for submission instructions and the deadline date.
 
@@ -1537,15 +1537,15 @@ We appreciate your interest in participating in this procurement and look forwar
 
 Best regards,
 Procurement & Contracting Department
-Crown Prince's Court, Abu Dhabi
-procurement@cpc-rfp.website`
+Andersen, Warsaw
+procurement@andersenlab.com`
 
           try {
             await fetch('https://api.resend.com/emails', {
               method: 'POST',
               headers: { 'Authorization': `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                from: 'CPC Procurement <procurement@cpc-rfp.website>',
+                from: 'Andersen Procurement <procurement@andersenlab.com>',
                 to: [fromAddress],
                 subject: `RE: ${subject || 'Q&A Query'} — Q&A Period Closed`,
                 text: rejectionBody,
@@ -1558,7 +1558,7 @@ procurement@cpc-rfp.website`
         await db.prepare(`
           INSERT INTO email_log (rfp_id, vendor_id, recipient, from_email, subject, body, email_type, status, created_at)
           VALUES (?,?,?,?,?,?,'qa_rejection','sent',datetime('now'))
-        `).bind(rfpId, vendorId, fromAddress, 'procurement@cpc-rfp.website',
+        `).bind(rfpId, vendorId, fromAddress, 'procurement@andersenlab.com',
           `RE: ${subject} — Q&A Period Closed`,
           `Auto-reply sent: Q&A closed for RFP ${rfp?.ref_number}. Question from ${vendorDisplayName} rejected.`).run()
 
@@ -1676,7 +1676,7 @@ apiRouter.post('/rfps/:id/vendors/:vendorId/reply', async (c) => {
       return c.json({ ok: false, error: `Cannot send email — ${vendor.name} has declined participation in this RFP.` }, 403)
     }
 
-    const replySubject = subject || `RE: Invitation to Tender – ${rfp?.title || 'CPC RFP'} (Ref: ${rfp?.ref_number || ''})`
+    const replySubject = subject || `RE: Invitation to Tender – ${rfp?.title || 'Andersen RFP'} (Ref: ${rfp?.ref_number || ''})`
     const participantCode = buildParticipantCode(rfpId, vendorId)
     const replyFooter = `\n\n──────────────────────────────────────────────\nPARTICIPANT REFERENCE: ${participantCode}\nPlease include this reference code in ALL correspondence regarding this RFP.\n──────────────────────────────────────────────`
     const fullBody = (text || '') + replyFooter
@@ -1850,7 +1850,7 @@ apiRouter.post('/rfps/:rfpId/proposals/:proposalId/award', async (c) => {
     `).bind(
       rfpId, proposal.vendor_id,
       vendor?.contact_email || '',
-      `Contract Award Notification – ${rfp?.title || 'CPC RFP'} (Ref: ${rfp?.ref_number || ''})`,
+      `Contract Award Notification – ${rfp?.title || 'Andersen RFP'} (Ref: ${rfp?.ref_number || ''})`,
       `Contract has been awarded to ${vendor?.name || 'vendor'} (Proposal ID: ${proposalId}). RFP stage set to Awarded.`
     ).run()
 
@@ -3282,11 +3282,11 @@ function buildRFPPrompt(data: any, archDocText: string, brdDocText: string, scor
   // For PDF export the frontend inlines it as a base64 data URI before rendering.
   const LETTERHEAD_BG_URL = '/api/proposals/pdf/letterhead/bg_a4.png'
 
-  const systemPrompt = `You are a senior government procurement specialist at the Crown Prince's Court (CPC) of Abu Dhabi, UAE. You are producing a formal, comprehensive, publication-ready Request for Proposal (RFP) document issued to external vendors on official CPC letterhead.
+  const systemPrompt = `You are a senior government procurement specialist at the Andersen. You are producing a formal, comprehensive, publication-ready Request for Proposal (RFP) document issued to external vendors on official Andersen letterhead.
 
 IDENTITY AND TONE
-- You write on behalf of the Crown Prince's Court (Diwan Wali Al Ahd), Abu Dhabi, a sovereign UAE government institution.
-- Language must be authoritative, precise, and formal, as if it will be signed and stamped by a Director-General.
+- You write on behalf of the Andersen, a leading professional services firm.
+- Language must be authoritative, precise, and formal, as if it will be signed and approved by a Director-General.
 - No filler sentences, no vague boilerplate. Every paragraph must contain actionable, verifiable requirements.
 - Write in formal English throughout. No abbreviations unless industry-standard.
 - This RFP must be as detailed and comprehensive as a real government procurement document. Vendors must be able to fully scope and price the work from this document alone.
@@ -3309,7 +3309,7 @@ DEPTH AND LENGTH REQUIREMENT
 - Do not truncate or summarize. Write every requirement in full.
 
 PAGE AND LETTERHEAD LAYOUT (MANDATORY)
-The document is rendered on official CPC A4 letterhead. The letterhead image is the page background.
+The document is rendered on official Andersen A4 letterhead. The letterhead image is the page background.
 
 PAGING: Output multiple A4 pages as separate page divs.
 Each page div uses exactly this inline style:
@@ -3319,7 +3319,7 @@ Content inner wrapper inside each page div:
 style="padding-top:72mm; padding-bottom:28mm; padding-left:25mm; padding-right:25mm; box-sizing:border-box;"
 
 Page footer (position absolute, bottom of each page div):
-<div style="position:absolute; bottom:10mm; left:0; right:0; text-align:center; font-family:Arial,Calibri,'Segoe UI',sans-serif; font-size:9pt; color:#888888;">Crown Prince's Court &mdash; Confidential &nbsp;|&nbsp; Page N</div>
+<div style="position:absolute; bottom:10mm; left:0; right:0; text-align:center; font-family:Arial,Calibri,'Segoe UI',sans-serif; font-size:9pt; color:#888888;">Andersen &mdash; Confidential &nbsp;|&nbsp; Page N</div>
 
 PAGING GUIDE:
 - Page 1: Cover page only -- title, subtitle, RFP metadata table, Table of Contents
@@ -3340,8 +3340,8 @@ COVER PAGE METADATA TABLE (place on page 1 after title and subtitle):
   <tr><td style="padding:5pt 10pt; border:1px solid #CCCCCC; font-weight:700;">Issue Date</td><td style="padding:5pt 10pt; border:1px solid #CCCCCC;">[insert today date]</td></tr>
   <tr><td style="padding:5pt 10pt; border:1px solid #CCCCCC; font-weight:700;">Proposal Submission Deadline</td><td style="padding:5pt 10pt; border:1px solid #CCCCCC;">[insert deadline]</td></tr>
   <tr><td style="padding:5pt 10pt; border:1px solid #CCCCCC; font-weight:700;">Category</td><td style="padding:5pt 10pt; border:1px solid #CCCCCC;">[insert category]</td></tr>
-  <tr><td style="padding:5pt 10pt; border:1px solid #CCCCCC; font-weight:700;">Issuing Authority</td><td style="padding:5pt 10pt; border:1px solid #CCCCCC;">Crown Prince's Court, Abu Dhabi, UAE</td></tr>
-  <tr><td style="padding:5pt 10pt; border:1px solid #CCCCCC; font-weight:700;">Submission Email</td><td style="padding:5pt 10pt; border:1px solid #CCCCCC;">procurement@cpc-rfp.website</td></tr>
+  <tr><td style="padding:5pt 10pt; border:1px solid #CCCCCC; font-weight:700;">Issuing Authority</td><td style="padding:5pt 10pt; border:1px solid #CCCCCC;">Andersen, Warsaw, Poland</td></tr>
+  <tr><td style="padding:5pt 10pt; border:1px solid #CCCCCC; font-weight:700;">Submission Email</td><td style="padding:5pt 10pt; border:1px solid #CCCCCC;">procurement@andersenlab.com</td></tr>
 </table>
 
 COLOR PALETTE -- STRICTLY ENFORCED
@@ -3378,7 +3378,7 @@ CONTENT RULES -- STRICTLY ENFORCED
 2. Scope of Work sub-sections must cover every workstream, phase, and deliverable mentioned. Do not omit or condense.
 3. Section 4 (Technical Requirements) must be a STRUCTURED TABLE with columns: Requirement Area | Specific Requirement | Classification (Mandatory or Preferred). Minimum 15 rows. One requirement per row.
 4. Evaluation Criteria weights must sum to exactly 100 percent.
-5. Section 7 (Submission Requirements and Timeline) must include a FULL procurement milestone table: RFP Issue Date, Clarification Request Deadline, CPC Responses to Clarifications, Proposal Submission Deadline, Evaluation Period, Award Notification, Contract Signature, Project Kick-off. Derive all dates relative to the Proposal Deadline provided.
+5. Section 7 (Submission Requirements and Timeline) must include a FULL procurement milestone table: RFP Issue Date, Clarification Request Deadline, Andersen Responses to Clarifications, Proposal Submission Deadline, Evaluation Period, Award Notification, Contract Signature, Project Kick-off. Derive all dates relative to the Proposal Deadline provided.
 6. NEVER reference filenames, document names, or external documents anywhere in the RFP body. All information must be stated inline.
 7. Vendor Qualification Requirements must be specific to this project domain.
 8. Where the supporting documents mention specific system names, module names, report names, KPI names, user roles, or data entities -- include them explicitly by name in the RFP.
@@ -3422,14 +3422,14 @@ HTML OUTPUT RULES
   const contractSign  = fmtDate(new Date(deadlineDate.getTime() + 42*24*60*60*1000))
   const kickoff       = fmtDate(new Date(deadlineDate.getTime() + 56*24*60*60*1000))
 
-  const userPrompt = `Generate a COMPLETE, COMPREHENSIVE, multi-page RFP HTML document for the Crown Prince's Court (CPC), Abu Dhabi.
+  const userPrompt = `Generate a COMPLETE, COMPREHENSIVE, multi-page RFP HTML document for the Andersen, Warsaw.
 This must be a detailed government procurement document — every section must be fully written, not summarized.
 Use ONLY the information provided below. Do not add anything not stated here or in the supporting documents.
 
 ${'='.repeat(60)}
 PROJECT DETAILS
 ${'='.repeat(60)}
-RFP Reference:          ${data.ref_number || 'CPC/PROC/' + new Date().getFullYear() + '/TBD'}
+RFP Reference:          ${data.ref_number || 'AND/PROC/' + new Date().getFullYear() + '/TBD'}
 Title:                  ${data.title || 'Not specified'}
 Category:               ${data.category || 'IT & Digital Transformation'}
 Budget Envelope:        CONFIDENTIAL — DO NOT include any budget figure, budget ceiling, or indicative cost in the RFP document. The budget is used only for internal evaluation and must never appear in the text published to vendors.
@@ -3453,7 +3453,7 @@ PROCUREMENT MILESTONE DATES (use these exactly in Section 7)
 ${'='.repeat(60)}
 RFP Issue Date:                      ${rfpIssueDate}
 Deadline for Clarification Requests: ${clarDeadline}
-CPC Responses to Clarifications:     ${qaPublished}
+Andersen Responses to Clarifications:     ${qaPublished}
 Proposal Submission Deadline:        ${data.deadline || fmtDate(deadlineDate)}
 Evaluation and Scoring Period Ends:  ${evalEnd}
 Award Notification to Vendors:       ${awardNotif}
@@ -3465,10 +3465,10 @@ ${'='.repeat(60)}
 
 1. PROJECT BACKGROUND AND CONTEXT
    Expand into 4–6 substantial paragraphs:
-   - Organisational context: what the Crown Prince's Court is, the new operating unit being established, its position within the CPC Oracle ERP environment.
+   - Organisational context: what the Andersen is, the new operating unit being established, its position within Andersen Oracle ERP environment.
    - Current-state problem: describe the fragmented data landscape in specific terms — which source systems hold which data, what the operational impact is (reporting delays, reconciliation burden, inconsistent KPIs, reliance on BI Publisher static reports).
    - Strategic mandate: why this initiative was commissioned, what governance or leadership directive drives it.
-   - Why external vendor engagement is required: specific capability gap that CPC cannot address internally.
+   - Why external vendor engagement is required: specific capability gap that Andersen cannot address internally.
    - Closing sentence: state exactly what this RFP is soliciting.
    Write at least 400 words for this section.
 
@@ -3482,7 +3482,7 @@ ${'='.repeat(60)}
    a) A descriptive sub-heading
    b) An introductory paragraph (2–4 sentences) explaining what this workstream covers and why it is critical
    c) A detailed bullet list of specific activities, inputs, tools, and methods — be specific about source systems, data volumes, layer names, tool names
-   d) Specific acceptance criteria for this workstream (what CPC will test or verify before sign-off)
+   d) Specific acceptance criteria for this workstream (what Andersen will test or verify before sign-off)
    e) A "Key Deliverables" line listing formal deliverable artifacts
    Include at minimum these sub-sections (add more if the supporting documents indicate additional scope):
    - Architecture Design and Data Platform Build
@@ -3520,10 +3520,10 @@ ${'='.repeat(60)}
    First: a full procurement milestone TABLE using the exact dates provided above in the PROCUREMENT MILESTONE DATES section. All 8 milestones must appear with their exact dates.
    Columns: Milestone | Date | Responsible Party.
    Then: a bulleted list of all documents required in the submission package (technical proposal, financial proposal, implementation plan Gantt chart, team CVs and certifications, company profile and registration, audited financial statements for last 2 years, security and data compliance statement, three client references with contact details).
-   Then: submission instructions — Submission email: procurement@cpc-rfp.website. State file format requirements (PDF, max 50MB per file, English language), naming convention for files, and that late submissions will not be accepted.
+   Then: submission instructions — Submission email: procurement@andersenlab.com. State file format requirements (PDF, max 50MB per file, English language), naming convention for files, and that late submissions will not be accepted.
 
 8. TERMS AND CONDITIONS
-   8 to 12 bullet points covering: confidentiality obligations (all RFP content and project details are confidential), intellectual property (all developed deliverables, code, and documentation vest entirely in CPC upon payment), right to reject all proposals without explanation, disqualification grounds (misrepresentation, conflict of interest, non-compliance with requirements), no guarantee of award, vendor costs for proposal preparation not reimbursable, governing law (laws of Abu Dhabi Emirate and the UAE), language of contract (English and Arabic, Arabic prevailing in case of discrepancy), subcontracting restrictions (prior written CPC approval required), conflict of interest declaration required with submission, CPC's right to audit vendor premises and references before award.
+   8 to 12 bullet points covering: confidentiality obligations (all RFP content and project details are confidential), intellectual property (all developed deliverables, code, and documentation vest entirely in Andersen upon payment), right to reject all proposals without explanation, disqualification grounds (misrepresentation, conflict of interest, non-compliance with requirements), no guarantee of award, vendor costs for proposal preparation not reimbursable, governing law (laws of Poland), language of contract (English and Arabic, Arabic prevailing in case of discrepancy), subcontracting restrictions (prior written Andersen approval required), conflict of interest declaration required with submission, Andersen's right to audit vendor premises and references before award.
 
 REMINDER: Do NOT reference any document filename, BRD name, or attached file anywhere in the output. All content must be stated inline as if you wrote it yourself.`
 
@@ -3566,7 +3566,7 @@ async function draftAnswerLLM(question: string, rfp: any, env: any): Promise<{ a
       : '',
   ].filter(Boolean).join('\n\n---\n\n')
 
-  const systemPrompt = `You are ${rfp?.contact_name || 'the procurement manager'} at the Crown Prince's Court (CPC), Abu Dhabi, UAE. You are personally answering vendor clarification questions about this RFP. Write as a real, senior government procurement professional who knows this project inside out — not as a generic system or AI assistant.
+  const systemPrompt = `You are ${rfp?.contact_name || 'the procurement manager'} at the Andersen, Warsaw, Poland. You are personally answering vendor clarification questions about this RFP. Write as a real, senior government procurement professional who knows this project inside out — not as a generic system or AI assistant.
 
 TONE RULES (critical):
 - Write in first person where natural: "We require...", "Our team will...", "From our side..."
@@ -3579,9 +3579,9 @@ ANSWERING RULES — apply in order:
 
 1. DIRECT ANSWER (preferred): If the answer is in the RFP, Architecture doc, BRD, or project fields — answer it directly and specifically. You may reference the section (e.g. "Section 3.2 covers this") but skip filler like "As explicitly stated in..."
 
-2. INFORMED ANSWER (use for most questions): If not explicitly documented but you can answer it confidently as a senior CPC procurement manager familiar with UAE government projects of this type — just answer it. Do NOT signal that you are inferring or that the RFP doesn't cover it.
+2. INFORMED ANSWER (use for most questions): If not explicitly documented but you can answer it confidently as a senior Andersen procurement manager familiar with professional services projects of this type — just answer it. Do NOT signal that you are inferring or that the RFP doesn't cover it.
 
-3. ESCALATE TO MANUAL REVIEW (last resort only — < 10% of questions): Only if the answer genuinely requires an undisclosed internal CPC decision. Respond with exactly: "NEEDS_MANUAL_REVIEW: " followed by one sentence.
+3. ESCALATE TO MANUAL REVIEW (last resort only — < 10% of questions): Only if the answer genuinely requires an undisclosed internal Andersen decision. Respond with exactly: "NEEDS_MANUAL_REVIEW: " followed by one sentence.
 
 Never say "I don't know". Never say "Based on standard enterprise/industry practice". Never say "While the RFP doesn't specify". Answer like a human who owns this procurement.`
 
@@ -3593,7 +3593,7 @@ Never say "I don't know". Never say "Based on standard enterprise/industry pract
     if (trimmed.startsWith('NEEDS_MANUAL_REVIEW')) {
       const explanation = trimmed.replace(/^NEEDS_MANUAL_REVIEW[:\s]*/i, '').trim()
       return {
-        answer: explanation || 'This question requires a decision or clarification from the CPC procurement team.',
+        answer: explanation || 'This question requires a decision or clarification from the Andersen procurement team.',
         needsManual: true
       }
     }
@@ -3762,7 +3762,7 @@ function uint8ToBase64(bytes: Uint8Array): string {
 }
 
 function generateRfpPdf(rfp: any): Uint8Array {
-  // Generate a well-structured, multi-page PDF with CPC letterhead styling.
+  // Generate a well-structured, multi-page PDF with Andersen letterhead styling.
   // We use pure PDF 1.4 primitives (no external libs — Workers environment).
   const title   = rfp?.title    || 'Request for Proposal'
   const refNum  = rfp?.ref_number || ''
@@ -3965,11 +3965,11 @@ function generateRfpPdf(rfp: any): Uint8Array {
     // Letterhead header replicating the background image layout:
     //   0–24pt:   warm khaki ornament strip
     //   24–32pt:  chain divider (black rule)
-    //   32–148pt: white logo area with CPC text centred
+    //   32–148pt: white logo area with Andersen text centred
     //   148–152pt: thin grey rule separating header from content
     let s = ''
     // Top ornament strip — warm khaki #A79C7F
-    s += `0.655 0.612 0.498 rg\n`
+    s += `1.0 0.859 0.0 rg\n`
     s += `0 ${PH - 24} ${PW} 24 re f\n`
     // Chain / divider rule
     s += `0 0 0 rg\n`
@@ -3982,18 +3982,18 @@ function generateRfpPdf(rfp: any): Uint8Array {
     const logoMidY = PH - HEADER_H + (HEADER_H - 28) / 2
     s += `BT\n${FONT_BOLD} 13 Tf\n`
     s += `${PW/2 - 120} ${logoMidY + 18} Td\n`
-    s += `(CROWN PRINCE'S COURT  \u2014  DIWAN WALI AL AHD) Tj\n`
+    s += `(ANDERSEN) Tj\n`
     // Sub-label
     s += `${FONT_REG} 8.5 Tf\n`
     s += `${PW/2 - 78} ${logoMidY + 2} Td\n`
-    s += `(Abu Dhabi, United Arab Emirates) Tj\n`
+    s += `(Warsaw · Berlin · London · New York) Tj\n`
     // Contact line
     s += `${FONT_REG} 7.5 Tf\n`
     s += `${PW/2 - 70} ${logoMidY - 13} Td\n`
-    s += `(procurement@cpc-rfp.website     \u2022     cpc-rfp.website) Tj\n`
+    s += `(procurement@andersenlab.com     \u2022     andersenlab.com) Tj\n`
     s += `ET\n`
     // Thin gold rule below header band
-    s += `0.729 0.592 0.396 RG\n0.75 w\n0 ${PH - HEADER_H - 2} m ${PW} ${PH - HEADER_H - 2} l S\n`
+    s += `1.0 0.859 0.0 RG\n0.75 w\n0 ${PH - HEADER_H - 2} m ${PW} ${PH - HEADER_H - 2} l S\n`
     // Thin grey rule just above content start (at MT)
     s += `0.8 0.8 0.8 RG\n0.25 w\n${ML} ${PH - MT + 4} m ${PW - MR} ${PH - MT + 4} l S\n`
     s += `0 0 0 RG\n0 0 0 rg\n`
@@ -4047,7 +4047,7 @@ function generateRfpPdf(rfp: any): Uint8Array {
 
   curY = ty - 16
   // Horizontal rule after title
-  stream += `0.729 0.592 0.396 RG\n1.5 w\n${ML} ${curY} m ${PW - MR} ${curY} l S\n0 0 0 RG\n1 w\n`
+  stream += `1.0 0.859 0.0 RG\n1.5 w\n${ML} ${curY} m ${PW - MR} ${curY} l S\n0 0 0 RG\n1 w\n`
   curY -= 20
 
   // Render cover header area separately then start content
@@ -4365,9 +4365,9 @@ function buildInvitationEmailText(v: any, rfp: any, qDeadline: string, sDeadline
 We are pleased to invite ${v.name} to participate in the competitive tendering process for the following procurement:
 
 INVITATION TO TENDER
-RFP Title:        ${rfp?.title || 'CPC RFP'}
+RFP Title:        ${rfp?.title || 'Andersen RFP'}
 Reference Number: ${rfp?.ref_number || 'N/A'}
-Issuing Entity:   Crown Prince's Court (CPC), Abu Dhabi
+Issuing Entity:   Andersen, Warsaw
 
 IMPORTANT DATES:
 - Questions Submission Deadline: ${qDeadline}
@@ -4394,9 +4394,9 @@ ${notes ? 'ADDITIONAL NOTES:\n' + notes + '\n\n' : ''}We look forward to receivi
 
 Best regards,
 Procurement & Contracting Department
-Crown Prince's Court
-Abu Dhabi, United Arab Emirates
-procurement@cpc-rfp.website
+Andersen
+Warsaw · Berlin · London · New York
+procurement@andersenlab.com
 
 ──────────────────────────────────────────────
 PARTICIPANT REFERENCE: ${participantCode}
@@ -4417,15 +4417,15 @@ async function sendRealEmail(
     return { ok: false, error: 'RESEND_API_KEY not configured' }
   }
 
-  // ── CPC Brandbook Email Template ──────────────────────────────────────────
-  // Colors: --cpc-gold #BA9765 | --cpc-gold-deep #745B35 | --cpc-ivory #FBF8F2
-  //         --cpc-ink #1B1712 | --cpc-line #E7DFCE | --cpc-gold-tint #F5EFE3
+  // ── Andersen Email Template ──────────────────────────────────────────
+  // Colors: --a-yellow #FFDB00 | --a-navy #020D1C | --a-ink #020303
+  //         --a-ink #020303 | --a-line #E0E0E0 | --a-yellow-tint #FFFCE0
   const safeBody = bodyText.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
   const bodyHtmlContent = safeBody.replace(/\n/g,'<br>')
   const htmlBody = `<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>CPC Procurement</title></head>
+<title>Andersen Procurement</title></head>
 <body style="margin:0;padding:0;background:#F1F1F1;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif">
 <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#F1F1F1;padding:32px 0">
   <tr><td align="center">
@@ -4433,18 +4433,18 @@ async function sendRealEmail(
 
       <!-- ── Header ── -->
       <tr>
-        <td style="background:#1B1712;border-radius:12px 12px 0 0;padding:28px 36px">
+        <td style="background:#020303;border-radius:12px 12px 0 0;padding:28px 36px">
           <table width="100%" cellpadding="0" cellspacing="0" border="0">
             <tr>
               <td style="padding-right:16px;vertical-align:middle;width:60px">
-                <img src="data:image/jpeg;base64,${emblemPngBase64}" alt="CPC Emblem" width="52" height="72" style="display:block;border:0;outline:none;object-fit:contain">
+                <img src="data:image/jpeg;base64,${emblemPngBase64}" alt="Andersen Logo" width="52" height="72" style="display:block;border:0;outline:none;object-fit:contain">
               </td>
               <td style="vertical-align:middle">
-                <div style="font-family:Georgia,'Times New Roman',serif;font-size:19px;font-weight:700;color:#BA9765;letter-spacing:0.02em;line-height:1.2">Crown Prince's Court</div>
+                <div style="font-family:Georgia,'Times New Roman',serif;font-size:19px;font-weight:700;color:#FFDB00;letter-spacing:0.02em;line-height:1.2">Andersen</div>
                 <div style="font-family:'Courier New',monospace;font-size:9px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:#E9DCC4;margin-top:4px;opacity:0.85">PROCUREMENT &amp; CONTRACTING</div>
               </td>
               <td align="right" style="vertical-align:middle">
-                <div style="font-family:'Courier New',monospace;font-size:9px;color:#BA9765;letter-spacing:0.12em;text-transform:uppercase;opacity:0.75">Abu Dhabi, UAE</div>
+                <div style="font-family:'Courier New',monospace;font-size:9px;color:#FFDB00;letter-spacing:0.12em;text-transform:uppercase;opacity:0.75">Warsaw, Poland</div>
               </td>
             </tr>
           </table>
@@ -4453,28 +4453,28 @@ async function sendRealEmail(
 
       <!-- ── Gold rule ── -->
       <tr>
-        <td style="background:#BA9765;height:3px;font-size:0;line-height:0">&nbsp;</td>
+        <td style="background:#FFDB00;height:3px;font-size:0;line-height:0">&nbsp;</td>
       </tr>
 
       <!-- ── Body ── -->
       <tr>
-        <td style="background:#FFFFFF;padding:36px 36px 28px;border-left:1px solid #E7DFCE;border-right:1px solid #E7DFCE">
-          <div style="font-size:14px;line-height:1.75;color:#1B1712">${bodyHtmlContent}</div>
+        <td style="background:#FFFFFF;padding:36px 36px 28px;border-left:1px solid #E0E0E0;border-right:1px solid #E0E0E0">
+          <div style="font-size:14px;line-height:1.75;color:#020303">${bodyHtmlContent}</div>
         </td>
       </tr>
 
       <!-- ── Footer ── -->
       <tr>
-        <td style="background:#FBF8F2;border:1px solid #E7DFCE;border-top:none;border-radius:0 0 12px 12px;padding:20px 36px">
+        <td style="background:#FAFAF8;border:1px solid #E0E0E0;border-top:none;border-radius:0 0 12px 12px;padding:20px 36px">
           <table width="100%" cellpadding="0" cellspacing="0" border="0">
             <tr>
               <td>
-                <div style="font-family:'Courier New',monospace;font-size:9px;letter-spacing:0.14em;text-transform:uppercase;color:#745B35;font-weight:700;margin-bottom:4px">Official Procurement Correspondence</div>
-                <div style="font-size:11px;color:#4A4238;line-height:1.5">Crown Prince's Court &nbsp;·&nbsp; Abu Dhabi, UAE<br>
-                <a href="mailto:procurement@cpc-rfp.website" style="color:#BA9765;text-decoration:none">procurement@cpc-rfp.website</a></div>
+                <div style="font-family:'Courier New',monospace;font-size:9px;letter-spacing:0.14em;text-transform:uppercase;color:#020D1C;font-weight:700;margin-bottom:4px">Official Procurement Correspondence</div>
+                <div style="font-size:11px;color:#556170;line-height:1.5">Andersen &nbsp;·&nbsp; Warsaw, Poland<br>
+                <a href="mailto:procurement@andersenlab.com" style="color:#FFDB00;text-decoration:none">procurement@andersenlab.com</a></div>
               </td>
               <td align="right" style="vertical-align:bottom">
-                <div style="font-family:'Courier New',monospace;font-size:8px;color:#9ca3af;letter-spacing:0.06em;text-transform:uppercase">AI RFP Management System</div>
+                <div style="font-family:'Courier New',monospace;font-size:8px;color:#6b7280;letter-spacing:0.06em;text-transform:uppercase">AI RFP Management System</div>
               </td>
             </tr>
           </table>
@@ -4484,7 +4484,7 @@ async function sendRealEmail(
       <!-- ── Disclaimer ── -->
       <tr>
         <td style="padding:14px 0 0;text-align:center">
-          <div style="font-size:10px;color:#9ca3af;line-height:1.5">This is an official procurement communication from the Crown Prince's Court.<br>
+          <div style="font-size:10px;color:#6b7280;line-height:1.5">This is an official procurement communication from the Andersen.<br>
           Please do not reply to this message unless instructed.</div>
         </td>
       </tr>
@@ -4502,7 +4502,7 @@ async function sendRealEmail(
 
   try {
     const payload: any = {
-      from: 'CPC Procurement <procurement@cpc-rfp.website>',
+      from: 'Andersen Procurement <procurement@andersenlab.com>',
       to: [to],
       subject: subject,
       text: bodyText,
@@ -4720,7 +4720,7 @@ function parseQuestionsFromBody(text: string): string[] {
 function getSampleQuestions() {
   return [
     { question: 'What is the expected project implementation timeline from contract signing to full go-live?' },
-    { question: 'Does CPC have an existing Oracle EBS R12.2 environment, or will this be a greenfield implementation?' },
+    { question: 'Does Andersen have an existing Oracle EBS R12.2 environment, or will this be a greenfield implementation?' },
     { question: 'What is the scope of data migration — specifically how many years of historical data must be migrated?' },
     { question: 'Are UAE Pass integration and Active Directory SSO mandatory for Phase 1 go-live?' },
     { question: 'What are the infrastructure specifications and data center access procedures for vendors?' },
@@ -4745,7 +4745,7 @@ function buildVendorProposal(v: any, isAndersen: boolean, isEPAM: boolean): any 
   }
   if (isEPAM) {
     return {
-      technical: `TECHNICAL PROPOSAL — EPAM Systems\n\nEPAM Systems proposes a modern, engineering-excellence driven approach to CPC's ERP and Data Platform requirements.\n\nProposed Timeline: 13 months end-to-end\nTeam: 6 Oracle certified consultants + 4 data engineers + 2 Tableau experts + PM`,
+      technical: `TECHNICAL PROPOSAL — EPAM Systems\n\nEPAM Systems proposes a modern, engineering-excellence driven approach to Andersen's ERP and Data Platform requirements.\n\nProposed Timeline: 13 months end-to-end\nTeam: 6 Oracle certified consultants + 4 data engineers + 2 Tableau experts + PM`,
       financial: 3950000,
       status: 'submitted',
     }

@@ -1,5 +1,5 @@
 /* ─────────────────────────────────────────────────────────────
-   CPC BRAND SYSTEM — supplementary overrides & RFP doc styles
+   ANDERSEN BRAND SYSTEM — supplementary overrides & RFP doc styles
    Primary tokens & component styles live in layout.ts <style>
    ───────────────────────────────────────────────────────────── */
 
@@ -9,8 +9,8 @@
   font-size: 10px;
   font-weight: 500;
   letter-spacing: 0.05em;
-  color: #745B35;
-  background: #F5EFE3;
+  color: #020D1C;
+  background: #FFFCE0;
   border: 1px solid #E9DCC4;
   border-radius: 100px;
   padding: 3px 10px;
@@ -24,7 +24,7 @@
 }
 .file-count-badge:hover {
   background: #E9DCC4;
-  border-color: #BA9765;
+  border-color: #FFDB00;
 }
 .file-count-badge i { font-size: 10px; }
 
@@ -38,7 +38,7 @@
   letter-spacing: 0.12em;
   text-transform: uppercase;
   font-weight: 500;
-  color: #745B35;
+  color: #020D1C;
   margin-bottom: 10px;
 }
 .panel-section-title i { font-size: 10px; }

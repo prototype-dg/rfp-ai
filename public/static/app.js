@@ -1,5 +1,5 @@
 // ============================================================
-// CPC RFP TOOL - Multi-RFP Edition
+// ANDERSEN AI RFP TOOL - Multi-RFP Edition
 // ============================================================
 'use strict';
 const API = '/api';
@@ -7,12 +7,12 @@ const API = '/api';
 // ============================================================
 // INTERNATIONALISATION (Arabic / English)
 // ============================================================
-var _currentLang = localStorage.getItem('cpc_lang') || 'en';
+var _currentLang = localStorage.getItem('andersen_lang') || localStorage.getItem('cpc_lang') || 'en';
 
 var I18N = {
   en: {
     // Sidebar
-    org_name:        "Crown Prince's Court",
+    org_name:        'Andersen',
     product_name:    'AI RFP Management',
     nav_overview:    'Overview',
     nav_dashboard:   'Dashboard',
@@ -22,7 +22,7 @@ var I18N = {
     nav_analytics:   'Analytics',
     nav_reports:     'Reports',
     user_name:       'Procurement Manager',
-    user_role:       'CPC · Abu Dhabi',
+    user_role:       'Andersen · Global',
     // Header
     lang_btn:        'AR',
     // Page titles
@@ -365,7 +365,7 @@ var I18N = {
     settings_cat_reset:     'Restore defaults',
     settings_procurement_email_hd: 'Procurement Contact Email',
     settings_procurement_email_sub: 'Displayed to vendors in the vendor portal when they are declined or need to reach out.',
-    settings_procurement_email_ph:  'procurement@cpc.gov.ae',
+    settings_procurement_email_ph:  'procurement@andersenlab.com',
     settings_procurement_email_save:'Save Email',
     settings_procurement_email_saved:'Contact email saved.',
     // Command palette
@@ -481,9 +481,1233 @@ var I18N = {
     // 13.3 submission confirmation
     submit_confirm_email_sent: 'A confirmation email has been sent to your registered address.',
   },
+  de: {
+    org_name:        'Andersen',
+    product_name:    'AI-Ausschreibungsmanagement',
+    nav_overview:    'Übersicht',
+    nav_dashboard:   'Dashboard',
+    nav_procurement: 'Einkauf',
+    nav_rfps:        'Ausschreibungen',
+    nav_vendors:     'Lieferantenregister',
+    nav_analytics:   'Analytics',
+    nav_reports:     'Berichte',
+    user_name:       'Einkaufsleiter',
+    user_role:       'Andersen · Global',
+    lang_btn:        'DE',
+    page_dashboard:        'Dashboard',
+    page_dashboard_sub:    'KI-gestützte Beschaffungsübersicht',
+    page_rfps:             'Ausschreibungen',
+    page_rfps_sub:         'Aktuelle und historische Beschaffung verwalten',
+    page_vendors:          'Lieferantenregister',
+    page_vendors_sub:      'Globale Lieferantenliste und Leistung',
+    page_reports:          'Berichte & Analytics',
+    page_reports_sub:      'Leistungskennzahlen über Ausschreibungen',
+    stage_publish:   'Veröffentlichen',
+    stage_invite:    'Einladen',
+    stage_qa:        'F&A',
+    stage_proposals: 'Angebote',
+    stage_award:     'Zuschlag',
+    tab_generate:  'Erstellen',
+    tab_vendors:   'Lieferanten',
+    tab_qa:        'F&A',
+    tab_proposals: 'Angebote',
+    dash_active_rfps:   'Aktive Ausschreibungen',
+    dash_total_vendors: 'Lieferanten gesamt',
+    dash_proposals:     'Eingegangene Angebote',
+    dash_awarded:       'Vergebene Aufträge',
+    stage_label_draft:               'Entwurf',
+    stage_label_published:           'Veröffentlicht',
+    stage_label_qa_open:             'F&A offen',
+    stage_label_submissions_closed:  'Einreichung geschlossen',
+    stage_label_evaluation:          'Bewertung',
+    stage_label_awarded:             'Vergeben',
+    btn_new_rfp:     '+ Neue Ausschreibung',
+    btn_save:        'Speichern',
+    btn_cancel:      'Abbrechen',
+    btn_back:        'Zurück',
+    btn_generate:    'Ausschreibung erstellen',
+    btn_publish:     'Ausschreibung veröffentlichen',
+    btn_edit:        'Bearbeiten',
+    btn_delete:      'Löschen',
+    btn_invite:      'Einladungen senden',
+    btn_evaluate:    'Alle bewerten',
+    btn_award:       'Auftrag vergeben',
+    btn_add:         'Hinzufügen',
+    btn_remove:      'Entfernen',
+    btn_comms:       'Kommunikation',
+    gen_rfp_params:       'Ausschreibungsparameter',
+    gen_scoring_matrix:   'Bewertungsmatrix',
+    gen_edit_matrix:      'Matrix bearbeiten',
+    gen_save_matrix:      'Matrix speichern',
+    gen_rfp_preview:      'Vorschau',
+    gen_generate_ai:      'KI-Generierung',
+    gen_matrix_hint:      'Kriterien und Gewichtungen für Generierung und Bewertung festlegen. Summe muss 100% ergeben.',
+    sm_th_criterion:    'Kriterium',
+    sm_th_weight:       'Gewichtung',
+    sm_th_description:  'Beschreibung',
+    sm_add_criterion:   'Kriterium hinzufügen',
+    sm_total:           'Gesamt',
+    sm_must_100:        '⚠ Muss 100% sein',
+    sm_ok:              '✓',
+    sm_weights_error:   'Gewichtungen müssen 100% ergeben. Aktuell:',
+    sm_saved:           'Bewertungsmatrix gespeichert.',
+    sm_crit_technical:  'Technischer Ansatz & Methodik',
+    sm_crit_functional: 'Funktionale Eignung & Lösungsqualität',
+    sm_crit_team:       'Teamqualifikationen & Erfahrung',
+    sm_crit_financial:  'Finanzangebot',
+    sm_crit_impl:       'Implementierungsplan & Zeitplan',
+    vendors_ai_suggest:   'KI-Lieferantenvorschläge',
+    vendors_send_inv:     'Einladungen senden',
+    vendors_section_title:'Lieferantenliste & Beteiligung',
+    inv_send_pdf_btn:     'Einladungen + PDF senden',
+    inv_modal_title:      'Ausschreibungseinladungen senden',
+    inv_sending_to:       'Senden an',
+    inv_shortlisted:      'ausgewählter Lieferant.',
+    inv_real_email:       'Eine echte E-Mail wird gesendet an',
+    inv_all_simulated:    'Alle Nachrichten werden simuliert.',
+    inv_others_simulated: 'Alle anderen werden simuliert.',
+    qa_no_questions_title:'Noch keine Lieferantenfragen',
+    qa_no_questions_sub:  'Lieferanten senden Fragen per Antwort auf die Ausschreibungseinladungs-E-Mail mit Excel-Anhang.',
+    qa_no_questions_hint: 'Falls eine E-Mail eingegangen ist und Fragen nicht erscheinen, versuchen Sie',
+    qa_re_extract_link:   'Fragen neu extrahieren',
+    qa_re_extract_btn:    'Neu extrahieren',
+    qa_re_extract_full:   'Fragen aus E-Mails neu extrahieren',
+    qa_ai_answer_all:     'Alle mit KI beantworten',
+    qa_publish_approved:  'Antworten senden',
+    qa_close_qa:          'F&A schließen',
+    qa_closed_label:      'F&A geschlossen',
+    qa_manual_required:   'Manuelle Eingabe erforderlich',
+    qa_awaiting_approval: 'Wartet auf Genehmigung',
+    qa_unanswered:        'Unbeantwortet',
+    qa_via_email:         'Per E-Mail',
+    qa_ai_draft_btn:      'KI-Entwurf',
+    qa_manual_edit_btn:   'Manuell bearbeiten',
+    qa_approve_send_btn:  'Genehmigen',
+    qa_approve_btn:       'Genehmigen',
+    qa_ai_draft_label:    'KI-Antwortentwurf',
+    qa_ai_no_answer:      'KI konnte keine Antwort generieren',
+    qa_manual_input_msg:  'Diese Frage erfordert manuelle Eingabe. Bitte bearbeiten und eine Antwort hinzufügen.',
+    qa_manual_warning_hd: 'Frage(n) erfordern manuelle Antworten',
+    qa_manual_warning_sub:'KI konnte für markierte Fragen keine Antworten generieren. Bitte manuell eingeben.',
+    qa_blocked_title:     'Blockiert:',
+    qa_need_manual_answers:'Frage(n) benötigen manuelle Antworten',
+    qa_answering:         'Wird beantwortet...',
+    qa_re_extracting:     'Wird extrahiert...',
+    prop_vendors_submit:  'Lieferanten reichen Angebote über den sicheren Einreichungslink aus der Einladungs-E-Mail ein.',
+    prop_evaluate_ai:     'KI-Bewertung',
+    prop_evaluating:      'Wird bewertet…',
+    prop_view_btn:        'Ansehen',
+    prop_award_btn:       'Vergeben',
+    prop_awarded_badge:   'Vergeben',
+    prop_recommended:     'Empfohlen',
+    prop_not_awarded:     'Nicht vergeben',
+    prop_submitted:       'Eingereicht',
+    prop_review_badge:    'Prüfung',
+    prop_files:           'Datei',
+    prop_files_pl:        'Dateien',
+    prop_no_docs:         'Keine Dokumente beigefügt',
+    panel_tab_summary:    'Zusammenfassung',
+    panel_tab_compliance: 'Compliance',
+    panel_tab_scoring:    'Bewertung',
+    panel_tab_verdict:    'KI-Urteil',
+    panel_budget_lbl:       'Budget',
+    panel_timeline_lbl:     'Zeitplan',
+    panel_tech_summary:     'Technische Zusammenfassung',
+    panel_key_strengths:    'Wichtigste Stärken',
+    panel_docs_submitted:   'Eingereichte Dokumente',
+    panel_no_docs:          'Keine Dokumente',
+    panel_budget_manual_hd: 'Budget nicht automatisch extrahiert — manuelle Eingabe erforderlich',
+    panel_budget_manual_sub:'KI konnte keine Gesamtsumme finden. Bitte Gesamtbudget eingeben.',
+    panel_save_reevaluate:  'Speichern & neu bewerten',
+    panel_low_confidence:   'Geringe Konfidenz — manuell prüfen',
+    panel_comp_disq:        '🚨 Pflichtanforderung(en) nicht erfüllt — Angebot automatisch ausgeschlossen',
+    panel_comp_th_req:      'Anforderung',
+    panel_comp_th_mand:     'Pflicht',
+    panel_comp_th_met:      'Erfüllt?',
+    panel_comp_th_depth:    'KI-Tiefe',
+    panel_comp_th_just:     'Begründung',
+    panel_comp_must:        'Muss',
+    panel_comp_should:      'Sollte',
+    panel_comp_no_data:     'Noch keine Compliance-Daten',
+    panel_comp_no_data_sub: 'KI-Bewertung starten, um Compliance-Matrix zu erstellen.',
+    panel_score_overall:    'KI-Gesamtpunktzahl',
+    panel_score_compliance: 'Compliance-Punktzahl',
+    panel_score_quality:    'Qualitätspunktzahl',
+    panel_score_commercial: 'Kommerzielle Punktzahl',
+    panel_score_comp_desc:  'Abdeckung der Pflicht- und optionalen Anforderungen',
+    panel_score_qual_desc:  'Tiefe, Klarheit und Machbarkeit laut KI-Bewertung',
+    panel_score_comm_desc:  'Budget-zu-Grenze-Verhältnis',
+    panel_score_pending:    'Kommerzielle Punktzahl ausgeschlossen — Budget erfordert manuelle Eingabe (siehe Zusammenfassung-Tab)',
+    panel_score_validated:  'Budget manuell validiert und in Bewertung einbezogen',
+    panel_score_no_data:    'Noch keine Bewertungsdaten',
+    panel_score_no_data_sub:'KI-Bewertung starten, um Bewertungsdetails zu sehen.',
+    panel_verdict_reasoning:'Begründung',
+    panel_verdict_strong:   'Stärken',
+    panel_verdict_risks:    'Risiken & Schwächen',
+    panel_verdict_orig_att: 'Originalanhänge',
+    panel_verdict_no_docs:  'Keine Dokumente',
+    panel_verdict_no_data:  'Noch kein KI-Urteil',
+    panel_verdict_no_data_sub:'Bewertung starten, um KI-Empfehlung zu erhalten.',
+    panel_eval_single_btn:  'Dieses Angebot bewerten',
+    panel_eval_footer_btn:  'KI-Bewertung',
+    panel_score_score_lbl:  'Punktzahl:',
+    panel_manual_validated: 'Budget manuell validiert und in Bewertung einbezogen',
+    badge_published:        'Veröffentlicht',
+    badge_awaiting:         'Wartet auf Genehmigung',
+    badge_unanswered:       'Unbeantwortet',
+    lbl_loading:     'Wird geladen…',
+    lbl_no_data:     'Keine Daten',
+    lbl_search:      'Suchen…',
+    lbl_filter:      'Filtern',
+    lbl_status:      'Status',
+    lbl_score:       'Punktzahl',
+    lbl_vendor:      'Lieferant',
+    lbl_date:        'Datum',
+    lbl_actions:     'Aktionen',
+    lbl_ref:         'Referenz',
+    lbl_title:       'Titel',
+    lbl_category:    'Kategorie',
+    lbl_budget:      'Budget',
+    lbl_deadline:    'Frist',
+    lbl_stage:       'Phase',
+    notif_panel_title:  'Benachrichtigungen',
+    notif_mark_read:    'Alle als gelesen markieren',
+    notif_none:         'Keine Benachrichtigungen',
+    notif_dismiss:      'Schließen',
+    dash_total_rfps:    'Ausschreibungen gesamt',
+    dash_win_rate:      'Vergabequote',
+    dash_avg_duration:  'Ø Dauer',
+    dash_vendor_pool:   'Lieferantenpool',
+    dash_proposals_lbl: 'Angebote',
+    dash_emails_sent:   'Gesendete E-Mails',
+    dash_active_suffix: 'aktiv',
+    dash_awarded_suffix:'vergeben',
+    dash_per_rfp:       'pro Ausschreibung',
+    dash_reg_vendors:   'registrierte Lieferanten',
+    dash_total_recv:    'Gesamt erhalten',
+    dash_inv_replies:   'Einladungen & Antworten',
+    dash_stage_breakdown:'Phasenverteilung',
+    dash_quick_actions: 'Schnellaktionen',
+    dash_no_rfp_data:   'Noch keine Daten',
+    qa_btn_new_rfp:     'Neue Ausschreibung',
+    qa_btn_all_rfps:    'Alle Ausschreibungen',
+    qa_btn_vendors:     'Lieferanten',
+    qa_btn_reports:     'Berichte',
+    active_procurements:'Aktive Beschaffungen',
+    rfps_in_progress:   'Ausschreibung(en) in Bearbeitung',
+    archived_contracts: 'Archiv — Vergebene Aufträge',
+    completed_procs:    'Abgeschlossene Beschaffung(en)',
+    no_active_rfps:     'Keine aktiven Beschaffungen — alle Aufträge vergeben!',
+    card_created:       'Erstellt',
+    card_deadline:      'Frist:',
+    card_no_deadline:   'Keine Frist',
+    card_open:          'Öffnen',
+    card_complete:      'Fertig',
+    card_completed:     'Abgeschlossen',
+    card_awarded_badge: 'Vergeben',
+    no_rfps_title:      'Noch keine Ausschreibungen',
+    no_rfps_sub:        'Erste Ausschreibung erstellen, um Beschaffung zu starten',
+    btn_create_rfp:     'Neue Ausschreibung erstellen',
+    form_project_title: 'Projekttitel',
+    form_category:      'Kategorie',
+    form_budget_aed:    'Budgetgrenze — EUR',
+    form_deadline:      'Einreichungsfrist',
+    form_background:    'Projekthintergrund',
+    form_objectives:    'Ziele',
+    form_scope:         'Arbeitsumfang',
+    form_tech_req:      'Technische Anforderungen',
+    cat_it:             'IT & Digitale Transformation',
+    cat_consulting:     'Beratungsdienstleistungen',
+    cat_infrastructure: 'Infrastruktur',
+    cat_professional:   'Professionelle Dienstleistungen',
+    cat_data:           'Daten & Analytics',
+    vendors_shortlisted:'Vorausgewählt',
+    vendors_inv_status: 'Einladungsstatus und Lieferantenantworten werden unten verfolgt',
+    vendors_none_title: 'Noch keine Lieferanten vorausgewählt',
+    vendors_none_sub:   'KI-Lieferantenvorschläge nutzen oder Lieferanten manuell hinzufügen.',
+    vendors_show_pool:  'Gesamten Lieferantenpool anzeigen',
+    vendors_not_shortlisted: 'Nicht vorausgewählt',
+    invite_q_deadline:  'F&A-Frist',
+    invite_s_deadline:  'Einreichungsfrist',
+    invite_notes:       'Zusätzliche Hinweise',
+    invite_notes_ph:    'Besondere Anweisungen für Lieferanten...',
+    qa_pending:         'Ausstehend',
+    qa_awaiting:        'Wartet auf Genehmigung',
+    qa_published:       'Gesendet',
+    qa_need_manual:     'Manuelle Eingabe erforderlich',
+    proposals_received: 'Angebot(e) erhalten',
+    proposals_evaluated:'KI-bewertet',
+    proposals_none:     'Noch keine Angebote eingegangen.',
+    proposals_submitted:'Eingereichte Angebote',
+    th_vendor:          'Lieferant',
+    th_date:            'Datum',
+    th_budget:          'Budget',
+    th_duration:        'Dauer',
+    th_files:           'Dateien',
+    th_ai_score:        'KI-Bewertung',
+    th_status:          'Status',
+    th_actions:         'Aktionen',
+    th_specializations: 'Spezialisierungen',
+    th_fit_score:       'Eignung',
+    th_participation:   'Beteiligungsstatus',
+    th_shortlist:       'Vorauswahl',
+    vpage_heading:      'Globales Lieferantenregister',
+    vpage_registered:   'registrierter Lieferant',
+    vpage_th_vendor:    'Lieferant',
+    vpage_th_category:  'Kategorie',
+    vpage_th_specs:     'Spezialisierungen',
+    vsec_company:       'Unternehmensdaten',
+    vsec_contact:       'Ansprechpartner',
+    vsec_tech_profile:  'Technisches Profil',
+    vsec_industry:      'Branchenerfahrung',
+    vfld_country:       'Land',
+    vfld_hq:            'Hauptsitz',
+    vfld_website:       'Website',
+    vfld_revenue:       'Jahresumsatz',
+    vfld_contact_name:  'Ansprechpartner',
+    vfld_contact_email: 'E-Mail',
+    vfld_email_editable:'(bearbeitbar)',
+    vfld_platforms:     'Plattformen & Technologien',
+    vfld_specializations:'Spezialisierungen',
+    vfld_certifications:'Zertifizierungen',
+    vfld_exp_summary:   'Erfahrungszusammenfassung',
+    vfld_pub_sector:    'Referenzen öffentlicher Sektor',
+    vfld_est:           'Gegründet',
+    vcat_it_consulting: 'IT-Beratung',
+    vcat_it_digital:    'IT & Digitale Transformation',
+    vsize_large:        'Groß',
+    vsize_medium:       'Mittel',
+    vcountry_uae:       'VAE',
+    vstatus_not_invited:'Nicht eingeladen',
+    vstatus_invited:    'Eingeladen',
+    vstatus_simulated:  'Simuliert',
+    vstatus_declined:   'Abgelehnt',
+    vstatus_replied:    'Geantwortet',
+    vstatus_no_comms:   'Keine Kommunikation',
+    settings_title:         'Einstellungen',
+    settings_sub:           'Anwendungseinstellungen verwalten',
+    settings_categories_hd: 'Ausschreibungskategorien',
+    settings_categories_sub:'Verfügbare Kategorien beim Erstellen einer Ausschreibung anpassen.',
+    settings_cat_add_ph:    'Neuer Kategoriename',
+    settings_cat_add_btn:   'Hinzufügen',
+    settings_cat_saved:     'Kategorien gespeichert.',
+    settings_cat_reset:     'Standard wiederherstellen',
+    settings_procurement_email_hd: 'Einkaufskontakt-E-Mail',
+    settings_procurement_email_sub: 'Wird Lieferanten im Lieferantenportal angezeigt.',
+    settings_procurement_email_ph:  'procurement@andersenlab.com',
+    settings_procurement_email_save:'E-Mail speichern',
+    settings_procurement_email_saved:'Kontakt-E-Mail gespeichert.',
+    cmd_placeholder:    'Ausschreibungen, Lieferanten suchen…',
+    notif_drawer_title: 'Benachrichtigungen',
+    notif_mark_all:     'Alle als gelesen markieren',
+    notif_clear_all:    'Alle löschen',
+    notif_empty_title:  'Keine neuen Benachrichtigungen!',
+    notif_empty_sub:    'F&A-Benachrichtigungen, Angebote und Vergaben erscheinen hier.',
+    sab_draft:          'Diese Ausschreibung ist ein Entwurf. Details eingeben und Dokument erstellen.',
+    sab_draft_btn:      'Erstellen',
+    sab_published:      'Ausschreibung veröffentlicht. Lieferanten einladen.',
+    sab_published_btn:  'Lieferanten',
+    sab_qa_open:        'F&A-Phase offen. Lieferantenfragen prüfen und beantworten.',
+    sab_qa_open_btn:    'F&A',
+    sab_subs_closed:    'Einreichung geschlossen. Eingegangene Angebote bewerten.',
+    sab_subs_closed_btn:'Angebote',
+    sab_awarded:        'Auftrag vergeben. Diese Ausschreibung ist abgeschlossen.',
+    ctx_drafts_hd:      'Entwürfe warten auf Erstellung',
+    ctx_drafts_btn:     'Öffnen',
+    ctx_qa_hd:          'Offene F&A-Fragen',
+    ctx_qa_btn:         'Antworten',
+    ctx_props_hd:       'Angebote warten auf Bewertung',
+    ctx_props_btn:      'Bewerten',
+    ctx_award_hd:       'Wartet auf Vergabeentscheidung',
+    ctx_award_btn:      'Entscheiden',
+    qa_filter_all:      'Alle',
+    qa_filter_pending:  'Ausstehend',
+    qa_filter_approved: 'Genehmigt',
+    qa_filter_published:'Veröffentlicht',
+    qa_edit_answer_btn: 'Antwort bearbeiten',
+    qa_save_answer_btn: 'Antwort speichern',
+    qa_ai_tooltip:      'KI erstellt Antworten auf unbeantwortete Fragen. Vor Genehmigung prüfen und bearbeiten.',
+    qa_publish_confirm_title: 'Alle genehmigten Antworten veröffentlichen?',
+    qa_publish_confirm_body:  'Folgende Antworten werden per E-Mail an alle ausgewählten Lieferanten gesendet:',
+    prop_evaluate_all_btn:'Alle bewerten',
+    prop_reevaluate_btn:  'Alle neu bewerten',
+    prop_award_this_btn:  'Diesem Lieferanten vergeben',
+    prop_award_in_panel:  'Auftrag vergeben',
+    confirm_close_qa_title: 'F&A-Phase schließen?',
+    confirm_close_qa_body:  'Lieferanten können keine Fragen mehr einreichen. Nicht rückgängig zu machen.',
+    confirm_award_title:    'Auftrag vergeben?',
+    confirm_award_body:     'Auftrag wird vergeben an',
+    confirm_delete_title:   'Löschen bestätigen',
+    confirm_destructive_btn:'Bestätigen',
+    confirm_cancel_btn:     'Abbrechen',
+    vendor_export_csv:      'CSV exportieren',
+    vendor_edit_mode_btn:   'Bearbeiten',
+    vendor_save_mode_btn:   'Änderungen speichern',
+    vendor_procurement_history_hd: 'Beschaffungshistorie',
+    vendor_ph_no_rfps:      'Dieser Lieferant hat noch an keinen Ausschreibungen teilgenommen.',
+    comms_jump_latest:      'Zum Neuesten springen',
+    comms_char_count:       'Zeichen',
+    comms_rfp_ref:          'Ausschreibungsreferenz',
+    comms_markdown_hint:    'Markdown unterstützt',
+    vendor_pending_invite:  'Einladung ausstehend',
+    vendor_invite_prompt:   'Einladung jetzt senden?',
+    vendor_invite_yes:      'Einladung senden',
+    vendor_invite_later:    'Später',
+    vendor_filter_all:      'Alle',
+    vendor_filter_shortlisted:'Vorausgewählt',
+    vendor_filter_invited:  'Eingeladen',
+    vendor_match_score:     'Eignung',
+    create_rfp_modal_hint:  'Details im Erstellen-Tab nach Erstellung eingeben.',
+    preview_copy_all:       'Alles kopieren',
+    preview_export_pdf:     'PDF exportieren',
+    autosave_restored:      'Entwurf aus automatischer Speicherung wiederhergestellt.',
+    autosave_discard:       'Verwerfen',
+    autosave_restore:       'Wiederherstellen',
+    snapshot_saved:         'Snapshot vor Überschreiben gespeichert.',
+    snapshot_view:          'Snapshots anzeigen',
+    snapshot_restore:       'Diesen Snapshot wiederherstellen',
+    reports_monthly_title:  'Monatliche Ausschreibungsaktivität',
+    reports_stage_funnel:   'Phasentrichter',
+    reports_vendor_perf:    'Top-Lieferanten nach Bewertung',
+    val_required:           'Dieses Feld ist erforderlich.',
+    val_email:              'Bitte eine gültige E-Mail-Adresse eingeben.',
+    val_min_length:         'Mindestens {n} Zeichen erforderlich.',
+    filter_stage:           'Phase',
+    filter_category:        'Kategorie',
+    filter_sort:            'Sortieren',
+    filter_sort_newest:     'Neueste zuerst',
+    filter_sort_oldest:     'Älteste zuerst',
+    filter_sort_az:         'A → Z',
+    filter_sort_score:      'Bewertung',
+    filter_view_grid:       'Raster',
+    filter_view_list:       'Liste',
+    filter_all:             'Alle',
+    archived_rfps:          'Archiviert',
+    card_menu_open:         'Ausschreibung öffnen',
+    card_menu_archive:      'Archivieren',
+    card_menu_delete:       'Löschen',
+    submit_declined_contact_prefix: 'Für weitere Hilfe kontaktieren Sie:',
+    submit_confirm_email_sent: 'Eine Bestätigungs-E-Mail wurde an Ihre registrierte Adresse gesendet.',
+  },
+  fr: {
+    org_name:        'Andersen',
+    product_name:    'Gestion des appels d\'offres IA',
+    nav_overview:    'Vue d\'ensemble',
+    nav_dashboard:   'Tableau de bord',
+    nav_procurement: 'Achats',
+    nav_rfps:        'Appels d\'offres',
+    nav_vendors:     'Registre fournisseurs',
+    nav_analytics:   'Analytique',
+    nav_reports:     'Rapports',
+    user_name:       'Responsable achats',
+    user_role:       'Andersen · Global',
+    lang_btn:        'FR',
+    page_dashboard:        'Tableau de bord',
+    page_dashboard_sub:    'Vue d\'ensemble des achats pilotée par l\'IA',
+    page_rfps:             'Appels d\'offres',
+    page_rfps_sub:         'Gestion des achats actuels et historiques',
+    page_vendors:          'Registre fournisseurs',
+    page_vendors_sub:      'Liste mondiale des fournisseurs et performance',
+    page_reports:          'Rapports & Analytique',
+    page_reports_sub:      'Indicateurs de performance sur les appels d\'offres',
+    stage_publish:   'Publier',
+    stage_invite:    'Inviter',
+    stage_qa:        'Q&R',
+    stage_proposals: 'Offres',
+    stage_award:     'Attribution',
+    tab_generate:  'Créer',
+    tab_vendors:   'Fournisseurs',
+    tab_qa:        'Q&R',
+    tab_proposals: 'Offres',
+    dash_active_rfps:   'Appels d\'offres actifs',
+    dash_total_vendors: 'Total fournisseurs',
+    dash_proposals:     'Offres reçues',
+    dash_awarded:       'Contrats attribués',
+    stage_label_draft:               'Brouillon',
+    stage_label_published:           'Publié',
+    stage_label_qa_open:             'Q&R ouvert',
+    stage_label_submissions_closed:  'Dépôt fermé',
+    stage_label_evaluation:          'Évaluation',
+    stage_label_awarded:             'Attribué',
+    btn_new_rfp:     '+ Nouvel appel d\'offres',
+    btn_save:        'Enregistrer',
+    btn_cancel:      'Annuler',
+    btn_back:        'Retour',
+    btn_generate:    'Créer l\'appel d\'offres',
+    btn_publish:     'Publier l\'appel d\'offres',
+    btn_edit:        'Modifier',
+    btn_delete:      'Supprimer',
+    btn_invite:      'Envoyer invitations',
+    btn_evaluate:    'Évaluer tout',
+    btn_award:       'Attribuer le contrat',
+    btn_add:         'Ajouter',
+    btn_remove:      'Supprimer',
+    btn_comms:       'Communications',
+    gen_rfp_params:       'Paramètres de l\'appel d\'offres',
+    gen_scoring_matrix:   'Matrice d\'évaluation',
+    gen_edit_matrix:      'Modifier la matrice',
+    gen_save_matrix:      'Enregistrer la matrice',
+    gen_rfp_preview:      'Aperçu',
+    gen_generate_ai:      'Générer par IA',
+    gen_matrix_hint:      'Définir les critères et pondérations pour la génération et l\'évaluation. La somme doit être 100%.',
+    sm_th_criterion:    'Critère',
+    sm_th_weight:       'Pondération',
+    sm_th_description:  'Description',
+    sm_add_criterion:   'Ajouter un critère',
+    sm_total:           'Total',
+    sm_must_100:        '⚠ Doit être 100%',
+    sm_ok:              '✓',
+    sm_weights_error:   'La somme des pondérations doit être 100%. Actuellement:',
+    sm_saved:           'Matrice d\'évaluation enregistrée.',
+    sm_crit_technical:  'Approche technique & Méthodologie',
+    sm_crit_functional: 'Adéquation fonctionnelle & Qualité de la solution',
+    sm_crit_team:       'Qualifications & Expérience de l\'équipe',
+    sm_crit_financial:  'Offre financière',
+    sm_crit_impl:       'Plan de mise en œuvre & Calendrier',
+    vendors_ai_suggest:   'Fournisseurs suggérés par IA',
+    vendors_send_inv:     'Envoyer invitations',
+    vendors_section_title:'Liste fournisseurs & Participation',
+    inv_send_pdf_btn:     'Envoyer invitations + PDF',
+    inv_modal_title:      'Envoyer les invitations à l\'appel d\'offres',
+    inv_sending_to:       'Envoi à',
+    inv_shortlisted:      'fournisseur présélectionné.',
+    inv_real_email:       'Un vrai e-mail sera envoyé à',
+    inv_all_simulated:    'Tous les messages seront simulés.',
+    inv_others_simulated: 'Tous les autres sont simulés.',
+    qa_no_questions_title:'Aucune question fournisseur pour l\'instant',
+    qa_no_questions_sub:  'Les fournisseurs envoient leurs questions en répondant à l\'e-mail d\'invitation avec une pièce jointe Excel.',
+    qa_no_questions_hint: 'Si vous avez reçu un e-mail et que les questions n\'apparaissent pas, essayez',
+    qa_re_extract_link:   're-extraire les questions',
+    qa_re_extract_btn:    'Re-extraire',
+    qa_re_extract_full:   'Re-extraire les questions des e-mails',
+    qa_ai_answer_all:     'Répondre à tout par IA',
+    qa_publish_approved:  'Envoyer les réponses',
+    qa_close_qa:          'Fermer Q&R',
+    qa_closed_label:      'Q&R fermé',
+    qa_manual_required:   'Saisie manuelle requise',
+    qa_awaiting_approval: 'En attente d\'approbation',
+    qa_unanswered:        'Sans réponse',
+    qa_via_email:         'Par e-mail',
+    qa_ai_draft_btn:      'Brouillon IA',
+    qa_manual_edit_btn:   'Modification manuelle',
+    qa_approve_send_btn:  'Approuver',
+    qa_approve_btn:       'Approuver',
+    qa_ai_draft_label:    'Brouillon de réponse IA',
+    qa_ai_no_answer:      'L\'IA n\'a pas pu générer de réponse',
+    qa_manual_input_msg:  'Cette question nécessite une saisie manuelle. Veuillez modifier et ajouter une réponse.',
+    qa_manual_warning_hd: 'Question(s) nécessitant des réponses manuelles',
+    qa_manual_warning_sub:'L\'IA n\'a pas pu générer de réponses pour les questions marquées. Veuillez les saisir manuellement.',
+    qa_blocked_title:     'Bloqué:',
+    qa_need_manual_answers:'Question(s) nécessitant des réponses manuelles',
+    qa_answering:         'Réponse en cours...',
+    qa_re_extracting:     'Extraction en cours...',
+    prop_vendors_submit:  'Les fournisseurs soumettent leurs offres via le lien sécurisé dans l\'e-mail d\'invitation.',
+    prop_evaluate_ai:     'Évaluation IA',
+    prop_evaluating:      'Évaluation en cours…',
+    prop_view_btn:        'Voir',
+    prop_award_btn:       'Attribuer',
+    prop_awarded_badge:   'Attribué',
+    prop_recommended:     'Recommandé',
+    prop_not_awarded:     'Non attribué',
+    prop_submitted:       'Soumis',
+    prop_review_badge:    'Révision',
+    prop_files:           'fichier',
+    prop_files_pl:        'fichiers',
+    prop_no_docs:         'Aucun document joint',
+    panel_tab_summary:    'Résumé',
+    panel_tab_compliance: 'Conformité',
+    panel_tab_scoring:    'Évaluation',
+    panel_tab_verdict:    'Verdict IA',
+    panel_budget_lbl:       'Budget',
+    panel_timeline_lbl:     'Calendrier',
+    panel_tech_summary:     'Résumé technique',
+    panel_key_strengths:    'Points forts clés',
+    panel_docs_submitted:   'Documents soumis',
+    panel_no_docs:          'Aucun document',
+    panel_budget_manual_hd: 'Budget non extrait automatiquement — saisie manuelle requise',
+    panel_budget_manual_sub:'L\'IA n\'a pas pu trouver de montant total. Veuillez saisir le budget total.',
+    panel_save_reevaluate:  'Enregistrer & réévaluer',
+    panel_low_confidence:   'Faible confiance — vérifier manuellement',
+    panel_comp_disq:        '🚨 Exigence(s) obligatoire(s) non satisfaite(s) — Offre automatiquement disqualifiée',
+    panel_comp_th_req:      'Exigence',
+    panel_comp_th_mand:     'Obligatoire',
+    panel_comp_th_met:      'Satisfait?',
+    panel_comp_th_depth:    'Profondeur IA',
+    panel_comp_th_just:     'Justification',
+    panel_comp_must:        'Doit',
+    panel_comp_should:      'Devrait',
+    panel_comp_no_data:     'Aucune donnée de conformité',
+    panel_comp_no_data_sub: 'Lancer l\'évaluation IA pour générer la matrice de conformité.',
+    panel_score_overall:    'Score global IA',
+    panel_score_compliance: 'Score de conformité',
+    panel_score_quality:    'Score de qualité',
+    panel_score_commercial: 'Score commercial',
+    panel_score_comp_desc:  'Couverture des exigences obligatoires et optionnelles',
+    panel_score_qual_desc:  'Profondeur, clarté et faisabilité selon l\'IA',
+    panel_score_comm_desc:  'Ratio budget/plafond',
+    panel_score_pending:    'Score commercial exclu — Budget nécessite saisie manuelle (voir onglet Résumé)',
+    panel_score_validated:  'Budget validé manuellement et inclus dans l\'évaluation',
+    panel_score_no_data:    'Aucune donnée d\'évaluation',
+    panel_score_no_data_sub:'Lancer l\'évaluation IA pour voir les détails.',
+    panel_verdict_reasoning:'Raisonnement',
+    panel_verdict_strong:   'Points forts',
+    panel_verdict_risks:    'Risques & Faiblesses',
+    panel_verdict_orig_att: 'Pièces jointes originales',
+    panel_verdict_no_docs:  'Aucun document',
+    panel_verdict_no_data:  'Aucun verdict IA',
+    panel_verdict_no_data_sub:'Lancer l\'évaluation pour obtenir la recommandation IA.',
+    panel_eval_single_btn:  'Évaluer cette offre',
+    panel_eval_footer_btn:  'Évaluation IA',
+    panel_score_score_lbl:  'Score:',
+    panel_manual_validated: 'Budget validé manuellement et inclus dans l\'évaluation',
+    badge_published:        'Publié',
+    badge_awaiting:         'En attente d\'approbation',
+    badge_unanswered:       'Sans réponse',
+    lbl_loading:     'Chargement…',
+    lbl_no_data:     'Aucune donnée',
+    lbl_search:      'Rechercher…',
+    lbl_filter:      'Filtrer',
+    lbl_status:      'Statut',
+    lbl_score:       'Score',
+    lbl_vendor:      'Fournisseur',
+    lbl_date:        'Date',
+    lbl_actions:     'Actions',
+    lbl_ref:         'Référence',
+    lbl_title:       'Titre',
+    lbl_category:    'Catégorie',
+    lbl_budget:      'Budget',
+    lbl_deadline:    'Échéance',
+    lbl_stage:       'Phase',
+    notif_panel_title:  'Notifications',
+    notif_mark_read:    'Tout marquer comme lu',
+    notif_none:         'Aucune notification',
+    notif_dismiss:      'Fermer',
+    dash_total_rfps:    'Total appels d\'offres',
+    dash_win_rate:      'Taux d\'attribution',
+    dash_avg_duration:  'Durée moyenne',
+    dash_vendor_pool:   'Pool fournisseurs',
+    dash_proposals_lbl: 'Offres',
+    dash_emails_sent:   'E-mails envoyés',
+    dash_active_suffix: 'actif',
+    dash_awarded_suffix:'attribué',
+    dash_per_rfp:       'par appel d\'offres',
+    dash_reg_vendors:   'fournisseur enregistré',
+    dash_total_recv:    'Total reçu',
+    dash_inv_replies:   'Invitations & réponses',
+    dash_stage_breakdown:'Répartition par phase',
+    dash_quick_actions: 'Actions rapides',
+    dash_no_rfp_data:   'Aucune donnée',
+    qa_btn_new_rfp:     'Nouvel appel d\'offres',
+    qa_btn_all_rfps:    'Tous les appels d\'offres',
+    qa_btn_vendors:     'Fournisseurs',
+    qa_btn_reports:     'Rapports',
+    active_procurements:'Achats actifs',
+    rfps_in_progress:   'appel(s) d\'offres en cours',
+    archived_contracts: 'Archive — Contrats attribués',
+    completed_procs:    'processus d\'achat terminé(s)',
+    no_active_rfps:     'Aucun achat actif — tous les contrats attribués!',
+    card_created:       'Créé le',
+    card_deadline:      'Échéance:',
+    card_no_deadline:   'Aucune échéance',
+    card_open:          'Ouvrir',
+    card_complete:      'Terminé',
+    card_completed:     'Terminé',
+    card_awarded_badge: 'Attribué',
+    no_rfps_title:      'Aucun appel d\'offres',
+    no_rfps_sub:        'Créer le premier appel d\'offres pour commencer',
+    btn_create_rfp:     'Créer un appel d\'offres',
+    form_project_title: 'Titre du projet',
+    form_category:      'Catégorie',
+    form_budget_aed:    'Plafond budgétaire — EUR',
+    form_deadline:      'Date limite de soumission',
+    form_background:    'Contexte du projet',
+    form_objectives:    'Objectifs',
+    form_scope:         'Périmètre',
+    form_tech_req:      'Exigences techniques',
+    cat_it:             'IT & Transformation numérique',
+    cat_consulting:     'Services de conseil',
+    cat_infrastructure: 'Infrastructure',
+    cat_professional:   'Services professionnels',
+    cat_data:           'Données & Analytique',
+    vendors_shortlisted:'Présélectionné',
+    vendors_inv_status: 'Statut d\'invitation et réponses fournisseurs suivis ci-dessous',
+    vendors_none_title: 'Aucun fournisseur présélectionné',
+    vendors_none_sub:   'Utiliser les suggestions IA ou ajouter des fournisseurs manuellement.',
+    vendors_show_pool:  'Voir le pool complet de fournisseurs',
+    vendors_not_shortlisted: 'Non présélectionné',
+    invite_q_deadline:  'Date limite Q&R',
+    invite_s_deadline:  'Date limite de soumission',
+    invite_notes:       'Notes supplémentaires',
+    invite_notes_ph:    'Instructions particulières pour les fournisseurs...',
+    qa_pending:         'En attente',
+    qa_awaiting:        'En attente d\'approbation',
+    qa_published:       'Envoyé',
+    qa_need_manual:     'Saisie manuelle requise',
+    proposals_received: 'offre(s) reçue(s)',
+    proposals_evaluated:'Évalué par IA',
+    proposals_none:     'Aucune offre reçue.',
+    proposals_submitted:'Offres soumises',
+    th_vendor:          'Fournisseur',
+    th_date:            'Date',
+    th_budget:          'Budget',
+    th_duration:        'Durée',
+    th_files:           'Fichiers',
+    th_ai_score:        'Score IA',
+    th_status:          'Statut',
+    th_actions:         'Actions',
+    th_specializations: 'Spécialisations',
+    th_fit_score:       'Adéquation',
+    th_participation:   'Statut de participation',
+    th_shortlist:       'Présélection',
+    vpage_heading:      'Registre mondial des fournisseurs',
+    vpage_registered:   'fournisseur enregistré',
+    vpage_th_vendor:    'Fournisseur',
+    vpage_th_category:  'Catégorie',
+    vpage_th_specs:     'Spécialisations',
+    vsec_company:       'Données entreprise',
+    vsec_contact:       'Contact',
+    vsec_tech_profile:  'Profil technique',
+    vsec_industry:      'Expérience sectorielle',
+    vfld_country:       'Pays',
+    vfld_hq:            'Siège social',
+    vfld_website:       'Site web',
+    vfld_revenue:       'Chiffre d\'affaires annuel',
+    vfld_contact_name:  'Nom du contact',
+    vfld_contact_email: 'E-mail',
+    vfld_email_editable:'(modifiable)',
+    vfld_platforms:     'Plateformes & Technologies',
+    vfld_specializations:'Spécialisations',
+    vfld_certifications:'Certifications',
+    vfld_exp_summary:   'Résumé d\'expérience',
+    vfld_pub_sector:    'Références secteur public',
+    vfld_est:           'Fondé en',
+    vcat_it_consulting: 'Conseil IT',
+    vcat_it_digital:    'IT & Transformation numérique',
+    vsize_large:        'Grande',
+    vsize_medium:       'Moyenne',
+    vcountry_uae:       'EAU',
+    vstatus_not_invited:'Non invité',
+    vstatus_invited:    'Invité',
+    vstatus_simulated:  'Simulé',
+    vstatus_declined:   'Refusé',
+    vstatus_replied:    'Répondu',
+    vstatus_no_comms:   'Pas de communication',
+    settings_title:         'Paramètres',
+    settings_sub:           'Gérer les paramètres de l\'application',
+    settings_categories_hd: 'Catégories d\'appels d\'offres',
+    settings_categories_sub:'Personnaliser la liste des catégories disponibles.',
+    settings_cat_add_ph:    'Nouveau nom de catégorie',
+    settings_cat_add_btn:   'Ajouter',
+    settings_cat_saved:     'Catégories enregistrées.',
+    settings_cat_reset:     'Restaurer les valeurs par défaut',
+    settings_procurement_email_hd: 'E-mail de contact achats',
+    settings_procurement_email_sub: 'Affiché aux fournisseurs dans le portail.',
+    settings_procurement_email_ph:  'procurement@andersenlab.com',
+    settings_procurement_email_save:'Enregistrer l\'e-mail',
+    settings_procurement_email_saved:'E-mail de contact enregistré.',
+    cmd_placeholder:    'Rechercher appels d\'offres, fournisseurs…',
+    notif_drawer_title: 'Notifications',
+    notif_mark_all:     'Tout marquer comme lu',
+    notif_clear_all:    'Tout effacer',
+    notif_empty_title:  'Aucune nouvelle notification!',
+    notif_empty_sub:    'Les alertes Q&R, offres et attributions apparaîtront ici.',
+    sab_draft:          'Cet appel d\'offres est un brouillon. Saisir les détails et générer le document.',
+    sab_draft_btn:      'Générer',
+    sab_published:      'Appel d\'offres publié. Inviter les fournisseurs présélectionnés.',
+    sab_published_btn:  'Fournisseurs',
+    sab_qa_open:        'Phase Q&R ouverte. Examiner et répondre aux questions.',
+    sab_qa_open_btn:    'Q&R',
+    sab_subs_closed:    'Dépôt fermé. Évaluer les offres reçues.',
+    sab_subs_closed_btn:'Offres',
+    sab_awarded:        'Contrat attribué. Cet appel d\'offres est terminé.',
+    ctx_drafts_hd:      'Brouillons en attente de génération',
+    ctx_drafts_btn:     'Ouvrir',
+    ctx_qa_hd:          'Questions Q&R en attente',
+    ctx_qa_btn:         'Répondre',
+    ctx_props_hd:       'Offres en attente d\'évaluation',
+    ctx_props_btn:      'Évaluer',
+    ctx_award_hd:       'En attente de décision d\'attribution',
+    ctx_award_btn:      'Décider',
+    qa_filter_all:      'Tout',
+    qa_filter_pending:  'En attente',
+    qa_filter_approved: 'Approuvé',
+    qa_filter_published:'Publié',
+    qa_edit_answer_btn: 'Modifier la réponse',
+    qa_save_answer_btn: 'Enregistrer la réponse',
+    qa_ai_tooltip:      'L\'IA préparera des réponses aux questions sans réponse. Réviser avant approbation.',
+    qa_publish_confirm_title: 'Publier toutes les réponses approuvées?',
+    qa_publish_confirm_body:  'Les réponses suivantes seront envoyées par e-mail à tous les fournisseurs présélectionnés:',
+    prop_evaluate_all_btn:'Évaluer tout',
+    prop_reevaluate_btn:  'Réévaluer tout',
+    prop_award_this_btn:  'Attribuer à ce fournisseur',
+    prop_award_in_panel:  'Attribuer le contrat',
+    confirm_close_qa_title: 'Fermer la phase Q&R?',
+    confirm_close_qa_body:  'Les fournisseurs ne pourront plus soumettre de questions. Action irréversible.',
+    confirm_award_title:    'Attribuer le contrat?',
+    confirm_award_body:     'Le contrat sera attribué à',
+    confirm_delete_title:   'Confirmer la suppression',
+    confirm_destructive_btn:'Confirmer',
+    confirm_cancel_btn:     'Annuler',
+    vendor_export_csv:      'Exporter CSV',
+    vendor_edit_mode_btn:   'Modifier',
+    vendor_save_mode_btn:   'Enregistrer les modifications',
+    vendor_procurement_history_hd: 'Historique des achats',
+    vendor_ph_no_rfps:      'Ce fournisseur n\'a encore participé à aucun appel d\'offres.',
+    comms_jump_latest:      'Aller au plus récent',
+    comms_char_count:       'caractère',
+    comms_rfp_ref:          'Référence appel d\'offres',
+    comms_markdown_hint:    'Markdown supporté',
+    vendor_pending_invite:  'Invitation en attente',
+    vendor_invite_prompt:   'Envoyer l\'invitation maintenant?',
+    vendor_invite_yes:      'Envoyer l\'invitation',
+    vendor_invite_later:    'Plus tard',
+    vendor_filter_all:      'Tous',
+    vendor_filter_shortlisted:'Présélectionné',
+    vendor_filter_invited:  'Invité',
+    vendor_match_score:     'Adéquation',
+    create_rfp_modal_hint:  'Saisir les détails dans l\'onglet Créer après création.',
+    preview_copy_all:       'Tout copier',
+    preview_export_pdf:     'Exporter PDF',
+    autosave_restored:      'Brouillon restauré depuis la sauvegarde automatique.',
+    autosave_discard:       'Ignorer',
+    autosave_restore:       'Restaurer',
+    snapshot_saved:         'Instantané enregistré avant écrasement.',
+    snapshot_view:          'Voir les instantanés',
+    snapshot_restore:       'Restaurer cet instantané',
+    reports_monthly_title:  'Activité mensuelle des appels d\'offres',
+    reports_stage_funnel:   'Entonnoir par phase',
+    reports_vendor_perf:    'Meilleurs fournisseurs par score',
+    val_required:           'Ce champ est obligatoire.',
+    val_email:              'Veuillez saisir une adresse e-mail valide.',
+    val_min_length:         'Minimum {n} caractères.',
+    filter_stage:           'Phase',
+    filter_category:        'Catégorie',
+    filter_sort:            'Trier',
+    filter_sort_newest:     'Plus récent d\'abord',
+    filter_sort_oldest:     'Plus ancien d\'abord',
+    filter_sort_az:         'A → Z',
+    filter_sort_score:      'Score',
+    filter_view_grid:       'Grille',
+    filter_view_list:       'Liste',
+    filter_all:             'Tous',
+    archived_rfps:          'Archivé',
+    card_menu_open:         'Ouvrir l\'appel d\'offres',
+    card_menu_archive:      'Archiver',
+    card_menu_delete:       'Supprimer',
+    submit_declined_contact_prefix: 'Pour plus d\'assistance, veuillez contacter:',
+    submit_confirm_email_sent: 'Un e-mail de confirmation a été envoyé à votre adresse enregistrée.',
+  },
+  pl: {
+    org_name:        'Andersen',
+    product_name:    'Zarządzanie przetargami AI',
+    nav_overview:    'Przegląd',
+    nav_dashboard:   'Pulpit',
+    nav_procurement: 'Zakupy',
+    nav_rfps:        'Przetargi',
+    nav_vendors:     'Rejestr dostawców',
+    nav_analytics:   'Analityka',
+    nav_reports:     'Raporty',
+    user_name:       'Kierownik ds. zakupów',
+    user_role:       'Andersen · Global',
+    lang_btn:        'PL',
+    page_dashboard:        'Pulpit',
+    page_dashboard_sub:    'Przegląd zakupów opartych na AI',
+    page_rfps:             'Przetargi',
+    page_rfps_sub:         'Zarządzanie bieżącymi i historycznymi zamówieniami',
+    page_vendors:          'Rejestr dostawców',
+    page_vendors_sub:      'Globalna lista dostawców i wyniki',
+    page_reports:          'Raporty i analityka',
+    page_reports_sub:      'Wskaźniki wydajności przetargów',
+    stage_publish:   'Publikuj',
+    stage_invite:    'Zaproś',
+    stage_qa:        'P&O',
+    stage_proposals: 'Oferty',
+    stage_award:     'Udzielenie',
+    tab_generate:  'Utwórz',
+    tab_vendors:   'Dostawcy',
+    tab_qa:        'P&O',
+    tab_proposals: 'Oferty',
+    dash_active_rfps:   'Aktywne przetargi',
+    dash_total_vendors: 'Łączna liczba dostawców',
+    dash_proposals:     'Złożone oferty',
+    dash_awarded:       'Udzielone zamówienia',
+    stage_label_draft:               'Szkic',
+    stage_label_published:           'Opublikowany',
+    stage_label_qa_open:             'P&O otwarte',
+    stage_label_submissions_closed:  'Składanie zamknięte',
+    stage_label_evaluation:          'Ocena',
+    stage_label_awarded:             'Udzielony',
+    btn_new_rfp:     '+ Nowy przetarg',
+    btn_save:        'Zapisz',
+    btn_cancel:      'Anuluj',
+    btn_back:        'Wstecz',
+    btn_generate:    'Utwórz przetarg',
+    btn_publish:     'Opublikuj przetarg',
+    btn_edit:        'Edytuj',
+    btn_delete:      'Usuń',
+    btn_invite:      'Wyślij zaproszenia',
+    btn_evaluate:    'Oceń wszystkich',
+    btn_award:       'Udziel zamówienia',
+    btn_add:         'Dodaj',
+    btn_remove:      'Usuń',
+    btn_comms:       'Komunikacja',
+    gen_rfp_params:       'Parametry przetargu',
+    gen_scoring_matrix:   'Macierz oceny',
+    gen_edit_matrix:      'Edytuj macierz',
+    gen_save_matrix:      'Zapisz macierz',
+    gen_rfp_preview:      'Podgląd',
+    gen_generate_ai:      'Generuj AI',
+    gen_matrix_hint:      'Określ kryteria i wagi dla generowania i oceny. Suma musi wynosić 100%.',
+    sm_th_criterion:    'Kryterium',
+    sm_th_weight:       'Waga',
+    sm_th_description:  'Opis',
+    sm_add_criterion:   'Dodaj kryterium',
+    sm_total:           'Łącznie',
+    sm_must_100:        '⚠ Musi być 100%',
+    sm_ok:              '✓',
+    sm_weights_error:   'Suma wag musi wynosić 100%. Aktualnie:',
+    sm_saved:           'Macierz oceny zapisana.',
+    sm_crit_technical:  'Podejście techniczne i metodologia',
+    sm_crit_functional: 'Dopasowanie funkcjonalne i jakość rozwiązania',
+    sm_crit_team:       'Kwalifikacje i doświadczenie zespołu',
+    sm_crit_financial:  'Oferta finansowa',
+    sm_crit_impl:       'Plan wdrożenia i harmonogram',
+    vendors_ai_suggest:   'Sugestie dostawców AI',
+    vendors_send_inv:     'Wyślij zaproszenia',
+    vendors_section_title:'Lista dostawców i uczestnictwo',
+    inv_send_pdf_btn:     'Wyślij zaproszenia + PDF',
+    inv_modal_title:      'Wyślij zaproszenia do przetargu',
+    inv_sending_to:       'Wysyłanie do',
+    inv_shortlisted:      'wybrany dostawca.',
+    inv_real_email:       'Prawdziwy e-mail zostanie wysłany do',
+    inv_all_simulated:    'Wszystkie wiadomości będą symulowane.',
+    inv_others_simulated: 'Pozostałe są symulowane.',
+    qa_no_questions_title:'Brak pytań od dostawców',
+    qa_no_questions_sub:  'Dostawcy przesyłają pytania odpowiadając na e-mail zaproszeniowy z załącznikiem Excel.',
+    qa_no_questions_hint: 'Jeśli otrzymałeś e-mail, a pytania nie pojawiają się, spróbuj',
+    qa_re_extract_link:   'ponownie wyodrębnić pytania',
+    qa_re_extract_btn:    'Wyodrębnij ponownie',
+    qa_re_extract_full:   'Ponownie wyodrębnij pytania z e-maili',
+    qa_ai_answer_all:     'Odpowiedz na wszystko AI',
+    qa_publish_approved:  'Wyślij odpowiedzi',
+    qa_close_qa:          'Zamknij P&O',
+    qa_closed_label:      'P&O zamknięte',
+    qa_manual_required:   'Wymagane ręczne wprowadzenie',
+    qa_awaiting_approval: 'Oczekuje na zatwierdzenie',
+    qa_unanswered:        'Bez odpowiedzi',
+    qa_via_email:         'Przez e-mail',
+    qa_ai_draft_btn:      'Wersja robocza AI',
+    qa_manual_edit_btn:   'Ręczna edycja',
+    qa_approve_send_btn:  'Zatwierdź',
+    qa_approve_btn:       'Zatwierdź',
+    qa_ai_draft_label:    'Wersja robocza odpowiedzi AI',
+    qa_ai_no_answer:      'AI nie mogło wygenerować odpowiedzi',
+    qa_manual_input_msg:  'To pytanie wymaga ręcznego wprowadzenia. Edytuj i dodaj odpowiedź.',
+    qa_manual_warning_hd: 'Pytanie(a) wymagające ręcznych odpowiedzi',
+    qa_manual_warning_sub:'AI nie mogło wygenerować odpowiedzi na oznaczone pytania. Wprowadź ręcznie.',
+    qa_blocked_title:     'Zablokowane:',
+    qa_need_manual_answers:'Pytanie(a) wymagające ręcznych odpowiedzi',
+    qa_answering:         'Odpowiadanie...',
+    qa_re_extracting:     'Wyodrębnianie...',
+    prop_vendors_submit:  'Dostawcy składają oferty przez bezpieczny link z e-maila zaproszeniowego.',
+    prop_evaluate_ai:     'Ocena AI',
+    prop_evaluating:      'Ocenianie…',
+    prop_view_btn:        'Zobacz',
+    prop_award_btn:       'Udziel',
+    prop_awarded_badge:   'Udzielony',
+    prop_recommended:     'Zalecany',
+    prop_not_awarded:     'Nieudzielony',
+    prop_submitted:       'Złożony',
+    prop_review_badge:    'Przegląd',
+    prop_files:           'plik',
+    prop_files_pl:        'pliki',
+    prop_no_docs:         'Brak załączonych dokumentów',
+    panel_tab_summary:    'Podsumowanie',
+    panel_tab_compliance: 'Zgodność',
+    panel_tab_scoring:    'Ocena',
+    panel_tab_verdict:    'Werdykt AI',
+    panel_budget_lbl:       'Budżet',
+    panel_timeline_lbl:     'Harmonogram',
+    panel_tech_summary:     'Podsumowanie techniczne',
+    panel_key_strengths:    'Kluczowe mocne strony',
+    panel_docs_submitted:   'Złożone dokumenty',
+    panel_no_docs:          'Brak dokumentów',
+    panel_budget_manual_hd: 'Budżet nie wyodrębniony automatycznie — wymagane ręczne wprowadzenie',
+    panel_budget_manual_sub:'AI nie mogło znaleźć kwoty łącznej. Wprowadź łączny budżet.',
+    panel_save_reevaluate:  'Zapisz i oceń ponownie',
+    panel_low_confidence:   'Niska pewność — sprawdź ręcznie',
+    panel_comp_disq:        '🚨 Wymaganie(a) obowiązkowe niespełnione — Oferta automatycznie wykluczona',
+    panel_comp_th_req:      'Wymaganie',
+    panel_comp_th_mand:     'Obowiązkowe',
+    panel_comp_th_met:      'Spełnione?',
+    panel_comp_th_depth:    'Głębokość AI',
+    panel_comp_th_just:     'Uzasadnienie',
+    panel_comp_must:        'Musi',
+    panel_comp_should:      'Powinno',
+    panel_comp_no_data:     'Brak danych zgodności',
+    panel_comp_no_data_sub: 'Uruchom ocenę AI, aby wygenerować macierz zgodności.',
+    panel_score_overall:    'Ogólny wynik AI',
+    panel_score_compliance: 'Wynik zgodności',
+    panel_score_quality:    'Wynik jakości',
+    panel_score_commercial: 'Wynik handlowy',
+    panel_score_comp_desc:  'Pokrycie wymagań obowiązkowych i opcjonalnych',
+    panel_score_qual_desc:  'Głębokość, przejrzystość i wykonalność według AI',
+    panel_score_comm_desc:  'Stosunek budżetu do limitu',
+    panel_score_pending:    'Wynik handlowy wykluczony — Budżet wymaga ręcznego wprowadzenia (patrz zakładka Podsumowanie)',
+    panel_score_validated:  'Budżet ręcznie zweryfikowany i uwzględniony w ocenie',
+    panel_score_no_data:    'Brak danych oceny',
+    panel_score_no_data_sub:'Uruchom ocenę AI, aby zobaczyć szczegóły.',
+    panel_verdict_reasoning:'Uzasadnienie',
+    panel_verdict_strong:   'Mocne strony',
+    panel_verdict_risks:    'Ryzyka i słabości',
+    panel_verdict_orig_att: 'Oryginalne załączniki',
+    panel_verdict_no_docs:  'Brak dokumentów',
+    panel_verdict_no_data:  'Brak werdyktu AI',
+    panel_verdict_no_data_sub:'Uruchom ocenę, aby uzyskać rekomendację AI.',
+    panel_eval_single_btn:  'Oceń tę ofertę',
+    panel_eval_footer_btn:  'Ocena AI',
+    panel_score_score_lbl:  'Wynik:',
+    panel_manual_validated: 'Budżet ręcznie zweryfikowany i uwzględniony w ocenie',
+    badge_published:        'Opublikowany',
+    badge_awaiting:         'Oczekuje na zatwierdzenie',
+    badge_unanswered:       'Bez odpowiedzi',
+    lbl_loading:     'Ładowanie…',
+    lbl_no_data:     'Brak danych',
+    lbl_search:      'Szukaj…',
+    lbl_filter:      'Filtruj',
+    lbl_status:      'Status',
+    lbl_score:       'Wynik',
+    lbl_vendor:      'Dostawca',
+    lbl_date:        'Data',
+    lbl_actions:     'Działania',
+    lbl_ref:         'Numer ref.',
+    lbl_title:       'Tytuł',
+    lbl_category:    'Kategoria',
+    lbl_budget:      'Budżet',
+    lbl_deadline:    'Termin',
+    lbl_stage:       'Etap',
+    notif_panel_title:  'Powiadomienia',
+    notif_mark_read:    'Oznacz wszystkie jako przeczytane',
+    notif_none:         'Brak powiadomień',
+    notif_dismiss:      'Zamknij',
+    dash_total_rfps:    'Łączna liczba przetargów',
+    dash_win_rate:      'Wskaźnik udzielenia',
+    dash_avg_duration:  'Śr. czas trwania',
+    dash_vendor_pool:   'Pula dostawców',
+    dash_proposals_lbl: 'Oferty',
+    dash_emails_sent:   'Wysłane e-maile',
+    dash_active_suffix: 'aktywny',
+    dash_awarded_suffix:'udzielony',
+    dash_per_rfp:       'na przetarg',
+    dash_reg_vendors:   'zarejestrowany dostawca',
+    dash_total_recv:    'Łącznie otrzymane',
+    dash_inv_replies:   'Zaproszenia i odpowiedzi',
+    dash_stage_breakdown:'Podział na etapy',
+    dash_quick_actions: 'Szybkie działania',
+    dash_no_rfp_data:   'Brak danych',
+    qa_btn_new_rfp:     'Nowy przetarg',
+    qa_btn_all_rfps:    'Wszystkie przetargi',
+    qa_btn_vendors:     'Dostawcy',
+    qa_btn_reports:     'Raporty',
+    active_procurements:'Aktywne zamówienia',
+    rfps_in_progress:   'przetarg(i) w toku',
+    archived_contracts: 'Archiwum — Udzielone zamówienia',
+    completed_procs:    'ukończony(e) proces(y) zakupowy(e)',
+    no_active_rfps:     'Brak aktywnych zamówień — wszystkie udzielone!',
+    card_created:       'Utworzono',
+    card_deadline:      'Termin:',
+    card_no_deadline:   'Brak terminu',
+    card_open:          'Otwórz',
+    card_complete:      'Ukończono',
+    card_completed:     'Ukończony',
+    card_awarded_badge: 'Udzielony',
+    no_rfps_title:      'Brak przetargów',
+    no_rfps_sub:        'Utwórz pierwszy przetarg, aby rozpocząć',
+    btn_create_rfp:     'Utwórz przetarg',
+    form_project_title: 'Tytuł projektu',
+    form_category:      'Kategoria',
+    form_budget_aed:    'Limit budżetu — EUR',
+    form_deadline:      'Termin składania ofert',
+    form_background:    'Tło projektu',
+    form_objectives:    'Cele',
+    form_scope:         'Zakres prac',
+    form_tech_req:      'Wymagania techniczne',
+    cat_it:             'IT i transformacja cyfrowa',
+    cat_consulting:     'Usługi doradcze',
+    cat_infrastructure: 'Infrastruktura',
+    cat_professional:   'Usługi profesjonalne',
+    cat_data:           'Dane i analityka',
+    vendors_shortlisted:'Preselekcja',
+    vendors_inv_status: 'Status zaproszenia i odpowiedzi dostawców śledzony poniżej',
+    vendors_none_title: 'Brak wstępnie wybranych dostawców',
+    vendors_none_sub:   'Użyj sugestii AI lub dodaj dostawców ręcznie.',
+    vendors_show_pool:  'Pokaż pełną pulę dostawców',
+    vendors_not_shortlisted: 'Nie preselekcjonowany',
+    invite_q_deadline:  'Termin P&O',
+    invite_s_deadline:  'Termin składania',
+    invite_notes:       'Dodatkowe uwagi',
+    invite_notes_ph:    'Specjalne instrukcje dla dostawców...',
+    qa_pending:         'Oczekujące',
+    qa_awaiting:        'Oczekuje na zatwierdzenie',
+    qa_published:       'Wysłane',
+    qa_need_manual:     'Wymagane ręczne wprowadzenie',
+    proposals_received: 'oferta(y) otrzymana(e)',
+    proposals_evaluated:'Ocenione przez AI',
+    proposals_none:     'Nie otrzymano jeszcze ofert.',
+    proposals_submitted:'Złożone oferty',
+    th_vendor:          'Dostawca',
+    th_date:            'Data',
+    th_budget:          'Budżet',
+    th_duration:        'Czas trwania',
+    th_files:           'Pliki',
+    th_ai_score:        'Wynik AI',
+    th_status:          'Status',
+    th_actions:         'Działania',
+    th_specializations: 'Specjalizacje',
+    th_fit_score:       'Dopasowanie',
+    th_participation:   'Status uczestnictwa',
+    th_shortlist:       'Preselekcja',
+    vpage_heading:      'Globalny rejestr dostawców',
+    vpage_registered:   'zarejestrowany dostawca',
+    vpage_th_vendor:    'Dostawca',
+    vpage_th_category:  'Kategoria',
+    vpage_th_specs:     'Specjalizacje',
+    vsec_company:       'Dane firmy',
+    vsec_contact:       'Kontakt',
+    vsec_tech_profile:  'Profil techniczny',
+    vsec_industry:      'Doświadczenie branżowe',
+    vfld_country:       'Kraj',
+    vfld_hq:            'Siedziba główna',
+    vfld_website:       'Strona internetowa',
+    vfld_revenue:       'Roczny przychód',
+    vfld_contact_name:  'Imię i nazwisko kontaktu',
+    vfld_contact_email: 'E-mail',
+    vfld_email_editable:'(edytowalny)',
+    vfld_platforms:     'Platformy i technologie',
+    vfld_specializations:'Specjalizacje',
+    vfld_certifications:'Certyfikaty',
+    vfld_exp_summary:   'Podsumowanie doświadczenia',
+    vfld_pub_sector:    'Referencje sektora publicznego',
+    vfld_est:           'Założona w',
+    vcat_it_consulting: 'Doradztwo IT',
+    vcat_it_digital:    'IT i transformacja cyfrowa',
+    vsize_large:        'Duża',
+    vsize_medium:       'Średnia',
+    vcountry_uae:       'ZEA',
+    vstatus_not_invited:'Niezaproszony',
+    vstatus_invited:    'Zaproszony',
+    vstatus_simulated:  'Symulowany',
+    vstatus_declined:   'Odrzucony',
+    vstatus_replied:    'Odpowiedział',
+    vstatus_no_comms:   'Brak komunikacji',
+    settings_title:         'Ustawienia',
+    settings_sub:           'Zarządzaj ustawieniami aplikacji',
+    settings_categories_hd: 'Kategorie przetargów',
+    settings_categories_sub:'Dostosuj dostępne kategorie przy tworzeniu przetargu.',
+    settings_cat_add_ph:    'Nazwa nowej kategorii',
+    settings_cat_add_btn:   'Dodaj',
+    settings_cat_saved:     'Kategorie zapisane.',
+    settings_cat_reset:     'Przywróć domyślne',
+    settings_procurement_email_hd: 'E-mail kontaktowy ds. zakupów',
+    settings_procurement_email_sub: 'Wyświetlany dostawcom w portalu.',
+    settings_procurement_email_ph:  'procurement@andersenlab.com',
+    settings_procurement_email_save:'Zapisz e-mail',
+    settings_procurement_email_saved:'E-mail kontaktowy zapisany.',
+    cmd_placeholder:    'Szukaj przetargów, dostawców…',
+    notif_drawer_title: 'Powiadomienia',
+    notif_mark_all:     'Oznacz wszystkie jako przeczytane',
+    notif_clear_all:    'Wyczyść wszystkie',
+    notif_empty_title:  'Brak nowych powiadomień!',
+    notif_empty_sub:    'Tutaj pojawią się alerty P&O, oferty i udzielenia.',
+    sab_draft:          'Ten przetarg jest szkicem. Wprowadź szczegóły i wygeneruj dokument.',
+    sab_draft_btn:      'Generuj',
+    sab_published:      'Przetarg opublikowany. Zaproś wybranych dostawców.',
+    sab_published_btn:  'Dostawcy',
+    sab_qa_open:        'Faza P&O otwarta. Przejrzyj i odpowiedz na pytania.',
+    sab_qa_open_btn:    'P&O',
+    sab_subs_closed:    'Składanie zamknięte. Oceń otrzymane oferty.',
+    sab_subs_closed_btn:'Oferty',
+    sab_awarded:        'Zamówienie udzielone. Ten przetarg jest zakończony.',
+    ctx_drafts_hd:      'Szkice oczekujące na wygenerowanie',
+    ctx_drafts_btn:     'Otwórz',
+    ctx_qa_hd:          'Oczekujące pytania P&O',
+    ctx_qa_btn:         'Odpowiedz',
+    ctx_props_hd:       'Oferty oczekujące na ocenę',
+    ctx_props_btn:      'Oceń',
+    ctx_award_hd:       'Oczekuje na decyzję o udzieleniu',
+    ctx_award_btn:      'Zdecyduj',
+    qa_filter_all:      'Wszystkie',
+    qa_filter_pending:  'Oczekujące',
+    qa_filter_approved: 'Zatwierdzone',
+    qa_filter_published:'Opublikowane',
+    qa_edit_answer_btn: 'Edytuj odpowiedź',
+    qa_save_answer_btn: 'Zapisz odpowiedź',
+    qa_ai_tooltip:      'AI przygotuje odpowiedzi na pytania bez odpowiedzi. Przejrzyj przed zatwierdzeniem.',
+    qa_publish_confirm_title: 'Opublikować wszystkie zatwierdzone odpowiedzi?',
+    qa_publish_confirm_body:  'Następujące odpowiedzi zostaną wysłane e-mailem do wszystkich wybranych dostawców:',
+    prop_evaluate_all_btn:'Oceń wszystkich',
+    prop_reevaluate_btn:  'Oceń ponownie wszystkich',
+    prop_award_this_btn:  'Udziel temu dostawcy',
+    prop_award_in_panel:  'Udziel zamówienia',
+    confirm_close_qa_title: 'Zamknąć fazę P&O?',
+    confirm_close_qa_body:  'Dostawcy nie będą mogli składać pytań. Działanie nieodwracalne.',
+    confirm_award_title:    'Udzielić zamówienia?',
+    confirm_award_body:     'Zamówienie zostanie udzielone do',
+    confirm_delete_title:   'Potwierdź usunięcie',
+    confirm_destructive_btn:'Potwierdź',
+    confirm_cancel_btn:     'Anuluj',
+    vendor_export_csv:      'Eksportuj CSV',
+    vendor_edit_mode_btn:   'Edytuj',
+    vendor_save_mode_btn:   'Zapisz zmiany',
+    vendor_procurement_history_hd: 'Historia zamówień',
+    vendor_ph_no_rfps:      'Ten dostawca nie uczestniczył jeszcze w żadnych przetargach.',
+    comms_jump_latest:      'Przejdź do najnowszego',
+    comms_char_count:       'znak',
+    comms_rfp_ref:          'Numer ref. przetargu',
+    comms_markdown_hint:    'Markdown obsługiwany',
+    vendor_pending_invite:  'Zaproszenie oczekujące',
+    vendor_invite_prompt:   'Wysłać zaproszenie teraz?',
+    vendor_invite_yes:      'Wyślij zaproszenie',
+    vendor_invite_later:    'Później',
+    vendor_filter_all:      'Wszystkie',
+    vendor_filter_shortlisted:'Preselekcja',
+    vendor_filter_invited:  'Zaproszony',
+    vendor_match_score:     'Dopasowanie',
+    create_rfp_modal_hint:  'Wprowadź szczegóły w zakładce Utwórz po utworzeniu.',
+    preview_copy_all:       'Kopiuj wszystko',
+    preview_export_pdf:     'Eksportuj PDF',
+    autosave_restored:      'Szkic przywrócony z automatycznego zapisu.',
+    autosave_discard:       'Odrzuć',
+    autosave_restore:       'Przywróć',
+    snapshot_saved:         'Migawka zapisana przed nadpisaniem.',
+    snapshot_view:          'Zobacz migawki',
+    snapshot_restore:       'Przywróć tę migawkę',
+    reports_monthly_title:  'Miesięczna aktywność przetargów',
+    reports_stage_funnel:   'Lejek etapów',
+    reports_vendor_perf:    'Najlepsi dostawcy według oceny',
+    val_required:           'To pole jest wymagane.',
+    val_email:              'Proszę wprowadzić prawidłowy adres e-mail.',
+    val_min_length:         'Minimum {n} znaków.',
+    filter_stage:           'Etap',
+    filter_category:        'Kategoria',
+    filter_sort:            'Sortuj',
+    filter_sort_newest:     'Najnowsze najpierw',
+    filter_sort_oldest:     'Najstarsze najpierw',
+    filter_sort_az:         'A → Z',
+    filter_sort_score:      'Wynik',
+    filter_view_grid:       'Siatka',
+    filter_view_list:       'Lista',
+    filter_all:             'Wszystkie',
+    archived_rfps:          'Zarchiwizowane',
+    card_menu_open:         'Otwórz przetarg',
+    card_menu_archive:      'Archiwizuj',
+    card_menu_delete:       'Usuń',
+    submit_declined_contact_prefix: 'W celu uzyskania pomocy skontaktuj się z:',
+    submit_confirm_email_sent: 'E-mail potwierdzający został wysłany na zarejestrowany adres.',
+  },
   ar: {
     // Sidebar
-    org_name:        'ديوان ولي العهد',
+    org_name:        'أندرسن',
     product_name:    'نظام إدارة طلبات العروض',
     nav_overview:    'نظرة عامة',
     nav_dashboard:   'لوحة التحكم',
@@ -493,7 +1717,7 @@ var I18N = {
     nav_analytics:   'التحليلات',
     nav_reports:     'التقارير',
     user_name:       'مدير المشتريات',
-    user_role:       'ديوان ولي العهد · أبوظبي',
+    user_role:       'أندرسن · عالمي',
     // Header
     lang_btn:        'EN',
     // Page titles
@@ -836,7 +2060,7 @@ var I18N = {
     settings_cat_reset:     'استعادة الافتراضي',
     settings_procurement_email_hd: 'بريد إلكتروني للتواصل مع المشتريات',
     settings_procurement_email_sub: 'يُعرض للموردين في بوابة التقديم عند رفضهم أو الحاجة للتواصل.',
-    settings_procurement_email_ph:  'procurement@cpc.gov.ae',
+    settings_procurement_email_ph:  'procurement@andersenlab.com',
     settings_procurement_email_save:'حفظ البريد الإلكتروني',
     settings_procurement_email_saved:'تم حفظ البريد الإلكتروني.',
     cmd_placeholder:    'البحث في الطلبات والموردين…',
@@ -988,14 +2212,15 @@ var SPEC_MAP_AR = {
 
 // Translate a single specialization/platform tag
 function tSpec(tag) {
-  if (_currentLang !== 'ar') return tag;
-  return SPEC_MAP_AR[tag.trim()] || tag;
+  if (_currentLang === 'en') return tag;
+  if (_currentLang === 'ar') return SPEC_MAP_AR[tag.trim()] || tag;
+  return tag;
 }
 
 // Translate a vendor category string stored in DB
 function tVendorCat(cat) {
   if (!cat) return '';
-  if (_currentLang !== 'ar') return cat;
+  if (_currentLang === 'en') return cat;
   var map = { 'IT Consulting': t('vcat_it_consulting'), 'IT & Digital Transformation': t('vcat_it_digital') };
   return map[cat] || cat;
 }
@@ -1003,7 +2228,7 @@ function tVendorCat(cat) {
 // Translate a vendor size string stored in DB
 function tVendorSize(size) {
   if (!size) return '';
-  if (_currentLang !== 'ar') return size;
+  if (_currentLang === 'en') return size;
   var map = { 'Large': t('vsize_large'), 'Medium': t('vsize_medium') };
   return map[size] || size;
 }
@@ -1011,7 +2236,7 @@ function tVendorSize(size) {
 // Translate a vendor country string stored in DB
 function tVendorCountry(country) {
   if (!country) return '';
-  if (_currentLang !== 'ar') return country;
+  if (_currentLang === 'en') return country;
   var map = { 'UAE': t('vcountry_uae') };
   return map[country] || country;
 }
@@ -1030,7 +2255,7 @@ function tSpecTagList(str, separator) {
 function applyTranslations() {
   var isAr = _currentLang === 'ar';
   // direction + lang attribute
-  document.documentElement.setAttribute('lang', isAr ? 'ar' : 'en');
+  document.documentElement.setAttribute('lang', _currentLang);
   document.documentElement.setAttribute('dir',  isAr ? 'rtl' : 'ltr');
   // Update header date locale
   if (typeof updateHeaderDate === 'function') updateHeaderDate();
@@ -1039,7 +2264,17 @@ function applyTranslations() {
     var key = el.getAttribute('data-i18n');
     el.textContent = t(key);
   });
-  // Lang toggle button label
+  // Lang dropdown active label
+  var langLabel = document.getElementById('langActiveLabel');
+  if (langLabel) {
+    var labelMap = { en: 'EN', de: 'DE', fr: 'FR', pl: 'PL', ar: 'AR' };
+    langLabel.textContent = labelMap[_currentLang] || _currentLang.toUpperCase();
+  }
+  // Update active state on dropdown options
+  document.querySelectorAll('.lang-option').forEach(function(opt) {
+    opt.classList.toggle('active', opt.getAttribute('data-lang') === _currentLang);
+  });
+  // Legacy lang toggle button (no-op if removed)
   var btn = document.getElementById('langToggleBtn');
   if (btn) btn.textContent = t('lang_btn');
   // Back button text
@@ -1114,17 +2349,13 @@ document.addEventListener('click', function(e) {
   }
 });
 
-// 1.3 — setLang: switch to explicit lang value; called by pill buttons
+// 1.3 — setLang: switch to explicit lang value; called by dropdown options
 function setLang(lang) {
-  if (lang !== 'en' && lang !== 'ar') return;
+  var supported = ['en', 'de', 'fr', 'pl', 'ar'];
+  if (supported.indexOf(lang) === -1) return;
   _currentLang = lang;
-  localStorage.setItem('cpc_lang', lang);
+  localStorage.setItem('andersen_lang', lang);
   applyTranslations();
-  // Update pill active state
-  var btnEn = document.getElementById('langBtnEn');
-  var btnAr = document.getElementById('langBtnAr');
-  if (btnEn) btnEn.classList.toggle('active', lang === 'en');
-  if (btnAr) btnAr.classList.toggle('active', lang === 'ar');
   // Re-render current page content to pick up translated labels
   if (appState && appState.currentPage) {
     var pageRenderFn = pages[appState.currentPage];
@@ -1133,6 +2364,24 @@ function setLang(lang) {
     }
   }
 }
+
+// Language dropdown open/close
+function toggleLangDropdown() {
+  var menu = document.getElementById('langDropdownMenu');
+  if (!menu) return;
+  menu.classList.toggle('open');
+}
+
+function closeLangDropdown() {
+  var menu = document.getElementById('langDropdownMenu');
+  if (menu) menu.classList.remove('open');
+}
+
+// Close dropdown when clicking outside
+document.addEventListener('click', function(e) {
+  var wrap = document.getElementById('langDropdownWrap');
+  if (wrap && !wrap.contains(e.target)) closeLangDropdown();
+});
 
 // Legacy toggle (kept for any old references)
 function switchLang() {
@@ -1207,7 +2456,7 @@ function updateBellBadge() {
 
 function showNotifPopup(notif) {
   const icons = { email: 'fa-envelope', questions: 'fa-question-circle', proposal: 'fa-inbox', info: 'fa-info-circle', decline: 'fa-times-circle', stage: 'fa-flag' };
-  const colors = { email: '#BA9765', questions: '#745B35', proposal: '#BA9765', info: '#6b7280', decline: '#dc2626', stage: '#16a34a' };
+  const colors = { email: '#FFDB00', questions: '#020D1C', proposal: '#FFDB00', info: '#6b7280', decline: '#dc2626', stage: '#16a34a' };
   const icon = icons[notif.type] || 'fa-bell';
   const color = colors[notif.type] || '#6b7280';
   const popupId = 'notif-popup-' + notif.id;
@@ -1304,7 +2553,7 @@ function toggleNotifPanel() {
 function renderNotifPanel() {
   var panel = document.getElementById('notifPanel');
   if (!panel) return;
-  const typeColors = { email: '#BA9765', questions: '#745B35', proposal: '#BA9765', info: '#6b7280', decline: '#dc2626', stage: '#16a34a' };
+  const typeColors = { email: '#FFDB00', questions: '#020D1C', proposal: '#FFDB00', info: '#6b7280', decline: '#dc2626', stage: '#16a34a' };
   const typeIcons  = { email: 'fa-envelope', questions: 'fa-question-circle', proposal: 'fa-inbox', info: 'fa-info-circle', decline: 'fa-times-circle', stage: 'fa-flag' };
 
   let html = '<div class="notif-drawer-header">'
@@ -1442,8 +2691,10 @@ async function apiCall(method, path, data) {
 }
 
 function updateHeaderDate() {
-  var locale = _currentLang === 'ar' ? 'ar-AE' : 'en-AE';
-  document.getElementById('headerDate').textContent = new Date().toLocaleDateString(locale, {
+  var localeMap = { en: 'en-GB', de: 'de-DE', fr: 'fr-FR', pl: 'pl-PL', ar: 'ar-AE' };
+  var locale = localeMap[_currentLang] || 'en-GB';
+  var el = document.getElementById('headerDate');
+  if (el) el.textContent = new Date().toLocaleDateString(locale, {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
   });
 }
@@ -1695,12 +2946,6 @@ function switchRfpTab(tab, rfpId) {
 async function init() {
   // Apply saved language before first render
   applyTranslations();
-  // 1.3 — Set correct active pill button on load
-  var savedLang = localStorage.getItem('cpc_lang') || 'en';
-  var btnEn = document.getElementById('langBtnEn');
-  var btnAr = document.getElementById('langBtnAr');
-  if (btnEn) btnEn.classList.toggle('active', savedLang === 'en');
-  if (btnAr) btnAr.classList.toggle('active', savedLang === 'ar');
 
   // Set header date
   var headerDate = document.getElementById('headerDate');
@@ -1982,10 +3227,10 @@ pages.dashboard = async function() {
 
   // KPI cards
   const kpis = [
-    { label:t('dash_total_rfps'),      value: stats.totalRfps || 0,      icon:'fa-layer-group',   color:'#745B35', sub: (stats.activeRfps||0) + ' ' + t('dash_active_suffix'),  trend: stats.totalRfps > 0 ? 0 : null },
-    { label:t('dash_win_rate'),        value: (stats.winRate||0) + '%',  icon:'fa-trophy',        color:'#BA9765', sub: (stats.awardedRfps||0) + ' ' + t('dash_awarded_suffix'), trend: null },
+    { label:t('dash_total_rfps'),      value: stats.totalRfps || 0,      icon:'fa-layer-group',   color:'#020D1C', sub: (stats.activeRfps||0) + ' ' + t('dash_active_suffix'),  trend: stats.totalRfps > 0 ? 0 : null },
+    { label:t('dash_win_rate'),        value: (stats.winRate||0) + '%',  icon:'fa-trophy',        color:'#FFDB00', sub: (stats.awardedRfps||0) + ' ' + t('dash_awarded_suffix'), trend: null },
     { label:t('dash_avg_duration'),    value: stats.avgDuration ? stats.avgDuration + 'd' : 'N/A', icon:'fa-clock', color:'#065f46', sub: t('dash_per_rfp'), trend: null },
-    { label:t('dash_vendor_pool'),     value: stats.totalVendors || 0,   icon:'fa-building',      color:'#BA9765', sub: t('dash_reg_vendors'), trend: null },
+    { label:t('dash_vendor_pool'),     value: stats.totalVendors || 0,   icon:'fa-building',      color:'#FFDB00', sub: t('dash_reg_vendors'), trend: null },
     { label:t('dash_proposals_lbl'),   value: stats.totalProposals || 0, icon:'fa-inbox',         color:'#dc6803', sub: t('dash_total_recv'), trend: stats.totalProposals > 0 ? null : null },
     { label:t('dash_emails_sent'),     value: stats.totalEmails || 0,    icon:'fa-envelope',      color:'#1d4ed8', sub: t('dash_inv_replies'), trend: null },
   ];
@@ -3068,7 +4313,7 @@ async function generateRfpPdfBlob(rfpId) {
   var jsPDF = window.jspdf.jsPDF;
 
   var safeRef = (rfp.ref_number || rfp.title || String(rfpId)).replace(/[^a-zA-Z0-9_\-]/g, '_');
-  var filename = 'CPC_RFP_' + safeRef + '.pdf';
+  var filename = 'Andersen_RFP_' + safeRef + '.pdf';
 
   // Inline letterhead as base64 data URI — avoids any CORS issue inside the iframe.
   var dataUri = await fetchLetterheadDataUri();
@@ -3242,7 +4487,7 @@ function downloadRfpPdf(rfpId) {
   }
 
   var safeRef = (rfp.ref_number || rfp.title || String(rfpId)).replace(/[^a-zA-Z0-9_\-]/g, '_');
-  var filename = 'CPC_RFP_' + safeRef + '.pdf';
+  var filename = 'Andersen_RFP_' + safeRef + '.pdf';
 
   showToast('Generating PDF — please wait…', 'info', 25000);
   fetch('/api/rfps/' + rfpId + '/pdf')
@@ -3505,7 +4750,7 @@ async function confirmSendInvitations(rfpId) {
       try {
         setLoading(btn, true, 'Generating PDF…');
         var safeRef = (rfp.ref_number || rfp.title || String(rfpId)).replace(/[^a-zA-Z0-9_\-]/g, '_');
-        pdfFilename = 'CPC_RFP_' + safeRef + '.pdf';
+        pdfFilename = 'Andersen_RFP_' + safeRef + '.pdf';
         var pdfRes = await fetch('/api/rfps/' + rfpId + '/pdf');
         if (!pdfRes.ok) throw new Error('PDF service returned ' + pdfRes.status);
         var pdfBlob = await pdfRes.blob();
@@ -3599,7 +4844,7 @@ rfpTabs.emails = async function(rfpId) {
       + '<i class="fas fa-comments" style="font-size:2rem;display:block;margin-bottom:0.75rem;color:#d1d5db"></i>'
       + '<p style="font-weight:600;color:#6b7280;margin-bottom:0.25rem">No email correspondence yet</p>'
       + '<p style="font-size:0.82rem">Send invitations from the <strong>Vendors</strong> tab to start vendor communication.<br>'
-      + 'Incoming replies will appear here automatically via <strong>procurement@cpc-rfp.website</strong>.</p>'
+      + 'Incoming replies will appear here automatically via <strong>procurement@andersenlab.com</strong>.</p>'
       + '</div>';
   } else {
     Object.entries(vendorMap).forEach(function(entry) {
@@ -3626,17 +4871,17 @@ rfpTabs.emails = async function(rfpId) {
 
         threadEmails += '<div style="display:flex;gap:0.75rem;margin-bottom:0.875rem;flex-direction:' + (isInbound ? 'row' : 'row-reverse') + '">'
           // Avatar
-          + '<div style="width:32px;height:32px;border-radius:50%;background:' + (isInbound ? '#BA9765' : 'var(--cpc-gold)') + ';display:flex;align-items:center;justify-content:center;flex-shrink:0">'
+          + '<div style="width:32px;height:32px;border-radius:50%;background:' + (isInbound ? '#FFDB00' : 'var(--cpc-gold)') + ';display:flex;align-items:center;justify-content:center;flex-shrink:0">'
           + '<i class="fas ' + (isInbound ? 'fa-user' : 'fa-crown') + '" style="color:white;font-size:0.75rem"></i></div>'
           // Bubble
           + '<div style="flex:1;max-width:85%">'
           + '<div style="background:' + (isInbound ? '#f5f3ff' : '#fff7e6') + ';border:1px solid ' + (isInbound ? '#ede9fe' : '#fde68a') + ';border-radius:' + (isInbound ? '0 12px 12px 12px' : '12px 0 12px 12px') + ';padding:0.75rem 1rem">'
           + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.4rem;gap:0.5rem;flex-wrap:wrap">'
-          + '<span style="font-weight:600;font-size:0.8rem;color:' + (isInbound ? '#BA9765' : '#b45309') + '">' + escHtml(isInbound ? (e.from_email||vdata.vendor_name) : 'CPC Procurement') + '</span>'
+          + '<span style="font-weight:600;font-size:0.8rem;color:' + (isInbound ? '#FFDB00' : '#b45309') + '">' + escHtml(isInbound ? (e.from_email||vdata.vendor_name) : 'Andersen Procurement') + '</span>'
           + '<div style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap">' + typeBadge + attachBadge + '<span style="font-size:0.7rem;color:#9ca3af">' + dateStr + '</span></div>'
           + '</div>'
           + '<div style="font-size:0.82rem;font-weight:600;color:#374151;margin-bottom:0.4rem">' + escHtml(e.subject||'(no subject)') + '</div>'
-          + '<button onclick="toggleInboundBody(\x27' + bodyCollapseId + '\x27)" style="font-size:0.72rem;color:' + (isInbound ? '#BA9765' : '#b45309') + ';background:none;border:none;cursor:pointer;padding:0;margin-bottom:0.4rem">'
+          + '<button onclick="toggleInboundBody(\x27' + bodyCollapseId + '\x27)" style="font-size:0.72rem;color:' + (isInbound ? '#FFDB00' : '#b45309') + ';background:none;border:none;cursor:pointer;padding:0;margin-bottom:0.4rem">'
           + '<i class="fas fa-chevron-down" id="chevron-' + bodyCollapseId + '"></i> View body</button>'
           + '<div id="' + bodyCollapseId + '" style="display:none;margin-top:0.5rem">' + bodyContent + '</div>'
           + (isInbound && e.has_attachment ? '<div style="margin-top:0.5rem;font-size:0.75rem;color:#92400e;background:#fef3c7;padding:4px 8px;border-radius:4px"><i class="fas fa-file-excel" style="margin-right:0.25rem"></i>Attachment processed — see Q&A tab</div>' : '')
@@ -3696,7 +4941,7 @@ rfpTabs.emails = async function(rfpId) {
     + '<p style="font-size:0.8rem;color:#9ca3af;margin:0">'
     + totalVendors + ' vendor thread(s) &bull; '
     + '<div style="display:inline-flex;align-items:center;gap:4px"><div style="width:8px;height:8px;border-radius:50%;background:#22c55e;animation:pulse 2s infinite"></div>'
-    + ' <code style="font-size:0.78rem;background:#f3f4f6;padding:1px 5px;border-radius:4px">procurement@cpc-rfp.website</code></div>'
+    + ' <code style="font-size:0.78rem;background:#f3f4f6;padding:1px 5px;border-radius:4px">procurement@andersenlab.com</code></div>'
     + '</p>'
     + '</div>'
     + '<div style="display:flex;gap:0.5rem">'
@@ -4044,7 +5289,7 @@ function pulseQATab() {
     if (t.textContent && t.textContent.includes('Q&A')) {
       t.style.animation = 'none';
       t.style.background = '#7c3aed22';
-      t.style.borderColor = '#BA9765';
+      t.style.borderColor = '#FFDB00';
       setTimeout(function() { t.style.background = ''; t.style.borderColor = ''; }, 3000);
     }
   });
@@ -4076,7 +5321,7 @@ async function checkInboxForQA(rfpId) {
     } else if (received.length > 0) {
       showToast('Inbox up to date — ' + received.length + ' email(s), ' + emailQs + ' question(s) extracted.', 'info');
     } else {
-      showToast('Inbox empty — no vendor replies yet. Waiting for email at procurement@cpc-rfp.website', 'info');
+      showToast('Inbox empty — no vendor replies yet. Waiting for email at procurement@andersenlab.com', 'info');
     }
     rfpTabs.emails(rfpId);
   } catch(e) {
@@ -4994,12 +6239,12 @@ function _buildEvalTabBodies(p, evalData) {
     + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem;margin-bottom:1rem">'
     + '<div style="background:#faf9f7;border:1px solid #e5e7eb;border-radius:8px;padding:0.75rem">'
     + '<div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#9a8c78;margin-bottom:4px">Budget</div>'
-    + '<div style="font-size:0.97rem;font-weight:700;color:#745B35">' + (evalBudget || escHtml(fin)) + '</div>'
+    + '<div style="font-size:0.97rem;font-weight:700;color:#020D1C">' + (evalBudget || escHtml(fin)) + '</div>'
     + (evalData && evalData.budget_confidence != null && evalData.budget_confidence < 0.8 ? '<div style="font-size:0.7rem;color:#d97706;margin-top:3px"><i class="fas fa-exclamation-circle" style="margin-right:0.25rem"></i>Low confidence — verify manually</div>' : '')
     + '</div>'
     + '<div style="background:#faf9f7;border:1px solid #e5e7eb;border-radius:8px;padding:0.75rem">'
     + '<div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#9a8c78;margin-bottom:4px">Timeline</div>'
-    + '<div style="font-size:0.97rem;font-weight:700;color:#745B35">' + escHtml((evalData && evalData.duration_extracted) || dur) + '</div>'
+    + '<div style="font-size:0.97rem;font-weight:700;color:#020D1C">' + escHtml((evalData && evalData.duration_extracted) || dur) + '</div>'
     + '</div>'
     + '</div>'
     + techSummaryHtml
@@ -5580,11 +6825,11 @@ pages.vendor_comms = async function(opts) {
       const bubbleStyle = isInbound
         ? 'background:#f5f3ff;border:1px solid #ede9fe;border-radius:0 12px 12px 12px;padding:0.875rem 1rem'
         : 'background:#fff7e6;border:1px solid #fde68a;border-radius:12px 0 12px 12px;padding:0.875rem 1rem';
-      const nameColor = isInbound ? '#BA9765' : '#b45309';
-      const avatarBg = isInbound ? '#BA9765' : 'var(--cpc-gold)';
+      const nameColor = isInbound ? '#FFDB00' : '#b45309';
+      const avatarBg = isInbound ? '#FFDB00' : 'var(--cpc-gold)';
       const avatarIcon = isInbound ? 'fa-user' : 'fa-crown';
       const alignDir = isInbound ? 'row' : 'row-reverse';
-      const displayName = isInbound ? escHtml(e.from_email || vendorName) : 'CPC Procurement';
+      const displayName = isInbound ? escHtml(e.from_email || vendorName) : 'Andersen Procurement';
 
       threadHtml += '<div style="display:flex;gap:0.75rem;margin-bottom:1rem;flex-direction:' + alignDir + ';align-items:flex-start">'
         // Avatar
@@ -6161,8 +7406,8 @@ function showCreateRfpModal() {
     + '<label style="display:flex;align-items:center;gap:6px;font-size:0.82rem;font-weight:600;color:#374151;margin-bottom:0.5rem">'
     + '<i class="fas fa-file-pdf" style="color:#dc2626"></i>Supporting Documents'
     + '<span style="font-weight:400;color:#9ca3af;font-size:0.72rem;margin-left:4px">— Optional. AI will read these during generation.</span></label>'
-    + buildDocUploadSlot('doc0', 'Conceptual Solution Architecture', 'fa-sitemap', '#BA9765')
-    + buildDocUploadSlot('doc1', 'Business Requirements Document', 'fa-clipboard-list', '#745B35')
+    + buildDocUploadSlot('doc0', 'Conceptual Solution Architecture', 'fa-sitemap', '#FFDB00')
+    + buildDocUploadSlot('doc1', 'Business Requirements Document', 'fa-clipboard-list', '#020D1C')
     + '</div>'
 
     // Action buttons

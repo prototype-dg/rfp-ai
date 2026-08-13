@@ -4,26 +4,26 @@ export function getSubmitPage(rfpId: string, participantCode: string): string {
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Proposal Submission — Crown Prince's Court</title>
+  <title>Proposal Submission — Andersen</title>
 
-  <!-- CPC Brand Fonts -->
+  <!-- Andersen Brand Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
-  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,600&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500;600&family=Noto+Kufi+Arabic:wght@400;600&display=swap" rel="stylesheet"/>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+Arabic:wght@300;400;500;700&display=swap" rel="stylesheet"/>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css"/>
 
   <style>
-    /* ── CPC Design Tokens ── */
+    /* ── Andersen Design Tokens ── */
     :root {
-      --cpc-gold:        #BA9765;
-      --cpc-gold-deep:   #745B35;
-      --cpc-gold-tint:   #F5EFE3;
-      --cpc-gold-line:   #E9DCC4;
-      --cpc-ivory:       #FBF8F2;
-      --cpc-ink:         #1B1712;
-      --cpc-ink-mid:     #3D3328;
-      --cpc-ink-muted:   #7A6E62;
-      --cpc-line:        #E7DFCE;
+      --cpc-gold:        #FFDB00;
+      --cpc-gold-deep:   #3A3E45;
+      --cpc-gold-tint:   #FFFBEC;
+      --cpc-gold-line:   #E0E0E0;
+      --cpc-ivory:       #F7F7F7;
+      --cpc-ink:         #020303;
+      --cpc-ink-mid:     #3A3E45;
+      --cpc-ink-muted:   #556170;
+      --cpc-line:        #E0E0E0;
       --cpc-white:       #FFFFFF;
       --cpc-success:     #2E7D52;
       --cpc-success-bg:  #EDFAF3;
@@ -31,18 +31,23 @@ export function getSubmitPage(rfpId: string, participantCode: string): string {
       --cpc-error:       #8B2020;
       --cpc-error-bg:    #FDF2F2;
       --cpc-error-bdr:   #F5C0C0;
+      /* Andersen primaries */
+      --a-yellow:        #FFDB00;
+      --a-navy:          #020D1C;
+      --a-ink:           #020303;
+      --a-charcoal:      #3A3E45;
 
-      --font-display: 'Cormorant Garamond', Georgia, serif;
-      --font-body:    'Inter', system-ui, sans-serif;
+      --font-display: 'Roboto', system-ui, sans-serif;
+      --font-body:    'Roboto', system-ui, sans-serif;
       --font-mono:    'JetBrains Mono', 'Courier New', monospace;
-      --font-arabic:  'Noto Kufi Arabic', sans-serif;
+      --font-arabic:  'Noto Sans Arabic', sans-serif;
     }
 
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
       font-family: var(--font-body);
-      background: var(--cpc-ivory);
+      background: #F4F4F4;
       min-height: 100vh;
       color: var(--cpc-ink);
       -webkit-font-smoothing: antialiased;
@@ -50,8 +55,8 @@ export function getSubmitPage(rfpId: string, participantCode: string): string {
 
     /* ── Header ── */
     .header {
-      background: var(--cpc-white);
-      border-bottom: 3px solid var(--cpc-gold);
+      background: var(--a-navy);
+      border-bottom: 4px solid var(--a-yellow);
       padding: 0;
     }
     .header-inner {
@@ -135,7 +140,7 @@ export function getSubmitPage(rfpId: string, participantCode: string): string {
       content: '';
       position: absolute;
       inset: 0;
-      background-image: url('/static/pattern.svg');
+      background: linear-gradient(135deg, var(--a-navy) 0%, #0a1f3d 100%);
       background-repeat: repeat-x;
       background-size: auto 100%;
       opacity: 0.25;
@@ -499,8 +504,8 @@ export function getSubmitPage(rfpId: string, participantCode: string): string {
     .submit-btn {
       width: 100%;
       padding: 14px;
-      background: var(--cpc-gold);
-      color: var(--cpc-white);
+      background: var(--a-yellow);
+      color: var(--a-ink);
       border: none;
       border-radius: 3px;
       font-family: var(--font-mono);
@@ -515,7 +520,7 @@ export function getSubmitPage(rfpId: string, participantCode: string): string {
       justify-content: center;
       gap: 10px;
     }
-    .submit-btn:hover:not(:disabled) { background: var(--cpc-gold-deep); }
+    .submit-btn:hover:not(:disabled) { background: #FFE963; }
     .submit-btn:disabled { background: var(--cpc-line); color: var(--cpc-ink-muted); cursor: not-allowed; }
 
     .submit-footer {
@@ -699,9 +704,9 @@ export function getSubmitPage(rfpId: string, participantCode: string): string {
       padding: 0.75rem 1rem;
       margin-top: 0.75rem;
       background: #f5f0e8;
-      border: 1.5px solid #BA9765;
+      border: 1.5px solid #FFDB00;
       border-radius: 8px;
-      color: #745B35;
+      color: #020D1C;
       font-weight: 600;
       font-size: 0.92rem;
       cursor: pointer;
@@ -714,16 +719,16 @@ export function getSubmitPage(rfpId: string, participantCode: string): string {
 <header class="header">
   <div class="header-inner">
     <div class="header-emblem">
-      <img src="/static/cpc-emblem.png" alt="Crown Prince's Court Emblem"/>
+      <img src="/static/andersen-logo.svg" alt="Andersen" style="height:40px;width:auto;"/>
     </div>
     <div class="header-divider"></div>
     <div class="header-text">
-      <h1>Crown Prince's Court</h1>
+      <h1>Andersen</h1>
       <div class="sub">Procurement Portal &nbsp;·&nbsp; Proposal Submission</div>
     </div>
     <div class="header-badge">
       <div class="secure-label"><i class="fas fa-lock"></i> Secure Submission</div>
-      <div class="location-label">Abu Dhabi, United Arab Emirates</div>
+      <div class="location-label">Warsaw · Berlin · London · New York</div>
     </div>
   </div>
 </header>
@@ -765,13 +770,13 @@ export function getSubmitPage(rfpId: string, participantCode: string): string {
     <div class="success-icon"><i class="fas fa-check"></i></div>
     <h2>Proposal Successfully Submitted</h2>
     <p>
-      Thank you for submitting your proposal to the Crown Prince's Court procurement process.
+      Thank you for submitting your proposal to the Andersen procurement process.
       Your submission has been received and securely recorded. Our evaluation team will review
       all proposals and notify shortlisted vendors of the next steps.
     </p>
     <p style="margin-top:10px">
       Please retain this confirmation for your records. For enquiries, contact us at
-      <strong>procurement@cpc-rfp.website</strong>, quoting your participant reference.
+      <strong>procurement@andersenlab.com</strong>, quoting your participant reference.
     </p>
     <div class="success-ref">
       <div class="ref-label">Participant Reference</div>
@@ -871,7 +876,7 @@ export function getSubmitPage(rfpId: string, participantCode: string): string {
 <!-- ── Footer ── -->
 <footer class="page-footer">
   <div class="footer-left">
-    © Crown Prince's Court · Abu Dhabi, UAE<br/>
+    © Andersen · andersenlab.com<br/>
     AI RFP Management System
   </div>
   <div class="footer-right">
