@@ -1,3 +1,5 @@
+import { logoFullDataUri, bgDarkDataUri, bgLightDataUri } from './brand-assets'
+
 export function getSubmitPage(rfpId: string, participantCode: string): string {
   return `<!DOCTYPE html>
 <html lang="en">
@@ -12,6 +14,14 @@ export function getSubmitPage(rfpId: string, participantCode: string): string {
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+Arabic:wght@300;400;500;700&display=swap" rel="stylesheet"/>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css"/>
 
+  <style>
+    /* ── Brand asset data URIs — guaranteed rendering regardless of path routing ── */
+    :root {
+      --brand-logo-full: url("${logoFullDataUri}");
+      --brand-bg-dark:   url("${bgDarkDataUri}");
+      --brand-bg-light:  url("${bgLightDataUri}");
+    }
+  </style>
   <style>
     /* ── Andersen Design Tokens ── */
     :root {
@@ -47,16 +57,19 @@ export function getSubmitPage(rfpId: string, participantCode: string): string {
 
     body {
       font-family: var(--font-body);
-      /* Light wave-line texture from Andersen brand assets */
-      background: #EFEFEF url('/static/andersen-bg-light.png') center top / cover fixed;
+      /* Light wave-line brand texture — inlined as data URI for guaranteed rendering */
+      background: #EFEFEF var(--brand-bg-light) center top / cover fixed;
       min-height: 100vh;
       color: var(--cpc-ink);
       -webkit-font-smoothing: antialiased;
     }
 
-    /* ── Header — dark bg-dark texture + navy overlay ── */
+    /* ── Header — dark brand texture + navy overlay ── */
     .header {
-      background: var(--a-navy) url('/static/andersen-bg-dark.png') center center / cover no-repeat;
+      /* Gradient overlay dims the charcoal texture; right-align shows the flame lines */
+      background:
+        linear-gradient(180deg, rgba(2,13,28,0.72) 0%, rgba(2,13,28,0.60) 100%),
+        var(--brand-bg-dark) right center / auto 100% no-repeat;
       border-bottom: 4px solid var(--a-yellow);
       padding: 0;
       position: relative;
@@ -78,12 +91,14 @@ export function getSubmitPage(rfpId: string, participantCode: string): string {
       align-items: center;
       gap: 24px;
     }
-    /* Full logo PNG (icon glyph + ANDERSEN wordmark) */
+    /* Full logo PNG (icon glyph + ANDERSEN wordmark) — 1024×267 landscape */
     .header-logo-full {
       display: block;
-      height: 44px;
+      height: 40px;
       width: auto;
+      max-width: 220px;
       object-fit: contain;
+      object-position: left center;
       flex-shrink: 0;
     }
     .header-divider {
@@ -704,7 +719,7 @@ export function getSubmitPage(rfpId: string, participantCode: string): string {
 <header class="header">
   <div class="header-inner">
     <!-- Full brand logo: yellow glyph + ANDERSEN wordmark in one PNG -->
-    <img src="/static/andersen-logo-full.png" alt="Andersen" class="header-logo-full"/>
+    <img src="${logoFullDataUri}" alt="Andersen" class="header-logo-full"/>
     <div class="header-divider"></div>
     <div class="header-text">
       <div class="sub">Procurement Portal &nbsp;·&nbsp; Proposal Submission</div>

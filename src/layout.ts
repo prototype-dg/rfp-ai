@@ -1,3 +1,5 @@
+import { logoFullDataUri, bgDarkDataUri, bgLightDataUri } from './brand-assets'
+
 export function getLayout(): string {
   return `<!DOCTYPE html>
 <html lang="en" dir="ltr">
@@ -15,6 +17,14 @@ export function getLayout(): string {
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"><\/script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"><\/script>
   <link href="/static/style.css" rel="stylesheet">
+  <style>
+    /* ── Brand asset data URIs injected at build time ── */
+    :root {
+      --brand-logo-full:  url("${logoFullDataUri}");
+      --brand-bg-dark:    url("${bgDarkDataUri}");
+      --brand-bg-light:   url("${bgLightDataUri}");
+    }
+  </style>
   <style>
     /* ============================================================
        ANDERSEN DESIGN SYSTEM — extracted from andersenlab.com
@@ -81,7 +91,8 @@ export function getLayout(): string {
 
     html, body {
       height: 100%;
-      background: #EFEFEF url('/static/andersen-bg-light.png') center center / cover fixed;
+      /* Light wave-line brand texture — fixed so it doesn't scroll */
+      background: #EFEFEF var(--brand-bg-light) center center / cover fixed;
       color: var(--a-ink);
       font-family: 'Roboto', system-ui, sans-serif;
       font-weight: 400;
@@ -93,29 +104,27 @@ export function getLayout(): string {
     /* ── LAYOUT SHELL ── */
     .app-shell { display: flex; height: 100vh; overflow: hidden; }
 
-    /* ── SIDEBAR — deep navy background + brand texture ── */
+    /* ── SIDEBAR — deep navy + dark brand texture ── */
     .cpc-sidebar {
       width: 248px;
       flex-shrink: 0;
-      background: var(--a-navy) url('/static/andersen-bg-dark.png') center center / cover no-repeat;
-      border-right: 1px solid rgba(255,255,255,0.06);
+      /*
+       * background-attachment:fixed on the texture keeps it pinned to the
+       * viewport while sidebar content scrolls — avoids ::before clip issues.
+       * Gradient overlay layered on top dims the texture for text readability.
+       * right center keeps the flame-line art (right side of image) visible
+       * in the narrow 248px column.
+       */
+      background:
+        linear-gradient(180deg, rgba(2,13,28,0.72) 0%, rgba(2,13,28,0.65) 100%),
+        var(--brand-bg-dark) right center / auto 100% fixed;
+      border-right: 1px solid rgba(255,255,255,0.08);
       display: flex;
       flex-direction: column;
       overflow-y: auto;
       transition: transform 0.22s cubic-bezier(0.4,0,0.2,1);
       z-index: 200;
-      position: relative;
     }
-    /* Dark overlay so text stays readable over the texture */
-    .cpc-sidebar::before {
-      content: '';
-      position: absolute;
-      inset: 0;
-      background: rgba(2,13,28,0.72);
-      pointer-events: none;
-      z-index: 0;
-    }
-    .cpc-sidebar > * { position: relative; z-index: 1; }
 
     /* Sidebar brand — full logo PNG (icon + wordmark) */
     .sidebar-brand {
@@ -128,11 +137,17 @@ export function getLayout(): string {
     /* Full logo: icon + "ANDERSEN" wordmark in one image */
     .sidebar-logo-full {
       display: block;
-      height: 36px;
+      /*
+       * The logo PNG is 1024×267 landscape (icon left + ANDERSEN text right).
+       * Fix height and let width scale naturally to show full wordmark.
+       * max-width caps it at the sidebar inner width minus padding.
+       */
+      height: 34px;
       width: auto;
-      max-width: 160px;
+      max-width: 188px;
       object-fit: contain;
-      /* PNG has yellow icon + white text on transparent → renders correctly on dark bg */
+      object-position: left center;
+      /* Yellow glyph + white text renders natively on dark navy bg */
     }
     .sidebar-wordmark .wm-product {
       font-family: 'JetBrains Mono', monospace;
@@ -1375,8 +1390,8 @@ export function getLayout(): string {
   <aside class="cpc-sidebar">
     <!-- Brand -->
     <div class="sidebar-brand">
-      <!-- Full brand logo: yellow glyph + ANDERSEN wordmark in one PNG -->
-      <img src="/static/andersen-logo-full.png" alt="Andersen" class="sidebar-logo-full">
+      <!-- Full brand logo: yellow glyph + ANDERSEN wordmark — data URI for guaranteed rendering -->
+      <img src="${logoFullDataUri}" alt="Andersen" class="sidebar-logo-full">
       <div class="sidebar-wordmark">
         <div class="wm-product" data-i18n="product_name">AI RFP Management</div>
       </div>
