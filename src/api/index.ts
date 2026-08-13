@@ -1965,19 +1965,19 @@ function extractBudget(text: string): { amount: number | null; currency: string;
   const totalRe = /(?:total|grand total|subtotal|total cost|total price)[^\n\r]{0,60}?(AED|USD|EUR|GBP|SAR)?\s*[\$€£]?\s*([\d,]+(?:\.\d{1,2})?)/gi
   let m: RegExpExecArray | null
   while ((m = totalRe.exec(text)) !== null) {
-    const cur = m[1] || 'AED'
+    const cur = m[1] || 'USD'
     const amt = parseFloat(m[2].replace(/,/g, ''))
     if (amt > 0) return { amount: amt, currency: cur, confidence: 1.0 }
   }
   // Priority 2: Largest currency amount
   const anyRe = /(AED|USD|EUR|GBP|SAR)?\s*[\$€£]?\s*([\d,]+(?:\.\d{1,2})?)/g
-  let best = { amount: 0, currency: 'AED' }
+  let best = { amount: 0, currency: 'USD' }
   while ((m = anyRe.exec(text)) !== null) {
     const amt = parseFloat(m[2].replace(/,/g, ''))
-    if (amt > best.amount && amt < 1e10) { best = { amount: amt, currency: m[1] || 'AED' } }
+    if (amt > best.amount && amt < 1e10) { best = { amount: amt, currency: m[1] || 'USD' } }
   }
   if (best.amount > 1000) return { amount: best.amount, currency: best.currency, confidence: 0.3 }
-  return { amount: null, currency: 'AED', confidence: 0.0 }
+  return { amount: null, currency: 'USD', confidence: 0.0 }
 }
 
 /** Extract duration from text */
@@ -2023,7 +2023,7 @@ async function evaluateProposal(proposal: any, rfp: any, env: any): Promise<any>
       quality_score: 0,
       commercial_score: null,
       budget_extracted: null,
-      budget_currency: 'AED',
+      budget_currency: 'USD',
       budget_confidence: 0,
       duration_extracted: null,
       strengths: [],
@@ -2098,14 +2098,14 @@ Respond ONLY with JSON: {"is_proposal": true|false, "reason": "<one sentence, ma
   // ── Budget & Duration — run inline extraction ────────────────────────────────
   // Always run runBudgetLLM here so budget + duration are always fresh from
   // the full proposal text. Results are saved to DB as a side-effect.
-  let budget = { amount: null as number | null, currency: 'AED', confidence: 0.0 }
+  let budget = { amount: null as number | null, currency: 'USD', confidence: 0.0 }
   let duration: string | null = proposal.proposed_duration || null
 
   try {
     const budgetResult = await runBudgetLLM(proposalText, proposal, env.DB, env)
     if (budgetResult.budget_amount) {
       budget.amount     = budgetResult.budget_amount
-      budget.currency   = budgetResult.budget_currency || 'AED'
+      budget.currency   = budgetResult.budget_currency || 'USD'
       budget.confidence = budgetResult.budget_confidence || 0.9
     }
     if (budgetResult.duration) duration = budgetResult.duration
@@ -2116,7 +2116,7 @@ Respond ONLY with JSON: {"is_proposal": true|false, "reason": "<one sentence, ma
     // Fall back to any stored values
     if (proposal.budget_amount) {
       budget.amount     = proposal.budget_amount
-      budget.currency   = proposal.budget_currency || 'AED'
+      budget.currency   = proposal.budget_currency || 'USD'
       budget.confidence = 0.4
     }
   }
@@ -2853,16 +2853,16 @@ ${proposalText}`
   }
 
   const jsonMatch = cleanRaw.match(/\{[\s\S]*?\}/)
-  if (!jsonMatch) return { budget_amount: null, budget_currency: 'AED', budget_confidence: 0, duration: null, missing_info: ['LLM returned no JSON'] }
+  if (!jsonMatch) return { budget_amount: null, budget_currency: 'USD', budget_confidence: 0, duration: null, missing_info: ['LLM returned no JSON'] }
 
   let parsed: any
   try { parsed = JSON.parse(jsonMatch[0]) } catch (_) {
-    return { budget_amount: null, budget_currency: 'AED', budget_confidence: 0, duration: null, missing_info: ['JSON parse failed'] }
+    return { budget_amount: null, budget_currency: 'USD', budget_confidence: 0, duration: null, missing_info: ['JSON parse failed'] }
   }
 
   // Parse "total_cost" string like "1,832,436 AED" or "AED 1,832,436"
   let budgetAmount: number | null = null
-  let budgetCurrency = 'AED'
+  let budgetCurrency = 'USD'
   const totalCostStr: string = (parsed.total_cost || '').toString()
   if (totalCostStr) {
     // Extract currency code
@@ -3297,11 +3297,6 @@ async function callLLM(systemPrompt: string, userPrompt: string, env: any, model
 // buildRFPPrompt — pure function, returns {systemPrompt, userPrompt} without calling the LLM.
 // Used by the streaming generate route. generateRFPWithLLM wraps it for batch/test usage.
 function buildRFPPrompt(data: any, archDocText: string, brdDocText: string, scoringMatrixJson?: string | null): { systemPrompt: string; userPrompt: string } {
-  // Use a relative URL so the letterhead works on any domain (local dev, staging, prod).
-  // The browser resolves it against the page origin when rendering the preview.
-  // For PDF export the frontend inlines it as a base64 data URI before rendering.
-  const LETTERHEAD_BG_URL = '/api/proposals/pdf/letterhead/bg_a4.png'
-
   const systemPrompt = `You are a senior government procurement specialist at the Andersen. You are producing a formal, comprehensive, publication-ready Request for Proposal (RFP) document issued to external vendors on official Andersen letterhead.
 
 IDENTITY AND TONE
@@ -3329,17 +3324,68 @@ DEPTH AND LENGTH REQUIREMENT
 - Do not truncate or summarize. Write every requirement in full.
 
 PAGE AND LETTERHEAD LAYOUT (MANDATORY)
-The document is rendered on official Andersen A4 letterhead. The letterhead image is the page background.
+Each page is rendered as a standalone A4 div that contains the full Andersen corporate letterhead structure — header band, accent rule, wordmark lockup, content area, and footer — ALL built from inline HTML with inline styles. Do NOT use background images.
 
 PAGING: Output multiple A4 pages as separate page divs.
 Each page div uses exactly this inline style:
-style="position:relative; width:210mm; min-height:297mm; max-width:210mm; margin:0 auto 8mm auto; background-image:url('${LETTERHEAD_BG_URL}'); background-size:210mm 297mm; background-repeat:no-repeat; background-position:top left; font-family:Arial,Calibri,'Segoe UI',sans-serif; color:#1A1A1A; box-sizing:border-box; overflow:hidden; page-break-after:always;"
+style="position:relative; width:794px; height:1123px; max-width:794px; margin:0 auto 20px auto; background:#ffffff; overflow:hidden; box-sizing:border-box; page-break-after:always; font-family:Roboto,Arial,'Segoe UI',sans-serif; color:#020303;"
 
-Content inner wrapper inside each page div:
-style="padding-top:72mm; padding-bottom:28mm; padding-left:25mm; padding-right:25mm; box-sizing:border-box;"
+LETTERHEAD STRUCTURE — reproduce EXACTLY inside every page div (all inline styles, no classes):
 
-Page footer (position absolute, bottom of each page div):
-<div style="position:absolute; bottom:10mm; left:0; right:0; text-align:center; font-family:Arial,Calibri,'Segoe UI',sans-serif; font-size:9pt; color:#888888;">Andersen &mdash; Confidential &nbsp;|&nbsp; Page N</div>
+<!-- 1. WORDMARK LOCKUP (top of every page) -->
+<div style="padding:18px 36px 14px; display:flex; align-items:center; gap:18px; border-bottom:none;">
+  <div style="display:flex; align-items:center; gap:14px;">
+    <div style="font-family:Roboto,Arial,sans-serif; font-size:18px; font-weight:700; color:#020D1C; letter-spacing:-0.02em;">Andersen</div>
+    <div style="width:1px; height:28px; background:#E0E0E0;"></div>
+    <div style="font-family:'Courier New',monospace; font-size:9px; letter-spacing:0.22em; text-transform:uppercase; color:#556170; line-height:1.6;"><strong style="color:#020303; font-weight:500;">Software Engineering</strong><br/>Group &middot; Global</div>
+  </div>
+</div>
+
+<!-- 2. YELLOW TOP BAND with topographic lines -->
+<div style="height:48px; background:#FFDB00; position:relative; overflow:hidden; flex-shrink:0;">
+  <svg style="position:absolute;top:0;left:0;width:100%;height:100%;display:block;" viewBox="0 0 794 48" preserveAspectRatio="none" fill="none">
+    <path d="M-10 12 Q 100 3, 220 17 T 460 20 Q 580 26, 810 10" stroke="#020303" stroke-width="0.7" stroke-opacity="0.55"/>
+    <path d="M-10 24 Q 120 11, 240 29 T 480 32 Q 620 38, 810 22" stroke="#020303" stroke-width="0.7" stroke-opacity="0.45"/>
+    <path d="M-10 36 Q 140 22, 260 39 T 500 43 Q 640 50, 810 32" stroke="#020303" stroke-width="0.7" stroke-opacity="0.35"/>
+    <circle cx="120" cy="14" r="2.5" fill="#020303"/>
+    <circle cx="300" cy="29" r="2" fill="#020303"/>
+    <circle cx="460" cy="20" r="3" fill="#020303"/>
+    <circle cx="620" cy="38" r="2" fill="#020303"/>
+    <circle cx="740" cy="17" r="2.5" fill="#020303"/>
+  </svg>
+  <div style="position:absolute;top:50%;right:36px;transform:translateY(-50%);font-family:'Courier New',monospace;font-size:9px;letter-spacing:0.24em;text-transform:uppercase;color:#020303;opacity:0.55;">Andersen &middot; Est. 2007</div>
+</div>
+
+<!-- 3. DOTTED ACCENT RULE -->
+<div style="height:18px; display:flex; align-items:center; padding:0 36px; gap:5px; border-bottom:1px solid #E0E0E0;">
+  <span style="display:block;width:5px;height:5px;border-radius:50%;background:#E0E0E0;"></span>
+  <span style="display:block;width:5px;height:5px;border-radius:50%;background:#E0E0E0;"></span>
+  <span style="display:block;width:7px;height:7px;border-radius:50%;background:#FFDB00;"></span>
+  <span style="display:block;width:5px;height:5px;border-radius:50%;background:#E0E0E0;"></span>
+  <span style="display:block;width:5px;height:5px;border-radius:50%;background:#E0E0E0;"></span>
+  <span style="flex:1;height:1px;background:#E0E0E0;margin:0 4px;"></span>
+  <span style="display:block;width:7px;height:7px;border-radius:50%;background:#FFDB00;"></span>
+  <span style="display:block;width:5px;height:5px;border-radius:50%;background:#E0E0E0;"></span>
+  <span style="display:block;width:5px;height:5px;border-radius:50%;background:#E0E0E0;"></span>
+</div>
+
+<!-- 4. CONTENT AREA (place all page content here) -->
+<div style="padding:24px 56px 20px; flex:1; position:relative; overflow:hidden; height:calc(1123px - 48px - 18px - 84px - 68px - 100px);">
+  [PAGE CONTENT GOES HERE]
+</div>
+
+<!-- 5. FOOTER -->
+<div style="position:absolute; bottom:0; left:0; right:0; background:#020D1C; color:#B8C0CB; padding:16px 36px; display:flex; justify-content:space-between; align-items:center; font-size:9px; letter-spacing:0.05em; height:68px; box-sizing:border-box;">
+  <div style="display:flex; gap:28px;">
+    <div><div style="font-family:'Courier New',monospace;font-size:8px;letter-spacing:0.2em;text-transform:uppercase;color:#FFDB00;margin-bottom:3px;">Web</div><div style="font-family:Roboto,Arial,sans-serif;font-size:9px;color:#D8DEE8;">andersenlab.com</div></div>
+    <div><div style="font-family:'Courier New',monospace;font-size:8px;letter-spacing:0.2em;text-transform:uppercase;color:#FFDB00;margin-bottom:3px;">Contact</div><div style="font-family:Roboto,Arial,sans-serif;font-size:9px;color:#D8DEE8;">procurement@andersenlab.com</div></div>
+    <div><div style="font-family:'Courier New',monospace;font-size:8px;letter-spacing:0.2em;text-transform:uppercase;color:#FFDB00;margin-bottom:3px;">Offices</div><div style="font-family:Roboto,Arial,sans-serif;font-size:9px;color:#D8DEE8;">Warsaw &middot; Berlin &middot; London &middot; New York</div></div>
+  </div>
+  <div style="display:flex; flex-direction:column; align-items:flex-end; gap:4px;">
+    <div style="font-family:Roboto,Arial,sans-serif;font-size:12px;font-weight:700;color:#ffffff;letter-spacing:-0.01em;">Andersen</div>
+    <div style="font-family:'Courier New',monospace;font-size:8px;letter-spacing:0.18em;text-transform:uppercase;color:#FFDB00;">&copy; Andersen 2026</div>
+  </div>
+</div>
 
 PAGING GUIDE:
 - Page 1: Cover page only -- title, subtitle, RFP metadata table, Table of Contents
@@ -3348,49 +3394,44 @@ PAGING GUIDE:
 - Continue: Technical Requirements, Evaluation Criteria, Vendor Qualifications, Submission Timeline, Terms and Conditions
 - Each major section starts at or near the top of a new page
 
-WHAT THE BACKGROUND IMAGE ALREADY CONTAINS (do NOT recreate any of these in HTML):
-- Top strip approximately 20mm: geometric Arabic ornamental pattern, warm khaki
-- Chain border full width below ornament
-- Logo block below chain: Arabic calligraphy plus CROWN PRINCE COURT text plus heraldic eagle emblem
-- Below logo: clean white content field
-
-COVER PAGE METADATA TABLE (place on page 1 after title and subtitle):
-<table style="width:80%; margin:16pt auto; border-collapse:collapse; font-family:Arial,Calibri,'Segoe UI',sans-serif; font-size:10.5pt; color:#1A1A1A;">
-  <tr><td style="padding:5pt 10pt; border:1px solid #CCCCCC; font-weight:700; width:38%;">RFP Reference Number</td><td style="padding:5pt 10pt; border:1px solid #CCCCCC;">[insert ref_number]</td></tr>
-  <tr><td style="padding:5pt 10pt; border:1px solid #CCCCCC; font-weight:700;">Issue Date</td><td style="padding:5pt 10pt; border:1px solid #CCCCCC;">[insert today date]</td></tr>
-  <tr><td style="padding:5pt 10pt; border:1px solid #CCCCCC; font-weight:700;">Proposal Submission Deadline</td><td style="padding:5pt 10pt; border:1px solid #CCCCCC;">[insert deadline]</td></tr>
-  <tr><td style="padding:5pt 10pt; border:1px solid #CCCCCC; font-weight:700;">Category</td><td style="padding:5pt 10pt; border:1px solid #CCCCCC;">[insert category]</td></tr>
-  <tr><td style="padding:5pt 10pt; border:1px solid #CCCCCC; font-weight:700;">Issuing Authority</td><td style="padding:5pt 10pt; border:1px solid #CCCCCC;">Andersen, Warsaw, Poland</td></tr>
-  <tr><td style="padding:5pt 10pt; border:1px solid #CCCCCC; font-weight:700;">Submission Email</td><td style="padding:5pt 10pt; border:1px solid #CCCCCC;">procurement@andersenlab.com</td></tr>
+COVER PAGE METADATA TABLE (place inside the content area on page 1, after title and subtitle):
+<table style="width:80%; margin:16pt auto; border-collapse:collapse; font-family:Roboto,Arial,sans-serif; font-size:10.5pt; color:#020303;">
+  <tr><td style="padding:5pt 10pt; border:1px solid #E0E0E0; font-weight:700; width:38%;">RFP Reference Number</td><td style="padding:5pt 10pt; border:1px solid #E0E0E0;">[insert ref_number]</td></tr>
+  <tr><td style="padding:5pt 10pt; border:1px solid #E0E0E0; font-weight:700;">Issue Date</td><td style="padding:5pt 10pt; border:1px solid #E0E0E0;">[insert today date]</td></tr>
+  <tr><td style="padding:5pt 10pt; border:1px solid #E0E0E0; font-weight:700;">Proposal Submission Deadline</td><td style="padding:5pt 10pt; border:1px solid #E0E0E0;">[insert deadline]</td></tr>
+  <tr><td style="padding:5pt 10pt; border:1px solid #E0E0E0; font-weight:700;">Category</td><td style="padding:5pt 10pt; border:1px solid #E0E0E0;">[insert category]</td></tr>
+  <tr><td style="padding:5pt 10pt; border:1px solid #E0E0E0; font-weight:700;">Issuing Authority</td><td style="padding:5pt 10pt; border:1px solid #E0E0E0;">Andersen, Warsaw, Poland</td></tr>
+  <tr><td style="padding:5pt 10pt; border:1px solid #E0E0E0; font-weight:700;">Submission Email</td><td style="padding:5pt 10pt; border:1px solid #E0E0E0;">procurement@andersenlab.com</td></tr>
 </table>
 
 COLOR PALETTE -- STRICTLY ENFORCED
-- All body text: #1A1A1A (near-black)
-- Section heading underline accent: #A79C7F (warm khaki)
-- Table and rule borders: #CCCCCC (light grey)
-- Footer text: #888888 (grey, page footer only)
-- PROHIBITED everywhere in body content and tables: blues, greens, teals, oranges, gradients, any other accent
+- All body text: #020303 (near-black, Andersen ink)
+- Section heading underline accent: #FFDB00 (Andersen yellow)
+- Table and rule borders: #E0E0E0 (light grey)
+- Footer: navy background #020D1C with yellow #FFDB00 labels
+- Accent highlights (e.g. yellow row stripe): #FFDB00 at very low opacity or #FFFDE7
+- PROHIBITED everywhere in body content: blues, greens, teals, oranges, gradients, reds, any other accent color
 
 TYPOGRAPHY -- ALL STYLES MUST BE INLINE (required for self-contained HTML and PDF export)
 Apply every style as an inline style= attribute. No style blocks. No CSS classes.
 
-TITLE: style="font-family:Arial,Calibri,'Segoe UI',sans-serif; font-size:20pt; font-weight:700; text-align:center; color:#1A1A1A; margin:0 0 10pt 0; line-height:1.2;"
-SUBTITLE REQUEST FOR PROPOSAL: style="font-family:Arial,Calibri,'Segoe UI',sans-serif; font-size:13.5pt; font-weight:400; text-align:center; letter-spacing:2.5px; color:#1A1A1A; margin:16pt 0 16pt 0;"
-SECTION HEADING: style="font-family:Arial,Calibri,'Segoe UI',sans-serif; font-size:13pt; font-weight:700; color:#1A1A1A; margin-top:14pt; margin-bottom:7pt; padding-bottom:3pt; border-bottom:1.5px solid #A79C7F;"
-SUBHEADING: style="font-family:Arial,Calibri,'Segoe UI',sans-serif; font-size:11pt; font-weight:700; color:#1A1A1A; margin-top:10pt; margin-bottom:4pt;"
-BODY PARAGRAPH p: style="font-family:Arial,Calibri,'Segoe UI',sans-serif; font-size:10.5pt; line-height:1.35; color:#1A1A1A; margin:0 0 5pt 0; text-align:justify;"
-BULLET LIST ul: style="font-family:Arial,Calibri,'Segoe UI',sans-serif; font-size:10.5pt; line-height:1.35; color:#1A1A1A; list-style-type:disc; padding-left:18pt; margin:3pt 0 6pt 0;"
-LIST ITEM li: style="margin-bottom:3pt; color:#1A1A1A;"
-NUMBERED LIST ol: style="font-family:Arial,Calibri,'Segoe UI',sans-serif; font-size:10.5pt; line-height:1.35; color:#1A1A1A; padding-left:18pt; margin:3pt 0 6pt 0;"
+TITLE: style="font-family:Roboto,Arial,sans-serif; font-size:20pt; font-weight:700; text-align:center; color:#020303; margin:0 0 10pt 0; line-height:1.2;"
+SUBTITLE REQUEST FOR PROPOSAL: style="font-family:Roboto,Arial,sans-serif; font-size:13.5pt; font-weight:300; text-align:center; letter-spacing:2.5px; color:#020303; margin:16pt 0 16pt 0;"
+SECTION HEADING: style="font-family:Roboto,Arial,sans-serif; font-size:13pt; font-weight:700; color:#020303; margin-top:14pt; margin-bottom:7pt; padding-bottom:3pt; border-bottom:2px solid #FFDB00;"
+SUBHEADING: style="font-family:Roboto,Arial,sans-serif; font-size:11pt; font-weight:700; color:#020303; margin-top:10pt; margin-bottom:4pt;"
+BODY PARAGRAPH p: style="font-family:Roboto,Arial,sans-serif; font-size:10.5pt; line-height:1.35; color:#020303; margin:0 0 5pt 0; text-align:justify;"
+BULLET LIST ul: style="font-family:Roboto,Arial,sans-serif; font-size:10.5pt; line-height:1.35; color:#020303; list-style-type:disc; padding-left:18pt; margin:3pt 0 6pt 0;"
+LIST ITEM li: style="margin-bottom:3pt; color:#020303;"
+NUMBERED LIST ol: style="font-family:Roboto,Arial,sans-serif; font-size:10.5pt; line-height:1.35; color:#020303; padding-left:18pt; margin:3pt 0 6pt 0;"
 
 TABLE OF CONTENTS ROWS:
-Top-level: <div style="display:flex; justify-content:space-between; border-bottom:1px dotted #CCCCCC; padding:4pt 0; font-family:Arial,Calibri,'Segoe UI',sans-serif; font-size:10.5pt; color:#1A1A1A;"><span style="font-weight:700;">N. Section Title</span><span style="white-space:nowrap;">N</span></div>
-Sub-item: <div style="display:flex; justify-content:space-between; border-bottom:1px dotted #CCCCCC; padding:3pt 0 3pt 16pt; font-family:Arial,Calibri,'Segoe UI',sans-serif; font-size:10.5pt; color:#1A1A1A;"><span>N.M Sub-section Title</span><span style="white-space:nowrap;">N</span></div>
+Top-level: <div style="display:flex; justify-content:space-between; border-bottom:1px dotted #E0E0E0; padding:4pt 0; font-family:Roboto,Arial,sans-serif; font-size:10.5pt; color:#020303;"><span style="font-weight:700;">N. Section Title</span><span style="white-space:nowrap;">N</span></div>
+Sub-item: <div style="display:flex; justify-content:space-between; border-bottom:1px dotted #E0E0E0; padding:3pt 0 3pt 16pt; font-family:Roboto,Arial,sans-serif; font-size:10.5pt; color:#020303;"><span>N.M Sub-section Title</span><span style="white-space:nowrap;">N</span></div>
 
 TABLES (use for technical requirements, evaluation criteria, qualification requirements, timeline):
-Outer: <table style="width:100%; border-collapse:collapse; font-family:Arial,Calibri,'Segoe UI',sans-serif; font-size:10.5pt; color:#1A1A1A; margin:6pt 0 10pt 0;">
-Header th: style="font-weight:700; color:#1A1A1A; background:#F5F5F5; padding:5pt 7pt; border:1px solid #CCCCCC; text-align:left;"
-Data td: style="color:#1A1A1A; background:#FFFFFF; padding:5pt 7pt; border:1px solid #CCCCCC; vertical-align:top;"
+Outer: <table style="width:100%; border-collapse:collapse; font-family:Roboto,Arial,sans-serif; font-size:10.5pt; color:#020303; margin:6pt 0 10pt 0;">
+Header th: style="font-weight:700; color:#020303; background:#FFFDE7; padding:5pt 7pt; border:1px solid #E0E0E0; text-align:left;"
+Data td: style="color:#020303; background:#FFFFFF; padding:5pt 7pt; border:1px solid #E0E0E0; vertical-align:top;"
 Rules: No colored cell fills. No merged cells. Alternate rows may use #FAFAFA background for readability if needed.
 
 CONTENT RULES -- STRICTLY ENFORCED
@@ -3406,10 +3447,13 @@ CONTENT RULES -- STRICTLY ENFORCED
 HTML OUTPUT RULES
 - Return ONLY the inner HTML -- no DOCTYPE, no html tag, no body tag, no head tag, no style blocks.
 - The outermost element is a plain wrapper div with no styling.
-- Inside it, each A4 page is a separate div with the page wrapper inline style shown above.
-- Inside each page div, place the content inner wrapper div with the padding style shown above.
+- Inside it, each A4 page is a separate div using EXACTLY the page wrapper inline style shown above (794px wide, 1123px tall, white background, no background-image).
+- Inside each page div, reproduce the full Andersen letterhead structure in this order: wordmark lockup, yellow band with inline SVG, dotted accent rule, content area div, and navy footer -- as shown above with all inline styles.
+- Place the actual page content (title, sections, tables, etc.) INSIDE the content area div, replacing the [PAGE CONTENT GOES HERE] placeholder.
+- Do NOT use background-image anywhere. The letterhead is pure inline HTML + CSS.
+- Do NOT use external images or img tags.
 - ALL styling via inline style= attributes ONLY. No classes. No style blocks. No external stylesheets.
-- Use proper HTML: p, ul, ol, li, table, thead, tbody, tr, th, td, strong, em, div.
+- Use proper HTML: p, ul, ol, li, table, thead, tbody, tr, th, td, strong, em, div, svg.
 - Do NOT use markdown, code fences, or non-HTML syntax.
 - Do NOT embed base64 images or data URIs.`
 

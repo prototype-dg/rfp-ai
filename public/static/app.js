@@ -6443,11 +6443,11 @@ rfpTabs.proposals = async function(rfpId) {
     try { _ed = p.evaluation_data ? JSON.parse(p.evaluation_data) : null; } catch(e){}
     let fin = '-';
     var _budgetAmt = (_ed && _ed.budget_extracted) || p.budget_amount;
-    var _budgetCur = (_ed && _ed.budget_currency) || p.budget_currency || 'AED';
+    var _budgetCur = (_ed && _ed.budget_currency) || p.budget_currency || 'USD';
     if (_budgetAmt && _budgetAmt > 0) {
       fin = _budgetCur + ' ' + Number(_budgetAmt).toLocaleString();
     } else if (p.financial_proposal) {
-      fin = 'AED ' + Number(p.financial_proposal).toLocaleString();
+      fin = 'USD ' + Number(p.financial_proposal).toLocaleString();
     }
     // Resolve duration from evaluation_data.duration_extracted first
     let dur = '-';
@@ -6801,9 +6801,9 @@ function _buildEvalTabBodies(p, evalData) {
   var rfpId = p.rfp_id;
   var fin = '-';
   if (p.budget_amount && p.budget_amount > 0) {
-    fin = (p.budget_currency || 'AED') + ' ' + Number(p.budget_amount).toLocaleString();
+    fin = (p.budget_currency || 'USD') + ' ' + Number(p.budget_amount).toLocaleString();
   } else if (p.financial_proposal) {
-    fin = 'AED ' + Number(p.financial_proposal).toLocaleString();
+    fin = 'USD ' + Number(p.financial_proposal).toLocaleString();
   }
   var dur = '-';
   if (p.timeline_months && p.timeline_months > 0) {
@@ -6832,7 +6832,7 @@ function _buildEvalTabBodies(p, evalData) {
   var budgetMissing = (!p.budget_amount || p.budget_amount <= 0) && (!p.financial_proposal);
   var budgetExtracted = evalData && evalData.budget_extracted;
   var evalBudget = budgetExtracted
-    ? (evalData.budget_currency || 'AED') + ' ' + Number(evalData.budget_extracted).toLocaleString()
+    ? (evalData.budget_currency || 'USD') + ' ' + Number(evalData.budget_extracted).toLocaleString()
       + (evalData.budget_confidence != null ? ' <span style="font-size:0.7rem;color:#9ca3af">(confidence: ' + Math.round(evalData.budget_confidence * 100) + '%)</span>' : '')
     : null;
 
@@ -6852,7 +6852,7 @@ function _buildEvalTabBodies(p, evalData) {
       + '<div style="font-size:0.78rem;color:#78350f">' + t('prop_budget_body') + '</div>'
       + '<div style="display:flex;gap:0.5rem;align-items:center;margin-top:0.25rem">'
       + '<input id="manualBudgetInput_' + p.id + '" type="number" min="0" placeholder="' + t('prop_budget_ph') + '" style="flex:1;padding:6px 10px;border:1.5px solid #fcd34d;border-radius:6px;font-size:0.82rem">'
-      + '<select id="manualBudgetCur_' + p.id + '" style="padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:0.82rem"><option>AED</option><option>USD</option><option>EUR</option><option>GBP</option></select>'
+      + '<select id="manualBudgetCur_' + p.id + '" style="padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:0.82rem"><option>USD</option><option>EUR</option><option>GBP</option><option>AED</option></select>'
       + '<button onclick="saveManualBudget(' + rfpId + ',' + p.id + ')" style="background:var(--cpc-gold-deep);color:white;border:none;border-radius:6px;padding:6px 14px;font-size:0.82rem;font-weight:600;cursor:pointer;white-space:nowrap"><i class="fas fa-save" style="margin-right:4px"></i>' + t('prop_budget_save_btn') + '</button>'
       + '</div>'
       + '</div>';
@@ -7305,7 +7305,7 @@ function _fireBudgetExtraction(rfpId, proposalId) {
 
       // Fast path: budget extracted immediately (cached OCR text or stored fields)
       if (budgetResult.ok && budgetResult.status !== 'processing' && budgetResult.budget_amount) {
-        showToast('💰 Budget: ' + (budgetResult.budget_currency || 'AED') + ' ' + budgetResult.budget_amount.toLocaleString() + ' (confidence ' + Math.round((budgetResult.budget_confidence || 0) * 100) + '%)', 'success', 8000);
+        showToast('💰 Budget: ' + (budgetResult.budget_currency || 'USD') + ' ' + budgetResult.budget_amount.toLocaleString() + ' (confidence ' + Math.round((budgetResult.budget_confidence || 0) * 100) + '%)', 'success', 8000);
         _refreshPanelFromDB(rfpId, proposalId);
         return;
       }
@@ -7333,7 +7333,7 @@ function _pollBudgetResult(rfpId, proposalId) {
       var budget = ev && ev.evaluation_data && ev.evaluation_data.budget_extracted;
       if (budget && budget !== lastBudget) {
         clearInterval(interval);
-        var currency = (ev.evaluation_data && ev.evaluation_data.budget_currency) || 'AED';
+        var currency = (ev.evaluation_data && ev.evaluation_data.budget_currency) || 'USD';
         var conf = (ev.evaluation_data && ev.evaluation_data.budget_confidence) || 0;
         showToast('💰 Budget extracted: ' + currency + ' ' + budget.toLocaleString() + ' (confidence ' + Math.round(conf * 100) + '%)', 'success', 8000);
         _refreshPanelFromDB(rfpId, proposalId);
@@ -7369,7 +7369,7 @@ async function saveManualBudget(rfpId, proposalId) {
   if (!amtEl || !amtEl.value) { showToast('Please enter a budget amount', 'error'); return; }
   var amount = parseFloat(amtEl.value);
   if (isNaN(amount) || amount <= 0) { showToast('Please enter a valid positive amount', 'error'); return; }
-  var currency = curEl ? curEl.value : 'AED';
+  var currency = curEl ? curEl.value : 'USD';
   try {
     showToast('Saving budget and re-evaluating…', 'info', 6000);
     var result = await apiCall('POST', '/rfps/' + rfpId + '/proposals/' + proposalId + '/manual-override', {
