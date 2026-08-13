@@ -9,6 +9,87 @@ const API = '/api';
 // ============================================================
 var _currentLang = localStorage.getItem('andersen_lang') || localStorage.getItem('cpc_lang') || 'en';
 
+// ============================================================
+// CURRENCY SETTINGS
+// FX rates as of 2026-08-13 (base: USD).
+// These are used to convert extracted vendor budget amounts
+// into the user-selected display currency.
+// ============================================================
+var FX_RATES = {
+  // Code: { label, symbol, rate (1 USD = X units), decimals }
+  USD: { label: 'US Dollar',            symbol: '$',   rate: 1.0000,   decimals: 0 },
+  EUR: { label: 'Euro',                 symbol: '€',   rate: 0.9245,   decimals: 0 },
+  GBP: { label: 'British Pound',        symbol: '£',   rate: 0.7912,   decimals: 0 },
+  CHF: { label: 'Swiss Franc',          symbol: 'Fr',  rate: 0.8981,   decimals: 0 },
+  JPY: { label: 'Japanese Yen',         symbol: '¥',   rate: 147.82,   decimals: 0 },
+  CNY: { label: 'Chinese Yuan',         symbol: '¥',   rate: 7.2430,   decimals: 0 },
+  INR: { label: 'Indian Rupee',         symbol: '₹',   rate: 83.95,    decimals: 0 },
+  CAD: { label: 'Canadian Dollar',      symbol: 'CA$', rate: 1.3862,   decimals: 0 },
+  AUD: { label: 'Australian Dollar',    symbol: 'A$',  rate: 1.5491,   decimals: 0 },
+  SGD: { label: 'Singapore Dollar',     symbol: 'S$',  rate: 1.3421,   decimals: 0 },
+  HKD: { label: 'Hong Kong Dollar',     symbol: 'HK$', rate: 7.7830,   decimals: 0 },
+  NZD: { label: 'New Zealand Dollar',   symbol: 'NZ$', rate: 1.6980,   decimals: 0 },
+  SEK: { label: 'Swedish Krona',        symbol: 'kr',  rate: 10.3270,  decimals: 0 },
+  NOK: { label: 'Norwegian Krone',      symbol: 'kr',  rate: 10.7840,  decimals: 0 },
+  DKK: { label: 'Danish Krone',         symbol: 'kr',  rate: 6.8920,   decimals: 0 },
+  PLN: { label: 'Polish Zloty',         symbol: 'zł',  rate: 3.9740,   decimals: 0 },
+  CZK: { label: 'Czech Koruna',         symbol: 'Kč',  rate: 23.280,   decimals: 0 },
+  HUF: { label: 'Hungarian Forint',     symbol: 'Ft',  rate: 369.40,   decimals: 0 },
+  RON: { label: 'Romanian Leu',         symbol: 'lei', rate: 4.5980,   decimals: 0 },
+  TRY: { label: 'Turkish Lira',         symbol: '₺',   rate: 38.620,   decimals: 0 },
+  RUB: { label: 'Russian Ruble',        symbol: '₽',   rate: 87.50,    decimals: 0 },
+  AED: { label: 'UAE Dirham',           symbol: 'د.إ', rate: 3.6725,   decimals: 0 },
+  SAR: { label: 'Saudi Riyal',          symbol: 'ر.س', rate: 3.7500,   decimals: 0 },
+  QAR: { label: 'Qatari Riyal',         symbol: 'ر.ق', rate: 3.6400,   decimals: 0 },
+  KWD: { label: 'Kuwaiti Dinar',        symbol: 'د.ك', rate: 0.3071,   decimals: 3 },
+  BHD: { label: 'Bahraini Dinar',       symbol: 'BD',  rate: 0.3770,   decimals: 3 },
+  ILS: { label: 'Israeli Shekel',       symbol: '₪',   rate: 3.7120,   decimals: 0 },
+  ZAR: { label: 'South African Rand',   symbol: 'R',   rate: 18.420,   decimals: 0 },
+  BRL: { label: 'Brazilian Real',       symbol: 'R$',  rate: 5.6940,   decimals: 0 },
+  MXN: { label: 'Mexican Peso',         symbol: 'MX$', rate: 17.890,   decimals: 0 },
+  KRW: { label: 'South Korean Won',     symbol: '₩',   rate: 1390.0,   decimals: 0 },
+  THB: { label: 'Thai Baht',            symbol: '฿',   rate: 34.320,   decimals: 0 },
+  MYR: { label: 'Malaysian Ringgit',    symbol: 'RM',  rate: 4.4510,   decimals: 0 },
+  IDR: { label: 'Indonesian Rupiah',    symbol: 'Rp',  rate: 16380.0,  decimals: 0 },
+  PHP: { label: 'Philippine Peso',      symbol: '₱',   rate: 56.950,   decimals: 0 },
+  PKR: { label: 'Pakistani Rupee',      symbol: '₨',   rate: 278.40,   decimals: 0 },
+  NGN: { label: 'Nigerian Naira',       symbol: '₦',   rate: 1620.0,   decimals: 0 },
+  EGP: { label: 'Egyptian Pound',       symbol: 'E£',  rate: 49.60,    decimals: 0 },
+  UAH: { label: 'Ukrainian Hryvnia',    symbol: '₴',   rate: 41.50,    decimals: 0 },
+};
+
+// FX_RATES base date — shown in the settings UI
+var FX_RATES_DATE = '2026-08-13';
+
+// Active display currency — loaded from localStorage, defaults to USD
+var _settingsCurrency = localStorage.getItem('andersen_currency') || 'USD';
+
+/**
+ * Convert amount from sourceCurrency to _settingsCurrency and return
+ * a formatted string like "€ 4,231,000" or "USD 4,231,000".
+ *
+ * @param {number|null} amount       Raw numeric amount
+ * @param {string}      sourceCurrency  ISO code of the stored value (e.g. 'USD')
+ * @returns {string}  Formatted string in display currency, or '-' if invalid
+ */
+function formatBudget(amount, sourceCurrency) {
+  if (!amount || isNaN(amount) || amount <= 0) return '-';
+  var src = (sourceCurrency || 'USD').toUpperCase();
+  var dst = (_settingsCurrency || 'USD').toUpperCase();
+  var srcFx = (FX_RATES[src] || FX_RATES.USD).rate;
+  var dstFx = (FX_RATES[dst] || FX_RATES.USD).rate;
+  // Convert: amount (in src) → USD → dst
+  var converted = (amount / srcFx) * dstFx;
+  var info = FX_RATES[dst] || FX_RATES.USD;
+  var decimals = info.decimals || 0;
+  var formatted = converted.toLocaleString(undefined, {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals
+  });
+  // Show symbol if unambiguous, else code
+  return dst + ' ' + formatted;
+}
+
 var I18N = {
   en: {
     // Sidebar
@@ -596,6 +677,10 @@ var I18N = {
     settings_email_title:    'Procurement Team Email',
     settings_email_desc:     'Shown on the vendor portal\'s declined message as a contact address.',
     settings_email_save_btn: 'Save',
+    settings_currency_title:  'Display Currency',
+    settings_currency_desc:   'All budget amounts are converted and displayed in this currency using today\'s FX rates.',
+    settings_currency_save_btn: 'Save Currency',
+    settings_currency_saved:  'Display currency updated.',
     submit_confirm_email_sent: 'A confirmation email has been sent to your registered address.',
   },
   de: {
@@ -1119,6 +1204,10 @@ var I18N = {
     settings_email_title:    'Beschaffungsteam-E-Mail',
     settings_email_desc:     'Wird im Lieferantenportal als Kontaktadresse angezeigt.',
     settings_email_save_btn: 'Speichern',
+    settings_currency_title:  'Anzeigewährung',
+    settings_currency_desc:   'Alle Budgetbeträge werden anhand der heutigen Wechselkurse in diese Währung umgerechnet.',
+    settings_currency_save_btn: 'Währung speichern',
+    settings_currency_saved:  'Anzeigewährung aktualisiert.',
     submit_confirm_email_sent: 'Eine Bestätigungs-E-Mail wurde an Ihre registrierte Adresse gesendet.',
   },
   fr: {
@@ -1642,6 +1731,10 @@ var I18N = {
     settings_email_title:    'E-mail de l\'équipe achats',
     settings_email_desc:     'Affiché comme adresse de contact dans le portail fournisseur.',
     settings_email_save_btn: 'Enregistrer',
+    settings_currency_title:  'Devise d\'affichage',
+    settings_currency_desc:   'Tous les montants budgétaires sont convertis et affichés dans cette devise selon les taux de change du jour.',
+    settings_currency_save_btn: 'Enregistrer la devise',
+    settings_currency_saved:  'Devise d\'affichage mise à jour.',
     submit_confirm_email_sent: 'Un e-mail de confirmation a été envoyé à votre adresse enregistrée.',
   },
   pl: {
@@ -2165,6 +2258,10 @@ var I18N = {
     settings_email_title:    'E-mail zespołu zamówień',
     settings_email_desc:     'Wyświetlany jako adres kontaktowy w portalu dostawcy.',
     settings_email_save_btn: 'Zapisz',
+    settings_currency_title:  'Waluta wyświetlania',
+    settings_currency_desc:   'Wszystkie kwoty budżetowe są przeliczane i wyświetlane w tej walucie według dzisiejszych kursów wymiany.',
+    settings_currency_save_btn: 'Zapisz walutę',
+    settings_currency_saved:  'Waluta wyświetlania zaktualizowana.',
     submit_confirm_email_sent: 'E-mail potwierdzający został wysłany na zarejestrowany adres.',
   },
   ar: {
@@ -2730,6 +2827,10 @@ var I18N = {
     settings_email_title:    'بريد فريق المشتريات',
     settings_email_desc:     'يُعرض كعنوان اتصال في بوابة الموردين.',
     settings_email_save_btn: 'حفظ',
+    settings_currency_title:  'عملة العرض',
+    settings_currency_desc:   'يتم تحويل جميع مبالغ الميزانية وعرضها بهذه العملة باستخدام أسعار الصرف اليومية.',
+    settings_currency_save_btn: 'حفظ العملة',
+    settings_currency_saved:  'تم تحديث عملة العرض.',
     submit_confirm_email_sent: 'تم إرسال بريد تأكيد إلى عنوانك المسجل.',
   }
 };
@@ -4554,7 +4655,7 @@ rfpTabs.generate = function(rfpId, rfp) {
     + (_settingsCategories || DEFAULT_CATEGORIES).map(function(c){ return '<option value="' + c + '"' + (catVal===c?' selected':'') + '>' + c + '</option>'; }).join('')
     + '</select></div>'
     + '<div class="form-group" style="margin:0">'
-    + fgLabel(t('form_budget_aed'), 'rfpBudget', false)
+    + fgLabel(t('form_budget_aed').replace(/USD|AED|EUR/, _settingsCurrency), 'rfpBudget', false)
     + '<input id="rfpBudget" placeholder="' + t('ph_budget') + '" value="' + escHtml(budgetVal) + '" oninput="' + asc + '" onchange="' + asc + '" title="Internal evaluation cap only — used to score vendor proposals commercially. This value is never published in the RFP document sent to vendors.">'
     + '<div style="font-size:0.7rem;color:#6b7280;margin-top:3px;line-height:1.35"><i class="fas fa-lock" style="font-size:0.65rem;margin-right:3px;color:#9ca3af"></i>' + t('gen_internal_only') + '</div>'
     + '</div></div>'
@@ -6445,9 +6546,9 @@ rfpTabs.proposals = async function(rfpId) {
     var _budgetAmt = (_ed && _ed.budget_extracted) || p.budget_amount;
     var _budgetCur = (_ed && _ed.budget_currency) || p.budget_currency || 'USD';
     if (_budgetAmt && _budgetAmt > 0) {
-      fin = _budgetCur + ' ' + Number(_budgetAmt).toLocaleString();
+      fin = formatBudget(_budgetAmt, _budgetCur);
     } else if (p.financial_proposal) {
-      fin = 'USD ' + Number(p.financial_proposal).toLocaleString();
+      fin = formatBudget(p.financial_proposal, 'USD');
     }
     // Resolve duration from evaluation_data.duration_extracted first
     let dur = '-';
@@ -6801,9 +6902,9 @@ function _buildEvalTabBodies(p, evalData) {
   var rfpId = p.rfp_id;
   var fin = '-';
   if (p.budget_amount && p.budget_amount > 0) {
-    fin = (p.budget_currency || 'USD') + ' ' + Number(p.budget_amount).toLocaleString();
+    fin = formatBudget(p.budget_amount, p.budget_currency || 'USD');
   } else if (p.financial_proposal) {
-    fin = 'USD ' + Number(p.financial_proposal).toLocaleString();
+    fin = formatBudget(p.financial_proposal, 'USD');
   }
   var dur = '-';
   if (p.timeline_months && p.timeline_months > 0) {
@@ -6832,7 +6933,7 @@ function _buildEvalTabBodies(p, evalData) {
   var budgetMissing = (!p.budget_amount || p.budget_amount <= 0) && (!p.financial_proposal);
   var budgetExtracted = evalData && evalData.budget_extracted;
   var evalBudget = budgetExtracted
-    ? (evalData.budget_currency || 'USD') + ' ' + Number(evalData.budget_extracted).toLocaleString()
+    ? formatBudget(evalData.budget_extracted, evalData.budget_currency || 'USD')
       + (evalData.budget_confidence != null ? ' <span style="font-size:0.7rem;color:#9ca3af">(confidence: ' + Math.round(evalData.budget_confidence * 100) + '%)</span>' : '')
     : null;
 
@@ -6852,7 +6953,7 @@ function _buildEvalTabBodies(p, evalData) {
       + '<div style="font-size:0.78rem;color:#78350f">' + t('prop_budget_body') + '</div>'
       + '<div style="display:flex;gap:0.5rem;align-items:center;margin-top:0.25rem">'
       + '<input id="manualBudgetInput_' + p.id + '" type="number" min="0" placeholder="' + t('prop_budget_ph') + '" style="flex:1;padding:6px 10px;border:1.5px solid #fcd34d;border-radius:6px;font-size:0.82rem">'
-      + '<select id="manualBudgetCur_' + p.id + '" style="padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:0.82rem"><option>USD</option><option>EUR</option><option>GBP</option><option>AED</option></select>'
+      + '<select id="manualBudgetCur_' + p.id + '" style="padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:0.82rem">' + ['USD','EUR','GBP','CHF','PLN','AED','SAR','QAR','KWD','BHD','JPY','CNY','INR','CAD','AUD','SGD','HKD','NZD','SEK','NOK','DKK','MXN','BRL','ZAR','TRY','RUB','KRW','THB','MYR','IDR','NGN','EGP','PKR','BDT','VND'].map(function(c){ var r = FX_RATES[c]; if (!r) return ''; return '<option value="' + c + '"' + (c === _settingsCurrency ? ' selected' : '') + '>' + c + ' — ' + r.label + '</option>'; }).join('') + '</select>'
       + '<button onclick="saveManualBudget(' + rfpId + ',' + p.id + ')" style="background:var(--cpc-gold-deep);color:white;border:none;border-radius:6px;padding:6px 14px;font-size:0.82rem;font-weight:600;cursor:pointer;white-space:nowrap"><i class="fas fa-save" style="margin-right:4px"></i>' + t('prop_budget_save_btn') + '</button>'
       + '</div>'
       + '</div>';
@@ -7335,7 +7436,7 @@ function _pollBudgetResult(rfpId, proposalId) {
         clearInterval(interval);
         var currency = (ev.evaluation_data && ev.evaluation_data.budget_currency) || 'USD';
         var conf = (ev.evaluation_data && ev.evaluation_data.budget_confidence) || 0;
-        showToast('💰 Budget extracted: ' + currency + ' ' + budget.toLocaleString() + ' (confidence ' + Math.round(conf * 100) + '%)', 'success', 8000);
+        showToast('💰 Budget extracted: ' + formatBudget(budget, currency) + ' (confidence ' + Math.round(conf * 100) + '%)', 'success', 8000);
         _refreshPanelFromDB(rfpId, proposalId);
       } else if (attempts >= maxAttempts) {
         clearInterval(interval);
@@ -7965,9 +8066,62 @@ pages.settings = async function() {
   var procEmail = '';
   try { var s = await apiCall('GET', '/settings'); procEmail = s.procurement_email || ''; } catch(e) {}
 
+  // Build currency dropdown options grouped by region
+  var currencyGroups = [
+    { label: 'Major',        codes: ['USD','EUR','GBP','CHF','JPY','CAD','AUD','NZD'] },
+    { label: 'Asia Pacific', codes: ['CNY','HKD','SGD','KRW','INR','THB','MYR','IDR','PHP','PKR'] },
+    { label: 'Europe',       codes: ['SEK','NOK','DKK','PLN','CZK','HUF','RON','TRY','UAH','RUB'] },
+    { label: 'Middle East',  codes: ['AED','SAR','QAR','KWD','BHD','ILS','EGP'] },
+    { label: 'Americas',     codes: ['BRL','MXN'] },
+    { label: 'Africa',       codes: ['ZAR','NGN'] },
+  ];
+  var currencyOptHtml = currencyGroups.map(function(g) {
+    var opts = g.codes.map(function(code) {
+      var fx = FX_RATES[code];
+      if (!fx) return '';
+      var selected = code === _settingsCurrency ? ' selected' : '';
+      return '<option value="' + code + '"' + selected + '>' + code + ' — ' + fx.label + '</option>';
+    }).join('');
+    return opts ? '<optgroup label="' + g.label + '">' + opts + '</optgroup>' : '';
+  }).join('');
+
   setContent(
     '<div style="max-width:680px;margin:0 auto;display:flex;flex-direction:column;gap:1.5rem">'
-    // Categories section
+
+    // ── Display Currency section ──────────────────────────────────────────────
+    + '<div class="card" style="padding:1.5rem">'
+    + '<h3 style="font-weight:700;font-size:1rem;color:#1f2937;margin:0 0 0.25rem"><i class="fas fa-coins cpc-gold" style="margin-right:8px"></i>' + t('settings_currency_title') + '</h3>'
+    + '<p style="font-size:0.82rem;color:#9ca3af;margin:0 0 1rem">' + t('settings_currency_desc') + '</p>'
+
+    // Currency selector row
+    + '<div style="display:flex;gap:0.75rem;align-items:flex-end;flex-wrap:wrap">'
+    + '<div style="flex:1;min-width:200px">'
+    + '<select id="settingsCurrencySelect" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:8px 10px;font-size:0.88rem;background:#fff">'
+    + currencyOptHtml
+    + '</select>'
+    + '</div>'
+    + '<button class="btn-primary" onclick="saveDisplayCurrency()" style="white-space:nowrap"><i class="fas fa-save"></i>' + t('settings_currency_save_btn') + '</button>'
+    + '</div>'
+
+    // FX rate table (read-only reference) — top 12 pairs vs display currency
+    + '<div style="margin-top:1rem;border-top:1px solid #f3f4f6;padding-top:1rem">'
+    + '<div style="font-size:0.72rem;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:#9ca3af;margin-bottom:0.5rem">FX Reference Rates · ' + FX_RATES_DATE + ' · vs ' + _settingsCurrency + '</div>'
+    + '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:4px 12px">'
+    + ['USD','EUR','GBP','AED','SAR','PLN','JPY','CHF','CAD','AUD','GBP','INR'].filter(function(c){ return c !== _settingsCurrency; }).slice(0, 10).map(function(code) {
+        var src = FX_RATES[code]; var dst = FX_RATES[_settingsCurrency] || FX_RATES.USD;
+        if (!src) return '';
+        var rate = (dst.rate / src.rate);
+        var decimals = rate < 0.01 ? 4 : rate < 1 ? 3 : rate < 100 ? 2 : 0;
+        return '<div style="display:flex;justify-content:space-between;font-size:0.78rem;padding:2px 0;border-bottom:1px solid #f3f4f6">'
+          + '<span style="color:#6b7280">1 ' + code + '</span>'
+          + '<span style="font-weight:600;color:#1f2937;font-family:monospace">' + rate.toFixed(decimals) + ' ' + _settingsCurrency + '</span>'
+          + '</div>';
+      }).join('')
+    + '</div>'
+    + '</div>'
+    + '</div>'
+
+    // ── Categories section ────────────────────────────────────────────────────
     + '<div class="card" style="padding:1.5rem">'
     + '<h3 style="font-weight:700;font-size:1rem;color:#1f2937;margin:0 0 0.25rem"><i class="fas fa-tag cpc-gold" style="margin-right:8px"></i>' + t('settings_cat_title') + '</h3>'
     + '<p style="font-size:0.82rem;color:#9ca3af;margin:0 0 1rem">' + t('settings_cat_desc') + '</p>'
@@ -7985,7 +8139,8 @@ pages.settings = async function() {
     + '</div>'
     + '<button class="btn-primary" style="margin-top:1rem;width:100%" onclick="saveSettingsCategories()"><i class="fas fa-save"></i>' + t('settings_cat_save_btn') + '</button>'
     + '</div>'
-    // Procurement email section
+
+    // ── Procurement email section ─────────────────────────────────────────────
     + '<div class="card" style="padding:1.5rem">'
     + '<h3 style="font-weight:700;font-size:1rem;color:#1f2937;margin:0 0 0.25rem"><i class="fas fa-envelope cpc-gold" style="margin-right:8px"></i>' + t('settings_email_title') + '</h3>'
     + '<p style="font-size:0.82rem;color:#9ca3af;margin:0 0 0.75rem">' + t('settings_email_desc') + '</p>'
@@ -7994,9 +8149,22 @@ pages.settings = async function() {
     + '<button class="btn-primary" onclick="saveProcurementEmail()"><i class="fas fa-save"></i>' + t('settings_email_save_btn') + '</button>'
     + '</div>'
     + '</div>'
+
     + '</div>'
   );
 };
+
+function saveDisplayCurrency() {
+  var sel = document.getElementById('settingsCurrencySelect');
+  if (!sel || !sel.value) return;
+  var code = sel.value;
+  if (!FX_RATES[code]) { showToast('Unknown currency code', 'error'); return; }
+  _settingsCurrency = code;
+  localStorage.setItem('andersen_currency', code);
+  showToast(t('settings_currency_saved') + '  (' + code + ' — ' + FX_RATES[code].label + ')', 'success', 4000);
+  // Re-render settings to update FX table
+  pages.settings();
+}
 
 var _settingsCatsEditing = null;
 function removeSettingsCategory(i) {
@@ -8059,7 +8227,7 @@ function showCreateRfpModal() {
     + '<div class="form-group" style="margin:0"><label>' + t('create_rfp_category') + '</label><select id="newRfpCat">'
     + (_settingsCategories || DEFAULT_CATEGORIES).map(function(c){ return '<option>' + c + '</option>'; }).join('')
     + '</select></div>'
-    + '<div class="form-group" style="margin:0"><label>' + t('create_rfp_budget') + '</label><input id="newRfpBudget" placeholder="5,000,000"></div>'
+    + '<div class="form-group" style="margin:0"><label>' + t('create_rfp_budget').replace(/USD|AED|EUR/, _settingsCurrency) + '</label><input id="newRfpBudget" placeholder="5,000,000"></div>'
     + '<div class="form-group" style="margin:0"><label>' + t('create_rfp_deadline') + '</label><input type="date" id="newRfpDeadline" value="' + getDateOffset(30) + '"></div>'
     + '</div>'
 
