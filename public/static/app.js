@@ -21,6 +21,7 @@ var I18N = {
     nav_vendors:     'Vendor Registry',
     nav_analytics:   'Analytics',
     nav_reports:     'Reports',
+    nav_settings:    'Settings',
     user_name:       'Procurement Manager',
     user_role:       'Andersen · Global',
     // Header
@@ -479,6 +480,28 @@ var I18N = {
     // 13.1 declined contact
     submit_declined_contact_prefix: 'For further assistance, please contact:',
     // 13.3 submission confirmation
+    // Dashboard pipeline action labels (hardcoded before — now i18n)
+    dash_pipeline_actions:  'Pipeline Actions',
+    dash_action_needed:     'Action Needed',
+    dash_pending_qa_lbl:    'Pending Q&A',
+    dash_ready_evaluate:    'Ready to Evaluate',
+    dash_awaiting_publish:  'draft RFP(s) awaiting publish',
+    dash_unanswered_qs:     'unanswered question(s)',
+    dash_ready_award:       'RFP(s) ready for award',
+    // Reports page labels
+    rpt_total_rfps:         'Total RFPs',
+    rpt_win_rate:           'Win Rate',
+    rpt_avg_duration:       'Avg Duration',
+    rpt_vendors:            'Vendors',
+    rpt_total_proposals:    'Total Proposals',
+    rpt_emails_sent:        'Emails Sent',
+    rpt_awarded_lbl:        'Awarded',
+    rpt_stage_funnel:       'RFP Stage Funnel',
+    rpt_top_vendors_hd:     'Top Vendors by Awards',
+    rpt_col_rank:           '#',
+    rpt_col_vendor:         'Vendor',
+    rpt_col_wins:           'Wins',
+    rpt_no_contracts:       'No awarded contracts yet',
     submit_confirm_email_sent: 'A confirmation email has been sent to your registered address.',
   },
   de: {
@@ -491,6 +514,7 @@ var I18N = {
     nav_vendors:     'Lieferantenregister',
     nav_analytics:   'Analytics',
     nav_reports:     'Berichte',
+    nav_settings:    'Einstellungen',
     user_name:       'Einkaufsleiter',
     user_role:       'Andersen · Global',
     lang_btn:        'DE',
@@ -887,6 +911,26 @@ var I18N = {
     card_menu_archive:      'Archivieren',
     card_menu_delete:       'Löschen',
     submit_declined_contact_prefix: 'Für weitere Hilfe kontaktieren Sie:',
+    dash_pipeline_actions:  'Pipeline-Aktionen',
+    dash_action_needed:     'Handlungsbedarf',
+    dash_pending_qa_lbl:    'Offene F&A',
+    dash_ready_evaluate:    'Zur Bewertung bereit',
+    dash_awaiting_publish:  'Ausschreibungsentwurf(e) zur Veröffentlichung',
+    dash_unanswered_qs:     'unbeantwortete Frage(n)',
+    dash_ready_award:       'Ausschreibung(en) zur Vergabe bereit',
+    rpt_total_rfps:         'Ausschreibungen gesamt',
+    rpt_win_rate:           'Erfolgsquote',
+    rpt_avg_duration:       'Ø Dauer',
+    rpt_vendors:            'Lieferanten',
+    rpt_total_proposals:    'Angebote gesamt',
+    rpt_emails_sent:        'E-Mails gesendet',
+    rpt_awarded_lbl:        'Vergeben',
+    rpt_stage_funnel:       'Ausschreibungs-Trichter',
+    rpt_top_vendors_hd:     'Top-Lieferanten nach Auftragsvergaben',
+    rpt_col_rank:           '#',
+    rpt_col_vendor:         'Lieferant',
+    rpt_col_wins:           'Erfolge',
+    rpt_no_contracts:       'Noch keine vergebenen Aufträge',
     submit_confirm_email_sent: 'Eine Bestätigungs-E-Mail wurde an Ihre registrierte Adresse gesendet.',
   },
   fr: {
@@ -899,6 +943,7 @@ var I18N = {
     nav_vendors:     'Registre fournisseurs',
     nav_analytics:   'Analytique',
     nav_reports:     'Rapports',
+    nav_settings:    'Paramètres',
     user_name:       'Responsable achats',
     user_role:       'Andersen · Global',
     lang_btn:        'FR',
@@ -1295,6 +1340,26 @@ var I18N = {
     card_menu_archive:      'Archiver',
     card_menu_delete:       'Supprimer',
     submit_declined_contact_prefix: 'Pour plus d\'assistance, veuillez contacter:',
+    dash_pipeline_actions:  'Actions Pipeline',
+    dash_action_needed:     'Action Requise',
+    dash_pending_qa_lbl:    'Q&R en attente',
+    dash_ready_evaluate:    'Prêt à évaluer',
+    dash_awaiting_publish:  'appel(s) d\'offres en attente de publication',
+    dash_unanswered_qs:     'question(s) sans réponse',
+    dash_ready_award:       'appel(s) d\'offres prêt(s) pour attribution',
+    rpt_total_rfps:         'Total AO',
+    rpt_win_rate:           'Taux de réussite',
+    rpt_avg_duration:       'Durée moy.',
+    rpt_vendors:            'Fournisseurs',
+    rpt_total_proposals:    'Total propositions',
+    rpt_emails_sent:        'E-mails envoyés',
+    rpt_awarded_lbl:        'Attribués',
+    rpt_stage_funnel:       'Entonnoir par étape',
+    rpt_top_vendors_hd:     'Top fournisseurs par contrats',
+    rpt_col_rank:           '#',
+    rpt_col_vendor:         'Fournisseur',
+    rpt_col_wins:           'Contrats',
+    rpt_no_contracts:       'Aucun contrat attribué pour l\'instant',
     submit_confirm_email_sent: 'Un e-mail de confirmation a été envoyé à votre adresse enregistrée.',
   },
   pl: {
@@ -1307,6 +1372,7 @@ var I18N = {
     nav_vendors:     'Rejestr dostawców',
     nav_analytics:   'Analityka',
     nav_reports:     'Raporty',
+    nav_settings:    'Ustawienia',
     user_name:       'Kierownik ds. zakupów',
     user_role:       'Andersen · Global',
     lang_btn:        'PL',
@@ -1703,6 +1769,26 @@ var I18N = {
     card_menu_archive:      'Archiwizuj',
     card_menu_delete:       'Usuń',
     submit_declined_contact_prefix: 'W celu uzyskania pomocy skontaktuj się z:',
+    dash_pipeline_actions:  'Działania Pipeline',
+    dash_action_needed:     'Wymagane działanie',
+    dash_pending_qa_lbl:    'Oczekujące pytania',
+    dash_ready_evaluate:    'Gotowe do oceny',
+    dash_awaiting_publish:  'zapytanie(a) ofertowe oczekujące na publikację',
+    dash_unanswered_qs:     'pytanie/a bez odpowiedzi',
+    dash_ready_award:       'zapytanie(a) ofertowe gotowe do przyznania',
+    rpt_total_rfps:         'Łącznie zapytań',
+    rpt_win_rate:           'Wskaźnik wygranych',
+    rpt_avg_duration:       'Śr. czas trwania',
+    rpt_vendors:            'Dostawcy',
+    rpt_total_proposals:    'Łącznie ofert',
+    rpt_emails_sent:        'Wysłane e-maile',
+    rpt_awarded_lbl:        'Przyznane',
+    rpt_stage_funnel:       'Lejek etapów',
+    rpt_top_vendors_hd:     'Najlepsi dostawcy wg kontraktów',
+    rpt_col_rank:           '#',
+    rpt_col_vendor:         'Dostawca',
+    rpt_col_wins:           'Kontrakty',
+    rpt_no_contracts:       'Brak przyznanych kontraktów',
     submit_confirm_email_sent: 'E-mail potwierdzający został wysłany na zarejestrowany adres.',
   },
   ar: {
@@ -1716,6 +1802,7 @@ var I18N = {
     nav_vendors:     'سجل الموردين',
     nav_analytics:   'التحليلات',
     nav_reports:     'التقارير',
+    nav_settings:    'الإعدادات',
     user_name:       'مدير المشتريات',
     user_role:       'أندرسن · عالمي',
     // Header
@@ -2153,6 +2240,26 @@ var I18N = {
     card_menu_archive:      'أرشفة',
     card_menu_delete:       'حذف',
     submit_declined_contact_prefix: 'للمزيد من المساعدة، يرجى التواصل مع:',
+    dash_pipeline_actions:  'إجراءات خط الأنابيب',
+    dash_action_needed:     'إجراء مطلوب',
+    dash_pending_qa_lbl:    'أسئلة معلقة',
+    dash_ready_evaluate:    'جاهز للتقييم',
+    dash_awaiting_publish:  'طلب(ات) عروض بانتظار النشر',
+    dash_unanswered_qs:     'سؤال/أسئلة بدون إجابة',
+    dash_ready_award:       'طلب(ات) عروض جاهزة للترسية',
+    rpt_total_rfps:         'إجمالي طلبات العروض',
+    rpt_win_rate:           'نسبة الفوز',
+    rpt_avg_duration:       'متوسط المدة',
+    rpt_vendors:            'الموردون',
+    rpt_total_proposals:    'إجمالي العروض',
+    rpt_emails_sent:        'رسائل مرسلة',
+    rpt_awarded_lbl:        'المرسّاة',
+    rpt_stage_funnel:       'قمع مراحل الطرح',
+    rpt_top_vendors_hd:     'أفضل الموردين حسب العقود',
+    rpt_col_rank:           '#',
+    rpt_col_vendor:         'المورد',
+    rpt_col_wins:           'عقود',
+    rpt_no_contracts:       'لا توجد عقود مُرسّاة بعد',
     submit_confirm_email_sent: 'تم إرسال بريد تأكيد إلى عنوانك المسجل.',
   }
 };
@@ -3303,9 +3410,9 @@ pages.dashboard = async function() {
   var _dRfps = (appState.rfps||[]).filter(function(r){ return r.stage==='draft'; });
   var _qRfps = (appState.rfps||[]).filter(function(r){ return r.stage==='qa_open'; });
   var _cRfps = (appState.rfps||[]).filter(function(r){ return r.stage==='submissions_closed'; });
-  if (_dRfps.length) contextCards += '<div class="card" style="padding:0.875rem 1rem;border-left:3px solid var(--cpc-gold);cursor:pointer;margin-bottom:0" onclick="navigateTo(\x27rfps\x27,{filterStage:\x27draft\x27})"><div style="font-size:0.72rem;color:var(--cpc-gold);font-weight:700;text-transform:uppercase;letter-spacing:0.05em">Action Needed</div><div style="font-size:0.88rem;font-weight:600;color:#1f2937;margin-top:2px">' + _dRfps.length + ' draft RFP' + (_dRfps.length>1?'s':'') + ' awaiting publish</div></div>';
-  if (_qRfps.length) { var _pqa = _qRfps.reduce(function(n,r){ return n+(r.pending_qa||0); },0); if (_pqa) contextCards += '<div class="card" style="padding:0.875rem 1rem;border-left:3px solid #f59e0b;cursor:pointer;margin-bottom:0" onclick="navigateTo(\x27rfps\x27,{filterStage:\x27qa_open\x27})"><div style="font-size:0.72rem;color:#f59e0b;font-weight:700;text-transform:uppercase;letter-spacing:0.05em">Pending Q&amp;A</div><div style="font-size:0.88rem;font-weight:600;color:#1f2937;margin-top:2px">' + _pqa + ' unanswered question' + (_pqa>1?'s':'') + '</div></div>'; }
-  if (_cRfps.length) contextCards += '<div class="card" style="padding:0.875rem 1rem;border-left:3px solid #10b981;cursor:pointer;margin-bottom:0" onclick="navigateTo(\x27rfps\x27,{filterStage:\x27submissions_closed\x27})"><div style="font-size:0.72rem;color:#10b981;font-weight:700;text-transform:uppercase;letter-spacing:0.05em">Ready to Evaluate</div><div style="font-size:0.88rem;font-weight:600;color:#1f2937;margin-top:2px">' + _cRfps.length + ' RFP' + (_cRfps.length>1?'s':'') + ' ready for award</div></div>';
+  if (_dRfps.length) contextCards += '<div class="card" style="padding:0.875rem 1rem;border-left:3px solid var(--cpc-gold);cursor:pointer;margin-bottom:0" onclick="navigateTo(\x27rfps\x27,{filterStage:\x27draft\x27})"><div style="font-size:0.72rem;color:var(--cpc-gold);font-weight:700;text-transform:uppercase;letter-spacing:0.05em">' + t('dash_action_needed') + '</div><div style="font-size:0.88rem;font-weight:600;color:#1f2937;margin-top:2px">' + _dRfps.length + ' ' + t('dash_awaiting_publish') + '</div></div>';
+  if (_qRfps.length) { var _pqa = _qRfps.reduce(function(n,r){ return n+(r.pending_qa||0); },0); if (_pqa) contextCards += '<div class="card" style="padding:0.875rem 1rem;border-left:3px solid #f59e0b;cursor:pointer;margin-bottom:0" onclick="navigateTo(\x27rfps\x27,{filterStage:\x27qa_open\x27})"><div style="font-size:0.72rem;color:#f59e0b;font-weight:700;text-transform:uppercase;letter-spacing:0.05em">' + t('dash_pending_qa_lbl') + '</div><div style="font-size:0.88rem;font-weight:600;color:#1f2937;margin-top:2px">' + _pqa + ' ' + t('dash_unanswered_qs') + '</div></div>'; }
+  if (_cRfps.length) contextCards += '<div class="card" style="padding:0.875rem 1rem;border-left:3px solid #10b981;cursor:pointer;margin-bottom:0" onclick="navigateTo(\x27rfps\x27,{filterStage:\x27submissions_closed\x27})"><div style="font-size:0.72rem;color:#10b981;font-weight:700;text-transform:uppercase;letter-spacing:0.05em">' + t('dash_ready_evaluate') + '</div><div style="font-size:0.88rem;font-weight:600;color:#1f2937;margin-top:2px">' + _cRfps.length + ' ' + t('dash_ready_award') + '</div></div>';
   if (!contextCards) contextCards = '<div style="color:#9ca3af;font-size:0.85rem;padding:0.25rem 0">' + t('dash_no_rfp_data') + '</div>';
 
   setContent(
@@ -3319,7 +3426,7 @@ pages.dashboard = async function() {
     + stageChartHtml
     + '</div>'
     + '<div class="card" style="padding:1.25rem">'
-    + '<h3 style="font-weight:700;color:#1f2937;font-size:0.9rem;margin:0 0 0.75rem"><i class="fas fa-bolt cpc-gold" style="margin-right:0.5rem"></i>Pipeline Actions</h3>'
+    + '<h3 style="font-weight:700;color:#1f2937;font-size:0.9rem;margin:0 0 0.75rem"><i class="fas fa-bolt cpc-gold" style="margin-right:0.5rem"></i>' + t('dash_pipeline_actions') + '</h3>'
     + '<div style="display:flex;flex-direction:column;gap:0.5rem;margin-bottom:0.75rem">' + contextCards + '</div>'
     + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;border-top:1px solid #f3f4f6;padding-top:0.75rem">'
     + '<button class="btn-primary" style="flex-direction:column;padding:0.75rem;justify-content:center" onclick="showCreateRfpModal()"><i class="fas fa-plus-circle" style="font-size:1.1rem;margin-bottom:3px"></i><span style="font-size:0.78rem">' + t('qa_btn_new_rfp') + '</span></button>'
@@ -7326,38 +7433,42 @@ pages.reports = async function() {
     funnelHtml = '<div style="color:#9ca3af;font-size:0.82rem;padding:1rem;text-align:center">No data yet</div>';
   }
 
-  // Vendor performance table from proposals data
-  var rfps = appState.rfps || [];
-  var vendorPerf = {};
-  rfps.forEach(function(r){ if(r.awarded_vendor){ if(!vendorPerf[r.awarded_vendor]) vendorPerf[r.awarded_vendor]={name:r.awarded_vendor,wins:0}; vendorPerf[r.awarded_vendor].wins++; } });
-  var vendorRows = Object.values(vendorPerf).sort(function(a,b){ return b.wins-a.wins; }).slice(0,10).map(function(v,i){
-    return '<tr><td style="padding:6px 10px;font-size:0.82rem">' + (i+1) + '</td><td style="padding:6px 10px;font-size:0.82rem;font-weight:600">' + escHtml(v.name) + '</td><td style="padding:6px 10px;text-align:center"><span style="background:#d1fae5;color:#065f46;border-radius:10px;padding:1px 8px;font-size:0.78rem;font-weight:700">' + v.wins + '</span></td></tr>';
-  }).join('') || '<tr><td colspan="3" style="padding:1rem;text-align:center;color:#9ca3af;font-size:0.82rem">No awarded contracts yet</td></tr>';
+  // Vendor performance table — fetch from dedicated endpoint (proposals WHERE status='awarded' JOIN vendors)
+  var topVendors = [];
+  try { topVendors = await apiCall('GET', '/stats/top-vendors'); } catch(e) { topVendors = []; }
+  if (!Array.isArray(topVendors)) topVendors = [];
+  var vendorRows = topVendors.slice(0,10).map(function(v,i){
+    return '<tr style="border-bottom:1px solid #f3f4f6">'
+      + '<td style="padding:7px 10px;font-size:0.85rem;color:#6b7280">' + (i+1) + '</td>'
+      + '<td style="padding:7px 10px;font-size:0.85rem;font-weight:600;color:#111827">' + escHtml(v.name) + '</td>'
+      + '<td style="padding:7px 10px;text-align:center"><span style="background:#d1fae5;color:#065f46;border-radius:10px;padding:2px 10px;font-size:0.8rem;font-weight:700">' + v.wins + '</span></td>'
+      + '</tr>';
+  }).join('') || '<tr><td colspan="3" style="padding:1.25rem;text-align:center;color:#9ca3af;font-size:0.85rem">' + t('rpt_no_contracts') + '</td></tr>';
 
   setContent(
     '<div class="space-y-4">'
     + '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:0.875rem">'
-    + '<div class="stat-card"><div class="stat-label">Total RFPs</div><div class="stat-value" style="color:var(--cpc-ink)">' + (stats.totalRfps||0) + '</div></div>'
-    + '<div class="stat-card"><div class="stat-label">Win Rate</div><div class="stat-value" style="color:var(--cpc-gold)">' + (stats.winRate||0) + '%</div></div>'
-    + '<div class="stat-card"><div class="stat-label">Avg Duration</div><div class="stat-value" style="color:#065f46">' + (stats.avgDuration ? stats.avgDuration + 'd' : 'N/A') + '</div></div>'
-    + '<div class="stat-card"><div class="stat-label">Vendors</div><div class="stat-value" style="color:var(--cpc-gold-deep)">' + (stats.totalVendors||0) + '</div></div>'
+    + '<div class="stat-card"><div class="stat-label">' + t('rpt_total_rfps') + '</div><div class="stat-value" style="color:var(--cpc-ink)">' + (stats.totalRfps||0) + '</div></div>'
+    + '<div class="stat-card"><div class="stat-label">' + t('rpt_win_rate') + '</div><div class="stat-value" style="color:var(--cpc-gold)">' + (stats.winRate||0) + '%</div></div>'
+    + '<div class="stat-card"><div class="stat-label">' + t('rpt_avg_duration') + '</div><div class="stat-value" style="color:#065f46">' + (stats.avgDuration ? stats.avgDuration + 'd' : 'N/A') + '</div></div>'
+    + '<div class="stat-card"><div class="stat-label">' + t('rpt_vendors') + '</div><div class="stat-value" style="color:var(--cpc-gold-deep)">' + (stats.totalVendors||0) + '</div></div>'
     + '</div>'
     + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1.25rem">'
     + '<div class="card" style="padding:1.25rem">'
-    + '<h3 style="font-weight:700;font-size:0.9rem;color:#1f2937;margin:0 0 1rem"><i class="fas fa-filter cpc-gold" style="margin-right:0.5rem"></i>RFP Stage Funnel</h3>'
+    + '<h3 style="font-weight:700;font-size:0.9rem;color:#1f2937;margin:0 0 1rem"><i class="fas fa-filter cpc-gold" style="margin-right:0.5rem"></i>' + t('rpt_stage_funnel') + '</h3>'
     + funnelHtml
     + '</div>'
     + '<div class="card" style="padding:1.25rem">'
-    + '<h3 style="font-weight:700;font-size:0.9rem;color:#1f2937;margin:0 0 1rem"><i class="fas fa-trophy cpc-gold" style="margin-right:0.5rem"></i>Top Vendors by Awards</h3>'
+    + '<h3 style="font-weight:700;font-size:0.9rem;color:#1f2937;margin:0 0 1rem"><i class="fas fa-trophy cpc-gold" style="margin-right:0.5rem"></i>' + t('rpt_top_vendors_hd') + '</h3>'
     + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">'
-    + '<thead><tr style="background:#f9fafb"><th style="padding:6px 10px;text-align:left;font-size:0.75rem;color:#9ca3af">#</th><th style="padding:6px 10px;text-align:left;font-size:0.75rem;color:#9ca3af">Vendor</th><th style="padding:6px 10px;text-align:center;font-size:0.75rem;color:#9ca3af">Wins</th></tr></thead>'
+    + '<thead><tr style="background:#f9fafb;border-bottom:2px solid #e5e7eb"><th style="padding:7px 10px;text-align:left;font-size:0.78rem;color:#9ca3af;font-weight:600">' + t('rpt_col_rank') + '</th><th style="padding:7px 10px;text-align:left;font-size:0.78rem;color:#9ca3af;font-weight:600">' + t('rpt_col_vendor') + '</th><th style="padding:7px 10px;text-align:center;font-size:0.78rem;color:#9ca3af;font-weight:600">' + t('rpt_col_wins') + '</th></tr></thead>'
     + '<tbody>' + vendorRows + '</tbody></table></div>'
     + '</div>'
     + '</div>'
     + '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0.875rem">'
-    + '<div class="stat-card"><div class="stat-label">Total Proposals</div><div class="stat-value" style="color:var(--cpc-gold-deep)">' + (stats.totalProposals||0) + '</div></div>'
-    + '<div class="stat-card"><div class="stat-label">Emails Sent</div><div class="stat-value" style="color:var(--cpc-ink)">' + (stats.totalEmails||0) + '</div></div>'
-    + '<div class="stat-card"><div class="stat-label">Awarded</div><div class="stat-value" style="color:#065f46">' + (stats.awardedRfps||0) + '</div></div>'
+    + '<div class="stat-card"><div class="stat-label">' + t('rpt_total_proposals') + '</div><div class="stat-value" style="color:var(--cpc-gold-deep)">' + (stats.totalProposals||0) + '</div></div>'
+    + '<div class="stat-card"><div class="stat-label">' + t('rpt_emails_sent') + '</div><div class="stat-value" style="color:var(--cpc-ink)">' + (stats.totalEmails||0) + '</div></div>'
+    + '<div class="stat-card"><div class="stat-label">' + t('rpt_awarded_lbl') + '</div><div class="stat-value" style="color:#065f46">' + (stats.awardedRfps||0) + '</div></div>'
     + '</div>'
     + '</div>'
   );

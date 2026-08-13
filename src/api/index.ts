@@ -201,6 +201,26 @@ apiRouter.get('/stats', async (c) => {
 })
 
 // ============================================================
+// TOP VENDORS BY AWARDED CONTRACTS
+// ============================================================
+apiRouter.get('/stats/top-vendors', async (c) => {
+  try {
+    const { results } = await c.env.DB.prepare(`
+      SELECT v.name, COUNT(p.id) as wins
+      FROM proposals p
+      JOIN vendors v ON p.vendor_id = v.id
+      WHERE p.status = 'awarded'
+      GROUP BY p.vendor_id, v.name
+      ORDER BY wins DESC
+      LIMIT 10
+    `).all<{name:string, wins:number}>()
+    return c.json(results || [])
+  } catch {
+    return c.json([])
+  }
+})
+
+// ============================================================
 // RFP CRUD
 // ============================================================
 apiRouter.get('/rfps', async (c) => {

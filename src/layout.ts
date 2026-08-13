@@ -99,25 +99,24 @@ export function getLayout(): string {
       font-weight: 400;
       line-height: 1.6;
       -webkit-font-smoothing: antialiased;
-      font-size: 14px;
+      font-size: 15px; /* Increased base for readability */
     }
 
     /* ── LAYOUT SHELL ── */
     .app-shell { display: flex; height: 100vh; overflow: hidden; }
 
-    /* ── SIDEBAR — deep navy + dark brand texture ── */
+    /* ── SIDEBAR — dark charcoal grey + brand texture ── */
     .cpc-sidebar {
-      width: 248px;
+      width: 260px;
       flex-shrink: 0;
       /*
-       * background-attachment:fixed on the texture keeps it pinned to the
-       * viewport while sidebar content scrolls — avoids ::before clip issues.
-       * Gradient overlay layered on top dims the texture for text readability.
-       * right center keeps the flame-line art (right side of image) visible
-       * in the narrow 248px column.
+       * Dark-grey overlay (matches andersen-bg-dark.png tones: #3A3F45)
+       * replaces old navy (#020D1C) overlay — texture now reads as warm dark grey
+       * rather than blue-navy, matching the brand image palette.
+       * right center keeps line-art (right half of landscape image) visible.
        */
       background:
-        linear-gradient(180deg, rgba(2,13,28,0.72) 0%, rgba(2,13,28,0.65) 100%),
+        linear-gradient(180deg, rgba(36,39,43,0.82) 0%, rgba(44,48,54,0.78) 100%),
         var(--brand-bg-dark) right center / auto 100% fixed;
       border-right: 1px solid rgba(255,255,255,0.08);
       display: flex;
@@ -152,11 +151,11 @@ export function getLayout(): string {
     }
     .sidebar-wordmark .wm-product {
       font-family: 'Roboto', sans-serif;
-      font-size: 13px;
+      font-size: 14px;
       font-weight: 600;
       letter-spacing: 0.02em;
       text-transform: none;
-      color: rgba(255,255,255,0.90);
+      color: rgba(255,255,255,0.92);
       margin-top: 0;
     }
     /* Legacy emblem class — hidden, replaced by sidebar-logo-full */
@@ -167,22 +166,22 @@ export function getLayout(): string {
     .sidebar-nav { flex: 1; padding: 12px 8px; }
     .nav-section-label {
       font-family: 'JetBrains Mono', monospace;
-      font-size: 9px;
-      font-weight: 400;
-      letter-spacing: 0.2em;
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: 0.18em;
       text-transform: uppercase;
-      color: rgba(255,255,255,0.35);
-      padding: 12px 12px 4px;
+      color: rgba(255,255,255,0.42);
+      padding: 14px 12px 5px;
     }
     .nav-item {
       display: flex;
       align-items: center;
       gap: 10px;
-      padding: 9px 12px;
+      padding: 10px 12px;
       border-radius: 4px;
-      font-size: 13px;
+      font-size: 14px;
       font-weight: 400;
-      color: rgba(255,255,255,0.65);
+      color: rgba(255,255,255,0.72);
       text-decoration: none;
       cursor: pointer;
       margin-bottom: 2px;
@@ -191,12 +190,12 @@ export function getLayout(): string {
       position: relative;
     }
     .nav-item i {
-      width: 16px;
-      height: 16px;
+      width: 18px;
+      height: 18px;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 13px;
+      font-size: 14px;
       flex-shrink: 0;
       line-height: 1;
     }
@@ -235,17 +234,17 @@ export function getLayout(): string {
       flex-shrink: 0;
     }
     .user-info .user-name {
-      font-size: 12px;
-      font-weight: 500;
+      font-size: 13px;
+      font-weight: 600;
       color: #FFFFFF;
       line-height: 1.2;
     }
     .user-info .user-role {
       font-family: 'JetBrains Mono', monospace;
-      font-size: 9px;
-      letter-spacing: 0.08em;
+      font-size: 10px;
+      letter-spacing: 0.06em;
       text-transform: uppercase;
-      color: rgba(255,255,255,0.4);
+      color: rgba(255,255,255,0.45);
     }
 
     /* ── MAIN AREA ── */
@@ -276,14 +275,14 @@ export function getLayout(): string {
     .header-page-title {
       font-family: 'Roboto', sans-serif;
       font-weight: 700;
-      font-size: 20px;
+      font-size: 22px;
       color: var(--a-ink);
       line-height: 1.2;
     }
     .header-page-subtitle {
       font-family: 'JetBrains Mono', monospace;
-      font-size: 10px;
-      letter-spacing: 0.12em;
+      font-size: 11px;
+      letter-spacing: 0.10em;
       text-transform: uppercase;
       color: var(--a-slate);
       margin-top: 1px;
@@ -291,8 +290,8 @@ export function getLayout(): string {
     .header-right { display: flex; align-items: center; gap: 12px; }
     .header-date {
       font-family: 'JetBrains Mono', monospace;
-      font-size: 11px;
-      letter-spacing: 0.06em;
+      font-size: 12px;
+      letter-spacing: 0.05em;
       color: var(--a-slate);
     }
 
@@ -480,7 +479,7 @@ export function getLayout(): string {
       padding: 7px 24px;
       background: var(--cpc-paper);
       border-bottom: 1px solid var(--a-line);
-      font-size: 12px;
+      font-size: 13px;
       color: var(--a-slate);
       flex-shrink: 0;
     }
@@ -546,7 +545,7 @@ export function getLayout(): string {
       background: var(--a-yellow-wash);
     }
     .cmd-item i { width: 18px; text-align: center; color: var(--a-charcoal); flex-shrink: 0; }
-    .cmd-item-sub { font-size: 11px; color: var(--a-slate); margin-left: auto; white-space: nowrap; }
+    .cmd-item-sub { font-size: 12px; color: var(--a-slate); margin-left: auto; white-space: nowrap; }
     #cmdEmpty { padding: 24px; text-align: center; color: var(--a-slate); font-size: 13px; }
 
     /* 4.2 — Stage action banner below lifecycle bar */
@@ -558,7 +557,7 @@ export function getLayout(): string {
       padding: 9px 24px;
       background: linear-gradient(90deg, #FFFBEC 0%, #FFFFFF 100%);
       border-bottom: 1px solid #FFE963;
-      font-size: 13px;
+      font-size: 14px;
       flex-shrink: 0;
     }
     #stageActionBanner.visible { display: flex; }
@@ -606,8 +605,8 @@ export function getLayout(): string {
     }
     .lc-label {
       font-family: 'JetBrains Mono', monospace;
-      font-size: 10px;
-      letter-spacing: 0.05em;
+      font-size: 11px;
+      letter-spacing: 0.04em;
       text-transform: uppercase;
       text-align: center;
       white-space: normal;
@@ -787,7 +786,7 @@ export function getLayout(): string {
       padding: 10px 20px;
       border: 1px solid var(--a-yellow);
       font-family: 'Roboto', sans-serif;
-      font-size: 13px;
+      font-size: 14px;
       cursor: pointer;
       display: inline-flex;
       align-items: center;
@@ -806,7 +805,7 @@ export function getLayout(): string {
       padding: 10px 20px;
       border: 1px solid var(--a-ink);
       font-family: 'Roboto', sans-serif;
-      font-size: 13px;
+      font-size: 14px;
       cursor: pointer;
       display: inline-flex;
       align-items: center;
@@ -823,7 +822,7 @@ export function getLayout(): string {
       padding: 10px 20px;
       border: 1px solid var(--a-line);
       font-family: 'Roboto', sans-serif;
-      font-size: 13px;
+      font-size: 14px;
       cursor: pointer;
       display: inline-flex;
       align-items: center;
@@ -840,15 +839,15 @@ export function getLayout(): string {
       padding: 10px 20px;
       border: 1px solid var(--status-err-fg);
       font-family: 'Roboto', sans-serif;
-      font-size: 13px;
+      font-size: 14px;
       cursor: pointer;
       display: inline-flex;
       align-items: center;
       gap: 6px;
     }
 
-    .btn-sm { padding: 6px 12px; font-size: 12px; }
-    .btn-xs { padding: 4px 10px; font-size: 11px; }
+    .btn-sm { padding: 6px 12px; font-size: 13px; }
+    .btn-xs { padding: 4px 10px; font-size: 12px; }
 
     /* Award button */
     .award-btn {
@@ -910,8 +909,8 @@ export function getLayout(): string {
     }
     .stat-label {
       font-family: 'JetBrains Mono', monospace;
-      font-size: 10px;
-      letter-spacing: 0.12em;
+      font-size: 11px;
+      letter-spacing: 0.10em;
       text-transform: uppercase;
       color: var(--a-slate);
       margin-bottom: 8px;
@@ -932,7 +931,7 @@ export function getLayout(): string {
       padding: 3px 10px;
       border-radius: 4px;
       font-family: 'JetBrains Mono', monospace;
-      font-size: 10px;
+      font-size: 11px;
       font-weight: 500;
       letter-spacing: 0.05em;
       white-space: nowrap;
@@ -953,7 +952,7 @@ export function getLayout(): string {
       padding: 11px 16px;
       text-align: left;
       font-family: 'JetBrains Mono', monospace;
-      font-size: 11px;
+      font-size: 12px;
       font-weight: 400;
       letter-spacing: 0.10em;
       text-transform: uppercase;
@@ -1004,8 +1003,8 @@ export function getLayout(): string {
     label {
       font-family: 'JetBrains Mono', monospace;
       font-weight: 400;
-      font-size: 11px;
-      letter-spacing: 0.10em;
+      font-size: 12px;
+      letter-spacing: 0.08em;
       text-transform: uppercase;
       color: var(--a-slate);
       display: block;

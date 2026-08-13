@@ -6,9 +6,9 @@
 /* File count badge — rebrand */
 .file-count-badge {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 500;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.04em;
   color: #020D1C;
   background: #FFFCE0;
   border: 1px solid #E9DCC4;
@@ -26,7 +26,7 @@
   background: #E9DCC4;
   border-color: #FFDB00;
 }
-.file-count-badge i { font-size: 10px; }
+.file-count-badge i { font-size: 11px; }
 
 /* Panel section title */
 .panel-section-title {
@@ -34,11 +34,11 @@
   align-items: center;
   gap: 6px;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 10px;
-  letter-spacing: 0.12em;
+  font-size: 11px;
+  letter-spacing: 0.10em;
   text-transform: uppercase;
   font-weight: 500;
   color: #020D1C;
   margin-bottom: 10px;
 }
-.panel-section-title i { font-size: 10px; }
+.panel-section-title i { font-size: 11px; }
