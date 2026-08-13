@@ -502,6 +502,100 @@ var I18N = {
     rpt_col_vendor:         'Vendor',
     rpt_col_wins:           'Wins',
     rpt_no_contracts:       'No awarded contracts yet',
+    // === Stage banners ===
+    banner_ready_publish:    'Ready to publish?',
+    banner_gen_first:        'Generate the RFP document first, then publish to make it visible to vendors.',
+    banner_publish_btn:      'Publish RFP',
+    banner_gen_first_title:  'Generate the document first',
+    banner_rfp_published_hd: 'RFP is Published',
+    banner_shortlist_inv:    'Shortlist vendors and send invitations to start the Q&A phase.',
+    banner_send_inv_btn:     'Send Invitations',
+    banner_qa_open_hd:       'Q&A is Open',
+    banner_qa_open_body:     'Vendors can submit proposals at any time before the submission deadline — regardless of Q&A status. Close Q&A only stops vendors from asking clarification questions.',
+    banner_close_qa_btn:     'Close Q&A',
+    banner_qa_closed_hd:     'Q&A is Closed',
+    banner_qa_closed_body:   'Vendor questions are no longer accepted. Proposal evaluation is in progress.',
+    banner_subs_closed_hd:   'Submissions Closed',
+    banner_subs_preparing:   'proposal(s) are still being prepared. Evaluation will be available shortly.',
+    banner_subs_unevaluated: 'proposal(s) not yet evaluated. Run AI evaluation, then award the contract.',
+    banner_subs_all_done:    t('banner_subs_all_done'),
+    banner_subs_preparing_spin: 'Preparing…',
+    banner_eval_ai_btn:      'Evaluate with AI',
+    banner_contract_awarded_hd: 'Contract Awarded',
+    banner_contract_awarded_body: 'This RFP is complete. A winner has been selected.',
+    // === Stage banner top bar ===
+    stage_draft_text:        'This RFP is a <strong>Draft</strong>. Generate the RFP document, then publish to invite vendors.',
+    stage_draft_btn:         'Go to Generate',
+    stage_published_text:    'RFP is <strong>Published</strong>. Shortlist vendors and send invitations to open the Q&A phase.',
+    stage_published_btn:     'Go to Vendors',
+    stage_qa_open_text:      'Invitations sent — Q&A is <strong>Open</strong>. Vendors can submit proposals at any time before the deadline. Close Q&A when you want to stop accepting clarification questions.',
+    stage_qa_open_btn:       'Go to Q&A',
+    stage_subs_closed_text:  'Q&A is closed — <strong>waiting for vendor proposals</strong>. Questions are no longer accepted. You can already run AI evaluation on any proposals received so far; award the contract once the submission deadline passes.',
+    stage_subs_closed_btn:   'Go to Proposals',
+    stage_awarded_text:      'Contract <strong>Awarded</strong>. This RFP is complete.',
+    // === Generate tab form placeholders ===
+    ph_project_title:        'e.g. New Oracle ERP Setup, Data Warehouse and Data Visualization',
+    ph_budget:               'e.g. 5,000,000',
+    ph_background:           'Describe the current situation, business problem, and strategic drivers...',
+    ph_objectives:           'List 4-6 measurable objectives for this project...',
+    ph_scope:                'Detail the work phases, deliverables, and what is in/out of scope...',
+    ph_tech_req:             'Infrastructure, hosting, security, compliance, integration specs...',
+    ph_crit_name:            'Criterion name',
+    ph_crit_desc:            'Describe what this criterion evaluates...',
+    // === Create RFP modal ===
+    create_rfp_title:        'Create New RFP',
+    create_rfp_subtitle:     'Enter project basics and optionally upload supporting documents. You will fill in detailed requirements on the Generate tab after creation.',
+    create_rfp_proj_title:   'Project Title *',
+    create_rfp_category:     'Category',
+    create_rfp_budget:       'Budget (AED)',
+    create_rfp_deadline:     'Deadline',
+    create_rfp_docs:         'Supporting Documents',
+    create_rfp_docs_sub:     '— Optional. AI will read these during generation.',
+    create_rfp_upload_hint:  'Click to upload PDF (optional)',
+    create_rfp_btn:          'Create RFP',
+    ph_rfp_title_eg:         'e.g. CRM Modernisation, Fraud Detection Platform, Data Warehouse...',
+    // === Generate tab inline texts ===
+    gen_fill_hint:           'Fill in the details and click Generate with AI to produce a professional RFP document',
+    gen_internal_only:       '' + t('gen_internal_only') + '',
+    // === Correspondence tab ===
+    corr_no_emails_hd:       'No email correspondence yet',
+    corr_no_emails_body:     'Send invitations from the Vendors tab to start vendor communication. Incoming replies will appear here automatically via procurement@andersenlab.com.',
+    corr_no_emails_yet:      'No emails yet',
+    corr_reply_ph_subj:      'Subject...',
+    corr_reply_ph_msg:       'Your reply message...',
+    corr_send_reply_btn:     'Send Reply',
+    // === Vendor detail / comms ===
+    vc_no_emails_hd:         'No email correspondence yet',
+    vc_no_emails_body:       'Emails with this vendor will appear here once communication starts.',
+    vc_reply_ph_msg:         'Type your message...',
+    vc_send_reply_btn:       'Send Reply',
+    vc_back_btn:             'Back to RFP',
+    vc_correspondence_proh_hd:   'Correspondence Prohibited',
+    vc_correspondence_proh_body: 'has declined participation in this RFP. No further correspondence is permitted.',
+    vc_declined_hd:          'Vendor Declined Participation',
+    vc_declined_body:        'This vendor replied to the RFP invitation indicating they are not interested. All correspondence is now prohibited.',
+    vc_no_msgs_yet:          'No messages yet',
+    // === Proposals tab ===
+    prop_wrong_doc_hd:       'Wrong document type — not a vendor proposal',
+    prop_wrong_doc_body:     'This file does not appear to be a response to an RFP.',
+    prop_wrong_doc_replace:  'Please replace the attachment with the correct vendor proposal document and re-evaluate.',
+    prop_budget_hd:          'Budget not auto-extracted — manual entry required',
+    prop_budget_body:        'The AI could not find a clear "Total" line in the proposal. Enter the total budget to unlock full commercial scoring.',
+    prop_budget_ph:          'Enter amount (e.g. 1500000)',
+    prop_budget_save_btn:    'Save & Re-evaluate',
+    prop_no_compliance_hd:   'No compliance data yet',
+    prop_no_compliance_body: 'Run AI evaluation to generate the compliance matrix.',
+    prop_show_more:          'Show more',
+    prop_show_less:          'Show less',
+    // === Settings page ===
+    settings_cat_title:      'Procurement Categories',
+    settings_cat_desc:       'These categories appear in the Create RFP and Generate tab dropdowns.',
+    settings_cat_ph:         'Add new category…',
+    settings_cat_add_btn:    'Add',
+    settings_cat_save_btn:   'Save Categories',
+    settings_email_title:    'Procurement Team Email',
+    settings_email_desc:     'Shown on the vendor portal\'s declined message as a contact address.',
+    settings_email_save_btn: 'Save',
     submit_confirm_email_sent: 'A confirmation email has been sent to your registered address.',
   },
   de: {
@@ -931,6 +1025,100 @@ var I18N = {
     rpt_col_vendor:         'Lieferant',
     rpt_col_wins:           'Erfolge',
     rpt_no_contracts:       'Noch keine vergebenen Aufträge',
+    // === Stage banners ===
+    banner_ready_publish:    'Bereit zur Veröffentlichung?',
+    banner_gen_first:        'Erstellen Sie zuerst das Ausschreibungsdokument, dann veröffentlichen Sie es für Lieferanten.',
+    banner_publish_btn:      'Ausschreibung veröffentlichen',
+    banner_gen_first_title:  'Zuerst Dokument erstellen',
+    banner_rfp_published_hd: 'Ausschreibung veröffentlicht',
+    banner_shortlist_inv:    'Lieferanten vorauswählen und Einladungen senden, um die F&A-Phase zu starten.',
+    banner_send_inv_btn:     'Einladungen senden',
+    banner_qa_open_hd:       'F&A ist offen',
+    banner_qa_open_body:     'Lieferanten können jederzeit vor der Einreichungsfrist Angebote einreichen — unabhängig vom F&A-Status. F&A schließen stoppt nur Klärungsfragen.',
+    banner_close_qa_btn:     'F&A schließen',
+    banner_qa_closed_hd:     'F&A ist geschlossen',
+    banner_qa_closed_body:   'Lieferantenfragen werden nicht mehr akzeptiert. Die Angebotsbewertung ist im Gange.',
+    banner_subs_closed_hd:   'Einreichung geschlossen',
+    banner_subs_preparing:   'Angebot(e) werden noch vorbereitet. Bewertung steht bald zur Verfügung.',
+    banner_subs_unevaluated: 'Angebot(e) noch nicht bewertet. KI-Bewertung starten, dann Auftrag vergeben.',
+    banner_subs_all_done:    'Alle Angebote bewertet. Gewinner auswählen und Auftrag vergeben.',
+    banner_subs_preparing_spin: 'Wird vorbereitet…',
+    banner_eval_ai_btn:      'Mit KI bewerten',
+    banner_contract_awarded_hd: 'Auftrag vergeben',
+    banner_contract_awarded_body: 'Diese Ausschreibung ist abgeschlossen. Ein Gewinner wurde ausgewählt.',
+    // === Stage banner top bar ===
+    stage_draft_text:        'Diese Ausschreibung ist ein <strong>Entwurf</strong>. Dokument erstellen und dann veröffentlichen.',
+    stage_draft_btn:         'Zum Erstellen',
+    stage_published_text:    'Ausschreibung ist <strong>veröffentlicht</strong>. Lieferanten vorauswählen und zur F&A-Phase einladen.',
+    stage_published_btn:     'Zu Lieferanten',
+    stage_qa_open_text:      'Einladungen gesendet — F&A ist <strong>offen</strong>. Lieferanten können Angebote einreichen. F&A schließen stoppt Klärungsfragen.',
+    stage_qa_open_btn:       'Zur F&A',
+    stage_subs_closed_text:  'F&A geschlossen — <strong>warten auf Angebote</strong>. Fragen werden nicht mehr akzeptiert. KI-Bewertung starten, dann Auftrag vergeben.',
+    stage_subs_closed_btn:   'Zu Angeboten',
+    stage_awarded_text:      'Auftrag <strong>vergeben</strong>. Diese Ausschreibung ist abgeschlossen.',
+    // === Generate tab form placeholders ===
+    ph_project_title:        'z.B. Neues Oracle ERP, Data Warehouse und Datenvisualisierung',
+    ph_budget:               'z.B. 5.000.000',
+    ph_background:           'Aktuelle Situation, Geschäftsproblem und strategische Treiber beschreiben...',
+    ph_objectives:           '4–6 messbare Ziele für dieses Projekt auflisten...',
+    ph_scope:                'Projektphasen, Lieferobjekte und Umfang detaillieren...',
+    ph_tech_req:             'Infrastruktur, Hosting, Sicherheit, Compliance, Integrationsanforderungen...',
+    ph_crit_name:            'Kriteriumsname',
+    ph_crit_desc:            'Beschreiben Sie, was dieses Kriterium bewertet...',
+    // === Create RFP modal ===
+    create_rfp_title:        'Neue Ausschreibung erstellen',
+    create_rfp_subtitle:     'Projektdaten eingeben und optional Dokumente hochladen. Details im Erstellen-Tab nach Erstellung.',
+    create_rfp_proj_title:   'Projekttitel *',
+    create_rfp_category:     'Kategorie',
+    create_rfp_budget:       'Budget (AED)',
+    create_rfp_deadline:     'Frist',
+    create_rfp_docs:         'Begleitdokumente',
+    create_rfp_docs_sub:     '— Optional. KI liest diese während der Erstellung.',
+    create_rfp_upload_hint:  'Zum Hochladen klicken (PDF, optional)',
+    create_rfp_btn:          'Ausschreibung erstellen',
+    ph_rfp_title_eg:         'z.B. CRM-Modernisierung, Betrugserkennung, Data Warehouse...',
+    // === Generate tab inline texts ===
+    gen_fill_hint:           'Details eingeben und auf "Mit KI erstellen" klicken, um ein professionelles Ausschreibungsdokument zu erzeugen',
+    gen_internal_only:       'Intern – wird nicht im Ausschreibungsdokument veröffentlicht',
+    // === Correspondence tab ===
+    corr_no_emails_hd:       'Noch keine E-Mail-Korrespondenz',
+    corr_no_emails_body:     'Einladungen im Lieferanten-Tab senden, um die Kommunikation zu starten. Antworten erscheinen automatisch.',
+    corr_no_emails_yet:      'Noch keine E-Mails',
+    corr_reply_ph_subj:      'Betreff...',
+    corr_reply_ph_msg:       'Ihre Antwortnachricht...',
+    corr_send_reply_btn:     'Antwort senden',
+    // === Vendor detail / comms ===
+    vc_no_emails_hd:         'Noch keine E-Mail-Korrespondenz',
+    vc_no_emails_body:       'E-Mails mit diesem Lieferanten erscheinen hier sobald die Kommunikation beginnt.',
+    vc_reply_ph_msg:         'Nachricht eingeben...',
+    vc_send_reply_btn:       'Antwort senden',
+    vc_back_btn:             'Zurück zur Ausschreibung',
+    vc_correspondence_proh_hd:   'Korrespondenz verboten',
+    vc_correspondence_proh_body: 'hat die Teilnahme abgelehnt. Weitere Korrespondenz ist nicht erlaubt.',
+    vc_declined_hd:          'Lieferant hat abgelehnt',
+    vc_declined_body:        'Dieser Lieferant hat auf die Einladung geantwortet und kein Interesse bekundet. Alle Korrespondenz ist nun verboten.',
+    vc_no_msgs_yet:          'Noch keine Nachrichten',
+    // === Proposals tab ===
+    prop_wrong_doc_hd:       'Falscher Dokumenttyp — kein Lieferantenangebot',
+    prop_wrong_doc_body:     'Diese Datei scheint keine Antwort auf eine Ausschreibung zu sein.',
+    prop_wrong_doc_replace:  'Bitte ersetzen Sie den Anhang durch das korrekte Angebotsdokument und bewerten Sie erneut.',
+    prop_budget_hd:          'Budget nicht automatisch extrahiert — manuelle Eingabe erforderlich',
+    prop_budget_body:        'Die KI konnte keine klare "Gesamt"-Zeile finden. Budget eingeben für vollständige kommerzielle Bewertung.',
+    prop_budget_ph:          'Betrag eingeben (z.B. 1500000)',
+    prop_budget_save_btn:    'Speichern & neu bewerten',
+    prop_no_compliance_hd:   'Noch keine Compliance-Daten',
+    prop_no_compliance_body: 'KI-Bewertung starten, um Compliance-Matrix zu erstellen.',
+    prop_show_more:          'Mehr anzeigen',
+    prop_show_less:          'Weniger anzeigen',
+    // === Settings page ===
+    settings_cat_title:      'Beschaffungskategorien',
+    settings_cat_desc:       'Diese Kategorien erscheinen in Ausschreibungs- und Erstellen-Tab-Dropdowns.',
+    settings_cat_ph:         'Neue Kategorie hinzufügen…',
+    settings_cat_add_btn:    'Hinzufügen',
+    settings_cat_save_btn:   'Kategorien speichern',
+    settings_email_title:    'Beschaffungsteam-E-Mail',
+    settings_email_desc:     'Wird im Lieferantenportal als Kontaktadresse angezeigt.',
+    settings_email_save_btn: 'Speichern',
     submit_confirm_email_sent: 'Eine Bestätigungs-E-Mail wurde an Ihre registrierte Adresse gesendet.',
   },
   fr: {
@@ -1360,6 +1548,100 @@ var I18N = {
     rpt_col_vendor:         'Fournisseur',
     rpt_col_wins:           'Contrats',
     rpt_no_contracts:       'Aucun contrat attribué pour l\'instant',
+    // === Stage banners ===
+    banner_ready_publish:    'Prêt à publier ?',
+    banner_gen_first:        'Générez d\'abord le document AO, puis publiez-le pour le rendre visible aux fournisseurs.',
+    banner_publish_btn:      'Publier l\'AO',
+    banner_gen_first_title:  'Générez d\'abord le document',
+    banner_rfp_published_hd: 'AO publié',
+    banner_shortlist_inv:    'Présélectionnez les fournisseurs et envoyez des invitations pour démarrer la phase Q&R.',
+    banner_send_inv_btn:     'Envoyer les invitations',
+    banner_qa_open_hd:       'Q&R ouverte',
+    banner_qa_open_body:     'Les fournisseurs peuvent soumettre des offres à tout moment avant la date limite — indépendamment du statut Q&R. Fermer la Q&R arrête seulement les questions de clarification.',
+    banner_close_qa_btn:     'Fermer la Q&R',
+    banner_qa_closed_hd:     'Q&R fermée',
+    banner_qa_closed_body:   'Les questions des fournisseurs ne sont plus acceptées. L\'évaluation des offres est en cours.',
+    banner_subs_closed_hd:   'Soumissions clôturées',
+    banner_subs_preparing:   'offre(s) encore en préparation. L\'évaluation sera disponible sous peu.',
+    banner_subs_unevaluated: 'offre(s) pas encore évaluée(s). Lancer l\'évaluation IA, puis attribuer le contrat.',
+    banner_subs_all_done:    'Toutes les offres évaluées. Sélectionnez un gagnant et attribuez le contrat.',
+    banner_subs_preparing_spin: 'Préparation…',
+    banner_eval_ai_btn:      'Évaluer avec IA',
+    banner_contract_awarded_hd: 'Contrat attribué',
+    banner_contract_awarded_body: 'Cet AO est terminé. Un gagnant a été sélectionné.',
+    // === Stage banner top bar ===
+    stage_draft_text:        'Cet AO est un <strong>Brouillon</strong>. Générez le document, puis publiez pour inviter les fournisseurs.',
+    stage_draft_btn:         'Aller à Générer',
+    stage_published_text:    'L\'AO est <strong>Publié</strong>. Présélectionnez les fournisseurs et envoyez des invitations pour la phase Q&R.',
+    stage_published_btn:     'Aller aux Fournisseurs',
+    stage_qa_open_text:      'Invitations envoyées — Q&R <strong>ouverte</strong>. Les fournisseurs peuvent soumettre des offres avant la date limite. Fermer la Q&R arrête les questions.',
+    stage_qa_open_btn:       'Aller à Q&R',
+    stage_subs_closed_text:  'Q&R fermée — <strong>en attente des offres</strong>. Questions non acceptées. Lancer l\'évaluation IA puis attribuer.',
+    stage_subs_closed_btn:   'Aller aux Offres',
+    stage_awarded_text:      'Contrat <strong>attribué</strong>. Cet AO est terminé.',
+    // === Generate tab form placeholders ===
+    ph_project_title:        'ex. Nouveau ERP Oracle, Entrepôt de données et Visualisation',
+    ph_budget:               'ex. 5 000 000',
+    ph_background:           'Décrire la situation actuelle, le problème métier et les facteurs stratégiques...',
+    ph_objectives:           'Lister 4 à 6 objectifs mesurables pour ce projet...',
+    ph_scope:                'Détailler les phases, livrables et ce qui est dans/hors périmètre...',
+    ph_tech_req:             'Infrastructure, hébergement, sécurité, conformité, intégrations...',
+    ph_crit_name:            'Nom du critère',
+    ph_crit_desc:            'Décrire ce que ce critère évalue...',
+    // === Create RFP modal ===
+    create_rfp_title:        'Créer un nouvel AO',
+    create_rfp_subtitle:     'Saisir les informations de base et télécharger des documents optionnels. Les détails seront ajoutés dans l\'onglet Générer.',
+    create_rfp_proj_title:   'Titre du projet *',
+    create_rfp_category:     'Catégorie',
+    create_rfp_budget:       'Budget (AED)',
+    create_rfp_deadline:     'Date limite',
+    create_rfp_docs:         'Documents complémentaires',
+    create_rfp_docs_sub:     '— Optionnel. L\'IA les lira lors de la génération.',
+    create_rfp_upload_hint:  'Cliquer pour télécharger un PDF (optionnel)',
+    create_rfp_btn:          'Créer l\'AO',
+    ph_rfp_title_eg:         'ex. Modernisation CRM, Plateforme anti-fraude, Entrepôt de données...',
+    // === Generate tab inline texts ===
+    gen_fill_hint:           'Remplissez les informations et cliquez sur Générer avec IA pour produire un document AO professionnel',
+    gen_internal_only:       'Interne uniquement — non publié dans le document AO',
+    // === Correspondence tab ===
+    corr_no_emails_hd:       'Pas encore de correspondance par e-mail',
+    corr_no_emails_body:     'Envoyez des invitations depuis l\'onglet Fournisseurs pour démarrer la communication. Les réponses apparaîtront automatiquement.',
+    corr_no_emails_yet:      'Pas encore d\'e-mails',
+    corr_reply_ph_subj:      'Objet...',
+    corr_reply_ph_msg:       'Votre message de réponse...',
+    corr_send_reply_btn:     'Envoyer la réponse',
+    // === Vendor detail / comms ===
+    vc_no_emails_hd:         'Pas encore de correspondance par e-mail',
+    vc_no_emails_body:       'Les e-mails avec ce fournisseur apparaîtront ici dès le début des communications.',
+    vc_reply_ph_msg:         'Saisir votre message...',
+    vc_send_reply_btn:       'Envoyer la réponse',
+    vc_back_btn:             'Retour à l\'AO',
+    vc_correspondence_proh_hd:   'Correspondance interdite',
+    vc_correspondence_proh_body: 'a refusé de participer à cet AO. Toute correspondance est désormais interdite.',
+    vc_declined_hd:          'Fournisseur a refusé',
+    vc_declined_body:        'Ce fournisseur a répondu à l\'invitation indiquant qu\'il n\'est pas intéressé. Toute correspondance est maintenant interdite.',
+    vc_no_msgs_yet:          'Aucun message pour l\'instant',
+    // === Proposals tab ===
+    prop_wrong_doc_hd:       'Type de document incorrect — pas une offre fournisseur',
+    prop_wrong_doc_body:     'Ce fichier ne semble pas être une réponse à un AO.',
+    prop_wrong_doc_replace:  'Veuillez remplacer la pièce jointe par le document d\'offre correct et réévaluer.',
+    prop_budget_hd:          'Budget non extrait automatiquement — saisie manuelle requise',
+    prop_budget_body:        'L\'IA n\'a pas trouvé de ligne "Total" claire. Saisissez le budget total pour débloquer le score commercial.',
+    prop_budget_ph:          'Saisir le montant (ex. 1500000)',
+    prop_budget_save_btn:    'Enregistrer & réévaluer',
+    prop_no_compliance_hd:   'Pas encore de données de conformité',
+    prop_no_compliance_body: 'Lancer l\'évaluation IA pour générer la matrice de conformité.',
+    prop_show_more:          'Voir plus',
+    prop_show_less:          'Voir moins',
+    // === Settings page ===
+    settings_cat_title:      'Catégories d\'achats',
+    settings_cat_desc:       'Ces catégories apparaissent dans les menus déroulants de création et de génération d\'AO.',
+    settings_cat_ph:         'Ajouter une nouvelle catégorie…',
+    settings_cat_add_btn:    'Ajouter',
+    settings_cat_save_btn:   'Enregistrer les catégories',
+    settings_email_title:    'E-mail de l\'équipe achats',
+    settings_email_desc:     'Affiché comme adresse de contact dans le portail fournisseur.',
+    settings_email_save_btn: 'Enregistrer',
     submit_confirm_email_sent: 'Un e-mail de confirmation a été envoyé à votre adresse enregistrée.',
   },
   pl: {
@@ -1789,6 +2071,100 @@ var I18N = {
     rpt_col_vendor:         'Dostawca',
     rpt_col_wins:           'Kontrakty',
     rpt_no_contracts:       'Brak przyznanych kontraktów',
+    // === Stage banners ===
+    banner_ready_publish:    'Gotowe do publikacji?',
+    banner_gen_first:        'Najpierw wygeneruj dokument przetargowy, a następnie opublikuj go dla dostawców.',
+    banner_publish_btn:      'Opublikuj przetarg',
+    banner_gen_first_title:  'Najpierw wygeneruj dokument',
+    banner_rfp_published_hd: 'Przetarg opublikowany',
+    banner_shortlist_inv:    'Preselekcja dostawców i wysłanie zaproszeń do fazy P&O.',
+    banner_send_inv_btn:     'Wyślij zaproszenia',
+    banner_qa_open_hd:       'P&O otwarte',
+    banner_qa_open_body:     'Dostawcy mogą składać oferty w dowolnym momencie przed terminem — niezależnie od statusu P&O. Zamknięcie P&O zatrzymuje tylko pytania wyjaśniające.',
+    banner_close_qa_btn:     'Zamknij P&O',
+    banner_qa_closed_hd:     'P&O zamknięte',
+    banner_qa_closed_body:   'Pytania dostawców nie są już akceptowane. Ocena ofert jest w toku.',
+    banner_subs_closed_hd:   'Składanie ofert zamknięte',
+    banner_subs_preparing:   'oferta(y) wciąż w przygotowaniu. Ocena będzie dostępna wkrótce.',
+    banner_subs_unevaluated: 'oferta(y) jeszcze nieocenione. Uruchom ocenę AI, następnie przyznaj kontrakt.',
+    banner_subs_all_done:    'Wszystkie oferty ocenione. Wybierz zwycięzcę i przyznaj kontrakt.',
+    banner_subs_preparing_spin: 'Przygotowywanie…',
+    banner_eval_ai_btn:      'Oceniaj przez AI',
+    banner_contract_awarded_hd: 'Kontrakt przyznany',
+    banner_contract_awarded_body: 'Ten przetarg jest zakończony. Wybrano zwycięzcę.',
+    // === Stage banner top bar ===
+    stage_draft_text:        'Ten przetarg jest <strong>Szkicem</strong>. Wygeneruj dokument, następnie opublikuj.',
+    stage_draft_btn:         'Przejdź do Generowania',
+    stage_published_text:    'Przetarg jest <strong>Opublikowany</strong>. Preselekcja dostawców i zaproszenia do fazy P&O.',
+    stage_published_btn:     'Przejdź do Dostawców',
+    stage_qa_open_text:      'Zaproszenia wysłane — P&O <strong>otwarte</strong>. Dostawcy mogą składać oferty przed terminem. Zamknięcie P&O zatrzymuje pytania.',
+    stage_qa_open_btn:       'Przejdź do P&O',
+    stage_subs_closed_text:  'P&O zamknięte — <strong>oczekiwanie na oferty</strong>. Pytania nie są akceptowane. Uruchom ocenę AI, następnie przyznaj kontrakt.',
+    stage_subs_closed_btn:   'Przejdź do Ofert',
+    stage_awarded_text:      'Kontrakt <strong>Przyznany</strong>. Ten przetarg jest zakończony.',
+    // === Generate tab form placeholders ===
+    ph_project_title:        'np. Nowy ERP Oracle, Hurtownia Danych i Wizualizacja',
+    ph_budget:               'np. 5 000 000',
+    ph_background:           'Opisz aktualną sytuację, problem biznesowy i czynniki strategiczne...',
+    ph_objectives:           'Wypisz 4–6 mierzalnych celów projektu...',
+    ph_scope:                'Szczegółowo opisz fazy, produkty i zakres prac...',
+    ph_tech_req:             'Infrastruktura, hosting, bezpieczeństwo, zgodność, integracje...',
+    ph_crit_name:            'Nazwa kryterium',
+    ph_crit_desc:            'Opisz co ocenia to kryterium...',
+    // === Create RFP modal ===
+    create_rfp_title:        'Utwórz nowy przetarg',
+    create_rfp_subtitle:     'Wprowadź podstawowe dane i opcjonalnie prześlij dokumenty. Szczegóły dodasz w zakładce Generowanie.',
+    create_rfp_proj_title:   'Tytuł projektu *',
+    create_rfp_category:     'Kategoria',
+    create_rfp_budget:       'Budżet (AED)',
+    create_rfp_deadline:     'Termin',
+    create_rfp_docs:         'Dokumenty pomocnicze',
+    create_rfp_docs_sub:     '— Opcjonalne. AI przeczyta je podczas generowania.',
+    create_rfp_upload_hint:  'Kliknij aby przesłać PDF (opcjonalne)',
+    create_rfp_btn:          'Utwórz przetarg',
+    ph_rfp_title_eg:         'np. Modernizacja CRM, Platforma wykrywania fraudów, Hurtownia Danych...',
+    // === Generate tab inline texts ===
+    gen_fill_hint:           'Wypełnij szczegóły i kliknij Generuj z AI, aby utworzyć profesjonalny dokument przetargowy',
+    gen_internal_only:       'Wewnętrzne — nie jest publikowane w dokumencie przetargowym',
+    // === Correspondence tab ===
+    corr_no_emails_hd:       'Brak korespondencji e-mail',
+    corr_no_emails_body:     'Wyślij zaproszenia z zakładki Dostawcy, aby rozpocząć komunikację. Odpowiedzi pojawią się automatycznie.',
+    corr_no_emails_yet:      'Brak e-maili',
+    corr_reply_ph_subj:      'Temat...',
+    corr_reply_ph_msg:       'Twoja odpowiedź...',
+    corr_send_reply_btn:     'Wyślij odpowiedź',
+    // === Vendor detail / comms ===
+    vc_no_emails_hd:         'Brak korespondencji e-mail',
+    vc_no_emails_body:       'E-maile z tym dostawcą pojawią się tutaj gdy rozpocznie się komunikacja.',
+    vc_reply_ph_msg:         'Wpisz wiadomość...',
+    vc_send_reply_btn:       'Wyślij odpowiedź',
+    vc_back_btn:             'Powrót do przetargu',
+    vc_correspondence_proh_hd:   'Korespondencja zabroniona',
+    vc_correspondence_proh_body: 'odmówił udziału w tym przetargu. Dalsza korespondencja jest niedozwolona.',
+    vc_declined_hd:          'Dostawca odmówił uczestnictwa',
+    vc_declined_body:        'Ten dostawca odpowiedział na zaproszenie wskazując brak zainteresowania. Wszelka korespondencja jest teraz zabroniona.',
+    vc_no_msgs_yet:          'Brak wiadomości',
+    // === Proposals tab ===
+    prop_wrong_doc_hd:       'Błędny typ dokumentu — to nie jest oferta dostawcy',
+    prop_wrong_doc_body:     'Ten plik nie wydaje się być odpowiedzią na przetarg.',
+    prop_wrong_doc_replace:  'Zastąp załącznik prawidłowym dokumentem oferty i ponownie oceń.',
+    prop_budget_hd:          'Budżet nie został automatycznie wyodrębniony — wymagane ręczne wprowadzenie',
+    prop_budget_body:        'AI nie znalazło wyraźnej linii "Łącznie". Wprowadź budżet całkowity aby odblokować ocenę handlową.',
+    prop_budget_ph:          'Wpisz kwotę (np. 1500000)',
+    prop_budget_save_btn:    'Zapisz i oceń ponownie',
+    prop_no_compliance_hd:   'Brak danych zgodności',
+    prop_no_compliance_body: 'Uruchom ocenę AI, aby wygenerować macierz zgodności.',
+    prop_show_more:          'Pokaż więcej',
+    prop_show_less:          'Pokaż mniej',
+    // === Settings page ===
+    settings_cat_title:      'Kategorie zamówień',
+    settings_cat_desc:       'Te kategorie pojawiają się w listach rozwijanych podczas tworzenia i generowania przetargów.',
+    settings_cat_ph:         'Dodaj nową kategorię…',
+    settings_cat_add_btn:    'Dodaj',
+    settings_cat_save_btn:   'Zapisz kategorie',
+    settings_email_title:    'E-mail zespołu zamówień',
+    settings_email_desc:     'Wyświetlany jako adres kontaktowy w portalu dostawcy.',
+    settings_email_save_btn: 'Zapisz',
     submit_confirm_email_sent: 'E-mail potwierdzający został wysłany na zarejestrowany adres.',
   },
   ar: {
@@ -2260,6 +2636,100 @@ var I18N = {
     rpt_col_vendor:         'المورد',
     rpt_col_wins:           'عقود',
     rpt_no_contracts:       'لا توجد عقود مُرسّاة بعد',
+    // === Stage banners ===
+    banner_ready_publish:    'جاهز للنشر؟',
+    banner_gen_first:        'أنشئ وثيقة طلب العروض أولاً، ثم انشرها لتكون مرئية للموردين.',
+    banner_publish_btn:      'نشر طلب العروض',
+    banner_gen_first_title:  'أنشئ الوثيقة أولاً',
+    banner_rfp_published_hd: 'طلب العروض منشور',
+    banner_shortlist_inv:    'قم بإدراج الموردين المختارين وأرسل الدعوات لبدء مرحلة الأسئلة والأجوبة.',
+    banner_send_inv_btn:     'إرسال الدعوات',
+    banner_qa_open_hd:       'الأسئلة والأجوبة مفتوحة',
+    banner_qa_open_body:     'يمكن للموردين تقديم العروض في أي وقت قبل الموعد النهائي — بغض النظر عن حالة الأسئلة. إغلاق الأسئلة يوقف فقط أسئلة التوضيح.',
+    banner_close_qa_btn:     'إغلاق الأسئلة',
+    banner_qa_closed_hd:     'الأسئلة والأجوبة مغلقة',
+    banner_qa_closed_body:   'لم تعد أسئلة الموردين مقبولة. تقييم العروض جارٍ.',
+    banner_subs_closed_hd:   'العروض مغلقة',
+    banner_subs_preparing:   'عرض(عروض) لا تزال قيد الإعداد. سيتوفر التقييم قريباً.',
+    banner_subs_unevaluated: 'عرض(عروض) لم يُقيَّم بعد. شغّل تقييم الذكاء الاصطناعي ثم أرسِّ العقد.',
+    banner_subs_all_done:    'جميع العروض مُقيَّمة. اختر الفائز وأرسِّ العقد.',
+    banner_subs_preparing_spin: 'جارٍ الإعداد…',
+    banner_eval_ai_btn:      'تقييم بالذكاء الاصطناعي',
+    banner_contract_awarded_hd: 'تم ترسية العقد',
+    banner_contract_awarded_body: 'طلب العروض هذا مكتمل. تم اختيار الفائز.',
+    // === Stage banner top bar ===
+    stage_draft_text:        'طلب العروض هذا <strong>مسودة</strong>. أنشئ الوثيقة ثم انشرها لدعوة الموردين.',
+    stage_draft_btn:         'الذهاب إلى الإنشاء',
+    stage_published_text:    'طلب العروض <strong>منشور</strong>. أدرج الموردين وأرسل الدعوات لمرحلة الأسئلة.',
+    stage_published_btn:     'الذهاب إلى الموردين',
+    stage_qa_open_text:      'الدعوات مُرسَلة — الأسئلة <strong>مفتوحة</strong>. يمكن تقديم العروض قبل الموعد النهائي. إغلاق الأسئلة يوقف الاستفسارات.',
+    stage_qa_open_btn:       'الذهاب إلى الأسئلة',
+    stage_subs_closed_text:  'الأسئلة مغلقة — <strong>انتظار العروض</strong>. الأسئلة غير مقبولة. شغّل التقييم ثم أرسِّ.',
+    stage_subs_closed_btn:   'الذهاب إلى العروض',
+    stage_awarded_text:      'العقد <strong>مُرسَّى</strong>. طلب العروض هذا مكتمل.',
+    // === Generate tab form placeholders ===
+    ph_project_title:        'مثال: نظام ERP أوراكل الجديد، مستودع البيانات والتصور',
+    ph_budget:               'مثال: 5,000,000',
+    ph_background:           'صف الوضع الحالي، المشكلة التجارية والمحركات الاستراتيجية...',
+    ph_objectives:           'اذكر 4-6 أهداف قابلة للقياس لهذا المشروع...',
+    ph_scope:                'فصّل مراحل العمل، المنتجات وما هو داخل/خارج النطاق...',
+    ph_tech_req:             'البنية التحتية، الاستضافة، الأمان، الامتثال، متطلبات التكامل...',
+    ph_crit_name:            'اسم المعيار',
+    ph_crit_desc:            'صف ما يُقيّمه هذا المعيار...',
+    // === Create RFP modal ===
+    create_rfp_title:        'إنشاء طلب عروض جديد',
+    create_rfp_subtitle:     'أدخل الأساسيات وارفع وثائق داعمة اختيارياً. التفاصيل تُضاف في تبويب الإنشاء.',
+    create_rfp_proj_title:   'عنوان المشروع *',
+    create_rfp_category:     'الفئة',
+    create_rfp_budget:       'الميزانية (درهم)',
+    create_rfp_deadline:     'الموعد النهائي',
+    create_rfp_docs:         'وثائق داعمة',
+    create_rfp_docs_sub:     '— اختياري. سيقرأها الذكاء الاصطناعي أثناء الإنشاء.',
+    create_rfp_upload_hint:  'انقر لرفع PDF (اختياري)',
+    create_rfp_btn:          'إنشاء طلب العروض',
+    ph_rfp_title_eg:         'مثال: تحديث نظام CRM، منصة كشف الاحتيال، مستودع البيانات...',
+    // === Generate tab inline texts ===
+    gen_fill_hint:           'أدخل التفاصيل وانقر على إنشاء بالذكاء الاصطناعي لإنتاج وثيقة طلب عروض احترافية',
+    gen_internal_only:       'داخلي فقط — لا يُنشر في وثيقة طلب العروض',
+    // === Correspondence tab ===
+    corr_no_emails_hd:       'لا توجد مراسلات بعد',
+    corr_no_emails_body:     'أرسل الدعوات من تبويب الموردين لبدء التواصل. ستظهر الردود تلقائياً.',
+    corr_no_emails_yet:      'لا توجد رسائل بعد',
+    corr_reply_ph_subj:      'الموضوع...',
+    corr_reply_ph_msg:       'رسالة ردك...',
+    corr_send_reply_btn:     'إرسال الرد',
+    // === Vendor detail / comms ===
+    vc_no_emails_hd:         'لا توجد مراسلات بعد',
+    vc_no_emails_body:       'ستظهر الرسائل مع هذا المورد هنا بمجرد بدء التواصل.',
+    vc_reply_ph_msg:         'اكتب رسالتك...',
+    vc_send_reply_btn:       'إرسال الرد',
+    vc_back_btn:             'العودة إلى طلب العروض',
+    vc_correspondence_proh_hd:   'المراسلة محظورة',
+    vc_correspondence_proh_body: 'رفض المشاركة في طلب العروض هذا. لا يُسمح بأي مراسلة.',
+    vc_declined_hd:          'المورد رفض المشاركة',
+    vc_declined_body:        'رد هذا المورد على الدعوة بعدم الاهتمام. جميع المراسلات محظورة الآن.',
+    vc_no_msgs_yet:          'لا رسائل بعد',
+    // === Proposals tab ===
+    prop_wrong_doc_hd:       'نوع وثيقة خاطئ — ليست عرضاً من مورد',
+    prop_wrong_doc_body:     'لا يبدو هذا الملف رداً على طلب عروض.',
+    prop_wrong_doc_replace:  'يرجى استبدال المرفق بوثيقة العرض الصحيحة وإعادة التقييم.',
+    prop_budget_hd:          'الميزانية لم تُستخرج تلقائياً — يلزم الإدخال اليدوي',
+    prop_budget_body:        'لم يجد الذكاء الاصطناعي سطر "إجمالي" واضحاً. أدخل الميزانية لإتاحة التقييم التجاري الكامل.',
+    prop_budget_ph:          'أدخل المبلغ (مثال: 1500000)',
+    prop_budget_save_btn:    'حفظ وإعادة التقييم',
+    prop_no_compliance_hd:   'لا توجد بيانات امتثال بعد',
+    prop_no_compliance_body: 'شغّل تقييم الذكاء الاصطناعي لإنشاء مصفوفة الامتثال.',
+    prop_show_more:          'عرض المزيد',
+    prop_show_less:          'عرض أقل',
+    // === Settings page ===
+    settings_cat_title:      'فئات المشتريات',
+    settings_cat_desc:       'تظهر هذه الفئات في قوائم إنشاء وإنتاج طلبات العروض.',
+    settings_cat_ph:         'إضافة فئة جديدة…',
+    settings_cat_add_btn:    'إضافة',
+    settings_cat_save_btn:   'حفظ الفئات',
+    settings_email_title:    'بريد فريق المشتريات',
+    settings_email_desc:     'يُعرض كعنوان اتصال في بوابة الموردين.',
+    settings_email_save_btn: 'حفظ',
     submit_confirm_email_sent: 'تم إرسال بريد تأكيد إلى عنوانك المسجل.',
   }
 };
@@ -3826,7 +4296,7 @@ function renderScoringMatrixEditor(matrix) {
       + '<td style="padding:8px 12px;border:1px solid var(--cpc-line);vertical-align:top;width:28%">'
       + '<textarea id="sm_crit_' + i + '" rows="2" '
       + 'style="' + taStyle + ';font-size:13px;font-weight:500" '
-      + 'placeholder="Criterion name" oninput="autoResizeSMTA(this);updateScoringMatrixRow(' + i + ')">'
+      + 'placeholder="' + t('ph_crit_name') + '" oninput="autoResizeSMTA(this);updateScoringMatrixRow(' + i + ')">'
       + escHtml(r.criterion) + '</textarea>'
       + '</td>'
       + '<td style="padding:6px 10px;border:1px solid var(--cpc-line);width:86px;text-align:center;vertical-align:top">'
@@ -3840,7 +4310,7 @@ function renderScoringMatrixEditor(matrix) {
       + '<td style="padding:8px 12px;border:1px solid var(--cpc-line);vertical-align:top">'
       + '<textarea id="sm_desc_' + i + '" rows="2" '
       + 'style="' + taStyle + ';font-size:12px;color:#4b5563" '
-      + 'placeholder="Describe what this criterion evaluates..." oninput="autoResizeSMTA(this);updateScoringMatrixRow(' + i + ')">'
+      + 'placeholder="' + t('ph_crit_desc') + '" oninput="autoResizeSMTA(this);updateScoringMatrixRow(' + i + ')">'
       + escHtml(r.description||'') + '</textarea>'
       + '</td>'
       + '<td style="padding:4px 6px;border:1px solid var(--cpc-line);width:36px;text-align:center;vertical-align:top">'
@@ -4057,9 +4527,9 @@ rfpTabs.generate = function(rfpId, rfp) {
   if (rfp && rfp.stage === 'draft') {
     genStageBar = '<div style="background:linear-gradient(90deg,#fffbeb,#fef3c7);border:1.5px solid var(--cpc-gold);border-radius:10px;padding:0.65rem 1rem;display:flex;align-items:center;gap:0.75rem;margin-bottom:1rem">'
       + '<i class="fas fa-rocket" style="color:var(--cpc-gold-deep);font-size:1rem;flex-shrink:0"></i>'
-      + '<div style="flex:1"><span style="font-weight:700;color:var(--cpc-ink);font-size:0.88rem">Ready to publish?</span>'
-      + '<span style="color:#92400e;font-size:0.82rem;margin-left:0.5rem">Generate the RFP document first, then publish to make it visible to vendors.</span></div>'
-      + '<button class="btn-primary" style="flex-shrink:0;white-space:nowrap;display:flex;align-items:center;gap:6px;padding:0.4rem 1rem;font-size:0.82rem' + (hasContent ? '' : ';opacity:0.45;pointer-events:none') + '" onclick="advanceRfpStage(' + rfpId + ',\x27published\x27)" title="' + (hasContent ? 'Publish this RFP' : 'Generate the document first') + '"><i class="fas fa-paper-plane" style="font-size:0.78rem"></i>Publish RFP</button>'
+      + '<div style="flex:1"><span style="font-weight:700;color:var(--cpc-ink);font-size:0.88rem">' + t('banner_ready_publish') + '</span>'
+      + '<span style="color:#92400e;font-size:0.82rem;margin-left:0.5rem">' + t('banner_gen_first') + '</span></div>'
+      + '<button class="btn-primary" style="flex-shrink:0;white-space:nowrap;display:flex;align-items:center;gap:6px;padding:0.4rem 1rem;font-size:0.82rem' + (hasContent ? '' : ';opacity:0.45;pointer-events:none') + '" onclick="advanceRfpStage(' + rfpId + ',\x27published\x27)" title="' + (hasContent ? t('banner_publish_btn') : t('banner_gen_first_title')) + '"><i class="fas fa-paper-plane" style="font-size:0.78rem"></i>' + t('banner_publish_btn') + '</button>'
       + '</div>';
   }
 
@@ -4073,7 +4543,7 @@ rfpTabs.generate = function(rfpId, rfp) {
     // Title
     + '<div class="form-group" style="margin:0">'
     + fgLabel(t('form_project_title'), 'rfpTitle', true)
-    + '<input id="rfpTitle" placeholder="e.g. New Oracle ERP Setup, Data Warehouse and Data Visualization" value="' + escHtml(titleVal) + '" oninput="' + asc + '" onchange="' + asc + '">'
+    + '<input id="rfpTitle" placeholder="' + t('ph_project_title') + '" value="' + escHtml(titleVal) + '" oninput="' + asc + '" onchange="' + asc + '">'
     + '</div>'
 
     // Category + Budget
@@ -4085,7 +4555,7 @@ rfpTabs.generate = function(rfpId, rfp) {
     + '</select></div>'
     + '<div class="form-group" style="margin:0">'
     + fgLabel(t('form_budget_aed'), 'rfpBudget', false)
-    + '<input id="rfpBudget" placeholder="e.g. 5,000,000" value="' + escHtml(budgetVal) + '" oninput="' + asc + '" onchange="' + asc + '" title="Internal evaluation cap only — used to score vendor proposals commercially. This value is never published in the RFP document sent to vendors.">'
+    + '<input id="rfpBudget" placeholder="' + t('ph_budget') + '" value="' + escHtml(budgetVal) + '" oninput="' + asc + '" onchange="' + asc + '" title="Internal evaluation cap only — used to score vendor proposals commercially. This value is never published in the RFP document sent to vendors.">'
     + '<div style="font-size:0.7rem;color:#6b7280;margin-top:3px;line-height:1.35"><i class="fas fa-lock" style="font-size:0.65rem;margin-right:3px;color:#9ca3af"></i>Internal only — not published in the RFP document</div>'
     + '</div></div>'
 
@@ -4098,25 +4568,25 @@ rfpTabs.generate = function(rfpId, rfp) {
     // Background
     + '<div class="form-group" style="margin:0">'
     + fgLabel(t('form_background'), 'rfpBackground', true)
-    + '<textarea id="rfpBackground" rows="3" placeholder="Describe the current situation, business problem, and strategic drivers..." oninput="' + asc + '">' + escHtml(bgVal) + '</textarea>'
+    + '<textarea id="rfpBackground" rows="3" placeholder="' + t('ph_background') + '" oninput="' + asc + '">' + escHtml(bgVal) + '</textarea>'
     + '</div>'
 
     // Objectives
     + '<div class="form-group" style="margin:0">'
     + fgLabel(t('form_objectives'), 'rfpObjectives', true)
-    + '<textarea id="rfpObjectives" rows="3" placeholder="List 4-6 measurable objectives for this project..." oninput="' + asc + '">' + escHtml(objVal) + '</textarea>'
+    + '<textarea id="rfpObjectives" rows="3" placeholder="' + t('ph_objectives') + '" oninput="' + asc + '">' + escHtml(objVal) + '</textarea>'
     + '</div>'
 
     // Scope
     + '<div class="form-group" style="margin:0">'
     + fgLabel(t('form_scope'), 'rfpScope', true)
-    + '<textarea id="rfpScope" rows="4" placeholder="Detail the work phases, deliverables, and what is in/out of scope..." oninput="' + asc + '">' + escHtml(scopeVal) + '</textarea>'
+    + '<textarea id="rfpScope" rows="4" placeholder="' + t('ph_scope') + '" oninput="' + asc + '">' + escHtml(scopeVal) + '</textarea>'
     + '</div>'
 
     // Technical requirements
     + '<div class="form-group" style="margin:0">'
     + fgLabel(t('form_tech_req'), 'rfpTech', false)
-    + '<textarea id="rfpTech" rows="3" placeholder="Infrastructure, hosting, security, compliance, integration specs..." oninput="' + asc + '">' + escHtml(techVal) + '</textarea>'
+    + '<textarea id="rfpTech" rows="3" placeholder="' + t('ph_tech_req') + '" oninput="' + asc + '">' + escHtml(techVal) + '</textarea>'
     + '</div>'
 
     // Scoring matrix — read-only summary + edit button (unchanged)
@@ -4365,31 +4835,31 @@ function refreshStageBanner(rfpId, rfp) {
   var msgs = {
     draft: {
       icon: 'fa-pen',
-      text: 'This RFP is a <strong>Draft</strong>. Generate the RFP document, then publish to invite vendors.',
+      text: t('stage_draft_text'),
       action: 'switchRfpTab(\x27generate\x27,' + rfpId + ')',
-      label: 'Go to Generate'
+      label: t('stage_draft_btn')
     },
     published: {
       icon: 'fa-paper-plane',
-      text: 'RFP is <strong>Published</strong>. Shortlist vendors and send invitations to open the Q&amp;A phase.',
+      text: t('stage_published_text'),
       action: 'switchRfpTab(\x27vendors\x27,' + rfpId + ')',
-      label: 'Go to Vendors'
+      label: t('stage_published_btn')
     },
     qa_open: {
       icon: 'fa-comments',
-      text: 'Invitations sent — Q&amp;A is <strong>Open</strong>. Vendors can submit proposals at any time before the deadline. Close Q&amp;A when you want to stop accepting clarification questions.',
+      text: t('stage_qa_open_text'),
       action: 'switchRfpTab(\x27qa\x27,' + rfpId + ')',
-      label: 'Go to Q&A'
+      label: t('stage_qa_open_btn')
     },
     submissions_closed: {
       icon: 'fa-inbox',
-      text: 'Q&amp;A is closed — <strong>waiting for vendor proposals</strong>. Questions are no longer accepted. You can already run AI evaluation on any proposals received so far; award the contract once the submission deadline passes.',
+      text: t('stage_subs_closed_text'),
       action: 'switchRfpTab(\x27proposals\x27,' + rfpId + ')',
-      label: 'Go to Proposals'
+      label: t('stage_subs_closed_btn')
     },
     awarded: {
       icon: 'fa-trophy',
-      text: 'Contract <strong>Awarded</strong>. This RFP is complete.',
+      text: t('stage_awarded_text'),
       action: null,
       label: null
     }
@@ -4816,9 +5286,9 @@ rfpTabs.vendors = async function(rfpId, rfp) {
   if (rfp && rfp.stage === 'published') {
     vendorStageBar = '<div style="background:linear-gradient(90deg,#eff6ff,#dbeafe);border:1.5px solid #3b82f6;border-radius:10px;padding:0.65rem 1rem;display:flex;align-items:center;gap:0.75rem">'
       + '<i class="fas fa-paper-plane" style="color:#2563eb;font-size:1rem;flex-shrink:0"></i>'
-      + '<div style="flex:1"><span style="font-weight:700;color:#1e3a8a;font-size:0.88rem">RFP is Published</span>'
-      + '<span style="color:#1d4ed8;font-size:0.82rem;margin-left:0.5rem">Shortlist vendors and send invitations to start the Q&amp;A phase.</span></div>'
-      + '<button class="btn-primary" style="flex-shrink:0;white-space:nowrap;display:flex;align-items:center;gap:6px;padding:0.4rem 1rem;font-size:0.82rem" onclick="sendRfpInvitations(' + rfpId + ')"><i class="fas fa-paper-plane" style="font-size:0.78rem"></i>Send Invitations</button>'
+      + '<div style="flex:1"><span style="font-weight:700;color:#1e3a8a;font-size:0.88rem">' + t('banner_rfp_published_hd') + '</span>'
+      + '<span style="color:#1d4ed8;font-size:0.82rem;margin-left:0.5rem">' + t('banner_shortlist_inv') + '</span></div>'
+      + '<button class="btn-primary" style="flex-shrink:0;white-space:nowrap;display:flex;align-items:center;gap:6px;padding:0.4rem 1rem;font-size:0.82rem" onclick="sendRfpInvitations(' + rfpId + ')"><i class="fas fa-paper-plane" style="font-size:0.78rem"></i>' + t('banner_send_inv_btn') + '</button>'
       + '</div>';
   }
 
@@ -5031,9 +5501,8 @@ rfpTabs.emails = async function(rfpId) {
   if (totalVendors === 0) {
     vendorThreadsHtml = '<div class="card" style="padding:2.5rem;text-align:center;color:#9ca3af">'
       + '<i class="fas fa-comments" style="font-size:2rem;display:block;margin-bottom:0.75rem;color:#d1d5db"></i>'
-      + '<p style="font-weight:600;color:#6b7280;margin-bottom:0.25rem">No email correspondence yet</p>'
-      + '<p style="font-size:0.82rem">Send invitations from the <strong>Vendors</strong> tab to start vendor communication.<br>'
-      + 'Incoming replies will appear here automatically via <strong>procurement@andersenlab.com</strong>.</p>'
+      + '<p style="font-weight:600;color:#6b7280;margin-bottom:0.25rem">' + t('corr_no_emails_hd') + '</p>'
+      + '<p style="font-size:0.82rem">' + t('corr_no_emails_body') + '</p>'
       + '</div>';
   } else {
     Object.entries(vendorMap).forEach(function(entry) {
@@ -5086,10 +5555,10 @@ rfpTabs.emails = async function(rfpId) {
       const replySection = isNumericVid ? (
         '<div id="' + replyFormId + '" style="display:none;padding:1rem;border-top:1px solid #f3f4f6;background:#fafafa">'
         + '<div style="font-weight:600;font-size:0.8rem;color:#374151;margin-bottom:0.5rem"><i class="fas fa-reply" style="margin-right:0.25rem"></i>Reply to ' + escHtml(vdata.vendor_name) + '</div>'
-        + '<input id="' + replySubjId + '" type="text" placeholder="Subject..." style="width:100%;padding:7px 10px;border:1px solid #e5e7eb;border-radius:6px;font-size:0.82rem;margin-bottom:0.5rem;box-sizing:border-box">'
-        + '<textarea id="' + replyTextId + '" rows="4" placeholder="Your reply message..." style="width:100%;padding:8px 10px;border:1px solid #e5e7eb;border-radius:6px;font-size:0.82rem;resize:vertical;box-sizing:border-box"></textarea>'
+        + '<input id="' + replySubjId + '" type="text" placeholder="' + t('corr_reply_ph_subj') + '" style="width:100%;padding:7px 10px;border:1px solid #e5e7eb;border-radius:6px;font-size:0.82rem;margin-bottom:0.5rem;box-sizing:border-box">'
+        + '<textarea id="' + replyTextId + '" rows="4" placeholder="' + t('corr_reply_ph_msg') + '" style="width:100%;padding:8px 10px;border:1px solid #e5e7eb;border-radius:6px;font-size:0.82rem;resize:vertical;box-sizing:border-box"></textarea>'
         + '<div style="display:flex;gap:0.5rem;margin-top:0.5rem">'
-        + '<button class="btn-primary btn-sm" onclick="sendVendorReply(' + rfpId + ',' + vid + ')"><i class="fas fa-paper-plane"></i>Send Reply</button>'
+        + '<button class="btn-primary btn-sm" onclick="sendVendorReply(' + rfpId + ',' + vid + ')"><i class="fas fa-paper-plane"></i>' + t('corr_send_reply_btn') + '</button>'
         + '<button class="btn-ghost btn-sm" onclick="document.getElementById(\x27' + replyFormId + '\x27).style.display=\x27none\x27">Cancel</button>'
         + '</div>'
         + '</div>'
@@ -5112,7 +5581,7 @@ rfpTabs.emails = async function(rfpId) {
         + '</div>'
         // Thread body (collapsible)
         + '<div id="' + threadId + '" style="padding:1rem">'
-        + (threadEmails || '<div style="padding:1rem;color:#9ca3af;font-size:0.82rem;text-align:center">No emails yet</div>')
+        + (threadEmails || '<div style="padding:1rem;color:#9ca3af;font-size:0.82rem;text-align:center">' + t('corr_no_emails_yet') + '</div>')
         + '</div>'
         // Reply form
         + replySection
@@ -5681,15 +6150,15 @@ rfpTabs.qa = async function(rfpId) {
   if (qaRfp && qaRfp.stage === 'qa_open') {
     qaStageBar = '<div style="background:linear-gradient(90deg,#faf5ff,#ede9fe);border:1.5px solid #7c3aed;border-radius:10px;padding:0.65rem 1rem;display:flex;align-items:center;gap:0.75rem">'
       + '<i class="fas fa-comments" style="color:#7c3aed;font-size:1rem;flex-shrink:0"></i>'
-      + '<div style="flex:1"><span style="font-weight:700;color:#4c1d95;font-size:0.88rem">Q&amp;A is Open</span>'
-      + '<span style="color:#5b21b6;font-size:0.82rem;margin-left:0.5rem">Vendors can submit proposals at any time before the submission deadline — regardless of Q&amp;A status. Close Q&amp;A only stops vendors from asking clarification questions.</span></div>'
-      + '<button style="flex-shrink:0;white-space:nowrap;display:flex;align-items:center;gap:6px;padding:0.4rem 1rem;font-size:0.82rem;background:#7c3aed;color:#fff;border:none;border-radius:7px;cursor:pointer;font-weight:600" onclick="closeQA(' + rfpId + ')"><i class="fas fa-lock" style="font-size:0.78rem"></i>Close Q&amp;A</button>'
+      + '<div style="flex:1"><span style="font-weight:700;color:#4c1d95;font-size:0.88rem">' + t('banner_qa_open_hd') + '</span>'
+      + '<span style="color:#5b21b6;font-size:0.82rem;margin-left:0.5rem">' + t('banner_qa_open_body') + '</span></div>'
+      + '<button style="flex-shrink:0;white-space:nowrap;display:flex;align-items:center;gap:6px;padding:0.4rem 1rem;font-size:0.82rem;background:#7c3aed;color:#fff;border:none;border-radius:7px;cursor:pointer;font-weight:600" onclick="closeQA(' + rfpId + ')"><i class="fas fa-lock" style="font-size:0.78rem"></i>' + t('banner_close_qa_btn') + '</button>'
       + '</div>';
   } else if (qaRfp && ['submissions_closed','evaluation','awarded'].includes(qaRfp.stage)) {
     qaStageBar = '<div style="background:#f0fdf4;border:1.5px solid #16a34a;border-radius:10px;padding:0.65rem 1rem;display:flex;align-items:center;gap:0.75rem">'
       + '<i class="fas fa-lock" style="color:#16a34a;font-size:1rem;flex-shrink:0"></i>'
-      + '<span style="font-weight:600;color:#14532d;font-size:0.88rem">Q&amp;A is Closed</span>'
-      + '<span style="color:#166534;font-size:0.82rem;margin-left:0.5rem">Vendor questions are no longer accepted. Proposal evaluation is in progress.</span>'
+      + '<span style="font-weight:600;color:#14532d;font-size:0.88rem">' + t('banner_qa_closed_hd') + '</span>'
+      + '<span style="color:#166534;font-size:0.82rem;margin-left:0.5rem">' + t('banner_qa_closed_body') + '</span>'
       + '</div>';
   }
 
@@ -6076,25 +6545,25 @@ rfpTabs.proposals = async function(rfpId) {
     var stageNotReady = proposals.filter(function(p){ return !isEvalReady(p); }).length;
     propStageBar = '<div style="background:linear-gradient(90deg,#fffbeb,#fef9c3);border:1.5px solid var(--cpc-gold);border-radius:10px;padding:0.65rem 1rem;display:flex;align-items:center;gap:0.75rem">'
       + '<i class="fas fa-gavel" style="color:var(--cpc-gold-deep);font-size:1rem;flex-shrink:0"></i>'
-      + '<div style="flex:1"><span style="font-weight:700;color:var(--cpc-ink);font-size:0.88rem">Submissions Closed</span>'
+      + '<div style="flex:1"><span style="font-weight:700;color:var(--cpc-ink);font-size:0.88rem">' + t('banner_subs_closed_hd') + '</span>'
       + '<span style="color:#92400e;font-size:0.82rem;margin-left:0.5rem">'
       + (stageNotReady > 0
-          ? stageNotReady + ' proposal(s) are still being prepared. Evaluation will be available shortly.'
+          ? stageNotReady + ' ' + t('banner_subs_preparing')
           : unevaluated > 0
-              ? unevaluated + ' proposal(s) not yet evaluated. Run AI evaluation, then award the contract.'
+              ? unevaluated + ' ' + t('banner_subs_unevaluated')
               : 'All proposals evaluated. Select a winner and award the contract.')
       + '</span></div>'
       + (stageNotReady === proposals.length
-          ? '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;font-size:0.8rem;color:#92400e"><i class="fas fa-hourglass-half fa-spin"></i>Preparing…</div>'
+          ? '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;font-size:0.8rem;color:#92400e"><i class="fas fa-hourglass-half fa-spin"></i>' + t('banner_subs_preparing_spin') + '</div>'
           : unevaluated > 0
-              ? '<button class="btn-primary" style="flex-shrink:0;white-space:nowrap;display:flex;align-items:center;gap:6px;padding:0.4rem 1rem;font-size:0.82rem;background:linear-gradient(135deg,var(--cpc-gold-deep),var(--cpc-gold));border:none" id="stageEvalBtn" onclick="evaluateAllProposals(' + rfpId + ')"><i class="fas fa-robot" style="font-size:0.78rem"></i>Evaluate with AI</button>'
+              ? '<button class="btn-primary" style="flex-shrink:0;white-space:nowrap;display:flex;align-items:center;gap:6px;padding:0.4rem 1rem;font-size:0.82rem;background:linear-gradient(135deg,var(--cpc-gold-deep),var(--cpc-gold));border:none" id="stageEvalBtn" onclick="evaluateAllProposals(' + rfpId + ')"><i class="fas fa-robot" style="font-size:0.78rem"></i>' + t('banner_eval_ai_btn') + '</button>'
               : '')
       + '</div>';
   } else if (propAwarded) {
     propStageBar = '<div style="background:linear-gradient(90deg,#f0fdf4,#dcfce7);border:1.5px solid #16a34a;border-radius:10px;padding:0.65rem 1rem;display:flex;align-items:center;gap:0.75rem">'
       + '<i class="fas fa-trophy" style="color:#16a34a;font-size:1rem;flex-shrink:0"></i>'
-      + '<span style="font-weight:700;color:#14532d;font-size:0.88rem">Contract Awarded</span>'
-      + '<span style="color:#166534;font-size:0.82rem;margin-left:0.5rem">This RFP is complete. A winner has been selected.</span>'
+      + '<span style="font-weight:700;color:#14532d;font-size:0.88rem">' + t('banner_contract_awarded_hd') + '</span>'
+      + '<span style="color:#166534;font-size:0.82rem;margin-left:0.5rem">' + t('banner_contract_awarded_body') + '</span>'
       + '</div>';
   }
 
@@ -6370,21 +6839,21 @@ function _buildEvalTabBodies(p, evalData) {
   var wrongDocBanner = '';
   if (evalData && evalData.validation_status === 'WRONG_DOCUMENT') {
     wrongDocBanner = '<div style="background:#fef2f2;border:1.5px solid #fca5a5;border-radius:8px;padding:0.75rem 1rem;margin-bottom:1rem;display:flex;flex-direction:column;gap:0.5rem">'
-      + '<div style="display:flex;align-items:center;gap:0.5rem;font-weight:700;font-size:0.85rem;color:#991b1b"><i class="fas fa-ban"></i>Wrong document type — not a vendor proposal</div>'
-      + '<div style="font-size:0.78rem;color:#7f1d1d">' + escHtml(evalData.wrong_document_reason || 'This file does not appear to be a response to an RFP.') + '</div>'
-      + '<div style="font-size:0.75rem;color:#9ca3af;margin-top:0.15rem">Please replace the attachment with the correct vendor proposal document and re-evaluate.</div>'
+      + '<div style="display:flex;align-items:center;gap:0.5rem;font-weight:700;font-size:0.85rem;color:#991b1b"><i class="fas fa-ban"></i>' + t('prop_wrong_doc_hd') + '</div>'
+      + '<div style="font-size:0.78rem;color:#7f1d1d">' + escHtml(evalData.wrong_document_reason || t('prop_wrong_doc_body')) + '</div>'
+      + '<div style="font-size:0.75rem;color:#9ca3af;margin-top:0.15rem">' + t('prop_wrong_doc_replace') + '</div>'
       + '</div>';
   }
 
   var manualBudgetBanner = '';
   if (evalData && evalData.validation_status === 'PENDING_MANUAL_REVIEW') {
     manualBudgetBanner = '<div style="background:#fffbeb;border:1.5px solid #fcd34d;border-radius:8px;padding:0.75rem 1rem;margin-bottom:1rem;display:flex;flex-direction:column;gap:0.5rem">'
-      + '<div style="display:flex;align-items:center;gap:0.5rem;font-weight:700;font-size:0.85rem;color:#92400e"><i class="fas fa-exclamation-triangle"></i>Budget not auto-extracted — manual entry required</div>'
-      + '<div style="font-size:0.78rem;color:#78350f">The AI could not find a clear "Total" line in the proposal. Enter the total budget to unlock full commercial scoring.</div>'
+      + '<div style="display:flex;align-items:center;gap:0.5rem;font-weight:700;font-size:0.85rem;color:#92400e"><i class="fas fa-exclamation-triangle"></i>' + t('prop_budget_hd') + '</div>'
+      + '<div style="font-size:0.78rem;color:#78350f">' + t('prop_budget_body') + '</div>'
       + '<div style="display:flex;gap:0.5rem;align-items:center;margin-top:0.25rem">'
-      + '<input id="manualBudgetInput_' + p.id + '" type="number" min="0" placeholder="Enter amount (e.g. 1500000)" style="flex:1;padding:6px 10px;border:1.5px solid #fcd34d;border-radius:6px;font-size:0.82rem">'
+      + '<input id="manualBudgetInput_' + p.id + '" type="number" min="0" placeholder="' + t('prop_budget_ph') + '" style="flex:1;padding:6px 10px;border:1.5px solid #fcd34d;border-radius:6px;font-size:0.82rem">'
       + '<select id="manualBudgetCur_' + p.id + '" style="padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:0.82rem"><option>AED</option><option>USD</option><option>EUR</option><option>GBP</option></select>'
-      + '<button onclick="saveManualBudget(' + rfpId + ',' + p.id + ')" style="background:var(--cpc-gold-deep);color:white;border:none;border-radius:6px;padding:6px 14px;font-size:0.82rem;font-weight:600;cursor:pointer;white-space:nowrap"><i class="fas fa-save" style="margin-right:4px"></i>Save &amp; Re-evaluate</button>'
+      + '<button onclick="saveManualBudget(' + rfpId + ',' + p.id + ')" style="background:var(--cpc-gold-deep);color:white;border:none;border-radius:6px;padding:6px 14px;font-size:0.82rem;font-weight:600;cursor:pointer;white-space:nowrap"><i class="fas fa-save" style="margin-right:4px"></i>' + t('prop_budget_save_btn') + '</button>'
       + '</div>'
       + '</div>';
   }
@@ -6487,8 +6956,8 @@ function _buildEvalTabBodies(p, evalData) {
   } else {
     tabComplianceHtml = '<div style="padding:2.5rem;text-align:center;color:#9ca3af">'
       + '<i class="fas fa-clipboard-list" style="font-size:2rem;display:block;margin-bottom:0.75rem;color:#d1d5db"></i>'
-      + '<div style="font-weight:600;margin-bottom:0.4rem">No compliance data yet</div>'
-      + '<div style="font-size:0.8rem">Run AI evaluation to generate the compliance matrix.</div>'
+      + '<div style="font-weight:600;margin-bottom:0.4rem">' + t('prop_no_compliance_hd') + '</div>'
+      + '<div style="font-size:0.8rem">' + t('prop_no_compliance_body') + '</div>'
       + '</div>';
   }
 
@@ -6623,10 +7092,10 @@ function _buildEvalTabBodies(p, evalData) {
             var badgeLabel = isMandatory ? 'Critical' : 'Warning';
             var titlePreview = escHtml(titleText) + (titleText.length >= 100 ? '…' : '');
             return '<div style="border:1px solid ' + (isMandatory ? '#fca5a5' : '#e5e7eb') + ';border-radius:8px;overflow:hidden;background:' + (isMandatory ? '#fff5f5' : '#fffdf7') + '">'
-              + '<div style="display:flex;align-items:flex-start;gap:0.5rem;padding:0.625rem 0.75rem;cursor:pointer" onclick="(function(el){var d=el.parentNode.querySelector(\'.weakDetail\');var btn=el.querySelector(\'.weakToggleBtn\');if(d.style.display===\'none\'){d.style.display=\'block\';btn.textContent=\'Show less\';}else{d.style.display=\'none\';btn.textContent=\'Show more\';}})(this)">'
+              + '<div style="display:flex;align-items:flex-start;gap:0.5rem;padding:0.625rem 0.75rem;cursor:pointer" onclick="(function(el){var d=el.parentNode.querySelector(\'.weakDetail\');var btn=el.querySelector(\'.weakToggleBtn\');if(d.style.display===\'none\'){d.style.display=\'block\';btn.textContent=t(\'prop_show_less\');}else{d.style.display=\'none\';btn.textContent=t(\'prop_show_more\');}})(this)">'
               + '<span style="font-size:0.7rem;font-weight:700;padding:2px 7px;border-radius:999px;white-space:nowrap;flex-shrink:0;' + badgeCss + '"><i class="fas ' + badgeIcon + '" style="margin-right:3px"></i>' + badgeLabel + '</span>'
               + '<span style="font-size:0.82rem;color:#374151;flex:1;line-height:1.5">' + titlePreview + '</span>'
-              + '<button class="weakToggleBtn" style="font-size:0.72rem;color:#6b7280;background:none;border:none;cursor:pointer;white-space:nowrap;padding:0;flex-shrink:0">Show more</button>'
+              + '<button class="weakToggleBtn" style="font-size:0.72rem;color:#6b7280;background:none;border:none;cursor:pointer;white-space:nowrap;padding:0;flex-shrink:0">' + t('prop_show_more') + '</button>'
               + '</div>'
               + '<div class="weakDetail" style="display:none;padding:0 0.75rem 0.625rem 0.75rem;font-size:0.8rem;line-height:1.7;color:#374151;white-space:pre-wrap;border-top:1px solid ' + (isMandatory ? '#fecaca' : '#f3f4f6') + '">' + escHtml(detailText) + '</div>'
               + '</div>';
@@ -6706,7 +7175,7 @@ function _renderProposalPanel(p, evalData) {
         var rfpAlreadyAwarded = (appState.proposals||[]).some(function(pp){ return pp.status==='awarded' && pp.id!==p.id; });
         var canAward = rfpNow && rfpNow.stage === 'submissions_closed' && !isAwarded && !rfpAlreadyAwarded;
         return '<div style="position:sticky;bottom:0;background:#fff;border-top:1px solid #e5e7eb;padding:0.75rem 1.25rem;display:flex;gap:0.5rem;justify-content:flex-end;align-items:center;flex-shrink:0">'
-          + (isAwarded ? '<div style="background:#d1fae5;color:#065f46;padding:0.35rem 0.9rem;border-radius:7px;font-weight:700;font-size:0.82rem;display:inline-flex;align-items:center;gap:0.4rem"><i class="fas fa-trophy"></i>Contract Awarded</div>' : '')
+          + (isAwarded ? '<div style="background:#d1fae5;color:#065f46;padding:0.35rem 0.9rem;border-radius:7px;font-weight:700;font-size:0.82rem;display:inline-flex;align-items:center;gap:0.4rem"><i class="fas fa-trophy"></i>' + t('banner_contract_awarded_hd') + '</div>' : '')
           + (canAward ? '<button onclick="closeProposalPanel();awardProposal(' + rfpId + ',' + p.id + ',\x27' + escHtml(p.vendor_name||'this vendor') + '\x27)" style="background:linear-gradient(135deg,#059669,#10b981);color:white;border:none;border-radius:7px;padding:0.45rem 1.1rem;font-size:0.82rem;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:0.4rem"><i class="fas fa-trophy"></i>Award Contract</button>' : '')
           + (!evalData ? '<button onclick="evaluateSingleProposal(' + rfpId + ',' + p.id + ')" id="evalSingleBtnFooter_' + p.id + '" style="background:linear-gradient(135deg,var(--cpc-gold-deep),var(--cpc-gold));color:white;border:none;border-radius:7px;padding:0.45rem 1.1rem;font-size:0.82rem;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:0.4rem"><i class="fas fa-robot"></i>' + t('panel_eval_footer_btn') + '</button>' : '')
           + '<button class="btn-ghost" onclick="closeProposalPanel()" style="padding:0.45rem 1.1rem">' + t('btn_cancel') + '</button>'
@@ -6984,8 +7453,8 @@ pages.vendor_comms = async function(opts) {
   if (vendorEmails.length === 0) {
     threadHtml = '<div class="card" style="padding:3rem;text-align:center;color:#9ca3af">'
       + '<i class="fas fa-comments" style="font-size:2.5rem;display:block;margin-bottom:1rem;color:#d1d5db"></i>'
-      + '<p style="font-weight:600;color:#6b7280;margin-bottom:0.5rem">No email correspondence yet</p>'
-      + '<p style="font-size:0.82rem">Emails with this vendor will appear here once communication starts.</p>'
+      + '<p style="font-weight:600;color:#6b7280;margin-bottom:0.5rem">' + t('vc_no_emails_hd') + '</p>'
+      + '<p style="font-size:0.82rem">' + t('vc_no_emails_body') + '</p>'
       + '</div>';
   } else {
     vendorEmails.forEach(function(e) {
@@ -7058,10 +7527,10 @@ pages.vendor_comms = async function(opts) {
     ? '<div class="card" style="padding:1.25rem;margin-top:1rem;background:#fef2f2;border:1.5px solid #fca5a5">'
       + '<div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.5rem">'
       + '<i class="fas fa-ban" style="color:#dc2626;font-size:1.25rem;flex-shrink:0"></i>'
-      + '<div><div style="font-weight:700;font-size:0.9rem;color:#991b1b">Correspondence Prohibited</div>'
-      + '<div style="font-size:0.8rem;color:#dc2626">' + escHtml(vendorName) + ' has declined participation in this RFP. No further correspondence is permitted.</div>'
+      + '<div><div style="font-weight:700;font-size:0.9rem;color:#991b1b">' + t('vc_correspondence_proh_hd') + '</div>'
+      + '<div style="font-size:0.8rem;color:#dc2626">' + escHtml(vendorName) + ' ' + t('vc_correspondence_proh_body') + '</div>'
       + '</div></div>'
-      + '<button class="btn-ghost" onclick="navigateTo(\x27rfp_detail\x27,{rfpId:' + rfpId + ',tab:\x27vendors\x27})"><i class="fas fa-arrow-left"></i>Back to RFP</button>'
+      + '<button class="btn-ghost" onclick="navigateTo(\x27rfp_detail\x27,{rfpId:' + rfpId + ',tab:\x27vendors\x27})"><i class="fas fa-arrow-left"></i>' + t('vc_back_btn') + '</button>'
       + '</div>'
     : '<div class="card" style="padding:1.25rem;margin-top:1rem">'
       + '<h4 style="font-weight:700;font-size:0.875rem;color:#1f2937;margin:0 0 0.75rem"><i class="fas fa-reply" style="margin-right:0.5rem" style="color:var(--cpc-ink)"></i>Reply to ' + escHtml(vendorName) + '</h4>'
@@ -7069,20 +7538,20 @@ pages.vendor_comms = async function(opts) {
       + '<input id="vc-reply-subj" type="text" placeholder="Subject..." style="width:100%;padding:7px 10px;border:1px solid #e5e7eb;border-radius:6px;font-size:0.82rem;box-sizing:border-box">'
       + '</div>'
       + '<div class="form-group" style="margin-bottom:0.5rem">'
-      + '<textarea id="vc-reply-text" rows="4" placeholder="Type your message..." style="width:100%;padding:8px 10px;border:1px solid #e5e7eb;border-radius:6px;font-size:0.82rem;resize:vertical;box-sizing:border-box" oninput="var c=document.getElementById(\x27vc-charcount\x27);if(c)c.textContent=this.value.length+\x27 chars\x27"></textarea>'
+      + '<textarea id="vc-reply-text" rows="4" placeholder="' + t('vc_reply_ph_msg') + '" style="width:100%;padding:8px 10px;border:1px solid #e5e7eb;border-radius:6px;font-size:0.82rem;resize:vertical;box-sizing:border-box" oninput="var c=document.getElementById(\x27vc-charcount\x27);if(c)c.textContent=this.value.length+\x27 chars\x27"></textarea>'
       + '<div style="text-align:right;font-size:0.7rem;color:#9ca3af;margin-top:2px" id="vc-charcount">0 chars</div>'
       + '</div>'
       + '<div style="display:flex;gap:0.5rem">'
-      + '<button class="btn-primary" onclick="sendVendorCommReply(' + rfpId + ',' + vendorId + ')"><i class="fas fa-paper-plane"></i>Send Reply</button>'
-      + '<button class="btn-ghost" onclick="navigateTo(\x27rfp_detail\x27,{rfpId:' + rfpId + ',tab:\x27vendors\x27})"><i class="fas fa-arrow-left"></i>Back to RFP</button>'
+      + '<button class="btn-primary" onclick="sendVendorCommReply(' + rfpId + ',' + vendorId + ')"><i class="fas fa-paper-plane"></i>' + t('vc_send_reply_btn') + '</button>'
+      + '<button class="btn-ghost" onclick="navigateTo(\x27rfp_detail\x27,{rfpId:' + rfpId + ',tab:\x27vendors\x27})"><i class="fas fa-arrow-left"></i>' + t('vc_back_btn') + '</button>'
       + '</div>'
       + '</div>';
 
   const declinedBanner = vendorDeclined
     ? '<div style="background:#fee2e2;border:1.5px solid #fca5a5;border-radius:8px;padding:0.75rem 1rem;display:flex;align-items:center;gap:0.75rem;margin-bottom:1rem">'
       + '<i class="fas fa-times-circle" style="color:#dc2626;font-size:1.1rem;flex-shrink:0"></i>'
-      + '<div><div style="font-weight:700;font-size:0.85rem;color:#991b1b">Vendor Declined Participation</div>'
-      + '<div style="font-size:0.78rem;color:#dc2626">This vendor replied to the RFP invitation indicating they are not interested. All correspondence is now prohibited.</div></div>'
+      + '<div><div style="font-weight:700;font-size:0.85rem;color:#991b1b">' + t('vc_declined_hd') + '</div>'
+      + '<div style="font-size:0.78rem;color:#dc2626">' + t('vc_declined_body') + '</div></div>'
       + '</div>'
     : '';
 
@@ -7105,12 +7574,12 @@ pages.vendor_comms = async function(opts) {
     + '<div style="display:flex;gap:0.5rem">'
     + '<button class="btn-ghost btn-sm" id="jumpLatestBtn" onclick="(function(){var el=document.getElementById(\x27vc-latest\x27);if(el)el.scrollIntoView({behavior:\x27smooth\x27})})()"><i class="fas fa-arrow-down"></i>Latest</button>'
     + '<button class="btn-secondary btn-sm" onclick="pages.vendor_comms({rfpId:' + rfpId + ',vendorId:' + vendorId + '})"><i class="fas fa-sync"></i>Refresh</button>'
-    + '<button class="btn-ghost btn-sm" onclick="navigateTo(\x27rfp_detail\x27,{rfpId:' + rfpId + ',tab:\x27vendors\x27})"><i class="fas fa-arrow-left"></i>Back to RFP</button>'
+    + '<button class="btn-ghost btn-sm" onclick="navigateTo(\x27rfp_detail\x27,{rfpId:' + rfpId + ',tab:\x27vendors\x27})"><i class="fas fa-arrow-left"></i>' + t('vc_back_btn') + '</button>'
     + '</div>'
     + '</div>'
     // Messages
     + '<div style="display:flex;flex-direction:column;gap:0;padding:0 0 0.5rem">'
-    + (threadHtml || '<div style="padding:2rem;text-align:center;color:#9ca3af">No messages yet</div>')
+    + (threadHtml || '<div style="padding:2rem;text-align:center;color:#9ca3af">' + t('vc_no_msgs_yet') + '</div>')
     + '</div>'
     // Reply
     + replySection
@@ -7500,8 +7969,8 @@ pages.settings = async function() {
     '<div style="max-width:680px;margin:0 auto;display:flex;flex-direction:column;gap:1.5rem">'
     // Categories section
     + '<div class="card" style="padding:1.5rem">'
-    + '<h3 style="font-weight:700;font-size:1rem;color:#1f2937;margin:0 0 0.25rem"><i class="fas fa-tag cpc-gold" style="margin-right:8px"></i>Procurement Categories</h3>'
-    + '<p style="font-size:0.82rem;color:#9ca3af;margin:0 0 1rem">These categories appear in the Create RFP and Generate tab dropdowns.</p>'
+    + '<h3 style="font-weight:700;font-size:1rem;color:#1f2937;margin:0 0 0.25rem"><i class="fas fa-tag cpc-gold" style="margin-right:8px"></i>' + t('settings_cat_title') + '</h3>'
+    + '<p style="font-size:0.82rem;color:#9ca3af;margin:0 0 1rem">' + t('settings_cat_desc') + '</p>'
     + '<div id="settingsCatList" style="display:flex;flex-direction:column;gap:0.5rem;margin-bottom:1rem">'
     + cats.map(function(c, i){
         return '<div style="display:flex;align-items:center;gap:0.5rem;padding:6px 10px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px">'
@@ -7511,18 +7980,18 @@ pages.settings = async function() {
       }).join('')
     + '</div>'
     + '<div style="display:flex;gap:0.5rem">'
-    + '<input id="settingsNewCat" type="text" placeholder="Add new category…" style="flex:1;border:1px solid #d1d5db;border-radius:6px;padding:6px 10px;font-size:0.84rem">'
-    + '<button class="btn-primary" onclick="addSettingsCategory()"><i class="fas fa-plus"></i>Add</button>'
+    + '<input id="settingsNewCat" type="text" placeholder="' + t('settings_cat_ph') + '" style="flex:1;border:1px solid #d1d5db;border-radius:6px;padding:6px 10px;font-size:0.84rem">'
+    + '<button class="btn-primary" onclick="addSettingsCategory()"><i class="fas fa-plus"></i>' + t('settings_cat_add_btn') + '</button>'
     + '</div>'
-    + '<button class="btn-primary" style="margin-top:1rem;width:100%" onclick="saveSettingsCategories()"><i class="fas fa-save"></i>Save Categories</button>'
+    + '<button class="btn-primary" style="margin-top:1rem;width:100%" onclick="saveSettingsCategories()"><i class="fas fa-save"></i>' + t('settings_cat_save_btn') + '</button>'
     + '</div>'
     // Procurement email section
     + '<div class="card" style="padding:1.5rem">'
-    + '<h3 style="font-weight:700;font-size:1rem;color:#1f2937;margin:0 0 0.25rem"><i class="fas fa-envelope cpc-gold" style="margin-right:8px"></i>Procurement Team Email</h3>'
-    + '<p style="font-size:0.82rem;color:#9ca3af;margin:0 0 0.75rem">Shown on the vendor portal\x27s declined message as a contact address.</p>'
+    + '<h3 style="font-weight:700;font-size:1rem;color:#1f2937;margin:0 0 0.25rem"><i class="fas fa-envelope cpc-gold" style="margin-right:8px"></i>' + t('settings_email_title') + '</h3>'
+    + '<p style="font-size:0.82rem;color:#9ca3af;margin:0 0 0.75rem">' + t('settings_email_desc') + '</p>'
     + '<div style="display:flex;gap:0.5rem">'
     + '<input id="settingsProcEmail" type="email" value="' + escHtml(procEmail) + '" placeholder="procurement@example.com" style="flex:1;border:1px solid #d1d5db;border-radius:6px;padding:6px 10px;font-size:0.84rem">'
-    + '<button class="btn-primary" onclick="saveProcurementEmail()"><i class="fas fa-save"></i>Save</button>'
+    + '<button class="btn-primary" onclick="saveProcurementEmail()"><i class="fas fa-save"></i>' + t('settings_email_save_btn') + '</button>'
     + '</div>'
     + '</div>'
     + '</div>'
@@ -7577,35 +8046,35 @@ function showCreateRfpModal() {
     '<div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:1rem">'
     + '<div style="width:36px;height:36px;border-radius:50%;background:var(--cpc-gold);display:flex;align-items:center;justify-content:center;color:white;flex-shrink:0">'
     + '<i class="fas fa-file-circle-plus" style="font-size:1rem"></i></div>'
-    + '<div><h3 style="font-size:1rem;font-weight:700;margin:0">Create New RFP</h3>'
-    + '<div style="font-size:0.72rem;color:#9ca3af">Enter project basics and optionally upload supporting documents. You will fill in detailed requirements on the <strong>Generate tab</strong> after creation.</div>'
+    + '<div><h3 style="font-size:1rem;font-weight:700;margin:0">' + t('create_rfp_title') + '</h3>'
+    + '<div style="font-size:0.72rem;color:#9ca3af">' + t('create_rfp_subtitle') + '</div>'
     + '</div></div>'
 
     // Title
-    + '<div class="form-group" style="margin-bottom:0.625rem"><label>Project Title *</label>'
-    + '<input id="newRfpTitle" placeholder="e.g. CRM Modernisation, Fraud Detection Platform, Data Warehouse..."></div>'
+    + '<div class="form-group" style="margin-bottom:0.625rem"><label>' + t('create_rfp_proj_title') + '</label>'
+    + '<input id="newRfpTitle" placeholder="' + t('ph_rfp_title_eg') + '"></div>'
 
     // Category / Budget / Deadline in one row
     + '<div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:0.625rem;margin-bottom:0.75rem">'
-    + '<div class="form-group" style="margin:0"><label>Category</label><select id="newRfpCat">'
+    + '<div class="form-group" style="margin:0"><label>' + t('create_rfp_category') + '</label><select id="newRfpCat">'
     + (_settingsCategories || DEFAULT_CATEGORIES).map(function(c){ return '<option>' + c + '</option>'; }).join('')
     + '</select></div>'
-    + '<div class="form-group" style="margin:0"><label>Budget (AED)</label><input id="newRfpBudget" placeholder="5,000,000"></div>'
-    + '<div class="form-group" style="margin:0"><label>Deadline</label><input type="date" id="newRfpDeadline" value="' + getDateOffset(30) + '"></div>'
+    + '<div class="form-group" style="margin:0"><label>' + t('create_rfp_budget') + '</label><input id="newRfpBudget" placeholder="5,000,000"></div>'
+    + '<div class="form-group" style="margin:0"><label>' + t('create_rfp_deadline') + '</label><input type="date" id="newRfpDeadline" value="' + getDateOffset(30) + '"></div>'
     + '</div>'
 
     // Two upload slots
     + '<div style="margin-bottom:1rem">'
     + '<label style="display:flex;align-items:center;gap:6px;font-size:0.82rem;font-weight:600;color:#374151;margin-bottom:0.5rem">'
-    + '<i class="fas fa-file-pdf" style="color:#dc2626"></i>Supporting Documents'
-    + '<span style="font-weight:400;color:#9ca3af;font-size:0.72rem;margin-left:4px">— Optional. AI will read these during generation.</span></label>'
+    + '<i class="fas fa-file-pdf" style="color:#dc2626"></i>' + t('create_rfp_docs') + ''
+    + '<span style="font-weight:400;color:#9ca3af;font-size:0.72rem;margin-left:4px">' + t('create_rfp_docs_sub') + '</span></label>'
     + buildDocUploadSlot('doc0', 'Conceptual Solution Architecture', 'fa-sitemap', '#FFDB00')
     + buildDocUploadSlot('doc1', 'Business Requirements Document', 'fa-clipboard-list', '#020D1C')
     + '</div>'
 
     // Action buttons
     + '<div style="display:flex;gap:0.5rem">'
-    + '<button class="btn-primary" id="createRfpBtn" style="flex:1" onclick="createRfp()"><i class="fas fa-rocket"></i>Create RFP</button>'
+    + '<button class="btn-primary" id="createRfpBtn" style="flex:1" onclick="createRfp()"><i class="fas fa-rocket"></i>' + t('create_rfp_btn') + '</button>'
     + '<button class="btn-ghost" onclick="closeModal()">Cancel</button>'
     + '</div>'
   );
@@ -7619,7 +8088,7 @@ function buildDocUploadSlot(slotId, docLabel, icon, color) {
     + '<i class="fas ' + icon + '" style="color:' + color + ';font-size:0.82rem"></i></div>'
     + '<div style="flex:1;min-width:0">'
     + '<div style="font-size:0.78rem;font-weight:600;color:#374151">' + docLabel + '</div>'
-    + '<div id="slot-label-' + slotId + '" style="font-size:0.7rem;color:#9ca3af">Click to upload PDF (optional)</div>'
+    + '<div id="slot-label-' + slotId + '" style="font-size:0.7rem;color:#9ca3af">' + t('create_rfp_upload_hint') + '</div>'
     + '</div>'
     + '<i class="fas fa-cloud-upload-alt" id="slot-icon-' + slotId + '" style="color:#d1d5db;font-size:1rem"></i>'
     + '</div>'
