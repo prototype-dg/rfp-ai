@@ -2677,17 +2677,37 @@ function setLoading(el, loading, text) {
 }
 
 async function apiCall(method, path, data) {
-  try {
-    const opts = { method: method, headers: { 'Content-Type': 'application/json' } };
-    if (data !== undefined) opts.body = JSON.stringify(data);
-    const r = await fetch(API + path, opts);
-    const json = await r.json();
-    if (!r.ok) throw new Error(json.error || json.message || 'Request failed (' + r.status + ')');
-    return json;
-  } catch(e) {
-    showToast(e.message, 'error');
-    throw e;
+  // Retry only safe read-only methods on transient network failures (cold starts, timeouts)
+  var isIdempotent = (method === 'GET' || method === 'HEAD');
+  var maxAttempts = isIdempotent ? 3 : 1;
+  var lastErr;
+  for (var _attempt = 0; _attempt < maxAttempts; _attempt++) {
+    if (_attempt > 0) {
+      // Exponential backoff: 300ms, 700ms
+      await new Promise(function(res){ setTimeout(res, 300 * (1 << (_attempt - 1))); });
+    }
+    try {
+      var opts = { method: method, headers: { 'Content-Type': 'application/json' } };
+      if (data !== undefined) opts.body = JSON.stringify(data);
+      var r = await fetch(API + path, opts);
+      var json = await r.json();
+      if (!r.ok) {
+        // Server returned an error status — don't retry, surface immediately
+        var serverErr = new Error(json.error || json.message || 'Request failed (' + r.status + ')');
+        serverErr._serverError = true;
+        throw serverErr;
+      }
+      return json;
+    } catch(e) {
+      lastErr = e;
+      // Server-side errors (4xx/5xx) — no retry
+      if (e._serverError) break;
+      // Network errors (Failed to fetch, timeout) — retry if attempts remain
+      if (_attempt < maxAttempts - 1) continue;
+    }
   }
+  showToast(lastErr.message, 'error');
+  throw lastErr;
 }
 
 function updateHeaderDate() {
@@ -3225,14 +3245,14 @@ pages.dashboard = async function() {
   const stageBreakdown = stats.stageBreakdown || [];
   const maxStage = stageBreakdown.reduce(function(m,s){ return Math.max(m, s.cnt); }, 1);
 
-  // KPI cards
+  // KPI cards — Total RFPs uses yellow accent (consistent with other cards)
   const kpis = [
-    { label:t('dash_total_rfps'),      value: stats.totalRfps || 0,      icon:'fa-layer-group',   color:'#020D1C', sub: (stats.activeRfps||0) + ' ' + t('dash_active_suffix'),  trend: stats.totalRfps > 0 ? 0 : null },
-    { label:t('dash_win_rate'),        value: (stats.winRate||0) + '%',  icon:'fa-trophy',        color:'#FFDB00', sub: (stats.awardedRfps||0) + ' ' + t('dash_awarded_suffix'), trend: null },
-    { label:t('dash_avg_duration'),    value: stats.avgDuration ? stats.avgDuration + 'd' : 'N/A', icon:'fa-clock', color:'#065f46', sub: t('dash_per_rfp'), trend: null },
-    { label:t('dash_vendor_pool'),     value: stats.totalVendors || 0,   icon:'fa-building',      color:'#FFDB00', sub: t('dash_reg_vendors'), trend: null },
-    { label:t('dash_proposals_lbl'),   value: stats.totalProposals || 0, icon:'fa-inbox',         color:'#dc6803', sub: t('dash_total_recv'), trend: stats.totalProposals > 0 ? null : null },
-    { label:t('dash_emails_sent'),     value: stats.totalEmails || 0,    icon:'fa-envelope',      color:'#1d4ed8', sub: t('dash_inv_replies'), trend: null },
+    { label:t('dash_total_rfps'),      value: stats.totalRfps || 0,      icon:'fa-layer-group',   color:'#FFDB00', bg:'#020D1C', sub: (stats.activeRfps||0) + ' ' + t('dash_active_suffix'),  trend: stats.totalRfps > 0 ? 0 : null },
+    { label:t('dash_win_rate'),        value: (stats.winRate||0) + '%',  icon:'fa-trophy',        color:'#FFDB00', bg:null,     sub: (stats.awardedRfps||0) + ' ' + t('dash_awarded_suffix'), trend: null },
+    { label:t('dash_avg_duration'),    value: stats.avgDuration ? stats.avgDuration + 'd' : 'N/A', icon:'fa-clock', color:'#065f46', bg:null, sub: t('dash_per_rfp'), trend: null },
+    { label:t('dash_vendor_pool'),     value: stats.totalVendors || 0,   icon:'fa-building',      color:'#FFDB00', bg:null,     sub: t('dash_reg_vendors'), trend: null },
+    { label:t('dash_proposals_lbl'),   value: stats.totalProposals || 0, icon:'fa-inbox',         color:'#dc6803', bg:null,     sub: t('dash_total_recv'), trend: stats.totalProposals > 0 ? null : null },
+    { label:t('dash_emails_sent'),     value: stats.totalEmails || 0,    icon:'fa-envelope',      color:'#1d4ed8', bg:null,     sub: t('dash_inv_replies'), trend: null },
   ];
   // 2.1 — KPI trend indicators (compare to previous period via stats.prev if available)
   let kpiHtml = '';
@@ -3243,25 +3263,40 @@ pages.dashboard = async function() {
       trendHtml = '<span style="font-size:0.7rem;font-weight:600;color:' + (up ? '#059669' : '#dc2626') + ';background:' + (up ? '#d1fae5' : '#fee2e2') + ';border-radius:4px;padding:1px 5px;margin-left:4px">'
         + (up ? '↑' : '↓') + ' ' + Math.abs(k.trend) + '%</span>';
     }
-    kpiHtml += '<div class="stat-card" style="cursor:default">'
+    var iconBg   = k.bg ? k.bg : (k.color + '18');
+    var iconClr  = k.bg ? k.color : k.color;
+    var valueClr = k.bg ? '#020D1C' : k.color;
+    kpiHtml += '<div class="stat-card" style="cursor:default' + (k.bg ? ';border-top:3px solid ' + k.color : '') + '">'
       + '<div style="display:flex;align-items:flex-start;justify-content:space-between">'
-      + '<div style="width:40px;height:40px;border-radius:10px;background:' + k.color + '18;display:flex;align-items:center;justify-content:center">'
-      + '<i class="fas ' + k.icon + '" style="color:' + k.color + ';font-size:1rem"></i></div>'
-      + '<div style="text-align:right"><div class="stat-value" style="color:' + k.color + '">' + k.value + '</div>' + trendHtml + '</div>'
+      + '<div style="width:40px;height:40px;border-radius:10px;background:' + iconBg + ';display:flex;align-items:center;justify-content:center">'
+      + '<i class="fas ' + k.icon + '" style="color:' + iconClr + ';font-size:1rem"></i></div>'
+      + '<div style="text-align:right"><div class="stat-value" style="color:' + valueClr + '">' + k.value + '</div>' + trendHtml + '</div>'
       + '</div>'
       + '<div class="stat-label">' + k.label + '</div>'
       + '<div style="font-size:0.72rem;color:#9ca3af;margin-top:2px">' + k.sub + '</div>'
       + '</div>';
   });
 
-  // Build clickable stage bars (2.3)
-  var stageBarClickable = '';
-  if (stageBreakdown.length > 0) {
-    stageBreakdown.forEach(function(s) {
-      var h = Math.max(8, Math.round((s.cnt / maxStage) * 50));
-      stageBarClickable += '<div style="display:flex;flex-direction:column;align-items:center;gap:4px;flex:1;cursor:pointer" title="' + stageLabelMap(s.stage) + ': ' + s.cnt + '" onclick="navigateTo(\x27rfps\x27,{filterStage:\x27' + s.stage + '\x27})"><div style="font-size:0.7rem;font-weight:700;color:#374151">' + s.cnt + '</div><div class="mini-bar-item" style="height:' + h + 'px" onmouseover="this.style.opacity=\x270.65\x27" onmouseout="this.style.opacity=\x271\x27"></div><div style="font-size:0.65rem;color:#9ca3af;text-align:center">' + stageLabelMap(s.stage) + '</div></div>';
-    });
-  } else { stageBarClickable = '<div style="color:#9ca3af;font-size:0.85rem;padding:1rem">' + t('dash_no_rfp_data') + '</div>'; }
+  // Stage breakdown — donut chart + legend (replaces mini-bar flexbox)
+  var stageChartData = stageBreakdown.length > 0 ? stageBreakdown : [];
+  var stageChartHtml = stageBreakdown.length > 0
+    ? '<div style="display:flex;align-items:center;gap:1rem;height:160px">'
+      + '<div style="flex:0 0 160px;height:160px;position:relative"><canvas id="stageDonutChart" width="160" height="160"></canvas></div>'
+      + '<div style="flex:1;display:flex;flex-direction:column;gap:6px;overflow:hidden">'
+      + stageBreakdown.map(function(s,i){
+          var clrs = ['#FFDB00','#1d4ed8','#065f46','#dc6803','#7c3aed','#0891b2'];
+          var clr = clrs[i % clrs.length];
+          var pct = Math.round((s.cnt / Math.max(stats.totalRfps,1)) * 100);
+          return '<div style="display:flex;align-items:center;gap:8px;cursor:pointer" onclick="navigateTo(\'rfps\',{filterStage:\'' + s.stage + '\'})">'
+            + '<div style="width:10px;height:10px;border-radius:2px;background:' + clr + ';flex-shrink:0"></div>'
+            + '<div style="font-size:0.75rem;color:#374151;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + stageLabelMap(s.stage) + '</div>'
+            + '<div style="font-size:0.75rem;font-weight:700;color:#020D1C;flex-shrink:0">' + s.cnt + '</div>'
+            + '<div style="font-size:0.7rem;color:#9ca3af;flex-shrink:0;width:32px;text-align:right">' + pct + '%</div>'
+            + '</div>';
+        }).join('')
+      + '</div>'
+      + '</div>'
+    : '<div style="color:#9ca3af;font-size:0.85rem;padding:1rem;text-align:center"><i class="fas fa-chart-pie" style="font-size:2rem;display:block;margin-bottom:0.5rem;color:#e5e7eb"></i>' + t('dash_no_rfp_data') + '</div>';
 
   // Contextual action cards (2.2)
   var contextCards = '';
@@ -3280,8 +3315,8 @@ pages.dashboard = async function() {
     // Row 2: clickable stage bars + pipeline actions
     + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1.25rem">'
     + '<div class="card" style="padding:1.25rem">'
-    + '<h3 style="font-weight:700;color:#1f2937;font-size:0.9rem;margin:0 0 0.5rem"><i class="fas fa-chart-bar cpc-gold" style="margin-right:0.5rem"></i>' + t('dash_stage_breakdown') + ' <span style="font-size:0.7rem;color:#9ca3af;font-weight:400">(click to filter)</span></h3>'
-    + '<div class="mini-bar" style="align-items:flex-end;gap:8px">' + stageBarClickable + '</div>'
+    + '<h3 style="font-weight:700;color:#1f2937;font-size:0.9rem;margin:0 0 0.75rem"><i class="fas fa-chart-pie" style="color:var(--cpc-gold);margin-right:0.5rem"></i>' + t('dash_stage_breakdown') + ' <span style="font-size:0.7rem;color:#9ca3af;font-weight:400">(click to filter)</span></h3>'
+    + stageChartHtml
     + '</div>'
     + '<div class="card" style="padding:1.25rem">'
     + '<h3 style="font-weight:700;color:#1f2937;font-size:0.9rem;margin:0 0 0.75rem"><i class="fas fa-bolt cpc-gold" style="margin-right:0.5rem"></i>Pipeline Actions</h3>'
@@ -3294,7 +3329,54 @@ pages.dashboard = async function() {
     + '</div></div>'
     + '</div>'
     + '</div>'
-  );};
+  );
+
+  // Draw donut chart after DOM is ready
+  if (stageBreakdown.length > 0 && typeof Chart !== 'undefined') {
+    var stageCanvas = document.getElementById('stageDonutChart');
+    if (stageCanvas) {
+      // Destroy previous instance if navigating back to dashboard
+      if (stageCanvas._chartInstance) { stageCanvas._chartInstance.destroy(); }
+      var stageColors = ['#FFDB00','#1d4ed8','#065f46','#dc6803','#7c3aed','#0891b2'];
+      stageCanvas._chartInstance = new Chart(stageCanvas, {
+        type: 'doughnut',
+        data: {
+          labels: stageBreakdown.map(function(s){ return stageLabelMap(s.stage); }),
+          datasets: [{
+            data: stageBreakdown.map(function(s){ return s.cnt; }),
+            backgroundColor: stageBreakdown.map(function(s,i){ return stageColors[i % stageColors.length]; }),
+            borderWidth: 2,
+            borderColor: '#ffffff',
+            hoverOffset: 4
+          }]
+        },
+        options: {
+          responsive: false,
+          cutout: '68%',
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: function(ctx) {
+                  var total = ctx.dataset.data.reduce(function(a,b){ return a+b; }, 0);
+                  var pct = Math.round((ctx.raw / total) * 100);
+                  return ' ' + ctx.raw + ' (' + pct + '%)';
+                }
+              }
+            }
+          },
+          onClick: function(evt, elements) {
+            if (elements.length > 0) {
+              var idx = elements[0].index;
+              var stage = stageBreakdown[idx] ? stageBreakdown[idx].stage : null;
+              if (stage) navigateTo('rfps', { filterStage: stage });
+            }
+          }
+        }
+      });
+    }
+  }
+};
 
 // ============================================================
 // PAGE: ALL RFPs

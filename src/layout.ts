@@ -16,6 +16,7 @@ export function getLayout(): string {
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"><\/script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"><\/script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"><\/script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"><\/script>
   <link href="/static/style.css" rel="stylesheet">
   <style>
     /* ── Brand asset data URIs injected at build time ── */
@@ -128,11 +129,11 @@ export function getLayout(): string {
 
     /* Sidebar brand — full logo PNG (icon + wordmark) */
     .sidebar-brand {
-      padding: 20px 20px 16px;
+      padding: 18px 16px 14px;
       border-bottom: 1px solid rgba(255,255,255,0.08);
       display: flex;
       flex-direction: column;
-      gap: 10px;
+      gap: 6px;
     }
     /* Full logo: icon + "ANDERSEN" wordmark in one image */
     .sidebar-logo-full {
@@ -150,12 +151,12 @@ export function getLayout(): string {
       /* Yellow glyph + white text renders natively on dark navy bg */
     }
     .sidebar-wordmark .wm-product {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 9px;
-      font-weight: 400;
-      letter-spacing: 0.18em;
-      text-transform: uppercase;
-      color: rgba(255,219,0,0.75);
+      font-family: 'Roboto', sans-serif;
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      text-transform: none;
+      color: rgba(255,255,255,0.90);
       margin-top: 0;
     }
     /* Legacy emblem class — hidden, replaced by sidebar-logo-full */
