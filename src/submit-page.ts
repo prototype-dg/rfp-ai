@@ -47,61 +47,58 @@ export function getSubmitPage(rfpId: string, participantCode: string): string {
 
     body {
       font-family: var(--font-body);
-      background: #F4F4F4;
+      /* Light wave-line texture from Andersen brand assets */
+      background: #EFEFEF url('/static/andersen-bg-light.png') center top / cover fixed;
       min-height: 100vh;
       color: var(--cpc-ink);
       -webkit-font-smoothing: antialiased;
     }
 
-    /* ── Header ── */
+    /* ── Header — dark bg-dark texture + navy overlay ── */
     .header {
-      background: var(--a-navy);
+      background: var(--a-navy) url('/static/andersen-bg-dark.png') center center / cover no-repeat;
       border-bottom: 4px solid var(--a-yellow);
       padding: 0;
+      position: relative;
+    }
+    .header::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: rgba(2,13,28,0.68);
+      pointer-events: none;
     }
     .header-inner {
+      position: relative;
+      z-index: 1;
       max-width: 860px;
       margin: 0 auto;
-      padding: 20px 32px;
+      padding: 22px 32px;
       display: flex;
       align-items: center;
-      gap: 20px;
+      gap: 24px;
     }
-    .header-emblem {
-      width: 60px;
-      height: 60px;
-      flex-shrink: 0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-    .header-emblem img {
-      width: 100%;
-      height: 100%;
+    /* Full logo PNG (icon glyph + ANDERSEN wordmark) */
+    .header-logo-full {
+      display: block;
+      height: 44px;
+      width: auto;
       object-fit: contain;
+      flex-shrink: 0;
     }
     .header-divider {
       width: 1px;
-      height: 40px;
-      background: var(--cpc-line);
+      height: 44px;
+      background: rgba(255,255,255,0.18);
       flex-shrink: 0;
     }
     .header-text {}
-    .header-text h1 {
-      font-family: var(--font-display);
-      font-size: 1.45rem;
-      font-weight: 600;
-      color: var(--cpc-ink);
-      letter-spacing: 0.01em;
-      line-height: 1.2;
-    }
     .header-text .sub {
       font-family: var(--font-mono);
       font-size: 0.65rem;
-      color: var(--cpc-gold-deep);
-      letter-spacing: 0.14em;
+      color: rgba(255,219,0,0.85);
+      letter-spacing: 0.16em;
       text-transform: uppercase;
-      margin-top: 5px;
     }
     .header-badge {
       margin-left: auto;
@@ -113,7 +110,7 @@ export function getSubmitPage(rfpId: string, participantCode: string): string {
     .header-badge .secure-label {
       font-family: var(--font-mono);
       font-size: 0.6rem;
-      color: var(--cpc-gold-deep);
+      color: rgba(255,219,0,0.85);
       letter-spacing: 0.12em;
       text-transform: uppercase;
       display: flex;
@@ -124,26 +121,14 @@ export function getSubmitPage(rfpId: string, participantCode: string): string {
     .header-badge .location-label {
       font-family: var(--font-mono);
       font-size: 0.6rem;
-      color: var(--cpc-ink-muted);
+      color: rgba(255,255,255,0.45);
       letter-spacing: 0.1em;
     }
 
-    /* ── Pattern strip under header ── */
+    /* ── Pattern strip under header — thin yellow accent ── */
     .header-pattern {
-      height: 32px;
-      background: var(--cpc-gold-tint);
-      border-bottom: 1px solid var(--cpc-line);
-      overflow: hidden;
-      position: relative;
-    }
-    .header-pattern::after {
-      content: '';
-      position: absolute;
-      inset: 0;
-      background: linear-gradient(135deg, var(--a-navy) 0%, #0a1f3d 100%);
-      background-repeat: repeat-x;
-      background-size: auto 100%;
-      opacity: 0.25;
+      height: 0;
+      display: none;
     }
 
     /* ── Page layout ── */
@@ -718,12 +703,10 @@ export function getSubmitPage(rfpId: string, participantCode: string): string {
 <!-- ── Header ── -->
 <header class="header">
   <div class="header-inner">
-    <div class="header-emblem">
-      <img src="/static/andersen-logo.svg" alt="Andersen" style="height:40px;width:auto;"/>
-    </div>
+    <!-- Full brand logo: yellow glyph + ANDERSEN wordmark in one PNG -->
+    <img src="/static/andersen-logo-full.png" alt="Andersen" class="header-logo-full"/>
     <div class="header-divider"></div>
     <div class="header-text">
-      <h1>Andersen</h1>
       <div class="sub">Procurement Portal &nbsp;·&nbsp; Proposal Submission</div>
     </div>
     <div class="header-badge">

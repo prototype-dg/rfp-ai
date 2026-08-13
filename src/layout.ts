@@ -81,7 +81,7 @@ export function getLayout(): string {
 
     html, body {
       height: 100%;
-      background: var(--a-pale);
+      background: #EFEFEF url('/static/andersen-bg-light.png') center center / cover fixed;
       color: var(--a-ink);
       font-family: 'Roboto', system-ui, sans-serif;
       font-weight: 400;
@@ -93,49 +93,46 @@ export function getLayout(): string {
     /* ── LAYOUT SHELL ── */
     .app-shell { display: flex; height: 100vh; overflow: hidden; }
 
-    /* ── SIDEBAR — deep navy background (Andersen brand) ── */
+    /* ── SIDEBAR — deep navy background + brand texture ── */
     .cpc-sidebar {
       width: 248px;
       flex-shrink: 0;
-      background: var(--a-navy);
+      background: var(--a-navy) url('/static/andersen-bg-dark.png') center center / cover no-repeat;
       border-right: 1px solid rgba(255,255,255,0.06);
       display: flex;
       flex-direction: column;
       overflow-y: auto;
       transition: transform 0.22s cubic-bezier(0.4,0,0.2,1);
       z-index: 200;
+      position: relative;
     }
+    /* Dark overlay so text stays readable over the texture */
+    .cpc-sidebar::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: rgba(2,13,28,0.72);
+      pointer-events: none;
+      z-index: 0;
+    }
+    .cpc-sidebar > * { position: relative; z-index: 1; }
 
-    /* Sidebar wordmark */
+    /* Sidebar brand — full logo PNG (icon + wordmark) */
     .sidebar-brand {
-      padding: 20px 16px 18px;
-      border-bottom: 1px solid rgba(255,255,255,0.06);
+      padding: 20px 20px 16px;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
       display: flex;
-      align-items: center;
-      gap: 12px;
+      flex-direction: column;
+      gap: 10px;
     }
-    .sidebar-emblem {
-      width: 40px;
-      height: 40px;
-      flex-shrink: 0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-    .sidebar-emblem img {
-      width: 40px;
-      height: auto;
+    /* Full logo: icon + "ANDERSEN" wordmark in one image */
+    .sidebar-logo-full {
+      display: block;
+      height: 36px;
+      width: auto;
+      max-width: 160px;
       object-fit: contain;
-      filter: brightness(0) invert(1);
-    }
-    .sidebar-wordmark {}
-    .sidebar-wordmark .wm-org {
-      font-family: 'Roboto', sans-serif;
-      font-weight: 700;
-      font-size: 15px;
-      line-height: 1.2;
-      color: #FFFFFF;
-      letter-spacing: 0em;
+      /* PNG has yellow icon + white text on transparent → renders correctly on dark bg */
     }
     .sidebar-wordmark .wm-product {
       font-family: 'JetBrains Mono', monospace;
@@ -143,10 +140,12 @@ export function getLayout(): string {
       font-weight: 400;
       letter-spacing: 0.18em;
       text-transform: uppercase;
-      color: var(--a-yellow);
-      margin-top: 3px;
-      opacity: 0.9;
+      color: rgba(255,219,0,0.75);
+      margin-top: 0;
     }
+    /* Legacy emblem class — hidden, replaced by sidebar-logo-full */
+    .sidebar-emblem { display: none; }
+    .sidebar-wordmark .wm-org { display: none; }
 
     /* Nav */
     .sidebar-nav { flex: 1; padding: 12px 8px; }
@@ -234,13 +233,23 @@ export function getLayout(): string {
     }
 
     /* ── MAIN AREA ── */
-    .app-main { flex: 1; display: flex; flex-direction: column; min-height: 100vh; overflow: hidden; }
+    .app-main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+      overflow: hidden;
+      /* Light texture comes through from body bg — page cards sit on top */
+      background: transparent;
+    }
 
-    /* ── TOP HEADER ── */
+    /* ── TOP HEADER — frosted white bar over light texture ── */
     .cpc-header {
       height: 64px;
-      background: var(--cpc-paper);
-      border-bottom: 1px solid var(--a-line);
+      background: rgba(255,255,255,0.88);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      border-bottom: 1px solid rgba(224,224,224,0.8);
       padding: 0 24px;
       display: flex;
       align-items: center;
@@ -444,7 +453,8 @@ export function getLayout(): string {
     }
 
     /* ── PAGE CONTENT ── */
-    #pageContent { flex: 1; overflow-y: auto; padding: 32px; background: var(--a-pale); }
+    /* pageContent: transparent so light bg texture from body shows through */
+    #pageContent { flex: 1; overflow-y: auto; padding: 32px; background: transparent; }
 
     /* 1.1 — Breadcrumb bar */
     #breadcrumbBar {
@@ -1365,11 +1375,9 @@ export function getLayout(): string {
   <aside class="cpc-sidebar">
     <!-- Brand -->
     <div class="sidebar-brand">
-      <div class="sidebar-emblem">
-        <img src="/static/andersen-logo.svg" alt="Andersen" style="width:40px;height:auto;object-fit:contain;filter:brightness(0) invert(1);">
-      </div>
+      <!-- Full brand logo: yellow glyph + ANDERSEN wordmark in one PNG -->
+      <img src="/static/andersen-logo-full.png" alt="Andersen" class="sidebar-logo-full">
       <div class="sidebar-wordmark">
-        <div class="wm-org" data-i18n="org_name">Andersen</div>
         <div class="wm-product" data-i18n="product_name">AI RFP Management</div>
       </div>
     </div>
