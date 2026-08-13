@@ -602,7 +602,7 @@ apiRouter.post('/rfps/:id/generate', async (c) => {
       body: JSON.stringify({
         model: 'gpt-5-mini',
         messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
-        max_tokens: 30000,
+        max_tokens: 64000,
         temperature: 0.3,
         stream: true,
       }),
@@ -653,7 +653,9 @@ apiRouter.post('/rfps/:id/generate', async (c) => {
       }
 
       // Save to DB — also strip HTML and store as rfp_full_text for evaluation (no OCR needed)
-      const content = fullContent.length > 400 ? `<div class="rfp-doc">${fullContent}</div>` : ''
+      // Auto-repair any truncated HTML (LLM may stop mid-tag if it hits the token limit)
+      const repairedContent = repairTruncatedHtml(fullContent)
+      const content = repairedContent.length > 400 ? `<div class="rfp-doc">${repairedContent}</div>` : ''
       if (content) {
         const rfpFullText = fullContent
           .replace(/<[^>]+>/g, ' ')
@@ -692,6 +694,47 @@ apiRouter.post('/rfps/:id/generate', async (c) => {
     },
   })
 })
+
+/**
+ * repairTruncatedHtml — close any HTML tags left open if the LLM was cut off mid-output.
+ * Handles the most likely truncation patterns: mid-attribute, mid-tag, mid-table-row/cell.
+ * Returns the input string with proper closing tags appended.
+ */
+function repairTruncatedHtml(html: string): string {
+  if (!html) return html
+
+  let s = html
+
+  // 1. If the string ends mid-attribute (e.g. "border:1px solid</div>"), strip the broken tag.
+  //    A broken open-tag looks like: <tagname ...attributes... without closing >
+  //    We detect this by finding a < that is never closed by >
+  const lastOpenAngle = s.lastIndexOf('<')
+  const lastCloseAngle = s.lastIndexOf('>')
+  if (lastOpenAngle > lastCloseAngle) {
+    // We have a dangling open tag fragment — strip it
+    s = s.slice(0, lastOpenAngle).trimEnd()
+  }
+
+  // 2. Count open vs close tags for the structural elements we care about.
+  //    We close in reverse nesting order: td → tr → tbody/thead → table → div
+  const countOpen  = (tag: string) => (s.match(new RegExp(`<${tag}(\\s[^>]*)?>`, 'gi')) || []).length
+  const countClose = (tag: string) => (s.match(new RegExp(`</${tag}>`, 'gi')) || []).length
+
+  const openTd    = countOpen('td')    - countClose('td')
+  const openTr    = countOpen('tr')    - countClose('tr')
+  const openTbody = (countOpen('tbody') + countOpen('thead')) - (countClose('tbody') + countClose('thead'))
+  const openTable = countOpen('table') - countClose('table')
+  const openDiv   = countOpen('div')   - countClose('div')
+
+  // 3. Append the minimum closing tags needed (in correct nesting order)
+  if (openTd > 0)    s += Array(openTd).fill('</td>').join('')
+  if (openTr > 0)    s += Array(openTr).fill('</tr>').join('')
+  if (openTbody > 0) s += Array(openTbody).fill('</tbody>').join('')
+  if (openTable > 0) s += Array(openTable).fill('</table>').join('')
+  if (openDiv > 0)   s += Array(openDiv).fill('</div>').join('')
+
+  return s
+}
 
 // PDF text extraction for Cloudflare Workers (no Node.js fs/buffer APIs available)
 // Uses a streaming byte-level parser to extract raw text from PDF content streams.
@@ -3585,9 +3628,9 @@ REMINDER: Do NOT reference any document filename, BRD name, or attached file any
 
 async function generateRFPWithLLM(data: any, archDocText: string, brdDocText: string, env: any, scoringMatrixJson?: string | null): Promise<string> {
   const { systemPrompt, userPrompt } = buildRFPPrompt(data, archDocText, brdDocText, scoringMatrixJson)
-  const llmContent = await callLLM(systemPrompt, userPrompt, env, 'gpt-5-mini', 30000)
+  const llmContent = await callLLM(systemPrompt, userPrompt, env, 'gpt-5-mini', 64000)
   if (llmContent && llmContent.length > 400) {
-    return `<div class="rfp-doc">${llmContent}</div>`
+    return `<div class="rfp-doc">${repairTruncatedHtml(llmContent)}</div>`
   }
   throw new Error(`LLM returned insufficient content (${llmContent?.length || 0} chars)`)
 }
