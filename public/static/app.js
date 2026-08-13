@@ -518,7 +518,7 @@ var I18N = {
     banner_subs_closed_hd:   'Submissions Closed',
     banner_subs_preparing:   'proposal(s) are still being prepared. Evaluation will be available shortly.',
     banner_subs_unevaluated: 'proposal(s) not yet evaluated. Run AI evaluation, then award the contract.',
-    banner_subs_all_done:    t('banner_subs_all_done'),
+    banner_subs_all_done:    'All proposals evaluated. Select a winner and award the contract.',
     banner_subs_preparing_spin: 'Preparing…',
     banner_eval_ai_btn:      'Evaluate with AI',
     banner_contract_awarded_hd: 'Contract Awarded',
@@ -556,7 +556,7 @@ var I18N = {
     ph_rfp_title_eg:         'e.g. CRM Modernisation, Fraud Detection Platform, Data Warehouse...',
     // === Generate tab inline texts ===
     gen_fill_hint:           'Fill in the details and click Generate with AI to produce a professional RFP document',
-    gen_internal_only:       '' + t('gen_internal_only') + '',
+    gen_internal_only:       'Internal only — not published in the RFP document',
     // === Correspondence tab ===
     corr_no_emails_hd:       'No email correspondence yet',
     corr_no_emails_body:     'Send invitations from the Vendors tab to start vendor communication. Incoming replies will appear here automatically via procurement@andersenlab.com.',
@@ -4556,7 +4556,7 @@ rfpTabs.generate = function(rfpId, rfp) {
     + '<div class="form-group" style="margin:0">'
     + fgLabel(t('form_budget_aed'), 'rfpBudget', false)
     + '<input id="rfpBudget" placeholder="' + t('ph_budget') + '" value="' + escHtml(budgetVal) + '" oninput="' + asc + '" onchange="' + asc + '" title="Internal evaluation cap only — used to score vendor proposals commercially. This value is never published in the RFP document sent to vendors.">'
-    + '<div style="font-size:0.7rem;color:#6b7280;margin-top:3px;line-height:1.35"><i class="fas fa-lock" style="font-size:0.65rem;margin-right:3px;color:#9ca3af"></i>Internal only — not published in the RFP document</div>'
+    + '<div style="font-size:0.7rem;color:#6b7280;margin-top:3px;line-height:1.35"><i class="fas fa-lock" style="font-size:0.65rem;margin-right:3px;color:#9ca3af"></i>' + t('gen_internal_only') + '</div>'
     + '</div></div>'
 
     // Deadline
@@ -6551,7 +6551,7 @@ rfpTabs.proposals = async function(rfpId) {
           ? stageNotReady + ' ' + t('banner_subs_preparing')
           : unevaluated > 0
               ? unevaluated + ' ' + t('banner_subs_unevaluated')
-              : 'All proposals evaluated. Select a winner and award the contract.')
+              : t('banner_subs_all_done'))
       + '</span></div>'
       + (stageNotReady === proposals.length
           ? '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;font-size:0.8rem;color:#92400e"><i class="fas fa-hourglass-half fa-spin"></i>' + t('banner_subs_preparing_spin') + '</div>'
