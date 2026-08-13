@@ -4614,7 +4614,7 @@ rfpTabs.generate = function(rfpId, rfp) {
   setTimeout(function(){ restoreAutoSave(rfpId); }, 200);
 
   const previewHtml = hasContent
-    ? rfp.content
+    ? cleanRfpContent(rfp.content)
     : '<div style="text-align:center;padding:3rem 1.5rem;color:#9ca3af">'
       + '<i class="fas fa-file-alt" style="font-size:2.5rem;display:block;margin-bottom:1rem;color:#d1d5db"></i>'
       + '<p style="margin:0">Fill in the details and click <strong>Generate with AI</strong> to produce a professional RFP document</p>'
@@ -5033,6 +5033,24 @@ async function fetchLetterheadDataUri() {
   }
 }
 
+// Strip legacy CPC/Crown Prince Court markers from stored RFP HTML before display.
+// Handles old-format RFPs generated before the Andersen letterhead migration.
+function cleanRfpContent(html) {
+  if (!html) return html;
+  return html
+    // Remove old background-image letterhead references
+    .replace(/background-image\s*:\s*url\([^)]*bg_a4[^)]*\)\s*;?\s*/gi, '')
+    .replace(/background-image\s*:\s*url\([^)]*letterhead[^)]*\)\s*;?\s*/gi, '')
+    // Remove old background-size/repeat/position that went with the old letterhead
+    .replace(/min-height\s*:\s*297mm\s*;?\s*/gi, '')
+    // Remove absolute-positioned old footer divs (position:absolute + bottom:Npx/Nmm)
+    .replace(/<div[^>]*position\s*:\s*absolute[^>]*bottom\s*:\s*\d+[^>]*>[\s\S]*?<\/div>/gi, '')
+    .replace(/<div[^>]*bottom\s*:\s*\d+[^>]*position\s*:\s*absolute[^>]*>[\s\S]*?<\/div>/gi, '')
+    // Remove CPC-specific footer text nodes
+    .replace(/<div[^>]*>[^<]*Crown Prince[^<]*<\/div>/gi, '')
+    .replace(/<div[^>]*>[^<]*Confidential[^<]*Page\s+\d+[^<]*<\/div>/gi, '');
+}
+
 // Rewrite background-image URL in RFP HTML to embedded data URI so
 // html2canvas can render the letterhead without any CORS issue.
 function inlineLetterheadInHtml(html, dataUri) {
@@ -5044,7 +5062,7 @@ function inlineLetterheadInHtml(html, dataUri) {
 // Build a self-contained HTML document from RFP content, with letterhead inlined.
 async function buildRfpHtmlDoc(rfpContent) {
   var dataUri = await fetchLetterheadDataUri();
-  var inlined = inlineLetterheadInHtml(rfpContent, dataUri);
+  var inlined = inlineLetterheadInHtml(cleanRfpContent(rfpContent), dataUri);
   return '<!DOCTYPE html><html><head><meta charset="UTF-8">'
     + '<style>'
     + '* { box-sizing: border-box; margin: 0; padding: 0; }'
@@ -5077,7 +5095,7 @@ async function generateRfpPdfBlob(rfpId) {
 
   // Inline letterhead as base64 data URI — avoids any CORS issue inside the iframe.
   var dataUri = await fetchLetterheadDataUri();
-  var inlined = inlineLetterheadInHtml(rfp.content, dataUri);
+  var inlined = inlineLetterheadInHtml(cleanRfpContent(rfp.content), dataUri);
 
   // A4 at 96 dpi: 794 × 1123 px
   var PAGE_W_PX = 794;

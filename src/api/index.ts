@@ -304,60 +304,38 @@ apiRouter.get('/rfps/:id/pdf', async (c) => {
   // ── Puppeteer path ────────────────────────────────────────────────────────
   if (renderUrl && renderSecret) {
     try {
-      // Fix 1 — Fetch letterhead from R2 and encode as base64 data URI.
-      // Puppeteer headerTemplate runs in an isolated context and CANNOT load
-      // external images via URL — they always fail silently showing a broken
-      // image icon. The only reliable approach is inlining as a data URI.
-      let letterheadDataUri = ''
-      try {
-        const bucket: R2Bucket | undefined = (c.env as any).PROPOSALS_BUCKET
-        if (bucket) {
-          const lhObj = await bucket.get('letterhead/bg_a4.png')
-          if (lhObj) {
-            const lhBytes = await lhObj.arrayBuffer()
-            const lhBase64 = btoa(String.fromCharCode(...new Uint8Array(lhBytes)))
-            const lhMime = lhObj.httpMetadata?.contentType || 'image/png'
-            letterheadDataUri = `data:${lhMime};base64,${lhBase64}`
-            console.log(`[pdf-render] Letterhead fetched from R2: ${lhBytes.byteLength} bytes`)
-          } else {
-            console.warn('[pdf-render] Letterhead not found in R2 at letterhead/bg_a4.png')
-          }
-        }
-      } catch (lhErr: any) {
-        console.warn('[pdf-render] Failed to fetch letterhead from R2:', lhErr.message)
-      }
+      // Andersen letterhead is now fully inline HTML inside every LLM page div.
+      // No headerTemplate image is needed — letterhead_data_uri is intentionally empty.
+      // (The old bg_a4.png CPC letterhead has been removed from R2.)
+      const letterheadDataUri = ''
 
       // Fix 2 — Clean up LLM HTML for Puppeteer rendering.
-      // Remove: background images (letterhead moves to Puppeteer headerTemplate),
-      //         absolute-positioned LLM footer divs (Puppeteer footerTemplate handles them),
-      //         min-height:297mm (prevents extra blank space at bottom of each page div),
-      //         overflow:hidden (was clipping content at the page div boundary).
+      // Remove: background images (letterhead is now inline HTML — no headerTemplate),
+      //         min-height:297mm (prevents extra blank space at bottom of each page div).
+      // DO NOT strip overflow:hidden from page divs — they need it to clip content
+      //   that would otherwise bleed over the absolute-positioned navy footer.
       // DO NOT strip page-break-after:always — the LLM inline styles already have it,
-      // and it is the only thing that forces one PDF page per LLM page div. Stripping it
-      // would collapse all pages into one continuous flow with arbitrary split points.
+      //   and it is the only thing that forces one PDF page per LLM page div.
       const continuous = content
-        // Remove background-image declarations (letterhead moves to headerTemplate)
+        // Remove background-image declarations (no longer needed — letterhead is inline HTML)
         .replace(/background-image\s*:\s*url\([^)]*\)\s*;?\s*/gi, '')
         .replace(/background-size\s*:[^;]+;\s*/gi, '')
         .replace(/background-repeat\s*:[^;]+;\s*/gi, '')
         .replace(/background-position\s*:[^;]+;\s*/gi, '')
         // Remove fixed min-height — prevents blank space at bottom of short pages
         .replace(/min-height\s*:\s*297mm\s*;?\s*/gi, '')
-        // Remove overflow:hidden — was clipping content that extended past page div height
-        .replace(/overflow\s*:\s*hidden\s*;?\s*/gi, '')
-        // Fix 2b — Remove LLM absolute-positioned footer divs entirely.
-        // LLM produces: <div style="position:absolute; bottom:10mm; ...">Andersen...</div>
-        // In print/PDF flow position:absolute is ignored → text renders mid-content.
-        // Two patterns needed because LLM may order CSS properties either way.
-        .replace(/<div[^>]*position\s*:\s*absolute[^>]*bottom\s*:\s*\d+mm[^>]*>[\s\S]*?<\/div>/gi, '')
-        .replace(/<div[^>]*bottom\s*:\s*\d+mm[^>]*position\s*:\s*absolute[^>]*>[\s\S]*?<\/div>/gi, '')
+        // Fix 2b — Remove LLM-generated CPC/old-letterhead footer text divs.
+        // These appear as absolute-positioned bottom divs (old pattern) or plain footer divs.
+        // Pattern 1: position:absolute with bottom:Nmm
+        .replace(/<div[^>]*position\s*:\s*absolute[^>]*bottom\s*:\s*\d+[^>]*>[\s\S]*?<\/div>/gi, '')
+        .replace(/<div[^>]*bottom\s*:\s*\d+[^>]*position\s*:\s*absolute[^>]*>[\s\S]*?<\/div>/gi, '')
+        // Pattern 2: any div whose text contains CPC/Crown Prince Court footer markers
+        .replace(/<div[^>]*>[^<]*Crown Prince[^<]*<\/div>/gi, '')
+        .replace(/<div[^>]*>[^<]*Confidential[^<]*Page \d+[^<]*<\/div>/gi, '')
 
-      // Fix 3 — Remove the LLM inner content wrapper's inline padding-top:72mm.
-      // The LLM adds padding-top:72mm to clear the letterhead background image.
-      // In Puppeteer, margin.top already reserves 72mm for the headerTemplate, so
-      // keeping this padding doubles the gap (144mm blank at top of every page).
-      // CSS !important cannot beat inline styles — must strip with regex.
-      // Handle both double-quoted and single-quoted style attributes.
+      // Fix 3 — Remove legacy padding-top:72mm / padding-bottom:28mm from content wrappers.
+      // Old LLM prompt used a background-image letterhead requiring 72mm top padding.
+      // New Andersen letterhead is fully inline HTML — no padding compensation needed.
       const cleanHtml = continuous
         .replace(/(style=["'][^"'>]*?)padding-top\s*:\s*72mm\s*;?\s*/gi, '$1')
         .replace(/(style=["'][^"'>]*?)padding-bottom\s*:\s*28mm\s*;?\s*/gi, '$1')
@@ -420,6 +398,17 @@ apiRouter.get('/rfps/:id/pdf', async (c) => {
   }
 
   // ── Legacy fallback: print-ready HTML page (browser prints to PDF) ────────
+  // Clean legacy CPC markers from stored content before serving to browser
+  const cleanContent = content
+    .replace(/background-image\s*:\s*url\([^)]*\)\s*;?\s*/gi, '')
+    .replace(/background-size\s*:[^;]+;\s*/gi, '')
+    .replace(/background-repeat\s*:[^;]+;\s*/gi, '')
+    .replace(/background-position\s*:[^;]+;\s*/gi, '')
+    .replace(/min-height\s*:\s*297mm\s*;?\s*/gi, '')
+    .replace(/<div[^>]*position\s*:\s*absolute[^>]*bottom\s*:\s*\d+[^>]*>[\s\S]*?<\/div>/gi, '')
+    .replace(/<div[^>]*bottom\s*:\s*\d+[^>]*position\s*:\s*absolute[^>]*>[\s\S]*?<\/div>/gi, '')
+    .replace(/<div[^>]*>[^<]*Crown Prince[^<]*<\/div>/gi, '')
+    .replace(/<div[^>]*>[^<]*Confidential[^<]*Page \d+[^<]*<\/div>/gi, '')
   const printHtml = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -451,7 +440,7 @@ apiRouter.get('/rfps/:id/pdf', async (c) => {
   </div>
 </div>
 <div class="no-print" style="height:52px"></div>
-${content}
+${cleanContent}
 <script>window.addEventListener('load', function() { setTimeout(function() { window.print(); }, 800); });</script>
 </body>
 </html>`
@@ -3370,7 +3359,7 @@ LETTERHEAD STRUCTURE — reproduce EXACTLY inside every page div (all inline sty
 </div>
 
 <!-- 4. CONTENT AREA (place all page content here) -->
-<div style="padding:24px 56px 20px; flex:1; position:relative; overflow:hidden; height:calc(1123px - 48px - 18px - 84px - 68px - 100px);">
+<div style="padding:20px 56px 88px; position:relative; overflow:hidden; height:997px; box-sizing:border-box;">
   [PAGE CONTENT GOES HERE]
 </div>
 
