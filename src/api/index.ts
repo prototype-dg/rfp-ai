@@ -1531,7 +1531,7 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
                 },
                 {
                   role: 'user',
-                  content: `Subject: ${subject}\n\nVendor reply:\n${cleanBody.slice(0, 800)}`,
+                  content: `Subject: ${subject}\n\nVendor reply:\n${cleanBody.slice(0, 4000)}`,
                 },
               ],
             }),
