@@ -1032,7 +1032,11 @@ Write the complete HTML for section "${sectionSpec?.heading || sectionKey}" now.
       //   splitTable()       — descends <table>, splits at <tr> boundaries
       //   splitList()        — descends <ol>/<ul>, splits at <li> boundaries
       //   splitDivChildren() — descends <div>/<section>, splits at child boundaries
-      const PROSE_BUDGET = 2400      // plain-text-equiv chars per page for prose content
+      // A1 FIX: PROSE_BUDGET raised 2400→2800.
+      // Scope subsections are ~800-1100w each. At 2400, two sections (800+900=1700w) flush
+      // leaving a 71%-fill page. At 2800, three sections (800+900+900=2600w) can pack
+      // before flushing, raising fill to 93%. Budget still safely below 929px content area.
+      const PROSE_BUDGET = 2800      // plain-text-equiv chars per page for prose content
       const TABLE_BUDGET = 2400      // budget for table (calibrated: 4 rows × ~502w/row + thead)
       // List budget raised from 2400 → 3200 so that 3 heavy items (~800w each = 2400w)
       // don't flush the last item onto its own page. At 3200 a trailing 800w item
@@ -1047,6 +1051,11 @@ Write the complete HTML for section "${sectionSpec?.heading || sectionKey}" now.
       //   <li>   ~22px rendered (line + margin)      → +18 overhead (text already counted)
       //   <p>    ~14px extra margin-bottom           → +14 overhead
       //   <div section heading style> ~34px          → +50 overhead
+      // A2 FIX: <p> tags that are direct children of <li> were being double-counted.
+      // A <li><p>text</p></li> got +18 (li overhead) + +14 (p overhead) = +32 extra,
+      // but the rendered height of an li wrapping a p is the same as a plain li —
+      // the p margin collapses inside the li. Subtract the p overhead for every <p>
+      // that is immediately preceded by an <li> open tag (i.e. <li...><p...>).
       function estimateWeight(html: string): number {
         const text = html.replace(/<[^>]+>/g, '').replace(/&[a-zA-Z#0-9]+;/g, ' ').replace(/\s+/g, ' ').trim()
         const base  = text.length
@@ -1054,7 +1063,9 @@ Write the complete HTML for section "${sectionSpec?.heading || sectionKey}" now.
         const heads = (html.match(/<h[1-4][\s>]/gi) || []).length
         const lis   = (html.match(/<li[\s>]/gi)     || []).length
         const ps    = (html.match(/<p[\s>]/gi)      || []).length
-        return base + trs * 55 + heads * 70 + lis * 18 + ps * 14
+        // <p> tags immediately inside <li> — their margin collapses, don't double-count
+        const liPs  = (html.match(/<li[^>]*>\s*<p[\s>]/gi) || []).length
+        return base + trs * 55 + heads * 70 + lis * 18 + ps * 14 - liPs * 14
       }
 
       // ── Low-level HTML element tokeniser ─────────────────────────────────
@@ -1284,7 +1295,19 @@ Write the complete HTML for section "${sectionSpec?.heading || sectionKey}" now.
         let chunk = '', weight = 0
         const SPARSE_THRESHOLD = PROSE_BUDGET * 0.30   // 720w — below this, don't flush early
 
-        function flush() { if (chunk.trim()) { pages.push(chunk); chunk = ''; weight = 0 } }
+        function flush() {
+          if (chunk.trim()) {
+            // A3 FIX: strip trailing orphan closing tags from the chunk tail.
+            // stripOrphanClosingTags() only cleaned the HEAD of the input string.
+            // Stray </div></div> at the END of a chunk (from unbalanced LLM HTML,
+            // e.g. page 18: "…text…</div></div>" and page 39: "…text…</div>")
+            // produce tiny orphan pages. Strip them before pushing.
+            const cleaned = chunk.replace(/^(\s*<\/(?:div|section|ul|ol|li|p|span)\s*>)+/gi, '')
+                                  .replace(/(\s*<\/(?:div|section)\s*>)+\s*$/gi, '')
+            if (cleaned.trim()) pages.push(cleaned)
+            chunk = ''; weight = 0
+          }
+        }
 
         function addChunk(seg: string, budget: number) {
           const w = estimateWeight(seg)
@@ -1316,9 +1339,17 @@ Write the complete HTML for section "${sectionSpec?.heading || sectionKey}" now.
             for (const lc of splitList(seg)) {
               addChunk(lc, LIST_BUDGET)
             }
-          } else if ((tag === 'div' || tag === 'section') && estimateWeight(seg) > PROSE_BUDGET) {
-            // Heavy div (scope workstream container etc.) — descend and split children
-            // splitDivChildren now handles <div><table> and <div><ul> correctly (BUG 2 fix)
+          } else if ((tag === 'div' || tag === 'section') && (
+              estimateWeight(seg) > PROSE_BUDGET ||
+              // A4 FIX: also descend divs that contain <ul>/<ol> children even when total
+              // weight is below PROSE_BUDGET. Without this, a div like:
+              //   <div>heading + intro-p + <ul>6 items</ul> + <ul>6 items</ul></div>
+              // sits just below the threshold and gets treated as an atomic blob —
+              // the two lists never reach splitList and overflow the page.
+              /<(?:ul|ol)[\s>]/i.test(seg)
+            )) {
+            // Descend and split at child boundaries
+            // splitDivChildren handles <div><table> and <div><ul> correctly
             for (const dc of splitDivChildren(seg)) {
               const dcTag = (dc.match(/^<([a-zA-Z][a-zA-Z0-9]*)/) || [])[1]?.toLowerCase() || ''
               if (dcTag === 'table') {
