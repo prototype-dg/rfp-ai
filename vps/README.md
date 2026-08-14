@@ -1,118 +1,183 @@
-# VPS PDF Render Sidecar
+# VPS Sidecar Services
 
-Puppeteer-based PDF generation service running on `api.cpc-rfp.website`.
+Two services run on `api.cpc-rfp.website` (vm15981785), managed by **systemd**.
+
+---
 
 ## Architecture
 
 ```
-Browser / Cloudflare Worker
+Cloudflare Worker  (api/index.ts)
         │
-        │  POST /pdf/render-pdf
-        │  { html, page_width, page_height }
-        ▼
-  nginx (api.cpc-rfp.website:443)
-        │ proxy_pass  strips /pdf prefix
-        ▼
-  Node.js / Express (127.0.0.1:8001)   ← this service
-        │  page.pdf({ width, height, displayHeaderFooter:false, margin:0 })
-        ▼
-  Puppeteer / Chromium
-        │
-        ▼
-  PDF bytes → response
+        ├─ POST /pdf/render-pdf  ──────────────────────────────────────┐
+        │                                                               │
+        └─ POST /                (OCR / proposal extraction)           │
+               ↓                                                        │
+        nginx  (api.cpc-rfp.website:443)                               │
+               │                                                        │
+               ├─ /pdf/*  → 127.0.0.1:8001  (pdf-render — Node.js)  ◄─┘
+               │
+               └─ /*      → 127.0.0.1:8000  (pdf-sidecar — Python/FastAPI)
 ```
 
-## File Layout (on VPS)
+---
 
-```
-/opt/pdf-service/
-├── server.js            ← main service (copy of vps/server.js in this repo)
-├── package.json         ← deps: express + puppeteer
-├── ecosystem.config.cjs ← PM2 config
-└── node_modules/
-```
+## Services
 
-## Version History
-
-| Version | Change |
-|---------|--------|
-| v1 | Initial — `format:'A4'`, no auth |
-| v2 | Add `letterhead_data_uri` support, Bearer auth. Still `format:'A4'` + `displayHeaderFooter:true` + 72mm top margin |
-| v3 | **Current** — `width/height` from request body (default 794×1123px), `displayHeaderFooter:false`, zero margins. 1 LLM page div = 1 PDF page. Inline Andersen header/footer design. |
-
-## Key Config
+### 1. `pdf-render` — Puppeteer PDF generation
 
 | Item | Value |
 |------|-------|
-| Listen address | `127.0.0.1:8001` |
-| Nginx public path | `https://api.cpc-rfp.website/pdf/` |
-| PM2 process name | `pdf-service` |
-| Auth | `Authorization: Bearer $PDF_SERVICE_SECRET` |
-| Version endpoint | `GET /pdf/` → `{"version":"3"}` |
+| Code | `vps/pdf-render/server.js` (this repo) |
+| Live path | `/opt/pdf-service/server.js` |
+| Port | `127.0.0.1:8001` |
+| Public URL | `https://api.cpc-rfp.website/pdf/` |
+| Process manager | **systemd** — `pdf-render.service` |
+| Node version | v20.20.2 |
+| Current version | **v3** |
 
-## Deployment
+**Version history:**
 
-### First-time setup (already done)
+| Ver | Change |
+|-----|--------|
+| v1 | Initial — `format:'A4'`, no auth |
+| v2 | Add `letterhead_data_uri`, Bearer auth — still `format:'A4'` + `displayHeaderFooter:true` + 72mm top margin (caused white-space-at-top bug) |
+| v3 | **Current** — `width:'794px'`, `height:'1123px'`, `displayHeaderFooter:false`, `margin:0`. Inline Andersen header/footer. 1 LLM page div = 1 PDF page. |
+
+**Deploy (update `server.js` only):**
 ```bash
-# On VPS as root/sudo user
-mkdir -p /opt/pdf-service /var/log/pdf-service
-cd /opt/pdf-service
-npm install express puppeteer   # installs Chromium automatically
-pm2 start ecosystem.config.cjs
-pm2 save && pm2 startup
+# From project root in this sandbox:
+bash vps/deploy.sh
+
+# Or manually:
+scp vps/pdf-render/server.js root@api.cpc-rfp.website:/opt/pdf-service/server.js
+ssh root@api.cpc-rfp.website "systemctl restart pdf-render.service"
 ```
 
-### Update service code (normal deploy)
+**Logs:**
 ```bash
-# From project root in this repo sandbox:
-bash vps/deploy.sh [user@api.cpc-rfp.website]
-
-# Or manually over SSH:
-scp vps/server.js user@api.cpc-rfp.website:/opt/pdf-service/server.js
-ssh user@api.cpc-rfp.website "pm2 reload pdf-service"
+ssh root@api.cpc-rfp.website "journalctl -u pdf-render.service -n 50 -f"
 ```
 
-### Verify live version
+---
+
+### 2. `pdf-sidecar` — Python/FastAPI PDF extraction (OCR)
+
+| Item | Value |
+|------|-------|
+| Code | `vps/pdf-sidecar/main.py` (this repo) |
+| Live path | `/opt/pdf-sidecar/main.py` |
+| Port | `127.0.0.1:8000` |
+| Public URL | `https://api.cpc-rfp.website/` |
+| Process manager | **systemd** — `pdf-sidecar.service` |
+| Runtime | Python 3 / uvicorn (venv at `/opt/pdf-sidecar/venv`) |
+| Current version | v5.0.0 |
+
+**Deploy (update `main.py` only):**
 ```bash
-curl https://api.cpc-rfp.website/pdf/
-# Expected: {"status":"ok","service":"pdf-render","version":"3"}
+scp vps/pdf-sidecar/main.py root@api.cpc-rfp.website:/opt/pdf-sidecar/main.py
+ssh root@api.cpc-rfp.website "systemctl restart pdf-sidecar.service"
 ```
 
-## Environment Variables
-
-| Variable | Where set | Purpose |
-|----------|-----------|---------|
-| `PDF_SERVICE_SECRET` | PM2 env / `.env` on VPS | Bearer token the Worker sends; must match `PDF_RENDER_SECRET` Cloudflare secret |
-
-Set it on the VPS without committing:
+**Deploy (after requirements.txt change):**
 ```bash
-# Option A — export before pm2 start (in /etc/environment or .bashrc)
-export PDF_SERVICE_SECRET="your-secret-here"
-pm2 restart pdf-service
-
-# Option B — pm2 env (per-process)
-pm2 set pdf-service:PDF_SERVICE_SECRET "your-secret-here"
-pm2 restart pdf-service
+scp vps/pdf-sidecar/requirements.txt root@api.cpc-rfp.website:/opt/pdf-sidecar/requirements.txt
+ssh root@api.cpc-rfp.website "
+  source /opt/pdf-sidecar/venv/bin/activate
+  pip install -r /opt/pdf-sidecar/requirements.txt
+  systemctl restart pdf-sidecar.service
+"
 ```
 
-## Logs & Monitoring
-
+**Logs:**
 ```bash
-pm2 logs pdf-service            # stream live logs
-pm2 logs pdf-service --nostream # dump recent logs
-pm2 status                      # process health
-tail -f /var/log/pdf-service/error.log
+ssh root@api.cpc-rfp.website "journalctl -u pdf-sidecar.service -n 50 -f"
 ```
+
+---
+
+## Systemd Units
+
+Reference copies in `vps/systemd/` (secrets replaced with placeholders — actual values set on VPS).
+
+| File | Live path |
+|------|-----------|
+| `systemd/pdf-render.service` | `/etc/systemd/system/pdf-render.service` |
+| `systemd/pdf-sidecar.service` | `/etc/systemd/system/pdf-sidecar.service` |
+
+**After editing a unit file on VPS:**
+```bash
+ssh root@api.cpc-rfp.website "systemctl daemon-reload && systemctl restart pdf-render.service"
+```
+
+---
 
 ## Nginx Config
 
-See `vps/nginx.conf` in this repo. The live file lives at:
+Reference copy in `vps/nginx/pdf-sidecar.conf` (live at `/etc/nginx/sites-available/pdf-sidecar`).
+
 ```
-/etc/nginx/sites-available/andersen-pdf
-/etc/nginx/sites-enabled/andersen-pdf  (symlink)
+/pdf/*  →  127.0.0.1:8001   (pdf-render, Node.js, 60s timeout)
+/*      →  127.0.0.1:8000   (pdf-sidecar, Python, 600s timeout)
 ```
 
-Reload nginx after changes:
+TLS is managed by Certbot at `/etc/letsencrypt/live/api.cpc-rfp.website/`.
+
+**After editing nginx config:**
 ```bash
-sudo nginx -t && sudo systemctl reload nginx
+ssh root@api.cpc-rfp.website "nginx -t && systemctl reload nginx"
+```
+
+---
+
+## Environment Secrets
+
+Secrets are set in the systemd unit files on the VPS — **never committed to git**.
+The repo contains placeholder values for reference only.
+
+| Secret | Unit | Used by |
+|--------|------|---------|
+| `PDF_SERVICE_SECRET` | `pdf-render.service` | Worker → pdf-render auth |
+| `PDF_SIDECAR_SECRET` | `pdf-sidecar.service` | Worker → pdf-sidecar auth |
+| `GOOGLE_VISION_API_KEY` | `pdf-sidecar.service` | Google Vision OCR |
+
+The Cloudflare Worker reads these as secrets (`PDF_RENDER_SECRET`, `PDF_RENDER_URL`).
+
+---
+
+## Sandbox SSH Access
+
+The sandbox `~/.ssh/vps_deploy_key` (ED25519) is authorized on the VPS.
+`~/.ssh/config` has a `vps-pdf` alias pointing to `root@api.cpc-rfp.website`.
+
+```bash
+# Test connection
+ssh vps-pdf "systemctl is-active pdf-render pdf-sidecar"
+
+# Quick health check
+curl https://api.cpc-rfp.website/pdf/
+# → {"status":"ok","service":"pdf-render","version":"3"}
+```
+
+---
+
+## Quick-Reference Commands
+
+```bash
+# Deploy pdf-render update (most common):
+bash vps/deploy.sh
+
+# SSH to VPS:
+ssh vps-pdf
+
+# Check all services:
+ssh vps-pdf "systemctl status pdf-render pdf-sidecar nginx"
+
+# Stream live logs:
+ssh vps-pdf "journalctl -u pdf-render.service -f"
+ssh vps-pdf "journalctl -u pdf-sidecar.service -f"
+
+# Verify public endpoints:
+curl https://api.cpc-rfp.website/pdf/
+curl https://api.cpc-rfp.website/health
 ```

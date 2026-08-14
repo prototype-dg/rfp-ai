@@ -1,47 +1,47 @@
 #!/usr/bin/env bash
-# deploy.sh — push updated VPS code from the git repo to the live server
-# Usage (run from project root):
-#   bash vps/deploy.sh [user@host]
+# vps/deploy.sh — push updated VPS code from this repo to the live server
 #
-# Default host: deploy@api.cpc-rfp.website
-# The script:
-#   1. SCPs server.js and package.json to /opt/pdf-service/ on the VPS
-#   2. npm-installs if package.json changed
-#   3. pm2 reloads the service (zero-downtime)
-#   4. Verifies the health endpoint reports version 3
+# Usage (run from project root):
+#   bash vps/deploy.sh                        # uses default host
+#   bash vps/deploy.sh root@api.cpc-rfp.website
+#
+# What it does:
+#   1. Copies vps/pdf-render/server.js to /opt/pdf-service/server.js on VPS
+#   2. Restarts the pdf-render systemd service
+#   3. Verifies the health endpoint reports version 3
 
 set -euo pipefail
 
-REMOTE="${1:-deploy@api.cpc-rfp.website}"
-REMOTE_DIR="/opt/pdf-service"
+REMOTE="${1:-vps-pdf}"          # uses ~/.ssh/config Host alias by default
+PDF_RENDER_DIR="/opt/pdf-service"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-echo "▶ Deploying VPS PDF service to ${REMOTE}:${REMOTE_DIR}"
+echo "▶ Deploying pdf-render service to ${REMOTE}"
 
-# 1. Upload files
-echo "  → Copying server.js and package.json..."
-scp "${SCRIPT_DIR}/server.js"         "${REMOTE}:${REMOTE_DIR}/server.js"
-scp "${SCRIPT_DIR}/package.json"      "${REMOTE}:${REMOTE_DIR}/package.json"
-scp "${SCRIPT_DIR}/ecosystem.config.cjs" "${REMOTE}:${REMOTE_DIR}/ecosystem.config.cjs"
+# 1. Upload server.js
+echo "  → Copying server.js..."
+scp "${SCRIPT_DIR}/pdf-render/server.js" "${REMOTE}:${PDF_RENDER_DIR}/server.js"
 
-# 2. npm install (only installs if lockfile/deps changed; fast if nothing changed)
-echo "  → Running npm install..."
-ssh "${REMOTE}" "cd ${REMOTE_DIR} && npm install --production --no-audit 2>&1 | tail -3"
+# 2. Restart via systemd (the service manager on this VPS)
+echo "  → Restarting pdf-render.service..."
+ssh "${REMOTE}" "systemctl restart pdf-render.service && sleep 2 && systemctl is-active pdf-render.service"
 
-# 3. Reload via PM2 (graceful — no dropped requests)
-echo "  → Reloading PM2 process..."
-ssh "${REMOTE}" "pm2 reload pdf-service || pm2 start ${REMOTE_DIR}/ecosystem.config.cjs"
-ssh "${REMOTE}" "pm2 save"
+# 3. Verify via internal endpoint
+echo "  → Verifying service (internal)..."
+INTERNAL=$(ssh "${REMOTE}" "curl -sf http://127.0.0.1:8001/" 2>/dev/null || echo '{}')
+VERSION=$(echo "${INTERNAL}" | python3 -c "import sys,json; print(json.load(sys.stdin).get('version','?'))" 2>/dev/null || echo "parse-error")
+echo "  Internal health: ${INTERNAL}"
 
-# 4. Verify version
-echo "  → Verifying service..."
-sleep 2
-VERSION=$(curl -sf https://api.cpc-rfp.website/pdf/ | python3 -c "import sys,json; print(json.load(sys.stdin).get('version','?'))" 2>/dev/null || echo "unreachable")
-echo "  Service reports version: ${VERSION}"
+# 4. Verify via public HTTPS
+echo "  → Verifying service (public HTTPS)..."
+sleep 1
+PUBLIC=$(curl -sf https://api.cpc-rfp.website/pdf/ 2>/dev/null || echo '{}')
+echo "  Public health:   ${PUBLIC}"
 
 if [ "${VERSION}" = "3" ]; then
-  echo "✅ Deployment successful — render service is v3"
+  echo "✅ pdf-render is v3 — Puppeteer path active"
 else
-  echo "⚠️  Expected version 3, got '${VERSION}' — check VPS logs: ssh ${REMOTE} 'pm2 logs pdf-service --nostream'"
+  echo "⚠️  Expected version 3, got '${VERSION}'"
+  echo "    Check logs: ssh ${REMOTE} 'journalctl -u pdf-render.service -n 50'"
   exit 1
 fi

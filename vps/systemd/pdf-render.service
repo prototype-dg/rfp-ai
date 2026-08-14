@@ -1,0 +1,17 @@
+[Unit]
+Description=PDF Render Service - Puppeteer PDF generation
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/pdf-service
+Environment="PDF_SERVICE_SECRET=REPLACE_WITH_ACTUAL_SECRET"
+ExecStart=/usr/bin/node /opt/pdf-service/server.js
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
