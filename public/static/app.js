@@ -4652,11 +4652,9 @@ rfpTabs.generate = function(rfpId, rfp) {
   window._currentScoringMatrix = JSON.parse(JSON.stringify(scoringMatrix));
   setTimeout(function(){ restoreAutoSave(rfpId); }, 200);
 
-  // Build the preview HTML. For generated content, wrap inside a document-viewer
-  // div (grey background, centred pages, drop-shadow) so each A4 page renders as a
-  // card. The <style> here is written into the page's <head> via applyRfpPreviewStyles().
+  // Build the preview HTML. Plain-text content is shown in a read-only textarea.
   const previewHtml = hasContent
-    ? '<div class="rfp-preview-viewer">' + cleanRfpContent(rfp.content) + '</div>'
+    ? '<textarea readonly style="width:100%;height:100%;box-sizing:border-box;font-family:monospace;font-size:12px;line-height:1.6;padding:14px;border:none;background:#f9fafb;resize:none;outline:none;color:#1f2937;">' + escHtml(rfp.content) + '</textarea>'
     : '<div style="text-align:center;padding:3rem 1.5rem;color:#9ca3af">'
       + '<i class="fas fa-file-alt" style="font-size:2.5rem;display:block;margin-bottom:1rem;color:#d1d5db"></i>'
       + '<p style="margin:0">Fill in the details and click <strong>Generate with AI</strong> to produce a professional RFP document</p>'
@@ -4754,7 +4752,7 @@ rfpTabs.generate = function(rfpId, rfp) {
     + (hasContent ? '<button class="btn-ghost btn-sm" onclick="copyRfpPreview()" title="Copy all text"><i class="fas fa-copy"></i>Copy All</button>' : '')
     + '<button id="genPreviewPdfBtn" class="btn-ghost btn-sm" onclick="downloadRfpPdf(' + rfpId + ')" style="' + (hasContent ? '' : 'display:none') + '"><i class="fas fa-download"></i>PDF</button>'
     + '</div>'
-    + '<div id="rfpPreviewArea" style="padding:0;flex:1;overflow-y:auto;background:#d1d5db;min-height:0">' + previewHtml + '</div>'
+    + '<div id="rfpPreviewArea" style="padding:0;flex:1;overflow-y:auto;background:#f9fafb;min-height:0;display:flex;flex-direction:column">' + previewHtml + '</div>'
     + '</div>'
     + '</div>'
   );
@@ -4763,7 +4761,9 @@ rfpTabs.generate = function(rfpId, rfp) {
 function copyRfpPreview() {
   var area = document.getElementById('rfpPreviewArea');
   if (!area) return;
-  var text = area.innerText || area.textContent || '';
+  // If the preview is a plain-text textarea, grab its .value directly
+  var ta = area.querySelector('textarea');
+  var text = ta ? ta.value : (area.innerText || area.textContent || '');
   if (navigator.clipboard) {
     navigator.clipboard.writeText(text).then(function(){ showToast('Content copied to clipboard!', 'success'); });
   } else {
@@ -4847,7 +4847,7 @@ async function generateRfpDoc(rfpId) {
   var progressSteps = [
     { key: 'outline',    icon: 'fa-sitemap',     label: 'Phase 1 — Building document outline and locking shared vocabulary…' },
     { key: 'sections',   icon: 'fa-layer-group',  label: 'Phase 2 — Generating all 8 sections in parallel…' },
-    { key: 'assembling', icon: 'fa-puzzle-piece', label: 'Phase 3 — Assembling and repairing document…' },
+    { key: 'assembling', icon: 'fa-puzzle-piece', label: 'Phase 3 — Assembling plain text document…' },
     { key: 'fallback',   icon: 'fa-sync',         label: 'Fallback — Using sequential generation…' },
   ];
   var currentStep = 0;
@@ -4976,7 +4976,8 @@ async function generateRfpDoc(rfpId) {
         + '<span><strong>Generation complete</strong> &mdash; total time: <strong>' + timeLabel + '</strong></span>'
         + '</div>';
       previewEl.innerHTML = result.content
-        ? timeBadge + '<div class="rfp-preview-viewer">' + cleanRfpContent(result.content) + '</div>'
+        ? timeBadge + '<textarea readonly style="width:100%;height:calc(100% - 60px);box-sizing:border-box;font-family:monospace;font-size:12px;line-height:1.6;padding:14px;border:none;background:#f9fafb;resize:none;outline:none;color:#1f2937;">'
+          + escHtml(result.content) + '</textarea>'
         : timeBadge;
     }
     // 2. Show PDF button

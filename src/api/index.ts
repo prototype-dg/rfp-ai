@@ -850,10 +850,11 @@ Return ONLY the JSON object. No markdown. No explanation.`
         await sendProgress('fallback', 'Outline parse failed — falling back to sequential generation…')
         const { systemPrompt: sp, userPrompt: up } = buildRFPPrompt(body, archDocText, brdDocText, existingScoringMatrix, settings)
         const llmContent = await llmCall(sp, up, 'gpt-5-mini', 64000)
-        const repairedContent = repairTruncatedHtml(llmContent)
-        const content = repairedContent.length > 400 ? `<div class="rfp-doc">${repairedContent}</div>` : ''
+        const content = llmContent.length > 400
+          ? llmContent.replace(/<[^>]+>/g, ' ').replace(/&amp;/g,'&').replace(/&mdash;/g,'\u2014').replace(/&nbsp;/g,' ').replace(/[ \t]+/g,' ').replace(/\n{3,}/g,'\n\n').trim()
+          : ''
         if (content) {
-          const rfpFullText = llmContent.replace(/<[^>]+>/g, ' ').replace(/\s{2,}/g, ' ').trim()
+          const rfpFullText = content
           await c.env.DB.prepare(`UPDATE rfps SET title=?,category=?,budget=?,deadline=?,scope=?,tech_requirements=?,objectives=?,background=?,content=?,rfp_full_text=?,arch_doc_text=?,brd_doc_text=?,updated_at=datetime('now') WHERE id=?`)
             .bind(body.title, body.category, body.budget, body.deadline, body.scope, body.tech_requirements||'', body.objectives||'', body.background||'', content, rfpFullText.slice(0,100000), archDocText, brdDocText, id).run()
         }
@@ -944,540 +945,46 @@ Write the complete HTML for section "${sectionSpec?.heading || sectionKey}" now.
 
       await sendProgress('assembling', 'All sections complete — assembling document…')
 
-      // ── PHASE 3: Assemble into full HTML document ──────────────────────────
-      // Cover page is generated from outline meta (no LLM call needed)
-      // Strip leading "N. " or "N.N " prefix from heading if present — the <ol>
-      // was replaced with a plain <ul> to avoid double-numbering like "1. 1. Background".
-      const tocItems = Object.values(s).map((sec: any) => {
-        const h = (sec?.heading || '').trim()
-        // Remove leading numbering pattern: "1. ", "1.2 ", "Section 1: ", etc.
-        return h.replace(/^(\d+\.?\d*\.?\s+|Section\s+\d+[:\s]+)/i, '').trim()
-      }).filter(Boolean)
-      const tocHtml = tocItems.map((h: string, idx: number) => 
-        `<li style="margin-bottom:5pt;font-family:Roboto,Arial,sans-serif;font-size:10.5pt;color:#020303;display:flex;gap:8pt;"><span style="min-width:18pt;font-weight:600;color:#020303;">${idx+1}.</span><span>${h}</span></li>`
-      ).join('')
-
-      const coverContent = `
-<h1 style="font-family:Roboto,Arial,sans-serif;font-size:20pt;font-weight:700;text-align:center;color:#020303;margin:0 0 10pt 0;line-height:1.2;">${outline.rfp_meta?.title || body.title || 'Request for Proposal'}</h1>
-<p style="font-family:Roboto,Arial,sans-serif;font-size:13.5pt;font-weight:300;text-align:center;letter-spacing:2.5px;color:#020303;margin:16pt 0;">REQUEST FOR PROPOSAL</p>
-<table style="width:80%;margin:16pt auto;border-collapse:collapse;font-family:Roboto,Arial,sans-serif;font-size:10.5pt;color:#020303;">
-  <tr><td style="padding:5pt 10pt;border:1px solid #E0E0E0;font-weight:700;width:38%;">RFP Reference Number</td><td style="padding:5pt 10pt;border:1px solid #E0E0E0;">${outline.rfp_meta?.ref_number || body.ref_number || ''}</td></tr>
-  <tr><td style="padding:5pt 10pt;border:1px solid #E0E0E0;font-weight:700;">Issue Date</td><td style="padding:5pt 10pt;border:1px solid #E0E0E0;">${rfpIssueDate}</td></tr>
-  <tr><td style="padding:5pt 10pt;border:1px solid #E0E0E0;font-weight:700;">Proposal Submission Deadline</td><td style="padding:5pt 10pt;border:1px solid #E0E0E0;">${body.deadline || fmtDate(deadlineDate)}</td></tr>
-  <tr><td style="padding:5pt 10pt;border:1px solid #E0E0E0;font-weight:700;">Category</td><td style="padding:5pt 10pt;border:1px solid #E0E0E0;">${body.category || ''}</td></tr>
-  <tr><td style="padding:5pt 10pt;border:1px solid #E0E0E0;font-weight:700;">Issuing Authority</td><td style="padding:5pt 10pt;border:1px solid #E0E0E0;">${issuerName}, ${issuerLoc}</td></tr>
-  <tr><td style="padding:5pt 10pt;border:1px solid #E0E0E0;font-weight:700;">Submission Email</td><td style="padding:5pt 10pt;border:1px solid #E0E0E0;">${procEmail}</td></tr>
-</table>
-<div style="margin:20pt 0 8pt 0;font-family:Roboto,Arial,sans-serif;font-size:11pt;font-weight:700;color:#020303;border-bottom:2px solid #FFDB00;padding-bottom:4pt;">Table of Contents</div>
-<ul style="margin:0;padding:0;list-style:none;">${tocHtml}</ul>`
-
-      // ── Page wrapper builder ────────────────────────────────────────────────
-      // Produces one A4 page div (794×1123px) with full letterhead + navy footer.
-      // Puppeteer renders width=794px height=1123px → exactly 1 PDF page per div.
-      // The content area is overflow:hidden at 909px (1123 - header~146 - footer68).
-      // Do NOT remove the height/overflow — Puppeteer requires fixed-size page divs.
-      // Instead, use buildPages() below to split content BEFORE calling buildPage().
-      const buildPage = (content: string) => `<div style="position:relative;width:794px;height:1123px;max-width:794px;margin:0 auto 20px auto;background:#ffffff;overflow:hidden;box-sizing:border-box;page-break-after:always;font-family:Roboto,Arial,'Segoe UI',sans-serif;color:#020303;">
-<div style="padding:18px 36px 14px;display:flex;align-items:center;gap:18px;border-bottom:none;">
-  <div style="display:flex;align-items:center;gap:14px;">
-    <div style="font-family:Roboto,Arial,sans-serif;font-size:18px;font-weight:700;color:#020D1C;letter-spacing:-0.02em;">${issuerName}</div>
-    <div style="width:1px;height:28px;background:#E0E0E0;"></div>
-    <div style="font-family:'Courier New',monospace;font-size:9px;letter-spacing:0.22em;text-transform:uppercase;color:#556170;line-height:1.6;"><strong style="color:#020303;font-weight:500;">Procurement</strong><br/>Group &middot; Global</div>
-  </div>
-</div>
-<div style="height:48px;background:#FFDB00;position:relative;overflow:hidden;flex-shrink:0;">
-  <svg style="position:absolute;top:0;left:0;width:100%;height:100%;display:block;" viewBox="0 0 794 48" preserveAspectRatio="none" fill="none">
-    <path d="M-10 12 Q 100 3, 220 17 T 460 20 Q 580 26, 810 10" stroke="#020303" stroke-width="0.7" stroke-opacity="0.55"/>
-    <path d="M-10 24 Q 120 11, 240 29 T 480 32 Q 620 38, 810 22" stroke="#020303" stroke-width="0.7" stroke-opacity="0.45"/>
-    <path d="M-10 36 Q 140 22, 260 39 T 500 43 Q 640 50, 810 32" stroke="#020303" stroke-width="0.7" stroke-opacity="0.35"/>
-  </svg>
-</div>
-<div style="height:18px;display:flex;align-items:center;padding:0 36px;gap:5px;border-bottom:1px solid #E0E0E0;">
-  <span style="display:block;width:5px;height:5px;border-radius:50%;background:#E0E0E0;"></span>
-  <span style="display:block;width:7px;height:7px;border-radius:50%;background:#FFDB00;"></span>
-  <span style="flex:1;height:1px;background:#E0E0E0;margin:0 4px;"></span>
-  <span style="display:block;width:7px;height:7px;border-radius:50%;background:#FFDB00;"></span>
-</div>
-<div style="padding:20px 56px 80px;position:relative;overflow:hidden;height:929px;box-sizing:border-box;">${content}</div>
-<div style="position:absolute;bottom:0;left:0;right:0;background:#020D1C;color:#B8C0CB;padding:16px 36px;display:flex;justify-content:space-between;align-items:center;font-size:9px;letter-spacing:0.05em;height:68px;box-sizing:border-box;">
-  <div style="display:flex;gap:28px;">
-    <div><div style="font-family:'Courier New',monospace;font-size:8px;letter-spacing:0.2em;text-transform:uppercase;color:#FFDB00;margin-bottom:3px;">Contact</div><div style="font-family:Roboto,Arial,sans-serif;font-size:9px;color:#D8DEE8;">${procEmail}</div></div>
-  </div>
-  <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
-    <div style="font-family:Roboto,Arial,sans-serif;font-size:12px;font-weight:700;color:#ffffff;letter-spacing:-0.01em;">${issuerName}</div>
-    <div style="font-family:'Courier New',monospace;font-size:8px;letter-spacing:0.18em;text-transform:uppercase;color:#FFDB00;">&copy; ${issuerName} ${new Date().getFullYear()}</div>
-  </div>
-</div>
-</div>`
-
-      // ── HTML content paginator ──────────────────────────────────────────────
-      // Splits section HTML into 794×1123px page-sized chunks (one buildPage()
-      // wrapper each). Three budget constants govern how tightly pages pack:
-      //
-      //   PROSE_BUDGET  — for paragraphs, headings, and list containers
-      //   TABLE_BUDGET  — pixel-height budget per table page (column-aware, in px)
-      //   LIST_BUDGET   — weight budget for list containers
-      //
-      // Calibrated from real RFP 18 analysis (Data Platform Modernization):
-      //   Content area: 829px usable (929px - 20px top padding - 80px bottom padding)
-      //   Content width: 682px (794px - 2×56px padding)
-      //   Font: 10.5pt Roboto = 14px, line-height 1.35 = 18.9px/line
-      //   Prose: ~85 chars/line (full width) → PROSE_BUDGET 2400 ≈ 28 lines ≈ 529px
-      //   Tables: 3-col narrow tables. widest cell drives row height.
-      //     TABLE_BUDGET 800px (≤829px safe area). estimateRowHeight() is column-aware.
-      //   Lists: verbose items ~200-600 chars. LIST_BUDGET 2500 ≈ 3 items per page.
-      //
-      // Architecture:
-      //   paginateHtml()     — main entry point; calls tokenise() on top-level elements
-      //   tokenise()         — extracts top-level element strings (handles nesting)
-      //   splitTable()       — descends <table>, splits at <tr> boundaries
-      //   splitList()        — descends <ol>/<ul>, splits at <li> boundaries
-      //   splitDivChildren() — descends <div>/<section>, splits at child boundaries
-      // Budget calibration history (RFP 18 analysis, 2026-08-14):
-      //
-      // PROSE_BUDGET 2400: prose at 85 chars/line ≈ 28 lines ≈ 529px (safe within 829px available).
-      //   Pages 17+27 (heading+table sections, 2854-2877w) fit at 98-99% without overflow.
-      //   Pages 9-12 (heavy prose, 2599-2676w) stay safely at 90-92%.
-      //
-      // TABLE_BUDGET 800px: pixel-height budget. estimateRowHeight() measures tallest cell per row.
-      //
-      // LIST_BUDGET 2500: RFP 18 list items are 540-690w each (very long objective statements).
-      //   At 3200, items 1-5 packed to 3072w → visual overflow. At 2500, items 1-4 pack to
-      //   2470w (99% fill), items 5-6 spill to next chunk (47% fill — unavoidable with 2-item
-      //   tail, but better than overflowing). Terms section ul: 5 items at 90% + 2-item tail.
-      const PROSE_BUDGET = 2400      // plain-text-equiv chars per page for prose content
-      const TABLE_BUDGET = 800       // pixel-height budget per TABLE PAGE (see estimateRowHeight)
-      const LIST_BUDGET  = 2500      // budget for list containers (heavy items: 540-690w each)
-
-      // ── Weight estimator ──────────────────────────────────────────────────
-      // Converts HTML fragment to an approximate "rendered height in text chars".
-      // Each rendered pixel ≈ 0.42 text chars (at 14px font, 48 chars/line, 20px/line).
-      //   <tr>   ~45px rendered (multi-line cells) → +55 overhead
-      //   <h2/3> ~34px rendered (heading + margin)  → +70 overhead
-      //   <li>   ~22px rendered (line + margin)      → +18 overhead (text already counted)
-      //   <p>    ~14px extra margin-bottom           → +14 overhead
-      //   <div section heading style> ~34px          → +50 overhead
-      // A2 FIX: <p> tags that are direct children of <li> were being double-counted.
-      // A <li><p>text</p></li> got +18 (li overhead) + +14 (p overhead) = +32 extra,
-      // but the rendered height of an li wrapping a p is the same as a plain li —
-      // the p margin collapses inside the li. Subtract the p overhead for every <p>
-      // that is immediately preceded by an <li> open tag (i.e. <li...><p...>).
-      function estimateWeight(html: string): number {
-        const text = html.replace(/<[^>]+>/g, '').replace(/&[a-zA-Z#0-9]+;/g, ' ').replace(/\s+/g, ' ').trim()
-        const base  = text.length
-        const trs   = (html.match(/<tr[\s>]/gi)     || []).length
-        const heads = (html.match(/<h[1-4][\s>]/gi) || []).length
-        const lis   = (html.match(/<li[\s>]/gi)     || []).length
-        const ps    = (html.match(/<p[\s>]/gi)      || []).length
-        // <p> tags immediately inside <li> — their margin collapses, don't double-count
-        const liPs  = (html.match(/<li[^>]*>\s*<p[\s>]/gi) || []).length
-        return base + trs * 55 + heads * 70 + lis * 18 + ps * 14 - liPs * 14
+      // ── PHASE 3: Assemble plain text ────────────────────────────────────────
+      // Strip HTML tags from each generated section, then concatenate into a
+      // single plain-text document. No pagination, no page wrappers.
+      function stripHtml(html: string): string {
+        return html
+          .replace(/<[^>]+>/g, ' ')
+          .replace(/&amp;/g, '&').replace(/&mdash;/g, '\u2014').replace(/&nbsp;/g, ' ')
+          .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
+          .replace(/&#39;/g, "'")
+          .replace(/[ \t]+/g, ' ')
+          .replace(/\n{3,}/g, '\n\n')
+          .trim()
       }
 
-      // ── Column-aware table row height estimator ───────────────────────────
-      // estimateWeight() concatenates all cell text and measures it as if it
-      // were full-width prose — critically wrong for narrow multi-column tables
-      // where each cell wraps independently. A 3-column table has cells only
-      // ~227px wide (682/3), so a 385-char cell wraps to 14 lines × 18.9px =
-      // 260px — 3× taller than the text-only weight model predicts.
-      //
-      // This function measures the TALLEST CELL in each row and sums those
-      // heights to produce a pixel estimate. TABLE_BUDGET is then expressed
-      // in pixels (800px), matching the 829px available content height.
-      //
-      // Content area: 794px page − 2×56px padding = 682px wide.
-      // Font: 10.5pt Roboto = 14px, line-height 1.35 = 18.9px per line.
-      // Avg char width at 14px Roboto ≈ 7.5px (slightly narrower than 8px
-      // because RFP prose uses mixed case + many narrow letters in jargon).
-      function estimateRowHeight(rowHtml: string): number {
-        // Extract all <td>/<th> cell contents
-        const cellRe = /<t[dh][^>]*>(.*?)<\/t[dh]>/gis
-        const cells: string[] = []
-        let m: RegExpExecArray | null
-        while ((m = cellRe.exec(rowHtml)) !== null) cells.push(m[1])
-        if (!cells.length) {
-          // No cells found — fallback to weight-based estimate
-          const text = rowHtml.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim()
-          return Math.max(28, Math.ceil(text.length / 85) * 18.9 + 10)
-        }
-        const ncols = cells.length
-        // Cell width = content area width / number of columns (equal-width assumption)
-        // Add 14px horizontal cell padding on each side (7pt × 2)
-        const CONTENT_WIDTH = 682
-        const CELL_PADDING_H = 14  // px each side → 28px total
-        const cellWidth = Math.max(80, (CONTENT_WIDTH / ncols) - CELL_PADDING_H)
-        const AVG_CHAR_W = 7.5   // px at 10.5pt Roboto
-        const LINE_H = 18.9      // px at 14px font, 1.35 line-height
-        const CELL_PAD_V = 10    // px top+bottom cell padding (5pt each)
-        let maxCellHeight = 0
-        for (const cell of cells) {
-          const cellText = cell.replace(/<[^>]+>/g, '').replace(/&[a-zA-Z#0-9]+;/g, ' ').replace(/\s+/g, ' ').trim()
-          const charsPerLine = Math.max(1, cellWidth / AVG_CHAR_W)
-          const lines = Math.max(1, Math.ceil(cellText.length / charsPerLine))
-          const h = lines * LINE_H + CELL_PAD_V
-          if (h > maxCellHeight) maxCellHeight = h
-        }
-        // Add 2px border
-        return maxCellHeight + 2
-      }
-
-      // Estimate total pixel height for a thead block (used for budget carry-over)
-      function estimateTheadHeight(theadHtml: string): number {
-        if (!theadHtml) return 0
-        const rows = [...theadHtml.matchAll(/<tr[\s\S]*?<\/tr>/gi)]
-        let h = 0
-        for (const r of rows) h += estimateRowHeight(r[0])
-        return h + 4  // 4px thead border
-      }
-
-      // ── Low-level HTML element tokeniser ─────────────────────────────────
-      // Extracts immediate children of an HTML fragment as separate strings.
-      // Handles nested tags correctly via depth tracking.
-      function tokenise(html: string): string[] {
-        const segs: string[] = []
-        const voidTags = new Set(['br','hr','img','input','meta','link','col','colgroup','area','base','source','track','wbr'])
-        let rem = html.trim()
-
-        while (rem.length > 0) {
-          const ws = rem.match(/^\s+/)
-          if (ws) { rem = rem.slice(ws[0].length); continue }
-
-          if (!rem.startsWith('<')) {
-            const nx = rem.indexOf('<')
-            if (nx === -1) { segs.push(rem); break }
-            segs.push(rem.slice(0, nx)); rem = rem.slice(nx); continue
-          }
-
-          const tm = rem.match(/^<([a-zA-Z][a-zA-Z0-9]*)/)
-          if (!tm) { segs.push(rem[0]); rem = rem.slice(1); continue }
-
-          const tag = tm[1].toLowerCase()
-          if (voidTags.has(tag)) {
-            const end = rem.indexOf('>') + 1
-            segs.push(rem.slice(0, end)); rem = rem.slice(end); continue
-          }
-
-          // Depth-aware close-tag search
-          let depth = 0, scanPos = 0, found = -1
-          while (scanPos < rem.length) {
-            const sub = rem.slice(scanPos)
-            const om = sub.match(/^<([a-zA-Z][a-zA-Z0-9]*)[\s\/>]/)
-            if (om && om[1].toLowerCase() === tag && !sub.startsWith('</')) {
-              depth++; const te = sub.indexOf('>'); scanPos += (te === -1 ? 1 : te + 1); continue
-            }
-            const cm = sub.match(/^<\/([a-zA-Z][a-zA-Z0-9]*)\s*>/)
-            if (cm && cm[1].toLowerCase() === tag) {
-              depth--; if (depth === 0) { found = scanPos + cm[0].length; break }
-              scanPos += cm[0].length; continue
-            }
-            scanPos++
-          }
-
-          if (found === -1) { segs.push(rem); break }
-          segs.push(rem.slice(0, found)); rem = rem.slice(found)
-        }
-        return segs
-      }
-
-      // ── Table splitter ────────────────────────────────────────────────────
-      // Splits <table> at <tr> boundaries. <thead> repeats on every chunk.
-      function splitTable(tableHtml: string): string[] {
-        const tableOpenM = tableHtml.match(/^(<table[^>]*>)/i)
-        const tableOpen  = tableOpenM ? tableOpenM[1] : '<table>'
-        const theadM     = tableHtml.match(/(<thead[\s\S]*?<\/thead>)/i)
-        const thead      = theadM ? theadM[1] : ''
-        // Use pixel-height for thead carry-over weight (TABLE_BUDGET is in px)
-        const theadH     = estimateTheadHeight(thead)
-
-        // Strip thead, table open/close, tbody/tfoot wrappers → get raw row HTML
-        let body = tableHtml
-          .replace(/<thead[\s\S]*?<\/thead>/gi, '')
-          .replace(/<\/table\s*>/gi, '').replace(tableOpen, '')
-          .replace(/<\/?tbody[^>]*>/gi, '').replace(/<\/?tfoot[^>]*>/gi, '')
-
-        // Extract individual <tr>...</tr> elements
-        const rows: string[] = []
-        let rem = body.trim()
-        while (rem.length > 0) {
-          rem = rem.trimStart()
-          if (!/^<tr/i.test(rem)) { const nx = rem.search(/<tr/i); if (nx < 0) break; rem = rem.slice(nx); continue }
-          let depth = 0, scan = 0, end = -1
-          while (scan < rem.length) {
-            const sub = rem.slice(scan)
-            if (/^<tr[\s>]/i.test(sub)) { depth++; const te = sub.indexOf('>'); scan += te + 1; continue }
-            const cm = sub.match(/^<\/tr\s*>/i)
-            if (cm) { depth--; if (!depth) { end = scan + cm[0].length; break }; scan += cm[0].length; continue }
-            scan++
-          }
-          if (end < 0) { rows.push(rem); break }
-          rows.push(rem.slice(0, end)); rem = rem.slice(end)
-        }
-
-        if (!rows.length) return [tableHtml]
-
-        // Pack rows by PIXEL HEIGHT (column-aware) instead of text weight.
-        // TABLE_BUDGET = 800px (content area is 829px; leave 29px safety margin).
-        const chunks: string[] = []
-        let buf: string[] = [], bufH = theadH
-        for (const row of rows) {
-          const rh = estimateRowHeight(row)   // pixels, column-aware
-          if (bufH + rh > TABLE_BUDGET && buf.length) {
-            chunks.push(`${tableOpen}${thead}<tbody>${buf.join('')}</tbody></table>`)
-            buf = []; bufH = theadH
-          }
-          buf.push(row); bufH += rh
-        }
-        if (buf.length) chunks.push(`${tableOpen}${thead}<tbody>${buf.join('')}</tbody></table>`)
-        return chunks.length ? chunks : [tableHtml]
-      }
-
-      // ── List splitter ─────────────────────────────────────────────────────
-      // Splits <ol>/<ul> at <li> boundaries. Preserves list tag + attributes.
-      function splitList(listHtml: string): string[] {
-        const listOpenM = listHtml.match(/^(<(?:ol|ul)[^>]*>)/i)
-        const listOpen  = listOpenM ? listOpenM[1] : '<ul>'
-        const listClose = listOpen.startsWith('<ol') ? '</ol>' : '</ul>'
-
-        // Extract <li> items (depth-aware)
-        const items: string[] = []
-        let rem = listHtml.replace(/^<(?:ol|ul)[^>]*>/i, '').replace(/<\/(?:ol|ul)\s*>$/i, '').trim()
-        while (rem.length > 0) {
-          rem = rem.trimStart()
-          if (!/^<li/i.test(rem)) { const nx = rem.search(/<li/i); if (nx < 0) break; rem = rem.slice(nx); continue }
-          let depth = 0, scan = 0, end = -1
-          while (scan < rem.length) {
-            const sub = rem.slice(scan)
-            if (/^<li[\s>]/i.test(sub)) { depth++; const te = sub.indexOf('>'); scan += te + 1; continue }
-            const cm = sub.match(/^<\/li\s*>/i)
-            if (cm) { depth--; if (!depth) { end = scan + cm[0].length; break }; scan += cm[0].length; continue }
-            scan++
-          }
-          if (end < 0) { items.push(rem); break }
-          items.push(rem.slice(0, end)); rem = rem.slice(end)
-        }
-
-        if (!items.length) return [listHtml]
-
-        const chunks: string[] = []
-        let buf: string[] = [], bufW = 0
-        for (const item of items) {
-          const iw = estimateWeight(item)
-          if (bufW + iw > LIST_BUDGET && buf.length) {
-            chunks.push(`${listOpen}${buf.join('')}${listClose}`)
-            buf = []; bufW = 0
-          }
-          buf.push(item); bufW += iw
-        }
-        if (buf.length) chunks.push(`${listOpen}${buf.join('')}${listClose}`)
-        return chunks.length ? chunks : [listHtml]
-      }
-
-      // ── Div child splitter ────────────────────────────────────────────────
-      // For a <div> or <section> whose children are too heavy for one page,
-      // descend and split at child element boundaries using PROSE_BUDGET.
-      // BUG 2 FIX: if a child is itself a <table>, route it through splitTable()
-      // instead of treating it as an atomic blob (handles <div><table>…</table></div>).
-      function splitDivChildren(divHtml: string): string[] {
-        const divOpenM = divHtml.match(/^(<(?:div|section)[^>]*>)/i)
-        if (!divOpenM) return [divHtml]
-        const divOpen  = divOpenM[1]
-        const tagName  = divOpenM[1].match(/^<([a-zA-Z]+)/i)![1].toLowerCase()
-        const divClose = `</${tagName}>`
-
-        const inner = divHtml.replace(/^<(?:div|section)[^>]*>/i, '').replace(/<\/(?:div|section)\s*>$/i, '')
-        const children = tokenise(inner)
-        if (children.length <= 1) {
-          // Single child: if it's a table, unwrap the div and split the table directly
-          if (children.length === 1) {
-            const childTag = (children[0].match(/^<([a-zA-Z][a-zA-Z0-9]*)/) || [])[1]?.toLowerCase()
-            if (childTag === 'table') {
-              return splitTable(children[0])
-            }
-          }
-          return [divHtml]
-        }
-
-        const chunks: string[] = []
-        let buf = '', bufW = 0
-        for (const child of children) {
-          const childTag = (child.match(/^<([a-zA-Z][a-zA-Z0-9]*)/) || [])[1]?.toLowerCase()
-          // If child is a heavy <table>, flush current buffer first then split the table
-          if (childTag === 'table' && estimateWeight(child) > PROSE_BUDGET) {
-            if (buf.trim()) { chunks.push(`${divOpen}${buf}${divClose}`); buf = ''; bufW = 0 }
-            for (const tc of splitTable(child)) chunks.push(tc)
-            continue
-          }
-          // If child is a heavy <ol>/<ul>, flush then split the list
-          if ((childTag === 'ol' || childTag === 'ul') && estimateWeight(child) > LIST_BUDGET) {
-            if (buf.trim()) { chunks.push(`${divOpen}${buf}${divClose}`); buf = ''; bufW = 0 }
-            for (const lc of splitList(child)) chunks.push(lc)
-            continue
-          }
-          const cw = estimateWeight(child)
-          if (bufW + cw > PROSE_BUDGET && buf.trim()) {
-            chunks.push(`${divOpen}${buf}${divClose}`)
-            buf = ''; bufW = 0
-          }
-          buf += child; bufW += cw
-        }
-        if (buf.trim()) chunks.push(`${divOpen}${buf}${divClose}`)
-        return chunks.length ? chunks : [divHtml]
-      }
-
-      // ── HTML sanitiser ────────────────────────────────────────────────────
-      // BUG 4 FIX: The LLM occasionally emits unbalanced HTML — stray closing
-      // tags like </div> or </ul> at the top level (no matching open tag).
-      // These confuse tokenise() and produce tiny garbage tokens ('<', '/div>')
-      // that count against the budget and cause premature page flushes.
-      // Strip all top-level orphan closing tags before paginating.
-      function stripOrphanClosingTags(html: string): string {
-        // Replace any leading stray closing tags (</div>, </ul>, </ol>, </section>)
-        // that appear at the start of the string or between real elements.
-        return html.replace(/^(\s*<\/(?:div|section|ul|ol|li|p|span)\s*>)+/gi, '')
-                   .replace(/(<\/(?:div|section)\s*>\s*){2,}/gi, (m) => {
-                     // Collapse runs of multiple </div></div> down to one if they look orphaned
-                     // (heuristic: only collapse when NOT preceded by a real closing element)
-                     return m
-                   })
-      }
-
-      // ── Main paginator ────────────────────────────────────────────────────
-      // Converts section HTML into page-budget-sized chunks for buildPage().
-      // Handles 4 element types specially:
-      //   <table>          → splitTable() at <tr> boundaries
-      //   <ol>/<ul>        → splitList()  at <li> boundaries
-      //   <div>/<section>  → splitDivChildren() if too heavy (scope sections)
-      //   everything else  → atomic, packed by weight into current chunk
-      //
-      // BUG 3 FIX: addChunk uses a SPARSE_THRESHOLD. When the current chunk
-      // is below 30% of budget (sparse, e.g. just a heading + intro paragraph),
-      // allow the next element to join even if it pushes past the budget.
-      // This prevents section headings from being stranded alone on near-empty pages.
-      // The overflow is bounded: a single element that exceeds budget alone still
-      // gets its own page via the normal flush path.
-      function paginateHtml(html: string): string[] {
-        const pages: string[] = []
-        let chunk = '', weight = 0
-        const SPARSE_THRESHOLD = PROSE_BUDGET * 0.30   // 720w — below this, don't flush early
-
-        function flush() {
-          if (chunk.trim()) {
-            // A3 FIX: strip trailing orphan closing tags from the chunk tail.
-            // stripOrphanClosingTags() only cleaned the HEAD of the input string.
-            // Stray </div></div> at the END of a chunk (from unbalanced LLM HTML,
-            // e.g. page 18: "…text…</div></div>" and page 39: "…text…</div>")
-            // produce tiny orphan pages. Strip them before pushing.
-            const cleaned = chunk.replace(/^(\s*<\/(?:div|section|ul|ol|li|p|span)\s*>)+/gi, '')
-                                  .replace(/(\s*<\/(?:div|section)\s*>)+\s*$/gi, '')
-            if (cleaned.trim()) pages.push(cleaned)
-            chunk = ''; weight = 0
-          }
-        }
-
-        function addChunk(seg: string, budget: number) {
-          const w = estimateWeight(seg)
-          // Only flush if current chunk is dense enough to justify a page break.
-          // If chunk is sparse (< 30% full), absorb the next element regardless.
-          const tooHeavy = weight + w > budget
-          const chunkIsDense = weight >= SPARSE_THRESHOLD
-          if (tooHeavy && chunkIsDense && chunk.trim()) flush()
-          chunk += seg; weight += w
-        }
-
-        for (const seg of tokenise(stripOrphanClosingTags(html))) {
-          // Skip pure whitespace or tiny garbage tokens (stray '<', '/div>' etc.)
-          const trimmed = seg.trim()
-          if (!trimmed || trimmed === '<' || /^<\//.test(trimmed)) continue
-
-          const tag = (seg.match(/^<([a-zA-Z][a-zA-Z0-9]*)/) || [])[1]?.toLowerCase() || ''
-
-          if (tag === 'table') {
-            // Split at row boundaries via pixel-height-aware splitTable().
-            // Each tc chunk is guaranteed to be ≤ TABLE_BUDGET (800px) tall.
-            // Flush preceding prose if it is dense enough to fill its own page,
-            // then always give each table sub-chunk its own page (flush before and after).
-            for (const tc of splitTable(seg)) {
-              const tw = estimateWeight(tc)
-              const chunkIsDense = weight >= SPARSE_THRESHOLD
-              // Always flush if there is any preceding content: tables should
-              // start at the top of a page so their full height is available.
-              if (chunk.trim()) flush()
-              chunk += tc; weight += tw
-              // Flush the table chunk immediately so it never merges with following prose
-              flush()
-            }
-          } else if (tag === 'ol' || tag === 'ul') {
-            // Split at list-item boundaries
-            for (const lc of splitList(seg)) {
-              addChunk(lc, LIST_BUDGET)
-            }
-          } else if ((tag === 'div' || tag === 'section') && (
-              estimateWeight(seg) > PROSE_BUDGET ||
-              // A4 FIX: also descend divs that contain <ul>/<ol> children even when total
-              // weight is below PROSE_BUDGET. Without this, a div like:
-              //   <div>heading + intro-p + <ul>6 items</ul> + <ul>6 items</ul></div>
-              // sits just below the threshold and gets treated as an atomic blob —
-              // the two lists never reach splitList and overflow the page.
-              /<(?:ul|ol)[\s>]/i.test(seg)
-            )) {
-            // Descend and split at child boundaries
-            // splitDivChildren handles <div><table> and <div><ul> correctly
-            for (const dc of splitDivChildren(seg)) {
-              const dcTag = (dc.match(/^<([a-zA-Z][a-zA-Z0-9]*)/) || [])[1]?.toLowerCase() || ''
-              if (dcTag === 'table') {
-                // Table sub-chunks from splitDivChildren: always isolated on own page
-                if (chunk.trim()) flush()
-                chunk += dc; weight += estimateWeight(dc)
-                flush()
-              } else {
-                addChunk(dc, PROSE_BUDGET)
-              }
-            }
-          } else {
-            // Prose element (p, h2, h3, dl, blockquote, etc.) — pack by weight
-            addChunk(seg, PROSE_BUDGET)
-          }
-        }
-        flush()
-
-        return pages.length > 0 ? pages : ['']
-      }
-
-      // Convenience: paginate HTML and wrap each chunk in a full buildPage()
-      function buildPages(html: string): string {
-        return paginateHtml(html).map(chunk => buildPage(chunk)).join('\n')
-      }
-
-      // ── PHASE 3: Assemble into full HTML document ──────────────────────────
-      // Each section is independently paginated so no content is ever clipped.
-      // Cover page always fits on one page (it's just a title table + TOC).
-      // Sections s1+s2 (background + objectives) share a starting page but
-      // will overflow onto additional pages if combined content is large.
-      // All other sections are paginated independently.
-      //
-      // IMPORTANT: wrap all page divs in a bare <div> so DOM depth matches
-      // the old single-call LLM output. Both the preview CSS (.rfp-doc > div > div)
-      // and the Puppeteer PDF CSS (body > div > div) target grandchildren.
-      const pagesHtml = [
-        buildPage(coverContent),         // cover — always 1 page
-        buildPages(html1 + html2),       // background + objectives — 1–2 pages
-        buildPages(html3),               // scope — 2–4 pages (subsections)
-        buildPages(html4),               // technical requirements table — 2–3 pages
-        buildPages(html5 + html6),       // evaluation + qualification — 1–3 pages
-        buildPages(html7),               // submission + timeline — 1–2 pages
-        buildPages(html8),               // terms & conditions — 1–2 pages
+      const coverText = [
+        outline.rfp_meta?.title || body.title || 'Request for Proposal',
+        'REQUEST FOR PROPOSAL',
+        '',
+        `RFP Reference Number: ${outline.rfp_meta?.ref_number || body.ref_number || ''}`,
+        `Issue Date: ${rfpIssueDate}`,
+        `Proposal Submission Deadline: ${body.deadline || fmtDate(deadlineDate)}`,
+        `Category: ${body.category || ''}`,
+        `Issuing Authority: ${issuerName}, ${issuerLoc}`,
+        `Submission Email: ${procEmail}`,
       ].join('\n')
-      const fullHtml = `<div>${pagesHtml}</div>`
 
-      const repairedContent = repairTruncatedHtml(fullHtml)
-      const content = repairedContent.length > 400 ? `<div class="rfp-doc">${repairedContent}</div>` : ''
+      const content = [
+        coverText,
+        stripHtml(html1),
+        stripHtml(html2),
+        stripHtml(html3),
+        stripHtml(html4),
+        stripHtml(html5),
+        stripHtml(html6),
+        stripHtml(html7),
+        stripHtml(html8),
+      ].join('\n\n---\n\n')
 
       if (content) {
-        const rfpFullText = fullHtml
-          .replace(/<[^>]+>/g, ' ')
-          .replace(/&amp;/g,'&').replace(/&mdash;/g,'—').replace(/&nbsp;/g,' ')
-          .replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"')
-          .replace(/\s{2,}/g, ' ').trim()
+        const rfpFullText = content.slice(0, 100000)
         await c.env.DB.prepare(`
           UPDATE rfps SET title=?, category=?, budget=?, deadline=?, scope=?, tech_requirements=?,
             objectives=?, background=?, content=?, rfp_full_text=?, arch_doc_text=?, brd_doc_text=?, updated_at=datetime('now')
@@ -1485,14 +992,12 @@ Write the complete HTML for section "${sectionSpec?.heading || sectionKey}" now.
         `).bind(
           body.title, body.category, body.budget, body.deadline, body.scope,
           body.tech_requirements || '', body.objectives || '', body.background || '',
-          content, rfpFullText.slice(0, 100000), archDocText, brdDocText, id
+          content, rfpFullText, archDocText, brdDocText, id
         ).run()
       }
 
       const rfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(id).first().catch(() => null)
-      // Strip heavy fields (content, rfp_full_text, arch_doc_text, brd_doc_text) from the SSE done
-      // event — sending 200k+ chars as a single SSE data line risks TCP fragmentation and silent
-      // JSON.parse failure on the client. The frontend always fetches the full object via GET.
+      // Strip heavy fields from SSE done event — frontend always fetches full object via GET.
       const rfpMeta = rfp ? {
         id: (rfp as any).id,
         title: (rfp as any).title,
@@ -1520,47 +1025,6 @@ Write the complete HTML for section "${sectionSpec?.heading || sectionKey}" now.
     },
   })
 })
-
-/**
- * repairTruncatedHtml — close any HTML tags left open if the LLM was cut off mid-output.
- * Handles the most likely truncation patterns: mid-attribute, mid-tag, mid-table-row/cell.
- * Returns the input string with proper closing tags appended.
- */
-function repairTruncatedHtml(html: string): string {
-  if (!html) return html
-
-  let s = html
-
-  // 1. If the string ends mid-attribute (e.g. "border:1px solid</div>"), strip the broken tag.
-  //    A broken open-tag looks like: <tagname ...attributes... without closing >
-  //    We detect this by finding a < that is never closed by >
-  const lastOpenAngle = s.lastIndexOf('<')
-  const lastCloseAngle = s.lastIndexOf('>')
-  if (lastOpenAngle > lastCloseAngle) {
-    // We have a dangling open tag fragment — strip it
-    s = s.slice(0, lastOpenAngle).trimEnd()
-  }
-
-  // 2. Count open vs close tags for the structural elements we care about.
-  //    We close in reverse nesting order: td → tr → tbody/thead → table → div
-  const countOpen  = (tag: string) => (s.match(new RegExp(`<${tag}(\\s[^>]*)?>`, 'gi')) || []).length
-  const countClose = (tag: string) => (s.match(new RegExp(`</${tag}>`, 'gi')) || []).length
-
-  const openTd    = countOpen('td')    - countClose('td')
-  const openTr    = countOpen('tr')    - countClose('tr')
-  const openTbody = (countOpen('tbody') + countOpen('thead')) - (countClose('tbody') + countClose('thead'))
-  const openTable = countOpen('table') - countClose('table')
-  const openDiv   = countOpen('div')   - countClose('div')
-
-  // 3. Append the minimum closing tags needed (in correct nesting order)
-  if (openTd > 0)    s += Array(openTd).fill('</td>').join('')
-  if (openTr > 0)    s += Array(openTr).fill('</tr>').join('')
-  if (openTbody > 0) s += Array(openTbody).fill('</tbody>').join('')
-  if (openTable > 0) s += Array(openTable).fill('</table>').join('')
-  if (openDiv > 0)   s += Array(openDiv).fill('</div>').join('')
-
-  return s
-}
 
 // PDF text extraction for Cloudflare Workers (no Node.js fs/buffer APIs available)
 // Uses a streaming byte-level parser to extract raw text from PDF content streams.
@@ -4453,7 +3917,7 @@ async function generateRFPWithLLM(data: any, archDocText: string, brdDocText: st
   const { systemPrompt, userPrompt } = buildRFPPrompt(data, archDocText, brdDocText, scoringMatrixJson, settings)
   const llmContent = await callLLM(systemPrompt, userPrompt, env, 'gpt-5-mini', 64000)
   if (llmContent && llmContent.length > 400) {
-    return `<div class="rfp-doc">${repairTruncatedHtml(llmContent)}</div>`
+    return llmContent.replace(/<[^>]+>/g, ' ').replace(/&amp;/g,'&').replace(/&mdash;/g,'\u2014').replace(/&nbsp;/g,' ').replace(/[ \t]+/g,' ').replace(/\n{3,}/g,'\n\n').trim()
   }
   throw new Error(`LLM returned insufficient content (${llmContent?.length || 0} chars)`)
 }
