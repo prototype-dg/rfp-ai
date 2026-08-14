@@ -3641,7 +3641,46 @@ function switchRfpTab(tab, rfpId) {
 // ============================================================
 // INIT
 // ============================================================
+// Inject global CSS for the RFP document preview viewer once at startup.
+// Uses a class-based approach (.rfp-preview-viewer) so the rules are globally
+// available whenever previewHtml is rendered into rfpPreviewArea.
+function injectRfpPreviewStyles() {
+  if (document.getElementById('rfp-preview-styles')) return; // already injected
+  var style = document.createElement('style');
+  style.id = 'rfp-preview-styles';
+  style.textContent = [
+    /* Grey document-viewer wrapper */
+    '.rfp-preview-viewer {',
+    '  background:#d1d5db;',
+    '  padding:20px 12px;',
+    '  box-sizing:border-box;',
+    '  min-height:100%;',
+    '}',
+    /* Neutralise rfp-doc and its bare inner wrapper */
+    '.rfp-preview-viewer .rfp-doc,',
+    '.rfp-preview-viewer .rfp-doc > div {',
+    '  display:block;',
+    '  margin:0;',
+    '  padding:0;',
+    '}',
+    /* Each A4 page: centre, shadow, hard-clip so footer never escapes */
+    '.rfp-preview-viewer .rfp-doc > div > div {',
+    '  display:block !important;',
+    '  position:relative !important;',
+    '  overflow:hidden !important;',
+    '  margin-left:auto !important;',
+    '  margin-right:auto !important;',
+    '  box-shadow:0 4px 20px rgba(0,0,0,0.22);',
+    '  box-sizing:border-box !important;',
+    '}',
+  ].join('\n');
+  document.head.appendChild(style);
+}
+
 async function init() {
+  // Inject RFP preview viewer styles into <head>
+  injectRfpPreviewStyles();
+
   // Apply saved language before first render
   applyTranslations();
 
@@ -4613,8 +4652,11 @@ rfpTabs.generate = function(rfpId, rfp) {
   window._currentScoringMatrix = JSON.parse(JSON.stringify(scoringMatrix));
   setTimeout(function(){ restoreAutoSave(rfpId); }, 200);
 
+  // Build the preview HTML. For generated content, wrap inside a document-viewer
+  // div (grey background, centred pages, drop-shadow) so each A4 page renders as a
+  // card. The <style> here is written into the page's <head> via applyRfpPreviewStyles().
   const previewHtml = hasContent
-    ? cleanRfpContent(rfp.content)
+    ? '<div class="rfp-preview-viewer">' + cleanRfpContent(rfp.content) + '</div>'
     : '<div style="text-align:center;padding:3rem 1.5rem;color:#9ca3af">'
       + '<i class="fas fa-file-alt" style="font-size:2.5rem;display:block;margin-bottom:1rem;color:#d1d5db"></i>'
       + '<p style="margin:0">Fill in the details and click <strong>Generate with AI</strong> to produce a professional RFP document</p>'
@@ -4712,7 +4754,7 @@ rfpTabs.generate = function(rfpId, rfp) {
     + (hasContent ? '<button class="btn-ghost btn-sm" onclick="copyRfpPreview()" title="Copy all text"><i class="fas fa-copy"></i>Copy All</button>' : '')
     + '<button id="genPreviewPdfBtn" class="btn-ghost btn-sm" onclick="downloadRfpPdf(' + rfpId + ')" style="' + (hasContent ? '' : 'display:none') + '"><i class="fas fa-download"></i>PDF</button>'
     + '</div>'
-    + '<div id="rfpPreviewArea" style="padding:0;flex:1;overflow-y:auto">' + previewHtml + '</div>'
+    + '<div id="rfpPreviewArea" style="padding:0;flex:1;overflow-y:auto;background:#d1d5db;min-height:0">' + previewHtml + '</div>'
     + '</div>'
     + '</div>'
   );
@@ -4891,7 +4933,11 @@ async function generateRfpDoc(rfpId) {
     showToast('RFP document generated!', 'success');
 
     // 1. Update the preview area immediately (fast path)
-    if (previewEl) previewEl.innerHTML = result.content || '';
+    if (previewEl) {
+      previewEl.innerHTML = result.content
+        ? '<div class="rfp-preview-viewer">' + cleanRfpContent(result.content) + '</div>'
+        : '';
+    }
     // 2. Show PDF button
     var pdfBtn = document.getElementById('genPreviewPdfBtn');
     if (pdfBtn) pdfBtn.style.display = '';
@@ -5038,15 +5084,14 @@ async function fetchLetterheadDataUri() {
 function cleanRfpContent(html) {
   if (!html) return html;
   return html
-    // Remove old background-image letterhead references
+    // Remove old background-image letterhead references (CPC era)
     .replace(/background-image\s*:\s*url\([^)]*bg_a4[^)]*\)\s*;?\s*/gi, '')
     .replace(/background-image\s*:\s*url\([^)]*letterhead[^)]*\)\s*;?\s*/gi, '')
-    // Remove old background-size/repeat/position that went with the old letterhead
+    // Remove old min-height:297mm that came with the old letterhead pages
     .replace(/min-height\s*:\s*297mm\s*;?\s*/gi, '')
-    // Remove absolute-positioned old footer divs (position:absolute + bottom:Npx/Nmm)
-    .replace(/<div[^>]*position\s*:\s*absolute[^>]*bottom\s*:\s*\d+[^>]*>[\s\S]*?<\/div>/gi, '')
-    .replace(/<div[^>]*bottom\s*:\s*\d+[^>]*position\s*:\s*absolute[^>]*>[\s\S]*?<\/div>/gi, '')
-    // Remove CPC-specific footer text nodes
+    // Remove CPC-specific text nodes (Crown Prince's Court branding)
+    // NOTE: Do NOT strip position:absolute divs here — the Andersen navy footer
+    // uses position:absolute and must be preserved. CPC text cleanup is sufficient.
     .replace(/<div[^>]*>[^<]*Crown Prince[^<]*<\/div>/gi, '')
     .replace(/<div[^>]*>[^<]*Confidential[^<]*Page\s+\d+[^<]*<\/div>/gi, '');
 }
