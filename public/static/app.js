@@ -3295,6 +3295,19 @@ function escHtml(str) {
     .replace(/"/g, '&quot;');
 }
 
+// Render markdown string to a styled HTML div using marked.js (loaded via CDN).
+// Falls back to a <pre> block if marked is not yet available.
+function renderMd(md) {
+  if (!md) return '';
+  var html = (typeof marked !== 'undefined')
+    ? marked.parse(md)
+    : '<pre style="white-space:pre-wrap;font-family:monospace;font-size:12px">' + escHtml(md) + '</pre>';
+  return '<div class="rfp-md-preview" style="'
+    + 'font-family:system-ui,Segoe UI,Roboto,Arial,sans-serif;'
+    + 'font-size:14px;line-height:1.7;color:#1f2937;max-width:860px;margin:0 auto;'
+    + '">' + html + '</div>';
+}
+
 function scoreBar(val) {
   val = val || 0;
   return '<div class="score-bar"><div class="score-fill" style="width:' + val + '%"></div></div>';
@@ -3649,30 +3662,20 @@ function injectRfpPreviewStyles() {
   var style = document.createElement('style');
   style.id = 'rfp-preview-styles';
   style.textContent = [
-    /* Grey document-viewer wrapper */
-    '.rfp-preview-viewer {',
-    '  background:#d1d5db;',
-    '  padding:20px 12px;',
-    '  box-sizing:border-box;',
-    '  min-height:100%;',
-    '}',
-    /* Neutralise rfp-doc and its bare inner wrapper */
-    '.rfp-preview-viewer .rfp-doc,',
-    '.rfp-preview-viewer .rfp-doc > div {',
-    '  display:block;',
-    '  margin:0;',
-    '  padding:0;',
-    '}',
-    /* Each A4 page: centre, shadow, hard-clip so footer never escapes */
-    '.rfp-preview-viewer .rfp-doc > div > div {',
-    '  display:block !important;',
-    '  position:relative !important;',
-    '  overflow:hidden !important;',
-    '  margin-left:auto !important;',
-    '  margin-right:auto !important;',
-    '  box-shadow:0 4px 20px rgba(0,0,0,0.22);',
-    '  box-sizing:border-box !important;',
-    '}',
+    /* Markdown preview typography */
+    '.rfp-md-preview h1 { font-size:1.6rem; font-weight:700; margin:0 0 0.5rem; color:#111827; border-bottom:2px solid #e5e7eb; padding-bottom:0.4rem; }',
+    '.rfp-md-preview h2 { font-size:1.2rem; font-weight:700; margin:1.6rem 0 0.5rem; color:#111827; border-bottom:1px solid #e5e7eb; padding-bottom:0.3rem; }',
+    '.rfp-md-preview h3 { font-size:1rem; font-weight:600; margin:1.2rem 0 0.4rem; color:#374151; }',
+    '.rfp-md-preview p  { margin:0 0 0.75rem; }',
+    '.rfp-md-preview ul, .rfp-md-preview ol { padding-left:1.4rem; margin:0.4rem 0 0.75rem; }',
+    '.rfp-md-preview li { margin-bottom:0.3rem; }',
+    '.rfp-md-preview strong { font-weight:600; }',
+    '.rfp-md-preview hr { border:none; border-top:1px solid #d1d5db; margin:1.5rem 0; }',
+    /* Tables */
+    '.rfp-md-preview table { width:100%; border-collapse:collapse; font-size:13px; margin:0.75rem 0 1rem; }',
+    '.rfp-md-preview th { background:#f3f4f6; font-weight:600; text-align:left; padding:6px 10px; border:1px solid #d1d5db; }',
+    '.rfp-md-preview td { padding:5px 10px; border:1px solid #e5e7eb; vertical-align:top; }',
+    '.rfp-md-preview tr:nth-child(even) td { background:#fafafa; }',
   ].join('\n');
   document.head.appendChild(style);
 }
@@ -4652,9 +4655,9 @@ rfpTabs.generate = function(rfpId, rfp) {
   window._currentScoringMatrix = JSON.parse(JSON.stringify(scoringMatrix));
   setTimeout(function(){ restoreAutoSave(rfpId); }, 200);
 
-  // Build the preview HTML. Plain-text content is shown in a read-only textarea.
+  // Build the preview HTML. Markdown content is rendered with marked.js.
   const previewHtml = hasContent
-    ? '<textarea readonly style="width:100%;height:100%;box-sizing:border-box;font-family:monospace;font-size:12px;line-height:1.6;padding:14px;border:none;background:#f9fafb;resize:none;outline:none;color:#1f2937;">' + escHtml(rfp.content) + '</textarea>'
+    ? renderMd(rfp.content)
     : '<div style="text-align:center;padding:3rem 1.5rem;color:#9ca3af">'
       + '<i class="fas fa-file-alt" style="font-size:2.5rem;display:block;margin-bottom:1rem;color:#d1d5db"></i>'
       + '<p style="margin:0">Fill in the details and click <strong>Generate with AI</strong> to produce a professional RFP document</p>'
@@ -4752,7 +4755,7 @@ rfpTabs.generate = function(rfpId, rfp) {
     + (hasContent ? '<button class="btn-ghost btn-sm" onclick="copyRfpPreview()" title="Copy all text"><i class="fas fa-copy"></i>Copy All</button>' : '')
     + '<button id="genPreviewPdfBtn" class="btn-ghost btn-sm" onclick="downloadRfpPdf(' + rfpId + ')" style="' + (hasContent ? '' : 'display:none') + '"><i class="fas fa-download"></i>PDF</button>'
     + '</div>'
-    + '<div id="rfpPreviewArea" style="padding:0;flex:1;overflow-y:auto;background:#f9fafb;min-height:0;display:flex;flex-direction:column">' + previewHtml + '</div>'
+    + '<div id="rfpPreviewArea" style="padding:16px 24px;flex:1;overflow-y:auto;background:#ffffff;min-height:0">' + previewHtml + '</div>'
     + '</div>'
     + '</div>'
   );
@@ -4761,9 +4764,9 @@ rfpTabs.generate = function(rfpId, rfp) {
 function copyRfpPreview() {
   var area = document.getElementById('rfpPreviewArea');
   if (!area) return;
-  // If the preview is a plain-text textarea, grab its .value directly
-  var ta = area.querySelector('textarea');
-  var text = ta ? ta.value : (area.innerText || area.textContent || '');
+  // Grab visible text from the rendered markdown div
+  var mdDiv = area.querySelector('.rfp-md-preview');
+  var text = mdDiv ? (mdDiv.innerText || mdDiv.textContent || '') : (area.innerText || area.textContent || '');
   if (navigator.clipboard) {
     navigator.clipboard.writeText(text).then(function(){ showToast('Content copied to clipboard!', 'success'); });
   } else {
@@ -4976,8 +4979,7 @@ async function generateRfpDoc(rfpId) {
         + '<span><strong>Generation complete</strong> &mdash; total time: <strong>' + timeLabel + '</strong></span>'
         + '</div>';
       previewEl.innerHTML = result.content
-        ? timeBadge + '<textarea readonly style="width:100%;height:calc(100% - 60px);box-sizing:border-box;font-family:monospace;font-size:12px;line-height:1.6;padding:14px;border:none;background:#f9fafb;resize:none;outline:none;color:#1f2937;">'
-          + escHtml(result.content) + '</textarea>'
+        ? timeBadge + renderMd(result.content)
         : timeBadge;
     }
     // 2. Show PDF button

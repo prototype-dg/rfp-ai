@@ -17,6 +17,7 @@ export function getLayout(): string {
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"><\/script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"><\/script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"><\/script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@13/marked.min.js"><\/script>
   <link href="/static/style.css" rel="stylesheet">
   <style>
     /* ── Brand asset data URIs injected at build time ── */

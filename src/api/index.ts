@@ -850,8 +850,9 @@ Return ONLY the JSON object. No markdown. No explanation.`
         await sendProgress('fallback', 'Outline parse failed — falling back to sequential generation…')
         const { systemPrompt: sp, userPrompt: up } = buildRFPPrompt(body, archDocText, brdDocText, existingScoringMatrix, settings)
         const llmContent = await llmCall(sp, up, 'gpt-5-mini', 64000)
+        // Fallback path still gets HTML from buildRFPPrompt — strip tags to plain text
         const content = llmContent.length > 400
-          ? llmContent.replace(/<[^>]+>/g, ' ').replace(/&amp;/g,'&').replace(/&mdash;/g,'\u2014').replace(/&nbsp;/g,' ').replace(/[ \t]+/g,' ').replace(/\n{3,}/g,'\n\n').trim()
+          ? llmContent.replace(/<[^>]+>/g, ' ').replace(/&amp;/g,'&').replace(/&mdash;/g,'—').replace(/&nbsp;/g,' ').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/[ \t]+/g,' ').replace(/\n{3,}/g,'\n\n').trim()
           : ''
         if (content) {
           const rfpFullText = content
@@ -895,11 +896,20 @@ ${brdDocText && brdDocText.length > 500 ? `BRD:\n${brdDocText.slice(0, 8000)}` :
       // Letterhead template (same as buildRFPPrompt systemPrompt, inlined here)
       const letterheadSys = systemPrompt  // reuse already-built systemPrompt from buildRFPPrompt
 
-      // Section generator: returns raw HTML content for one section (no page wrapping — assembler adds pages)
+      // Section generator: returns markdown content for one section
       const genSection = (sectionKey: string, sectionSpec: any, extraInstruction: string): Promise<string> => {
-        const sp = `${letterheadSys}
+        const sp = `You are a senior procurement specialist writing ONE section of a formal RFP document.
 
-You are writing ONE section of a formal RFP. Output ONLY the HTML content for this section — no page wrappers, no letterhead, no DOCTYPE. Use inline styles only. The assembler will place your content inside the correct page structure.
+OUTPUT FORMAT: Markdown only. Use:
+- ## for the section heading
+- ### for sub-headings
+- **bold** for emphasis
+- Bullet lists with -
+- Numbered lists with 1. 2. 3.
+- Markdown tables with | col | col | headers and |---|---| separator rows
+- Blank lines between paragraphs
+
+Do NOT output HTML, code fences, or any markup other than standard Markdown.
 CRITICAL: Use ONLY the canonical terms and key figures provided. Do not introduce any technology name, system name, or role name not present in the canonical terms list.`
 
         const up = `${sharedCtx}
@@ -909,9 +919,9 @@ ${JSON.stringify(sectionSpec, null, 2)}
 
 ${extraInstruction}
 
-Write the complete HTML for section "${sectionSpec?.heading || sectionKey}" now. Minimum word count: ${sectionSpec?.min_words || 150}. Output HTML content only — no page wrappers.`
+Write the complete Markdown for section "${sectionSpec?.heading || sectionKey}" now. Minimum word count: ${sectionSpec?.min_words || 150}. Output Markdown only — no HTML, no code fences.`
 
-        return llmCall(sp, up, 'gpt-5-mini', 10000).catch(err => `<p style="color:red">Section generation error: ${err.message}</p>`)
+        return llmCall(sp, up, 'gpt-5-mini', 10000).catch(err => `## Section Error\n\nGeneration error: ${err.message}`)
       }
 
       const s = outline.sections || {}
@@ -945,42 +955,39 @@ Write the complete HTML for section "${sectionSpec?.heading || sectionKey}" now.
 
       await sendProgress('assembling', 'All sections complete — assembling document…')
 
-      // ── PHASE 3: Assemble plain text ────────────────────────────────────────
-      // Strip HTML tags from each generated section, then concatenate into a
-      // single plain-text document. No pagination, no page wrappers.
-      function stripHtml(html: string): string {
-        return html
-          .replace(/<[^>]+>/g, ' ')
-          .replace(/&amp;/g, '&').replace(/&mdash;/g, '\u2014').replace(/&nbsp;/g, ' ')
-          .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
-          .replace(/&#39;/g, "'")
-          .replace(/[ \t]+/g, ' ')
-          .replace(/\n{3,}/g, '\n\n')
-          .trim()
-      }
-
-      const coverText = [
-        outline.rfp_meta?.title || body.title || 'Request for Proposal',
-        'REQUEST FOR PROPOSAL',
+      // ── PHASE 3: Assemble Markdown document ────────────────────────────────
+      // Each section is already markdown from genSection().
+      // Prepend a cover block then join all sections with --- separators.
+      const coverMarkdown = [
+        `# ${outline.rfp_meta?.title || body.title || 'Request for Proposal'}`,
         '',
-        `RFP Reference Number: ${outline.rfp_meta?.ref_number || body.ref_number || ''}`,
-        `Issue Date: ${rfpIssueDate}`,
-        `Proposal Submission Deadline: ${body.deadline || fmtDate(deadlineDate)}`,
-        `Category: ${body.category || ''}`,
-        `Issuing Authority: ${issuerName}, ${issuerLoc}`,
-        `Submission Email: ${procEmail}`,
+        '## REQUEST FOR PROPOSAL',
+        '',
+        `| Field | Value |`,
+        `|---|---|`,
+        `| **RFP Reference Number** | ${outline.rfp_meta?.ref_number || body.ref_number || ''} |`,
+        `| **Issue Date** | ${rfpIssueDate} |`,
+        `| **Proposal Submission Deadline** | ${body.deadline || fmtDate(deadlineDate)} |`,
+        `| **Category** | ${body.category || ''} |`,
+        `| **Issuing Authority** | ${issuerName}, ${issuerLoc} |`,
+        `| **Submission Email** | ${procEmail} |`,
       ].join('\n')
 
+      // Normalise each section: trim stray whitespace, collapse 3+ blank lines
+      function normMd(md: string): string {
+        return md.trim().replace(/\n{3,}/g, '\n\n')
+      }
+
       const content = [
-        coverText,
-        stripHtml(html1),
-        stripHtml(html2),
-        stripHtml(html3),
-        stripHtml(html4),
-        stripHtml(html5),
-        stripHtml(html6),
-        stripHtml(html7),
-        stripHtml(html8),
+        coverMarkdown,
+        normMd(html1),
+        normMd(html2),
+        normMd(html3),
+        normMd(html4),
+        normMd(html5),
+        normMd(html6),
+        normMd(html7),
+        normMd(html8),
       ].join('\n\n---\n\n')
 
       if (content) {
@@ -3642,116 +3649,18 @@ DEPTH AND LENGTH REQUIREMENT
 - Target a minimum of 6,000 to 8,000 words of actual textual content spread across all 8 sections.
 - Do not truncate or summarize. Write every requirement in full.
 
-PAGE AND LETTERHEAD LAYOUT (MANDATORY)
-Each page is rendered as a standalone A4 div that contains the full Andersen corporate letterhead structure — header band, accent rule, wordmark lockup, content area, and footer — ALL built from inline HTML with inline styles. Do NOT use background images.
+OUTPUT FORMAT
+Write in Markdown. Use ## for section headings, ### for sub-headings, **bold** for emphasis, - for bullet lists, 1. for numbered lists, and pipe-delimited tables (| col | col | with |---|---| separator rows). No HTML. No code fences. No letterhead markup.
 
-PAGING: Output multiple A4 pages as separate page divs.
-Each page div uses exactly this inline style:
-style="position:relative; width:794px; height:1123px; max-width:794px; margin:0 auto 20px auto; background:#ffffff; overflow:hidden; box-sizing:border-box; page-break-after:always; font-family:Roboto,Arial,'Segoe UI',sans-serif; color:#020303;"
+DOCUMENT STRUCTURE
 
-LETTERHEAD STRUCTURE — reproduce EXACTLY inside every page div (all inline styles, no classes):
-
-<!-- 1. WORDMARK LOCKUP (top of every page) -->
-<div style="padding:18px 36px 14px; display:flex; align-items:center; gap:18px; border-bottom:none;">
-  <div style="display:flex; align-items:center; gap:14px;">
-    <div style="font-family:Roboto,Arial,sans-serif; font-size:18px; font-weight:700; color:#020D1C; letter-spacing:-0.02em;">Andersen</div>
-    <div style="width:1px; height:28px; background:#E0E0E0;"></div>
-    <div style="font-family:'Courier New',monospace; font-size:9px; letter-spacing:0.22em; text-transform:uppercase; color:#556170; line-height:1.6;"><strong style="color:#020303; font-weight:500;">Software Engineering</strong><br/>Group &middot; Global</div>
-  </div>
-</div>
-
-<!-- 2. YELLOW TOP BAND with topographic lines -->
-<div style="height:48px; background:#FFDB00; position:relative; overflow:hidden; flex-shrink:0;">
-  <svg style="position:absolute;top:0;left:0;width:100%;height:100%;display:block;" viewBox="0 0 794 48" preserveAspectRatio="none" fill="none">
-    <path d="M-10 12 Q 100 3, 220 17 T 460 20 Q 580 26, 810 10" stroke="#020303" stroke-width="0.7" stroke-opacity="0.55"/>
-    <path d="M-10 24 Q 120 11, 240 29 T 480 32 Q 620 38, 810 22" stroke="#020303" stroke-width="0.7" stroke-opacity="0.45"/>
-    <path d="M-10 36 Q 140 22, 260 39 T 500 43 Q 640 50, 810 32" stroke="#020303" stroke-width="0.7" stroke-opacity="0.35"/>
-    <circle cx="120" cy="14" r="2.5" fill="#020303"/>
-    <circle cx="300" cy="29" r="2" fill="#020303"/>
-    <circle cx="460" cy="20" r="3" fill="#020303"/>
-    <circle cx="620" cy="38" r="2" fill="#020303"/>
-    <circle cx="740" cy="17" r="2.5" fill="#020303"/>
-  </svg>
-  <div style="position:absolute;top:50%;right:36px;transform:translateY(-50%);font-family:'Courier New',monospace;font-size:9px;letter-spacing:0.24em;text-transform:uppercase;color:#020303;opacity:0.55;">Andersen &middot; Est. 2007</div>
-</div>
-
-<!-- 3. DOTTED ACCENT RULE -->
-<div style="height:18px; display:flex; align-items:center; padding:0 36px; gap:5px; border-bottom:1px solid #E0E0E0;">
-  <span style="display:block;width:5px;height:5px;border-radius:50%;background:#E0E0E0;"></span>
-  <span style="display:block;width:5px;height:5px;border-radius:50%;background:#E0E0E0;"></span>
-  <span style="display:block;width:7px;height:7px;border-radius:50%;background:#FFDB00;"></span>
-  <span style="display:block;width:5px;height:5px;border-radius:50%;background:#E0E0E0;"></span>
-  <span style="display:block;width:5px;height:5px;border-radius:50%;background:#E0E0E0;"></span>
-  <span style="flex:1;height:1px;background:#E0E0E0;margin:0 4px;"></span>
-  <span style="display:block;width:7px;height:7px;border-radius:50%;background:#FFDB00;"></span>
-  <span style="display:block;width:5px;height:5px;border-radius:50%;background:#E0E0E0;"></span>
-  <span style="display:block;width:5px;height:5px;border-radius:50%;background:#E0E0E0;"></span>
-</div>
-
-<!-- 4. CONTENT AREA (place all page content here) -->
-<div style="padding:20px 56px 88px; position:relative; overflow:hidden; height:997px; box-sizing:border-box;">
-  [PAGE CONTENT GOES HERE]
-</div>
-
-<!-- 5. FOOTER -->
-<div style="position:absolute; bottom:0; left:0; right:0; background:#020D1C; color:#B8C0CB; padding:16px 36px; display:flex; justify-content:space-between; align-items:center; font-size:9px; letter-spacing:0.05em; height:68px; box-sizing:border-box;">
-  <div style="display:flex; gap:28px;">
-    <div><div style="font-family:'Courier New',monospace;font-size:8px;letter-spacing:0.2em;text-transform:uppercase;color:#FFDB00;margin-bottom:3px;">Web</div><div style="font-family:Roboto,Arial,sans-serif;font-size:9px;color:#D8DEE8;">andersenlab.com</div></div>
-    <div><div style="font-family:'Courier New',monospace;font-size:8px;letter-spacing:0.2em;text-transform:uppercase;color:#FFDB00;margin-bottom:3px;">Contact</div><div style="font-family:Roboto,Arial,sans-serif;font-size:9px;color:#D8DEE8;">${procEmail}</div></div>
-    <div><div style="font-family:'Courier New',monospace;font-size:8px;letter-spacing:0.2em;text-transform:uppercase;color:#FFDB00;margin-bottom:3px;">Offices</div><div style="font-family:Roboto,Arial,sans-serif;font-size:9px;color:#D8DEE8;">Warsaw &middot; Berlin &middot; London &middot; New York</div></div>
-  </div>
-  <div style="display:flex; flex-direction:column; align-items:flex-end; gap:4px;">
-    <div style="font-family:Roboto,Arial,sans-serif;font-size:12px;font-weight:700;color:#ffffff;letter-spacing:-0.01em;">Andersen</div>
-    <div style="font-family:'Courier New',monospace;font-size:8px;letter-spacing:0.18em;text-transform:uppercase;color:#FFDB00;">&copy; Andersen 2026</div>
-  </div>
-</div>
-
-PAGING GUIDE:
-- Page 1: Cover page only -- title, subtitle, RFP metadata table, Table of Contents
-- Page 2: Sections 1 and 2 (Background and Objectives)
-- Page 3 onward: Scope of Work sections (3.1, 3.2 ...) -- use as many pages as needed
-- Continue: Technical Requirements, Evaluation Criteria, Vendor Qualifications, Submission Timeline, Terms and Conditions
-- Each major section starts at or near the top of a new page
-
-COVER PAGE METADATA TABLE (place inside the content area on page 1, after title and subtitle):
-<table style="width:80%; margin:16pt auto; border-collapse:collapse; font-family:Roboto,Arial,sans-serif; font-size:10.5pt; color:#020303;">
-  <tr><td style="padding:5pt 10pt; border:1px solid #E0E0E0; font-weight:700; width:38%;">RFP Reference Number</td><td style="padding:5pt 10pt; border:1px solid #E0E0E0;">[insert ref_number]</td></tr>
-  <tr><td style="padding:5pt 10pt; border:1px solid #E0E0E0; font-weight:700;">Issue Date</td><td style="padding:5pt 10pt; border:1px solid #E0E0E0;">[insert today date]</td></tr>
-  <tr><td style="padding:5pt 10pt; border:1px solid #E0E0E0; font-weight:700;">Proposal Submission Deadline</td><td style="padding:5pt 10pt; border:1px solid #E0E0E0;">[insert deadline]</td></tr>
-  <tr><td style="padding:5pt 10pt; border:1px solid #E0E0E0; font-weight:700;">Category</td><td style="padding:5pt 10pt; border:1px solid #E0E0E0;">[insert category]</td></tr>
-  <tr><td style="padding:5pt 10pt; border:1px solid #E0E0E0; font-weight:700;">Issuing Authority</td><td style="padding:5pt 10pt; border:1px solid #E0E0E0;">${issuerName}, ${issuerLoc}</td></tr>
-  <tr><td style="padding:5pt 10pt; border:1px solid #E0E0E0; font-weight:700;">Submission Email</td><td style="padding:5pt 10pt; border:1px solid #E0E0E0;">${procEmail}</td></tr>
-</table>
-
-COLOR PALETTE -- STRICTLY ENFORCED
-- All body text: #020303 (near-black, Andersen ink)
-- Section heading underline accent: #FFDB00 (Andersen yellow)
-- Table and rule borders: #E0E0E0 (light grey)
-- Footer: navy background #020D1C with yellow #FFDB00 labels
-- Accent highlights (e.g. yellow row stripe): #FFDB00 at very low opacity or #FFFDE7
-- PROHIBITED everywhere in body content: blues, greens, teals, oranges, gradients, reds, any other accent color
-
-TYPOGRAPHY -- ALL STYLES MUST BE INLINE (required for self-contained HTML and PDF export)
-Apply every style as an inline style= attribute. No style blocks. No CSS classes.
-
-TITLE: style="font-family:Roboto,Arial,sans-serif; font-size:20pt; font-weight:700; text-align:center; color:#020303; margin:0 0 10pt 0; line-height:1.2;"
-SUBTITLE REQUEST FOR PROPOSAL: style="font-family:Roboto,Arial,sans-serif; font-size:13.5pt; font-weight:300; text-align:center; letter-spacing:2.5px; color:#020303; margin:16pt 0 16pt 0;"
-SECTION HEADING: style="font-family:Roboto,Arial,sans-serif; font-size:13pt; font-weight:700; color:#020303; margin-top:14pt; margin-bottom:7pt; padding-bottom:3pt; border-bottom:2px solid #FFDB00;"
-SUBHEADING: style="font-family:Roboto,Arial,sans-serif; font-size:11pt; font-weight:700; color:#020303; margin-top:10pt; margin-bottom:4pt;"
-BODY PARAGRAPH p: style="font-family:Roboto,Arial,sans-serif; font-size:10.5pt; line-height:1.35; color:#020303; margin:0 0 5pt 0; text-align:justify;"
-BULLET LIST ul: style="font-family:Roboto,Arial,sans-serif; font-size:10.5pt; line-height:1.35; color:#020303; list-style-type:disc; padding-left:18pt; margin:3pt 0 6pt 0;"
-LIST ITEM li: style="margin-bottom:3pt; color:#020303;"
-NUMBERED LIST ol: style="font-family:Roboto,Arial,sans-serif; font-size:10.5pt; line-height:1.35; color:#020303; padding-left:18pt; margin:3pt 0 6pt 0;"
-
-TABLE OF CONTENTS ROWS:
-Top-level: <div style="display:flex; justify-content:space-between; border-bottom:1px dotted #E0E0E0; padding:4pt 0; font-family:Roboto,Arial,sans-serif; font-size:10.5pt; color:#020303;"><span style="font-weight:700;">N. Section Title</span><span style="white-space:nowrap;">N</span></div>
-Sub-item: <div style="display:flex; justify-content:space-between; border-bottom:1px dotted #E0E0E0; padding:3pt 0 3pt 16pt; font-family:Roboto,Arial,sans-serif; font-size:10.5pt; color:#020303;"><span>N.M Sub-section Title</span><span style="white-space:nowrap;">N</span></div>
-
-TABLES (use for technical requirements, evaluation criteria, qualification requirements, timeline):
-Outer: <table style="width:100%; border-collapse:collapse; font-family:Roboto,Arial,sans-serif; font-size:10.5pt; color:#020303; margin:6pt 0 10pt 0;">
-Header th: style="font-weight:700; color:#020303; background:#FFFDE7; padding:5pt 7pt; border:1px solid #E0E0E0; text-align:left;"
-Data td: style="color:#020303; background:#FFFFFF; padding:5pt 7pt; border:1px solid #E0E0E0; vertical-align:top;"
-Rules: No colored cell fills. No merged cells. Alternate rows may use #FAFAFA background for readability if needed.
+DOCUMENT STRUCTURE:
+- Start with: # [RFP Title] then ## REQUEST FOR PROPOSAL
+- Then a markdown table with fields: RFP Reference Number, Issue Date, Proposal Submission Deadline, Category, Issuing Authority, Submission Email
+- Then ## Table of Contents as a numbered list
+- Then each of the 8 sections as ## headings
+- Sub-sections as ### headings
+- Tables using standard markdown pipe syntax
 
 CONTENT RULES -- STRICTLY ENFORCED
 1. ALL content must be derived exclusively from the PROVIDED PROJECT DETAILS and SUPPORTING DOCUMENTS. Do not invent, add, or extrapolate anything.
@@ -3763,18 +3672,14 @@ CONTENT RULES -- STRICTLY ENFORCED
 7. Vendor Qualification Requirements must be specific to this project domain.
 8. Where the supporting documents mention specific system names, module names, report names, KPI names, user roles, or data entities -- include them explicitly by name in the RFP.
 
-HTML OUTPUT RULES
-- Return ONLY the inner HTML -- no DOCTYPE, no html tag, no body tag, no head tag, no style blocks.
-- The outermost element is a plain wrapper div with no styling.
-- Inside it, each A4 page is a separate div using EXACTLY the page wrapper inline style shown above (794px wide, 1123px tall, white background, no background-image).
-- Inside each page div, reproduce the full Andersen letterhead structure in this order: wordmark lockup, yellow band with inline SVG, dotted accent rule, content area div, and navy footer -- as shown above with all inline styles.
-- Place the actual page content (title, sections, tables, etc.) INSIDE the content area div, replacing the [PAGE CONTENT GOES HERE] placeholder.
-- Do NOT use background-image anywhere. The letterhead is pure inline HTML + CSS.
-- Do NOT use external images or img tags.
-- ALL styling via inline style= attributes ONLY. No classes. No style blocks. No external stylesheets.
-- Use proper HTML: p, ul, ol, li, table, thead, tbody, tr, th, td, strong, em, div, svg.
-- Do NOT use markdown, code fences, or non-HTML syntax.
-- Do NOT embed base64 images or data URIs.`
+MARKDOWN OUTPUT RULES
+- Return ONLY Markdown. No HTML tags, no code fences, no DOCTYPE.
+- Use ## for major section headings, ### for sub-headings.
+- Use pipe tables for structured data (requirements, evaluation criteria, timelines).
+- Use - for unordered lists, 1. for ordered lists.
+- Use **bold** for emphasis and field labels.
+- Separate major sections with a blank line before and after headings.
+- Do NOT wrap output in triple backticks or any code block.`
 
   // Helper: check if a doc text field is a real extracted text or just a placeholder note
   const isRealDocText = (t: string) => t && t.length > 500 && !t.startsWith('[Document uploaded:') && !t.startsWith('[PDF:')
@@ -3917,7 +3822,7 @@ async function generateRFPWithLLM(data: any, archDocText: string, brdDocText: st
   const { systemPrompt, userPrompt } = buildRFPPrompt(data, archDocText, brdDocText, scoringMatrixJson, settings)
   const llmContent = await callLLM(systemPrompt, userPrompt, env, 'gpt-5-mini', 64000)
   if (llmContent && llmContent.length > 400) {
-    return llmContent.replace(/<[^>]+>/g, ' ').replace(/&amp;/g,'&').replace(/&mdash;/g,'\u2014').replace(/&nbsp;/g,' ').replace(/[ \t]+/g,' ').replace(/\n{3,}/g,'\n\n').trim()
+    return llmContent.trim().replace(/\n{3,}/g, '\n\n')
   }
   throw new Error(`LLM returned insufficient content (${llmContent?.length || 0} chars)`)
 }
