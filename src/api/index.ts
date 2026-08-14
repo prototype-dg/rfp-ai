@@ -302,7 +302,26 @@ apiRouter.get('/rfps/:id/pdf', async (c) => {
   const renderSecret = c.env.PDF_RENDER_SECRET || (globalThis as any).PDF_RENDER_SECRET || ''
 
   // ── Puppeteer path ────────────────────────────────────────────────────────
+  // Version-gate: the render service must be v3+ to handle the new Andersen inline-HTML design.
+  // v2 used format:'A4' + displayHeaderFooter:true + 72mm top margin → white-space bug.
+  // v3 uses page.pdf({width:'794px',height:'1123px'}) + displayHeaderFooter:false + margin:0.
+  // If the service reports v2 (or we can't reach it), skip to the browser-print fallback below.
+  let renderServiceVersion = 0
   if (renderUrl && renderSecret) {
+    try {
+      const healthRes = await fetch(`${renderUrl}/`, {
+        headers: { 'Authorization': `Bearer ${renderSecret}` },
+        signal: AbortSignal.timeout(5000),
+      }).catch(() => null)
+      if (healthRes?.ok) {
+        const health = await healthRes.json().catch(() => ({})) as any
+        renderServiceVersion = parseInt(health?.version || '0', 10)
+        console.log(`[pdf-render] Render service version: ${renderServiceVersion}`)
+      }
+    } catch (_) {}
+  }
+
+  if (renderUrl && renderSecret && renderServiceVersion >= 3) {
     try {
       // Andersen letterhead is now fully inline HTML inside every LLM page div.
       // No headerTemplate image is needed — letterhead_data_uri is intentionally empty.
@@ -337,14 +356,17 @@ apiRouter.get('/rfps/:id/pdf', async (c) => {
         .replace(/(style=["'][^"'>]*?)padding-top\s*:\s*72mm\s*;?\s*/gi, '$1')
         .replace(/(style=["'][^"'>]*?)padding-bottom\s*:\s*28mm\s*;?\s*/gi, '$1')
 
-      // Wrap in a minimal HTML document.
-      // page-break-after:always is preserved in LLM page div inline styles (see Fix 2 note above).
-      // The CSS below adds a safety net using the body > div > div selector which correctly
-      // targets the LLM page divs (body > outer-wrapper-div > page-divs).
-      // Bug fix: Use @page size that exactly matches LLM page divs (794×1123 px at 96dpi = A4).
-      // Previously we used default A4 paper (841px effective height at 96dpi) which made each
-      // 1123px-tall LLM page div overflow into ~1.34 PDF pages → 9 HTML pages → 64 PDF pages.
-      // Setting @page size to 794px×1123px means 1 LLM page div = exactly 1 PDF page.
+      // Wrap in a minimal HTML document for Puppeteer.
+      //
+      // Page sizing strategy: we pass page_width/page_height to the render service
+      // which calls page.pdf({ width:'794px', height:'1123px' }) — this is what controls
+      // the actual paper size. The render service has displayHeaderFooter:false and
+      // margin:0 so LLM inline headers/footers render without any Puppeteer overlay.
+      //
+      // The CSS here just provides a safety-net page-break between LLM page divs.
+      // DO NOT set height/max-height/overflow:hidden on page divs in CSS — that would
+      // clip content or cause all content to collapse into a single page.
+      // DO NOT set @page size here — Puppeteer's page.pdf() width/height overrides it.
       const PAGE_W = 794
       const PAGE_H = 1123
       const html = `<!DOCTYPE html>
@@ -352,20 +374,12 @@ apiRouter.get('/rfps/:id/pdf', async (c) => {
 <head>
 <meta charset="UTF-8">
 <style>
-  /* Match paper size to LLM page div dimensions (96dpi A4: 794×1123px). */
-  @page { size: ${PAGE_W}px ${PAGE_H}px; margin: 0; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: Arial, Calibri, 'Segoe UI', sans-serif; font-size: 11pt; color: #1A1A1A; background: #fff; width: ${PAGE_W}px; }
-  /* Each LLM page div is exactly PAGE_H tall — enforce hard clip so nothing bleeds. */
-  body > div > div {
-    width: ${PAGE_W}px !important;
-    height: ${PAGE_H}px !important;
-    max-height: ${PAGE_H}px !important;
-    overflow: hidden !important;
-    page-break-after: always;
-    page-break-inside: avoid;
-    position: relative;
-  }
+  /* Safety-net page break between LLM page divs.
+     LLM structure: body > .rfp-doc > [page divs]
+     Each page div already has page-break-after:always in its inline style. */
+  body > div > div { page-break-after: always; page-break-inside: avoid; }
   body > div > div:last-child { page-break-after: avoid; }
   h1, h2, h3 { color: #1A1A1A; }
   table { border-collapse: collapse; width: 100%; }
@@ -381,8 +395,8 @@ apiRouter.get('/rfps/:id/pdf', async (c) => {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${renderSecret}`,
         },
-        // Pass explicit page dimensions so Puppeteer uses 794×1123px paper —
-        // matches LLM page divs exactly → 1 div = 1 PDF page.
+        // page_width/page_height tell the render service to use page.pdf({width, height})
+        // instead of format:'A4'. This matches LLM page div dimensions → 1 div = 1 PDF page.
         body: JSON.stringify({
           html,
           letterhead_data_uri: letterheadDataUri,
@@ -442,8 +456,6 @@ apiRouter.get('/rfps/:id/pdf', async (c) => {
     .no-print { display: none !important; }
     .rfp-doc > div {
       box-shadow: none !important; margin: 0 !important;
-      width: 794px !important; height: 1123px !important; max-height: 1123px !important;
-      overflow: hidden !important;
       page-break-after: always; page-break-inside: avoid;
     }
     .rfp-doc > div:last-child { page-break-after: avoid; }

@@ -3,11 +3,13 @@
 // Runs on the sidecar VPS at 127.0.0.1:8001
 // Proxied by nginx at https://api.cpc-rfp.website/pdf/
 //
-// v2: Accept letterhead_data_uri (base64 data URI) instead of letterhead_url.
-//     Puppeteer headerTemplate runs in an isolated context with no network access,
-//     so external URLs always fail. A data URI is the only reliable approach.
-//     Header div uses height:72mm; overflow:hidden to show only the top decorative
-//     portion of the full-A4 letterhead background image.
+// v3: New Andersen inline-HTML design.
+//     - Header/footer are fully inline inside each LLM page div.
+//     - Puppeteer's displayHeaderFooter/headerTemplate/footerTemplate disabled.
+//     - Page size comes from the request body (page_width x page_height).
+//       Default: 794px x 1123px (96dpi A4) matching LLM page div dimensions.
+//       1 LLM page div → exactly 1 PDF page.
+//     - All margins are 0 — the LLM page divs have their own inner padding.
 
 'use strict';
 const express = require('express');
@@ -21,7 +23,7 @@ const SECRET = process.env.PDF_SERVICE_SECRET || '';
 
 // ── Health check ────────────────────────────────────────────────────────────
 app.get('/', (req, res) => {
-  res.json({ status: 'ok', service: 'pdf-render', version: '2' });
+  res.json({ status: 'ok', service: 'pdf-render', version: '3' });
 });
 
 app.get('/health', (req, res) => {
@@ -40,47 +42,24 @@ function requireAuth(req, res, next) {
 }
 
 // ── POST /render-pdf ─────────────────────────────────────────────────────────
-// Body: { html: string, letterhead_data_uri?: string }
+// Body: {
+//   html: string,
+//   page_width?: string,   // e.g. "794px"  — default "794px"
+//   page_height?: string,  // e.g. "1123px" — default "1123px"
+//   letterhead_data_uri?: string  // ignored (kept for API compat — new design is inline)
+// }
 // Returns: application/pdf bytes
 app.post('/render-pdf', requireAuth, async (req, res) => {
-  const { html, letterhead_data_uri } = req.body || {};
+  const { html, page_width, page_height } = req.body || {};
 
   if (!html || typeof html !== 'string') {
     return res.status(400).json({ error: 'Missing required field: html' });
   }
 
-  // ── Build header template ────────────────────────────────────────────────
-  // The letterhead image is a full A4 page (210mm × 297mm).
-  // We display it at 210mm wide inside a 72mm-tall div with overflow:hidden
-  // so only the top decorative portion (Arabic ornament + logo block) is shown.
-  // margin.top = 72mm reserves this exact height on every page.
-  //
-  // IMPORTANT: Puppeteer headerTemplate runs in an isolated context with no
-  // network access. External <img src="https://..."> always fails silently.
-  // Only inline base64 data URIs work reliably. The Worker fetches the image
-  // from R2 and sends it as a data URI in letterhead_data_uri.
-  let headerHtml;
-  if (letterhead_data_uri) {
-    headerHtml = `
-      <div style="margin:0; padding:0; width:210mm; height:72mm; overflow:hidden; line-height:0;">
-        <img src="${letterhead_data_uri}"
-             style="width:210mm; display:block; margin:0; padding:0; border:0;" />
-      </div>`;
-  } else {
-    // No letterhead available — use an empty placeholder div.
-    // margin.top:72mm still reserves space so content doesn't collide with the top.
-    headerHtml = `<div style="width:210mm; height:72mm;"></div>`;
-  }
-
-  // ── Build footer template ────────────────────────────────────────────────
-  // Puppeteer injects <span class="pageNumber"> and <span class="totalPages">
-  // automatically when those class names appear in footerTemplate.
-  const footerHtml = `
-    <div style="width:210mm; text-align:center; font-family:Arial,Calibri,'Segoe UI',sans-serif;
-                font-size:9pt; color:#888888; padding:0 25mm; box-sizing:border-box;">
-      Crown Prince&rsquo;s Court &mdash; Confidential &nbsp;|&nbsp;
-      Page <span class="pageNumber"></span> of <span class="totalPages"></span>
-    </div>`;
+  // Page dimensions — LLM generates 794×1123px divs (96dpi A4).
+  // Accept override from caller but fall back to the canonical values.
+  const pageW = page_width  || '794px';
+  const pageH = page_height || '1123px';
 
   let browser;
   try {
@@ -101,17 +80,21 @@ app.post('/render-pdf', requireAuth, async (req, res) => {
     await page.setContent(html, { waitUntil: 'networkidle0' });
 
     const pdfBuffer = await page.pdf({
-      format: 'A4',
+      // Use explicit pixel dimensions matching LLM page div size.
+      // This ensures 1 LLM page div (794×1123px) = exactly 1 PDF page.
+      // Do NOT use format:'A4' — A4 at 96dpi is only ~841px tall, causing
+      // each 1123px div to overflow into ~1.34 pages → many blank pages.
+      width: pageW,
+      height: pageH,
       printBackground: true,
-      displayHeaderFooter: true,
-      headerTemplate: headerHtml,
-      footerTemplate: footerHtml,
-      margin: {
-        top: '72mm',    // matches headerTemplate height — reserves space for letterhead
-        bottom: '18mm', // reserves space for footerTemplate
-        left: '0',
-        right: '0',
-      },
+      // Puppeteer header/footer overlay is DISABLED.
+      // The new Andersen design embeds header/footer inline inside each
+      // LLM page div — no Puppeteer overlay is needed or wanted.
+      // Enabling it with an empty template creates a mandatory top margin
+      // that pushes content down, causing the white-space-at-top bug.
+      displayHeaderFooter: false,
+      // Zero margins — LLM page divs have their own inner padding.
+      margin: { top: '0', bottom: '0', left: '0', right: '0' },
     });
 
     await browser.close();
