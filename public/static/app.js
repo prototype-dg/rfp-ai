@@ -4957,13 +4957,23 @@ async function generateRfpDoc(rfpId) {
     }
 
     appState.currentRfp = result;
-    showToast('RFP document generated!', 'success');
+    var totalSecs = Math.round((Date.now() - genStartTime) / 1000);
+    var totalMins = Math.floor(totalSecs / 60);
+    var totalRemSecs = totalSecs % 60;
+    var timeLabel = totalMins > 0
+      ? totalMins + 'm ' + totalRemSecs + 's'
+      : totalSecs + 's';
+    showToast('RFP generated in ' + timeLabel + '!', 'success');
 
     // 1. Update the preview area immediately (fast path)
     if (previewEl) {
+      var timeBadge = '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;padding:8px 14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;font-size:0.82rem;color:#166534;">'
+        + '<i class="fas fa-check-circle" style="color:#16a34a"></i>'
+        + '<span><strong>Generation complete</strong> &mdash; total time: <strong>' + timeLabel + '</strong></span>'
+        + '</div>';
       previewEl.innerHTML = result.content
-        ? '<div class="rfp-preview-viewer">' + cleanRfpContent(result.content) + '</div>'
-        : '';
+        ? timeBadge + '<div class="rfp-preview-viewer">' + cleanRfpContent(result.content) + '</div>'
+        : timeBadge;
     }
     // 2. Show PDF button
     var pdfBtn = document.getElementById('genPreviewPdfBtn');
