@@ -1199,7 +1199,7 @@ For any further queries, please reply to this email referencing your Participant
 Best regards,
 Procurement & Contracting Department
 Andersen, Warsaw
-procurement@andersenlab.com
+procurement@cpc-rfp.website
 
 ──────────────────────────────────────────────
 PARTICIPANT REFERENCE: ${participantCode}
@@ -1209,7 +1209,7 @@ Please include this reference code in ALL correspondence regarding this RFP.
       if (resendKey) {
         try {
           const emailPayload = {
-            from: 'Andersen Procurement <procurement@andersenlab.com>',
+            from: 'Andersen Procurement <procurement@cpc-rfp.website>',
             to: [vendor.contact_email],
             subject: `Q&A Consolidated Response – ${rfp?.title || 'Andersen RFP'} (Ref: ${rfp?.ref_number || ''})`,
             text: emailText,
@@ -1311,19 +1311,26 @@ apiRouter.post('/rfps/:id/emails/send-invitations', async (c) => {
     const emailBody = buildInvitationEmailText(v, rfp, qDeadline, sDeadline, notes, baseUrl)
     let status = 'simulated'
     let sendError = ''
+    let resendId: string | undefined
 
-    const result = await sendRealEmail(
-      v.contact_email,
-      `Invitation to Tender – ${rfp?.title || 'Andersen RFP'} (Ref: ${rfp?.ref_number || ''})`,
-      emailBody,
-      rfp,
-      c.env,
-      pdfBase64,
-      pdfFilename
-    )
-    status = result.ok && !result.simulated ? 'sent' : 'simulated'
-    sendError = result.error || ''
-    results.push({ vendor: v.name, status, resendId: result.id, error: sendError })
+    const isAndersenVendor = (v.contact_email || '').toLowerCase().includes('@andersenlab.com')
+    if (isAndersenVendor) {
+      // Real Andersen email — attempt actual delivery via Resend
+      const result = await sendRealEmail(
+        v.contact_email,
+        `Invitation to Tender – ${rfp?.title || 'Andersen RFP'} (Ref: ${rfp?.ref_number || ''})`,
+        emailBody,
+        rfp,
+        c.env,
+        pdfBase64,
+        pdfFilename
+      )
+      status = result.ok ? 'sent' : 'simulated'
+      sendError = result.error || ''
+      resendId = result.id
+    }
+    // Non-@andersenlab.com vendors → always simulate (prototype guard)
+    results.push({ vendor: v.name, status, resendId, error: sendError })
 
     await c.env.DB.prepare(`
       INSERT INTO email_log (rfp_id, vendor_id, recipient, subject, body, email_type, status, has_pdf, created_at)
@@ -1568,7 +1575,7 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
     `).bind(
       rfpId,
       vendorId,
-      'procurement@andersenlab.com',
+      'procurement@cpc-rfp.website',
       fromAddress,
       subject,
       bodyText.slice(0, 4000),
@@ -1610,7 +1617,7 @@ Reference Number: ${rfpRef}
 
 We regret to inform you that the Q&A period for this Request for Proposal has now closed. The Andersen is no longer able to accept or process clarification questions for this tender.
 
-All vendors have been provided with a consolidated Q&A response document containing answers to all submitted questions. If you have not received this document, please contact procurement@andersenlab.com referencing the RFP above.
+All vendors have been provided with a consolidated Q&A response document containing answers to all submitted questions. If you have not received this document, please contact procurement@cpc-rfp.website referencing the RFP above.
 
 Proposal submissions continue to be accepted until the stated deadline. Please refer to your original invitation letter for submission instructions and the deadline date.
 
@@ -1619,14 +1626,14 @@ We appreciate your interest in participating in this procurement and look forwar
 Best regards,
 Procurement & Contracting Department
 Andersen, Warsaw
-procurement@andersenlab.com`
+procurement@cpc-rfp.website`
 
           try {
             await fetch('https://api.resend.com/emails', {
               method: 'POST',
               headers: { 'Authorization': `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                from: 'Andersen Procurement <procurement@andersenlab.com>',
+                from: 'Andersen Procurement <procurement@cpc-rfp.website>',
                 to: [fromAddress],
                 subject: `RE: ${subject || 'Q&A Query'} — Q&A Period Closed`,
                 text: rejectionBody,
@@ -1639,7 +1646,7 @@ procurement@andersenlab.com`
         await db.prepare(`
           INSERT INTO email_log (rfp_id, vendor_id, recipient, from_email, subject, body, email_type, status, created_at)
           VALUES (?,?,?,?,?,?,'qa_rejection','sent',datetime('now'))
-        `).bind(rfpId, vendorId, fromAddress, 'procurement@andersenlab.com',
+        `).bind(rfpId, vendorId, fromAddress, 'procurement@cpc-rfp.website',
           `RE: ${subject} — Q&A Period Closed`,
           `Auto-reply sent: Q&A closed for RFP ${rfp?.ref_number}. Question from ${vendorDisplayName} rejected.`).run()
 
@@ -4521,7 +4528,7 @@ Best regards,
 Procurement & Contracting Department
 Andersen
 Warsaw · Berlin · London · New York
-procurement@andersenlab.com
+procurement@cpc-rfp.website
 
 ──────────────────────────────────────────────
 PARTICIPANT REFERENCE: ${participantCode}
@@ -4593,7 +4600,7 @@ async function sendRealEmail(
               <td>
                 <div style="font-family:'Courier New',monospace;font-size:9px;letter-spacing:0.14em;text-transform:uppercase;color:#020D1C;font-weight:700;margin-bottom:4px">Official Procurement Correspondence</div>
                 <div style="font-size:11px;color:#556170;line-height:1.5">Andersen &nbsp;·&nbsp; Warsaw, Poland<br>
-                <a href="mailto:procurement@andersenlab.com" style="color:#FFDB00;text-decoration:none">procurement@andersenlab.com</a></div>
+                <a href="mailto:procurement@cpc-rfp.website" style="color:#FFDB00;text-decoration:none">procurement@cpc-rfp.website</a></div>
               </td>
               <td align="right" style="vertical-align:bottom">
                 <div style="font-family:'Courier New',monospace;font-size:8px;color:#6b7280;letter-spacing:0.06em;text-transform:uppercase">AI RFP Management System</div>
@@ -4624,7 +4631,7 @@ async function sendRealEmail(
 
   try {
     const payload: any = {
-      from: 'Andersen Procurement <procurement@andersenlab.com>',
+      from: 'Andersen Procurement <procurement@cpc-rfp.website>',
       to: [to],
       subject: subject,
       text: bodyText,
