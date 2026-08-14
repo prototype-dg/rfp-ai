@@ -1015,16 +1015,17 @@ Write the complete HTML for section "${sectionSpec?.heading || sectionKey}" now.
       // wrapper each). Three budget constants govern how tightly pages pack:
       //
       //   PROSE_BUDGET  — for paragraphs, headings, and list containers
-      //   TABLE_BUDGET  — for table content (rows measured individually)
-      //   LIST_ITEM_BUDGET — for individual <li> items within a list block
+      //   TABLE_BUDGET  — pixel-height budget per table page (column-aware, in px)
+      //   LIST_BUDGET   — weight budget for list containers
       //
-      // Calibrated from real RFP 16 analysis (Data Platform Modernization):
-      //   Content area: 909px tall, 682px wide, 11pt/14px body, 1.4 line-height
-      //   ~20px per prose line → ~45 lines → ~2160 plain-text chars theoretically
-      //   Real S1 background: 5 paragraphs × ~1100 chars each → need PROSE_BUDGET ≥ 2200
-      //   Real S3 scope: 91 list items in nested divs → need <li>-level splitting
-      //   Real S4 table: 35 rows × ~360 chars/row → TABLE_BUDGET controls row packing
-      //   Real tables pages 12-18: 3 rows at 1342-1671 chars → budget was too tight
+      // Calibrated from real RFP 18 analysis (Data Platform Modernization):
+      //   Content area: 829px usable (929px - 20px top padding - 80px bottom padding)
+      //   Content width: 682px (794px - 2×56px padding)
+      //   Font: 10.5pt Roboto = 14px, line-height 1.35 = 18.9px/line
+      //   Prose: ~85 chars/line (full width) → PROSE_BUDGET 2400 ≈ 28 lines ≈ 529px
+      //   Tables: 3-col narrow tables. widest cell drives row height.
+      //     TABLE_BUDGET 800px (≤829px safe area). estimateRowHeight() is column-aware.
+      //   Lists: verbose items ~200-600 chars. LIST_BUDGET 2500 ≈ 3 items per page.
       //
       // Architecture:
       //   paginateHtml()     — main entry point; calls tokenise() on top-level elements
@@ -1034,18 +1035,18 @@ Write the complete HTML for section "${sectionSpec?.heading || sectionKey}" now.
       //   splitDivChildren() — descends <div>/<section>, splits at child boundaries
       // Budget calibration history (RFP 18 analysis, 2026-08-14):
       //
-      // PROSE_BUDGET 2900: scope subsections 800-1100w each pack 2-3 per page (78-92% fill).
+      // PROSE_BUDGET 2400: prose at 85 chars/line ≈ 28 lines ≈ 529px (safe within 829px available).
       //   Pages 17+27 (heading+table sections, 2854-2877w) fit at 98-99% without overflow.
       //   Pages 9-12 (heavy prose, 2599-2676w) stay safely at 90-92%.
       //
-      // TABLE_BUDGET 2400: unchanged — 4-5 rows per page gives 68-84% fill, comfortable.
+      // TABLE_BUDGET 800px: pixel-height budget. estimateRowHeight() measures tallest cell per row.
       //
       // LIST_BUDGET 2500: RFP 18 list items are 540-690w each (very long objective statements).
       //   At 3200, items 1-5 packed to 3072w → visual overflow. At 2500, items 1-4 pack to
       //   2470w (99% fill), items 5-6 spill to next chunk (47% fill — unavoidable with 2-item
       //   tail, but better than overflowing). Terms section ul: 5 items at 90% + 2-item tail.
-      const PROSE_BUDGET = 2900      // plain-text-equiv chars per page for prose content
-      const TABLE_BUDGET = 2400      // budget for table (calibrated: 4 rows × ~502w/row + thead)
+      const PROSE_BUDGET = 2400      // plain-text-equiv chars per page for prose content
+      const TABLE_BUDGET = 800       // pixel-height budget per TABLE PAGE (see estimateRowHeight)
       const LIST_BUDGET  = 2500      // budget for list containers (heavy items: 540-690w each)
 
       // ── Weight estimator ──────────────────────────────────────────────────
@@ -1071,6 +1072,62 @@ Write the complete HTML for section "${sectionSpec?.heading || sectionKey}" now.
         // <p> tags immediately inside <li> — their margin collapses, don't double-count
         const liPs  = (html.match(/<li[^>]*>\s*<p[\s>]/gi) || []).length
         return base + trs * 55 + heads * 70 + lis * 18 + ps * 14 - liPs * 14
+      }
+
+      // ── Column-aware table row height estimator ───────────────────────────
+      // estimateWeight() concatenates all cell text and measures it as if it
+      // were full-width prose — critically wrong for narrow multi-column tables
+      // where each cell wraps independently. A 3-column table has cells only
+      // ~227px wide (682/3), so a 385-char cell wraps to 14 lines × 18.9px =
+      // 260px — 3× taller than the text-only weight model predicts.
+      //
+      // This function measures the TALLEST CELL in each row and sums those
+      // heights to produce a pixel estimate. TABLE_BUDGET is then expressed
+      // in pixels (800px), matching the 829px available content height.
+      //
+      // Content area: 794px page − 2×56px padding = 682px wide.
+      // Font: 10.5pt Roboto = 14px, line-height 1.35 = 18.9px per line.
+      // Avg char width at 14px Roboto ≈ 7.5px (slightly narrower than 8px
+      // because RFP prose uses mixed case + many narrow letters in jargon).
+      function estimateRowHeight(rowHtml: string): number {
+        // Extract all <td>/<th> cell contents
+        const cellRe = /<t[dh][^>]*>(.*?)<\/t[dh]>/gis
+        const cells: string[] = []
+        let m: RegExpExecArray | null
+        while ((m = cellRe.exec(rowHtml)) !== null) cells.push(m[1])
+        if (!cells.length) {
+          // No cells found — fallback to weight-based estimate
+          const text = rowHtml.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim()
+          return Math.max(28, Math.ceil(text.length / 85) * 18.9 + 10)
+        }
+        const ncols = cells.length
+        // Cell width = content area width / number of columns (equal-width assumption)
+        // Add 14px horizontal cell padding on each side (7pt × 2)
+        const CONTENT_WIDTH = 682
+        const CELL_PADDING_H = 14  // px each side → 28px total
+        const cellWidth = Math.max(80, (CONTENT_WIDTH / ncols) - CELL_PADDING_H)
+        const AVG_CHAR_W = 7.5   // px at 10.5pt Roboto
+        const LINE_H = 18.9      // px at 14px font, 1.35 line-height
+        const CELL_PAD_V = 10    // px top+bottom cell padding (5pt each)
+        let maxCellHeight = 0
+        for (const cell of cells) {
+          const cellText = cell.replace(/<[^>]+>/g, '').replace(/&[a-zA-Z#0-9]+;/g, ' ').replace(/\s+/g, ' ').trim()
+          const charsPerLine = Math.max(1, cellWidth / AVG_CHAR_W)
+          const lines = Math.max(1, Math.ceil(cellText.length / charsPerLine))
+          const h = lines * LINE_H + CELL_PAD_V
+          if (h > maxCellHeight) maxCellHeight = h
+        }
+        // Add 2px border
+        return maxCellHeight + 2
+      }
+
+      // Estimate total pixel height for a thead block (used for budget carry-over)
+      function estimateTheadHeight(theadHtml: string): number {
+        if (!theadHtml) return 0
+        const rows = [...theadHtml.matchAll(/<tr[\s\S]*?<\/tr>/gi)]
+        let h = 0
+        for (const r of rows) h += estimateRowHeight(r[0])
+        return h + 4  // 4px thead border
       }
 
       // ── Low-level HTML element tokeniser ─────────────────────────────────
@@ -1129,7 +1186,8 @@ Write the complete HTML for section "${sectionSpec?.heading || sectionKey}" now.
         const tableOpen  = tableOpenM ? tableOpenM[1] : '<table>'
         const theadM     = tableHtml.match(/(<thead[\s\S]*?<\/thead>)/i)
         const thead      = theadM ? theadM[1] : ''
-        const theadW     = estimateWeight(thead)
+        // Use pixel-height for thead carry-over weight (TABLE_BUDGET is in px)
+        const theadH     = estimateTheadHeight(thead)
 
         // Strip thead, table open/close, tbody/tfoot wrappers → get raw row HTML
         let body = tableHtml
@@ -1157,15 +1215,17 @@ Write the complete HTML for section "${sectionSpec?.heading || sectionKey}" now.
 
         if (!rows.length) return [tableHtml]
 
+        // Pack rows by PIXEL HEIGHT (column-aware) instead of text weight.
+        // TABLE_BUDGET = 800px (content area is 829px; leave 29px safety margin).
         const chunks: string[] = []
-        let buf: string[] = [], bufW = theadW
+        let buf: string[] = [], bufH = theadH
         for (const row of rows) {
-          const rw = estimateWeight(row)
-          if (bufW + rw > TABLE_BUDGET && buf.length) {
+          const rh = estimateRowHeight(row)   // pixels, column-aware
+          if (bufH + rh > TABLE_BUDGET && buf.length) {
             chunks.push(`${tableOpen}${thead}<tbody>${buf.join('')}</tbody></table>`)
-            buf = []; bufW = theadW
+            buf = []; bufH = theadH
           }
-          buf.push(row); bufW += rw
+          buf.push(row); bufH += rh
         }
         if (buf.length) chunks.push(`${tableOpen}${thead}<tbody>${buf.join('')}</tbody></table>`)
         return chunks.length ? chunks : [tableHtml]
@@ -1242,7 +1302,7 @@ Write the complete HTML for section "${sectionSpec?.heading || sectionKey}" now.
         for (const child of children) {
           const childTag = (child.match(/^<([a-zA-Z][a-zA-Z0-9]*)/) || [])[1]?.toLowerCase()
           // If child is a heavy <table>, flush current buffer first then split the table
-          if (childTag === 'table' && estimateWeight(child) > TABLE_BUDGET) {
+          if (childTag === 'table' && estimateWeight(child) > PROSE_BUDGET) {
             if (buf.trim()) { chunks.push(`${divOpen}${buf}${divClose}`); buf = ''; bufW = 0 }
             for (const tc of splitTable(child)) chunks.push(tc)
             continue
@@ -1332,12 +1392,19 @@ Write the complete HTML for section "${sectionSpec?.heading || sectionKey}" now.
           const tag = (seg.match(/^<([a-zA-Z][a-zA-Z0-9]*)/) || [])[1]?.toLowerCase() || ''
 
           if (tag === 'table') {
-            // Split at row boundaries; each sub-table placed on page independently
+            // Split at row boundaries via pixel-height-aware splitTable().
+            // Each tc chunk is guaranteed to be ≤ TABLE_BUDGET (800px) tall.
+            // Flush preceding prose if it is dense enough to fill its own page,
+            // then always give each table sub-chunk its own page (flush before and after).
             for (const tc of splitTable(seg)) {
               const tw = estimateWeight(tc)
               const chunkIsDense = weight >= SPARSE_THRESHOLD
-              if (weight + tw > TABLE_BUDGET && chunkIsDense && chunk.trim()) flush()
+              // Always flush if there is any preceding content: tables should
+              // start at the top of a page so their full height is available.
+              if (chunk.trim()) flush()
               chunk += tc; weight += tw
+              // Flush the table chunk immediately so it never merges with following prose
+              flush()
             }
           } else if (tag === 'ol' || tag === 'ul') {
             // Split at list-item boundaries
@@ -1358,11 +1425,10 @@ Write the complete HTML for section "${sectionSpec?.heading || sectionKey}" now.
             for (const dc of splitDivChildren(seg)) {
               const dcTag = (dc.match(/^<([a-zA-Z][a-zA-Z0-9]*)/) || [])[1]?.toLowerCase() || ''
               if (dcTag === 'table') {
-                // Table chunks from splitDivChildren go through table placement logic
-                const tw = estimateWeight(dc)
-                const chunkIsDense = weight >= SPARSE_THRESHOLD
-                if (weight + tw > TABLE_BUDGET && chunkIsDense && chunk.trim()) flush()
-                chunk += dc; weight += tw
+                // Table sub-chunks from splitDivChildren: always isolated on own page
+                if (chunk.trim()) flush()
+                chunk += dc; weight += estimateWeight(dc)
+                flush()
               } else {
                 addChunk(dc, PROSE_BUDGET)
               }
