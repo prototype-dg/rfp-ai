@@ -963,7 +963,12 @@ Write the complete HTML for section "${sectionSpec?.heading || sectionKey}" now.
 <div style="margin:20pt 0 8pt 0;font-family:Roboto,Arial,sans-serif;font-size:11pt;font-weight:700;color:#020303;border-bottom:2px solid #FFDB00;padding-bottom:4pt;">Table of Contents</div>
 <ol style="margin:0;padding-left:20pt;">${tocHtml}</ol>`
 
-      // Page wrapper builder (matches letterhead in buildRFPPrompt systemPrompt)
+      // ── Page wrapper builder ────────────────────────────────────────────────
+      // Produces one A4 page div (794×1123px) with full letterhead + navy footer.
+      // Puppeteer renders width=794px height=1123px → exactly 1 PDF page per div.
+      // The content area is overflow:hidden at 909px (1123 - header~146 - footer68).
+      // Do NOT remove the height/overflow — Puppeteer requires fixed-size page divs.
+      // Instead, use buildPages() below to split content BEFORE calling buildPage().
       const buildPage = (content: string) => `<div style="position:relative;width:794px;height:1123px;max-width:794px;margin:0 auto 20px auto;background:#ffffff;overflow:hidden;box-sizing:border-box;page-break-after:always;font-family:Roboto,Arial,'Segoe UI',sans-serif;color:#020303;">
 <div style="padding:18px 36px 14px;display:flex;align-items:center;gap:18px;border-bottom:none;">
   <div style="display:flex;align-items:center;gap:14px;">
@@ -985,7 +990,7 @@ Write the complete HTML for section "${sectionSpec?.heading || sectionKey}" now.
   <span style="flex:1;height:1px;background:#E0E0E0;margin:0 4px;"></span>
   <span style="display:block;width:7px;height:7px;border-radius:50%;background:#FFDB00;"></span>
 </div>
-<div style="padding:20px 56px 88px;position:relative;overflow:hidden;height:997px;box-sizing:border-box;">${content}</div>
+<div style="padding:20px 56px 20px;position:relative;overflow:hidden;height:909px;box-sizing:border-box;">${content}</div>
 <div style="position:absolute;bottom:0;left:0;right:0;background:#020D1C;color:#B8C0CB;padding:16px 36px;display:flex;justify-content:space-between;align-items:center;font-size:9px;letter-spacing:0.05em;height:68px;box-sizing:border-box;">
   <div style="display:flex;gap:28px;">
     <div><div style="font-family:'Courier New',monospace;font-size:8px;letter-spacing:0.2em;text-transform:uppercase;color:#FFDB00;margin-bottom:3px;">Contact</div><div style="font-family:Roboto,Arial,sans-serif;font-size:9px;color:#D8DEE8;">${procEmail}</div></div>
@@ -997,18 +1002,177 @@ Write the complete HTML for section "${sectionSpec?.heading || sectionKey}" now.
 </div>
 </div>`
 
-      // Pack sections into pages — cover + s1&s2 on page 2 + s3 on page 3 + s4 on 4 + s5&s6 on 5 + s7 on 6 + s8 on 7
-      // IMPORTANT: wrap all page divs in a bare <div> so the DOM depth matches the
-      // old single-call LLM output. Both the preview CSS (.rfp-doc > div > div) and
-      // the Puppeteer PDF CSS (body > div > div) target grandchildren of rfp-doc/body.
+      // ── HTML content paginator ──────────────────────────────────────────────
+      // Splits arbitrary section HTML into chunks that fit within one page's
+      // content area (909px usable height), then wraps each chunk in buildPage().
+      //
+      // Strategy: parse top-level HTML elements one at a time, accumulate a
+      // running "text weight" estimate, and flush to a new page whenever the
+      // budget is exceeded. Weight is based on stripped text length, with
+      // multipliers for element types that render tall (headings, table rows, lists).
+      //
+      // Budget calibration (at 11pt/14px body, 1.4 line-height, 682px content width):
+      //   ~48 chars/line of prose → ~20px/line
+      //   909px usable → ~45 lines → ~2160 chars plain text
+      //   HTML tags inflate char count ~1.5–2×, so raw HTML budget ≈ 3200 chars text-eq.
+      //   Table rows are ~28px each; headings ~32px. We over-estimate to be safe.
+      const PAGE_BUDGET = 3000   // estimated plain-text-equivalent chars per page content area
+
+      function estimateWeight(html: string): number {
+        // Strip tags to get approximate text content length
+        const text = html.replace(/<[^>]+>/g, '').replace(/&[a-z]+;/g, ' ').replace(/\s+/g, ' ').trim()
+        const baseLen = text.length
+
+        // Count structural elements that add extra vertical space
+        const trCount  = (html.match(/<tr[\s>]/gi) || []).length   // table rows ~28px each
+        const h2Count  = (html.match(/<h[23][\s>]/gi) || []).length // section headings ~36px
+        const liCount  = (html.match(/<li[\s>]/gi) || []).length    // list items ~22px
+        const pCount   = (html.match(/<p[\s>]/gi) || []).length     // paragraphs (margin)
+
+        // Weighted estimate in "text equivalent chars"
+        // Each tr = ~60 char-equiv (28px / 20px-per-line × 48 chars/line)
+        // Each h2 = ~80 char-equiv
+        // Each li = ~48 char-equiv (but already counted in baseLen mostly)
+        // Each p  = ~24 char-equiv extra for margins
+        return baseLen + trCount * 60 + h2Count * 80 + liCount * 20 + pCount * 20
+      }
+
+      // Split a block of section HTML into top-level element chunks, then page them.
+      // "Top-level" means direct children of the section root — we never split
+      // inside a <tr> or <li>, only between sibling block elements.
+      function paginateHtml(html: string): string[] {
+        const pages: string[] = []
+        let currentChunk = ''
+        let currentWeight = 0
+
+        // Tokenise into top-level elements using a simple regex.
+        // Matches either:
+        //   (a) a complete self-contained block: <tag ...>...</tag>  (non-greedy, same tag)
+        //   (b) a void/self-closing element or text node fallback
+        // We handle nested tags by walking character by character for the common cases.
+        const segments: string[] = []
+        let remaining = html.trim()
+
+        while (remaining.length > 0) {
+          // Skip leading whitespace
+          const wsMatch = remaining.match(/^(\s+)/)
+          if (wsMatch) { remaining = remaining.slice(wsMatch[1].length); continue }
+
+          if (!remaining.startsWith('<')) {
+            // Raw text node — take up to next tag
+            const nextTag = remaining.indexOf('<')
+            if (nextTag === -1) { segments.push(remaining); remaining = ''; break }
+            segments.push(remaining.slice(0, nextTag))
+            remaining = remaining.slice(nextTag)
+            continue
+          }
+
+          // Extract tag name
+          const tagMatch = remaining.match(/^<([a-zA-Z][a-zA-Z0-9]*)/)
+          if (!tagMatch) {
+            // Not a valid tag — consume char and continue
+            segments.push(remaining[0]); remaining = remaining.slice(1); continue
+          }
+
+          const tagName = tagMatch[1].toLowerCase()
+          const voidTags = new Set(['br','hr','img','input','meta','link','col','area','base','source','track','wbr'])
+
+          if (voidTags.has(tagName)) {
+            // Void element — take up to end of tag
+            const end = remaining.indexOf('>') + 1
+            segments.push(remaining.slice(0, end))
+            remaining = remaining.slice(end)
+            continue
+          }
+
+          // Find matching closing tag, accounting for nesting
+          const openRe  = new RegExp(`<${tagName}[\\s>]`, 'gi')
+          const closeRe = new RegExp(`<\\/${tagName}\\s*>`, 'gi')
+          let depth = 0, pos = 0, found = -1
+
+          // Reset lastIndex
+          openRe.lastIndex  = 0
+          closeRe.lastIndex = 0
+
+          // Walk through remaining to find balanced close
+          let scanPos = 0
+          while (scanPos < remaining.length) {
+            // Try open match at scanPos
+            const sub = remaining.slice(scanPos)
+            const oMatch = sub.match(/^<([a-zA-Z][a-zA-Z0-9]*)[\s>]/)
+            if (oMatch && oMatch[1].toLowerCase() === tagName) {
+              depth++
+              // advance past tag open
+              const tEnd = sub.indexOf('>')
+              scanPos += (tEnd === -1 ? 1 : tEnd + 1)
+              continue
+            }
+            const cMatch = sub.match(/^<\/([a-zA-Z][a-zA-Z0-9]*)\s*>/)
+            if (cMatch && cMatch[1].toLowerCase() === tagName) {
+              depth--
+              if (depth === 0) {
+                found = scanPos + cMatch[0].length
+                break
+              }
+              scanPos += cMatch[0].length
+              continue
+            }
+            scanPos++
+          }
+
+          if (found === -1) {
+            // Unmatched tag — take everything as one segment
+            segments.push(remaining); remaining = ''; break
+          }
+
+          segments.push(remaining.slice(0, found))
+          remaining = remaining.slice(found)
+        }
+
+        // Now pack segments into pages using weight budget
+        for (const seg of segments) {
+          const w = estimateWeight(seg)
+
+          if (currentWeight + w > PAGE_BUDGET && currentChunk.length > 0) {
+            // Current page is full — flush and start new page
+            pages.push(currentChunk)
+            currentChunk = seg
+            currentWeight = w
+          } else {
+            currentChunk += seg
+            currentWeight += w
+          }
+        }
+
+        if (currentChunk.length > 0) pages.push(currentChunk)
+        if (pages.length === 0) pages.push('')  // always return at least one page
+
+        return pages
+      }
+
+      // Convenience: paginate HTML and wrap each chunk in a full buildPage()
+      function buildPages(html: string): string {
+        return paginateHtml(html).map(chunk => buildPage(chunk)).join('\n')
+      }
+
+      // ── PHASE 3: Assemble into full HTML document ──────────────────────────
+      // Each section is independently paginated so no content is ever clipped.
+      // Cover page always fits on one page (it's just a title table + TOC).
+      // Sections s1+s2 (background + objectives) share a starting page but
+      // will overflow onto additional pages if combined content is large.
+      // All other sections are paginated independently.
+      //
+      // IMPORTANT: wrap all page divs in a bare <div> so DOM depth matches
+      // the old single-call LLM output. Both the preview CSS (.rfp-doc > div > div)
+      // and the Puppeteer PDF CSS (body > div > div) target grandchildren.
       const pagesHtml = [
-        buildPage(coverContent),
-        buildPage(html1 + html2),
-        buildPage(html3),
-        buildPage(html4),
-        buildPage(html5 + html6),
-        buildPage(html7),
-        buildPage(html8),
+        buildPage(coverContent),         // cover — always 1 page
+        buildPages(html1 + html2),       // background + objectives — 1–2 pages
+        buildPages(html3),               // scope — 2–4 pages (subsections)
+        buildPages(html4),               // technical requirements table — 2–3 pages
+        buildPages(html5 + html6),       // evaluation + qualification — 1–3 pages
+        buildPages(html7),               // submission + timeline — 1–2 pages
+        buildPages(html8),               // terms & conditions — 1–2 pages
       ].join('\n')
       const fullHtml = `<div>${pagesHtml}</div>`
 
