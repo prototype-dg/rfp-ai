@@ -617,8 +617,13 @@ apiRouter.post('/rfps/:id/generate', async (c) => {
     : null
   const existingScoringMatrix = bodyScoringMatrix || existingRfp?.scoring_matrix || null
 
+  // Load settings (procurement_email, issuer_name, issuer_location) for prompt parameterisation
+  const settingsRows = await c.env.DB.prepare(`SELECT key, value FROM settings`).all().catch(() => ({ results: [] }))
+  const settings: Record<string,string> = {}
+  for (const r of (settingsRows.results || [])) { settings[(r as any).key] = (r as any).value }
+
   // Build the prompts (same as generateRFPWithLLM but without calling callLLM yet)
-  const { systemPrompt, userPrompt } = buildRFPPrompt(body, archDocText, brdDocText, existingScoringMatrix)
+  const { systemPrompt, userPrompt } = buildRFPPrompt(body, archDocText, brdDocText, existingScoringMatrix, settings)
 
   const apiKey = c.env?.OPENAI_API_KEY || (globalThis as any).OPENAI_API_KEY || ''
   const baseUrl = c.env?.OPENAI_BASE_URL || 'https://www.genspark.ai/api/llm_proxy/v1'
@@ -627,71 +632,387 @@ apiRouter.post('/rfps/:id/generate', async (c) => {
     return c.json({ error: 'OPENAI_API_KEY not configured' }, 500)
   }
 
-  // Open upstream SSE stream to LLM
-  let llmRes: Response
-  try {
-    llmRes = await fetch(`${baseUrl}/chat/completions`, {
+  // ─── Option A: Two-phase parallel RFP generation ─────────────────────────────
+  // Phase 1 (~10–15 s): single LLM call → JSON outline with canonical terms,
+  //   key figures, and per-section content blueprints.
+  // Phase 2 (~25–35 s wall clock): Promise.all(8 section calls) using the
+  //   outline as a shared contract, preventing terminology drift.
+  // Total expected: ~40–55 s vs. 7–10 min for sequential single-call generation.
+  // Client receives SSE progress events between phases so the UI stays responsive.
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  const encoder = new TextEncoder()
+  const { readable, writable } = new TransformStream()
+  const writer = writable.getWriter()
+
+  // Helper: send a progress event to the client (non-token; kept separate from
+  // token events so the UI can display a spinner/step label)
+  const sendProgress = async (step: string, detail?: string) => {
+    await writer.write(encoder.encode(`data: ${JSON.stringify({ progress: step, detail })}\n\n`))
+  }
+
+  // Helper: call LLM and collect full response text (streaming internally to
+  // avoid Cloudflare 30 s subrequest timeout)
+  const llmCall = async (sp: string, up: string, model: string, maxTok: number): Promise<string> => {
+    const res = await fetch(`${baseUrl}/chat/completions`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'gpt-5-mini',
-        messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
-        max_tokens: 64000,
+        model,
+        messages: [{ role: 'system', content: sp }, { role: 'user', content: up }],
+        max_tokens: maxTok,
         temperature: 0.3,
         stream: true,
       }),
     })
-  } catch (e: any) {
-    return c.json({ error: 'LLM fetch failed: ' + e.message }, 502)
+    if (!res.ok) {
+      const errText = await res.text().catch(() => 'unknown')
+      throw new Error(`LLM error ${res.status}: ${errText}`)
+    }
+    if (!res.body) throw new Error('LLM returned no body')
+    const reader = res.body.getReader()
+    const dec = new TextDecoder()
+    let out = '', buf = ''
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buf += dec.decode(value, { stream: true })
+      const lines = buf.split('\n'); buf = lines.pop() ?? ''
+      for (const line of lines) {
+        const t = line.trim()
+        if (!t || t === 'data: [DONE]' || !t.startsWith('data: ')) continue
+        try { const j = JSON.parse(t.slice(6)); const d = j.choices?.[0]?.delta?.content; if (d) out += d } catch { /* skip */ }
+      }
+    }
+    return out
   }
 
-  if (!llmRes.ok || !llmRes.body) {
-    const errText = await llmRes.text().catch(() => 'unknown')
-    return c.json({ error: `LLM error ${llmRes.status}: ${errText}` }, 502)
-  }
-
-  // Pipe upstream SSE → client SSE while collecting full content for DB save.
-  // TransformStream bridges the upstream reader into the response body.
-  let fullContent = ''
-  const encoder = new TextEncoder()
-  const decoder = new TextDecoder()
-
-  const { readable, writable } = new TransformStream()
-  const writer = writable.getWriter()
-
-  // Process upstream in background — ctx.waitUntil keeps the Worker alive after headers flush
   const streamTask = (async () => {
     try {
-      const reader = llmRes.body!.getReader()
-      let buf = ''
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buf += decoder.decode(value, { stream: true })
-        const lines = buf.split('\n')
-        buf = lines.pop() ?? ''
-        for (const line of lines) {
-          const t = line.trim()
-          if (!t || t === 'data: [DONE]') continue
-          if (!t.startsWith('data: ')) continue
-          try {
-            const json = JSON.parse(t.slice(6))
-            const delta = json.choices?.[0]?.delta?.content
-            if (delta) {
-              fullContent += delta
-              // Forward raw SSE token chunk to client
-              await writer.write(encoder.encode(`data: ${JSON.stringify({ token: delta })}\n\n`))
-            }
-          } catch { /* skip malformed */ }
-        }
+      // ── PHASE 1: Outline ────────────────────────────────────────────────────
+      await sendProgress('outline', 'Generating document outline and shared vocabulary…')
+
+      const procEmail  = settings?.procurement_email || 'procurement@andersenlab.com'
+      const issuerName = settings?.issuer_name       || 'Andersen'
+      const issuerLoc  = settings?.issuer_location   || 'Warsaw, Poland'
+
+      // Build deadline-relative milestone dates (duplicated from buildRFPPrompt for Phase 1 context)
+      const deadlineDate = body.deadline ? new Date(body.deadline) : new Date(Date.now() + 30*24*60*60*1000)
+      const fmtDate = (d: Date) => d.toISOString().split('T')[0]
+      const rfpIssueDate  = fmtDate(new Date())
+      const clarDeadline  = fmtDate(new Date(deadlineDate.getTime() - 21*24*60*60*1000))
+      const qaPublished   = fmtDate(new Date(deadlineDate.getTime() - 14*24*60*60*1000))
+      const evalEnd       = fmtDate(new Date(deadlineDate.getTime() + 21*24*60*60*1000))
+      const awardNotif    = fmtDate(new Date(deadlineDate.getTime() + 28*24*60*60*1000))
+      const contractSign  = fmtDate(new Date(deadlineDate.getTime() + 42*24*60*60*1000))
+      const kickoff       = fmtDate(new Date(deadlineDate.getTime() + 56*24*60*60*1000))
+
+      const milestoneDates = `RFP Issue Date: ${rfpIssueDate}
+Deadline for Clarification Requests: ${clarDeadline}
+${issuerName} Responses to Clarifications: ${qaPublished}
+Proposal Submission Deadline: ${body.deadline || fmtDate(deadlineDate)}
+Evaluation and Scoring Period Ends: ${evalEnd}
+Award Notification to Vendors: ${awardNotif}
+Contract Signature: ${contractSign}
+Project Kick-off: ${kickoff}`
+
+      // Determine whether scoring matrix was provided
+      let scoringMatrixNote = 'Not provided — generate domain-appropriate criteria, weights summing to 100%.'
+      if (existingScoringMatrix) {
+        try {
+          const mx = JSON.parse(existingScoringMatrix)
+          if (Array.isArray(mx) && mx.length > 0) {
+            scoringMatrixNote = mx.map((r: any) => `${r.criterion}: ${r.weight}% — ${r.description || ''}`).join('\n')
+          }
+        } catch { /* ignore */ }
       }
 
-      // Save to DB — also strip HTML and store as rfp_full_text for evaluation (no OCR needed)
-      // Auto-repair any truncated HTML (LLM may stop mid-tag if it hits the token limit)
-      const repairedContent = repairTruncatedHtml(fullContent)
+      const outlineSysPrompt = `You are a senior procurement architect. Your task is to produce a structured JSON outline that will be used as a shared contract by 8 parallel writers producing sections of a formal RFP document. The outline must lock all canonical terminology, key figures, technology names, system names, role names, and cross-section references so that every section writer uses identical language. Return ONLY valid JSON — no markdown fences, no explanation.`
+
+      const outlineUserPrompt = `Produce a JSON outline for an RFP with this structure:
+
+{
+  "rfp_meta": {
+    "title": "<RFP title>",
+    "ref_number": "<ref>",
+    "issuer": "<issuer name and location>",
+    "submission_email": "<email>",
+    "issue_date": "<date>",
+    "proposal_deadline": "<date>"
+  },
+  "milestone_dates": {
+    "rfp_issue": "<date>",
+    "clarification_deadline": "<date>",
+    "qa_published": "<date>",
+    "submission_deadline": "<date>",
+    "eval_end": "<date>",
+    "award_notification": "<date>",
+    "contract_signature": "<date>",
+    "project_kickoff": "<date>"
+  },
+  "canonical_terms": {
+    "source_systems": ["<list every source system name from scope/BRD>"],
+    "tech_stack": ["<list every tool, platform, framework named>"],
+    "modules": ["<list every functional module or workstream named>"],
+    "roles": ["<list every user role or team role named>"],
+    "deliverables": ["<list every named deliverable artifact>"],
+    "kpis": ["<list every KPI or metric named>"]
+  },
+  "key_figures": {
+    "total_duration_months": <number or null>,
+    "budget_confidential": true,
+    "data_volume": "<any stated data volume or 'not specified'>",
+    "user_count": "<any stated user count or 'not specified'>",
+    "phase_count": <number of delivery phases>
+  },
+  "sections": {
+    "s1_background": {
+      "heading": "1. Project Background and Context",
+      "key_points": ["<4–6 bullet points of what to cover — specific, not generic>"],
+      "min_words": 400
+    },
+    "s2_objectives": {
+      "heading": "2. Project Objectives",
+      "key_points": ["<4–6 specific measurable objectives>"],
+      "min_words": 200
+    },
+    "s3_scope": {
+      "heading": "3. Scope of Work",
+      "subsections": ["<list subsection headings 3.1, 3.2, etc. derived from scope/BRD>"],
+      "key_points": ["<specific activities, inputs, outputs per subsection>"],
+      "min_words": 1200
+    },
+    "s4_technical": {
+      "heading": "4. Technical Requirements and Architecture",
+      "requirement_areas": ["<list at minimum 18 requirement areas for the table>"],
+      "min_rows": 18
+    },
+    "s5_evaluation": {
+      "heading": "5. Evaluation Criteria",
+      "criteria": [{"name": "<criterion>", "weight": <number>, "description": "<description>"}],
+      "total_weight": 100
+    },
+    "s6_qualification": {
+      "heading": "6. Vendor Qualification Requirements",
+      "categories": ["<list requirement categories for qualification table>"]
+    },
+    "s7_submission": {
+      "heading": "7. Submission Requirements and Timeline",
+      "required_documents": ["<list all required submission documents>"]
+    },
+    "s8_terms": {
+      "heading": "8. Terms and Conditions",
+      "bullet_points": ["<8–12 specific T&C bullet points — derive governing law and language from context, do not hardcode Poland or Arabic>"]
+    }
+  }
+}
+
+PROJECT DATA:
+RFP Reference: ${body.ref_number || 'AND/PROC/' + new Date().getFullYear() + '/TBD'}
+Title: ${body.title || 'Not specified'}
+Category: ${body.category || 'IT & Digital Transformation'}
+Issuer: ${issuerName}, ${issuerLoc}
+Submission Email: ${procEmail}
+
+MILESTONE DATES:
+${milestoneDates}
+
+BACKGROUND:
+${body.background || '(not provided)'}
+
+OBJECTIVES:
+${body.objectives || '(not provided)'}
+
+SCOPE:
+${body.scope || '(not provided)'}
+
+TECHNICAL REQUIREMENTS:
+${body.tech_requirements || '(not provided)'}
+
+SCORING MATRIX (Section 5 — use exactly if provided):
+${scoringMatrixNote}
+
+${archDocText && archDocText.length > 500 ? `ARCHITECTURE DOCUMENT (extract all tech names, modules, roles, deliverables into canonical_terms):\n${archDocText.slice(0, 12000)}` : ''}
+${brdDocText && brdDocText.length > 500 ? `BRD (extract all module names, report names, KPIs, user roles, acceptance criteria into canonical_terms):\n${brdDocText.slice(0, 12000)}` : ''}
+
+Return ONLY the JSON object. No markdown. No explanation.`
+
+      const outlineRaw = await llmCall(outlineSysPrompt, outlineUserPrompt, 'gpt-5-mini', 8000)
+
+      // Parse outline — strip any accidental markdown fences
+      let outlineClean = outlineRaw.trim()
+      if (outlineClean.startsWith('```')) {
+        outlineClean = outlineClean.split('\n').slice(1).join('\n').replace(/```\s*$/, '').trim()
+      }
+      let outline: any = {}
+      try { outline = JSON.parse(outlineClean) } catch {
+        // Outline parse failed — fall back to single-call sequential generation
+        await sendProgress('fallback', 'Outline parse failed — falling back to sequential generation…')
+        const { systemPrompt: sp, userPrompt: up } = buildRFPPrompt(body, archDocText, brdDocText, existingScoringMatrix, settings)
+        const llmContent = await llmCall(sp, up, 'gpt-5-mini', 64000)
+        const repairedContent = repairTruncatedHtml(llmContent)
+        const content = repairedContent.length > 400 ? `<div class="rfp-doc">${repairedContent}</div>` : ''
+        if (content) {
+          const rfpFullText = llmContent.replace(/<[^>]+>/g, ' ').replace(/\s{2,}/g, ' ').trim()
+          await c.env.DB.prepare(`UPDATE rfps SET title=?,category=?,budget=?,deadline=?,scope=?,tech_requirements=?,objectives=?,background=?,content=?,rfp_full_text=?,arch_doc_text=?,brd_doc_text=?,updated_at=datetime('now') WHERE id=?`)
+            .bind(body.title, body.category, body.budget, body.deadline, body.scope, body.tech_requirements||'', body.objectives||'', body.background||'', content, rfpFullText.slice(0,100000), archDocText, brdDocText, id).run()
+        }
+        const rfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(id).first().catch(() => null)
+        await writer.write(encoder.encode(`data: ${JSON.stringify({ done: true, rfp })}\n\n`))
+        return
+      }
+
+      await sendProgress('sections', 'Outline complete — generating all 8 sections in parallel…')
+
+      // ── PHASE 2: Parallel section generation ───────────────────────────────
+      // Shared context injected into every section prompt
+      const canonicalJson = JSON.stringify(outline.canonical_terms || {}, null, 2)
+      const keyFiguresJson = JSON.stringify(outline.key_figures || {}, null, 2)
+      const milestonesJson = JSON.stringify(outline.milestone_dates || {}, null, 2)
+      const rfpMetaJson = JSON.stringify(outline.rfp_meta || {}, null, 2)
+
+      const sharedCtx = `
+CANONICAL TERMS (use these EXACT names throughout — do not paraphrase or invent alternatives):
+${canonicalJson}
+
+KEY FIGURES:
+${keyFiguresJson}
+
+RFP META:
+${rfpMetaJson}
+
+PROJECT DATA SUMMARY:
+Title: ${body.title}
+Category: ${body.category}
+Background: ${body.background || '(not provided)'}
+Objectives: ${body.objectives || '(not provided)'}
+Scope: ${body.scope || '(not provided)'}
+Technical Requirements: ${body.tech_requirements || '(not provided)'}
+${archDocText && archDocText.length > 500 ? `Architecture Document:\n${archDocText.slice(0, 8000)}` : ''}
+${brdDocText && brdDocText.length > 500 ? `BRD:\n${brdDocText.slice(0, 8000)}` : ''}`.trim()
+
+      // Letterhead template (same as buildRFPPrompt systemPrompt, inlined here)
+      const letterheadSys = systemPrompt  // reuse already-built systemPrompt from buildRFPPrompt
+
+      // Section generator: returns raw HTML content for one section (no page wrapping — assembler adds pages)
+      const genSection = (sectionKey: string, sectionSpec: any, extraInstruction: string): Promise<string> => {
+        const sp = `${letterheadSys}
+
+You are writing ONE section of a formal RFP. Output ONLY the HTML content for this section — no page wrappers, no letterhead, no DOCTYPE. Use inline styles only. The assembler will place your content inside the correct page structure.
+CRITICAL: Use ONLY the canonical terms and key figures provided. Do not introduce any technology name, system name, or role name not present in the canonical terms list.`
+
+        const up = `${sharedCtx}
+
+SECTION BLUEPRINT:
+${JSON.stringify(sectionSpec, null, 2)}
+
+${extraInstruction}
+
+Write the complete HTML for section "${sectionSpec?.heading || sectionKey}" now. Minimum word count: ${sectionSpec?.min_words || 150}. Output HTML content only — no page wrappers.`
+
+        return llmCall(sp, up, 'gpt-5-mini', 10000).catch(err => `<p style="color:red">Section generation error: ${err.message}</p>`)
+      }
+
+      const s = outline.sections || {}
+
+      // Build scoring matrix note for section 5
+      let s5Extra = 'Generate domain-appropriate evaluation criteria. Weights must sum to exactly 100%.'
+      if (s.s5_evaluation?.criteria?.length > 0) {
+        const crit = s.s5_evaluation.criteria
+        s5Extra = `Use EXACTLY these criteria from the outline (reproduce verbatim — do not alter weights or names):\n${crit.map((r: any) => `- ${r.name}: ${r.weight}% — ${r.description}`).join('\n')}\nTotal: ${crit.reduce((acc: number, r: any) => acc + (Number(r.weight)||0), 0)}%`
+      }
+
+      // Section 7 milestone table data
+      const s7Extra = `MILESTONE DATES — reproduce all 8 rows exactly:\n${milestoneDates}\nSubmission email: ${procEmail}\nIssuer: ${issuerName}`
+
+      // Section 8 T&C — pass outline's bullet points as guide
+      const s8bulletGuide = s.s8_terms?.bullet_points?.length > 0
+        ? `Use these as the basis for T&C bullets (do not hardcode any specific jurisdiction or language not derived from the project context):\n${s.s8_terms.bullet_points.map((b: string, i: number) => `${i+1}. ${b}`).join('\n')}`
+        : `Write 8–12 T&C bullet points. Derive governing law and contract language from the project context — do not hardcode Poland or Arabic.`
+
+      // Fire all 8 section calls in parallel
+      const [html1, html2, html3, html4, html5, html6, html7, html8] = await Promise.all([
+        genSection('s1_background',   s.s1_background,   'Write 4–6 substantial paragraphs. At least 400 words.'),
+        genSection('s2_objectives',   s.s2_objectives,   'Write as a numbered list. Each objective: specific, measurable, tied to input data. At least 4 objectives with full explanatory sentences.'),
+        genSection('s3_scope',        s.s3_scope,        `Write sub-sections ${(s.s3_scope?.subsections || ['3.1','3.2','3.3','3.4','3.5','3.6']).join(', ')}. Each subsection: heading, intro paragraph, detailed bullet list of activities, acceptance criteria, and key deliverables. At least 1,200 words.`),
+        genSection('s4_technical',    s.s4_technical,    `Render as a table: Requirement Area | Specific Requirement | Classification (Mandatory/Preferred). Minimum ${s.s4_technical?.min_rows || 18} rows. One specific testable requirement per row.`),
+        genSection('s5_evaluation',   s.s5_evaluation,   s5Extra),
+        genSection('s6_qualification',s.s6_qualification,'Render as a table: Requirement Category | Minimum Standard | Evidence Required. Derive from project domain and scope. Cover experience, certifications, financial standing, compliance.'),
+        genSection('s7_submission',   s.s7_submission,   s7Extra),
+        genSection('s8_terms',        s.s8_terms,        s8bulletGuide),
+      ])
+
+      await sendProgress('assembling', 'All sections complete — assembling document…')
+
+      // ── PHASE 3: Assemble into full HTML document ──────────────────────────
+      // Cover page is generated from outline meta (no LLM call needed)
+      const tocItems = Object.values(s).map((sec: any) => sec?.heading || '').filter(Boolean)
+      const tocHtml = tocItems.map((h: string) => `<li style="margin-bottom:4pt;font-family:Roboto,Arial,sans-serif;font-size:10.5pt;color:#020303;">${h}</li>`).join('')
+
+      const coverContent = `
+<h1 style="font-family:Roboto,Arial,sans-serif;font-size:20pt;font-weight:700;text-align:center;color:#020303;margin:0 0 10pt 0;line-height:1.2;">${outline.rfp_meta?.title || body.title || 'Request for Proposal'}</h1>
+<p style="font-family:Roboto,Arial,sans-serif;font-size:13.5pt;font-weight:300;text-align:center;letter-spacing:2.5px;color:#020303;margin:16pt 0;">REQUEST FOR PROPOSAL</p>
+<table style="width:80%;margin:16pt auto;border-collapse:collapse;font-family:Roboto,Arial,sans-serif;font-size:10.5pt;color:#020303;">
+  <tr><td style="padding:5pt 10pt;border:1px solid #E0E0E0;font-weight:700;width:38%;">RFP Reference Number</td><td style="padding:5pt 10pt;border:1px solid #E0E0E0;">${outline.rfp_meta?.ref_number || body.ref_number || ''}</td></tr>
+  <tr><td style="padding:5pt 10pt;border:1px solid #E0E0E0;font-weight:700;">Issue Date</td><td style="padding:5pt 10pt;border:1px solid #E0E0E0;">${rfpIssueDate}</td></tr>
+  <tr><td style="padding:5pt 10pt;border:1px solid #E0E0E0;font-weight:700;">Proposal Submission Deadline</td><td style="padding:5pt 10pt;border:1px solid #E0E0E0;">${body.deadline || fmtDate(deadlineDate)}</td></tr>
+  <tr><td style="padding:5pt 10pt;border:1px solid #E0E0E0;font-weight:700;">Category</td><td style="padding:5pt 10pt;border:1px solid #E0E0E0;">${body.category || ''}</td></tr>
+  <tr><td style="padding:5pt 10pt;border:1px solid #E0E0E0;font-weight:700;">Issuing Authority</td><td style="padding:5pt 10pt;border:1px solid #E0E0E0;">${issuerName}, ${issuerLoc}</td></tr>
+  <tr><td style="padding:5pt 10pt;border:1px solid #E0E0E0;font-weight:700;">Submission Email</td><td style="padding:5pt 10pt;border:1px solid #E0E0E0;">${procEmail}</td></tr>
+</table>
+<div style="margin:20pt 0 8pt 0;font-family:Roboto,Arial,sans-serif;font-size:11pt;font-weight:700;color:#020303;border-bottom:2px solid #FFDB00;padding-bottom:4pt;">Table of Contents</div>
+<ol style="margin:0;padding-left:20pt;">${tocHtml}</ol>`
+
+      // Page wrapper builder (matches letterhead in buildRFPPrompt systemPrompt)
+      const buildPage = (content: string) => `<div style="position:relative;width:794px;height:1123px;max-width:794px;margin:0 auto 20px auto;background:#ffffff;overflow:hidden;box-sizing:border-box;page-break-after:always;font-family:Roboto,Arial,'Segoe UI',sans-serif;color:#020303;">
+<div style="padding:18px 36px 14px;display:flex;align-items:center;gap:18px;border-bottom:none;">
+  <div style="display:flex;align-items:center;gap:14px;">
+    <div style="font-family:Roboto,Arial,sans-serif;font-size:18px;font-weight:700;color:#020D1C;letter-spacing:-0.02em;">${issuerName}</div>
+    <div style="width:1px;height:28px;background:#E0E0E0;"></div>
+    <div style="font-family:'Courier New',monospace;font-size:9px;letter-spacing:0.22em;text-transform:uppercase;color:#556170;line-height:1.6;"><strong style="color:#020303;font-weight:500;">Procurement</strong><br/>Group &middot; Global</div>
+  </div>
+</div>
+<div style="height:48px;background:#FFDB00;position:relative;overflow:hidden;flex-shrink:0;">
+  <svg style="position:absolute;top:0;left:0;width:100%;height:100%;display:block;" viewBox="0 0 794 48" preserveAspectRatio="none" fill="none">
+    <path d="M-10 12 Q 100 3, 220 17 T 460 20 Q 580 26, 810 10" stroke="#020303" stroke-width="0.7" stroke-opacity="0.55"/>
+    <path d="M-10 24 Q 120 11, 240 29 T 480 32 Q 620 38, 810 22" stroke="#020303" stroke-width="0.7" stroke-opacity="0.45"/>
+    <path d="M-10 36 Q 140 22, 260 39 T 500 43 Q 640 50, 810 32" stroke="#020303" stroke-width="0.7" stroke-opacity="0.35"/>
+  </svg>
+</div>
+<div style="height:18px;display:flex;align-items:center;padding:0 36px;gap:5px;border-bottom:1px solid #E0E0E0;">
+  <span style="display:block;width:5px;height:5px;border-radius:50%;background:#E0E0E0;"></span>
+  <span style="display:block;width:7px;height:7px;border-radius:50%;background:#FFDB00;"></span>
+  <span style="flex:1;height:1px;background:#E0E0E0;margin:0 4px;"></span>
+  <span style="display:block;width:7px;height:7px;border-radius:50%;background:#FFDB00;"></span>
+</div>
+<div style="padding:20px 56px 88px;position:relative;overflow:hidden;height:997px;box-sizing:border-box;">${content}</div>
+<div style="position:absolute;bottom:0;left:0;right:0;background:#020D1C;color:#B8C0CB;padding:16px 36px;display:flex;justify-content:space-between;align-items:center;font-size:9px;letter-spacing:0.05em;height:68px;box-sizing:border-box;">
+  <div style="display:flex;gap:28px;">
+    <div><div style="font-family:'Courier New',monospace;font-size:8px;letter-spacing:0.2em;text-transform:uppercase;color:#FFDB00;margin-bottom:3px;">Contact</div><div style="font-family:Roboto,Arial,sans-serif;font-size:9px;color:#D8DEE8;">${procEmail}</div></div>
+  </div>
+  <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
+    <div style="font-family:Roboto,Arial,sans-serif;font-size:12px;font-weight:700;color:#ffffff;letter-spacing:-0.01em;">${issuerName}</div>
+    <div style="font-family:'Courier New',monospace;font-size:8px;letter-spacing:0.18em;text-transform:uppercase;color:#FFDB00;">&copy; ${issuerName} ${new Date().getFullYear()}</div>
+  </div>
+</div>
+</div>`
+
+      // Pack sections into pages — cover + s1&s2 on page 2 + s3 on page 3 + s4 on 4 + s5&s6 on 5 + s7 on 6 + s8 on 7
+      const fullHtml = [
+        buildPage(coverContent),
+        buildPage(html1 + html2),
+        buildPage(html3),
+        buildPage(html4),
+        buildPage(html5 + html6),
+        buildPage(html7),
+        buildPage(html8),
+      ].join('\n')
+
+      const repairedContent = repairTruncatedHtml(fullHtml)
       const content = repairedContent.length > 400 ? `<div class="rfp-doc">${repairedContent}</div>` : ''
+
       if (content) {
-        const rfpFullText = fullContent
+        const rfpFullText = fullHtml
           .replace(/<[^>]+>/g, ' ')
           .replace(/&amp;/g,'&').replace(/&mdash;/g,'—').replace(/&nbsp;/g,' ')
           .replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"')
@@ -708,7 +1029,6 @@ apiRouter.post('/rfps/:id/generate', async (c) => {
       }
 
       const rfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(id).first().catch(() => null)
-      // Send final DONE event with the saved RFP
       await writer.write(encoder.encode(`data: ${JSON.stringify({ done: true, rfp })}\n\n`))
     } catch (e: any) {
       await writer.write(encoder.encode(`data: ${JSON.stringify({ error: e.message })}\n\n`)).catch(() => {})
@@ -717,7 +1037,7 @@ apiRouter.post('/rfps/:id/generate', async (c) => {
     }
   })()
 
-  // Keep Worker alive for the duration of the stream
+  // Keep Worker alive for the duration of the parallel generation
   c.executionCtx.waitUntil(streamTask)
 
   return new Response(readable, {
@@ -2881,7 +3201,7 @@ async function runBudgetLLM(proposalText: string, proposal: any, db: D1Database,
 
 1.  **Total Cost Calculation**:
     *   Identify all core project development phases (e.g., MVP1, MVP2, Phase 1, Phase 2, etc.) and sum their fixed-price costs.
-    *   Identify all mandatory third-party software licenses required for the base solution (e.g., Tableau, Power BI, Oracle, etc.) and add their annual/first-year subscription cost to the sum.
+    *   Identify all mandatory third-party software licenses explicitly stated in the proposal as required for the base solution, and add their first-year cost to the sum.
     *   **STRICTLY EXCLUDE** the following from the total: Optional add-on services (e.g., separate training workshops), post-launch ongoing support/maintenance fees, Value Added Tax (VAT), and infrastructure/hosting costs (unless explicitly bundled into the mandatory phase totals).
 
 2.  **Duration Calculation**:
@@ -3355,7 +3675,11 @@ async function callLLM(systemPrompt: string, userPrompt: string, env: any, model
 
 // buildRFPPrompt — pure function, returns {systemPrompt, userPrompt} without calling the LLM.
 // Used by the streaming generate route. generateRFPWithLLM wraps it for batch/test usage.
-function buildRFPPrompt(data: any, archDocText: string, brdDocText: string, scoringMatrixJson?: string | null): { systemPrompt: string; userPrompt: string } {
+// settings: optional key→value map from the settings table (procurement_email, issuer_name, issuer_location)
+function buildRFPPrompt(data: any, archDocText: string, brdDocText: string, scoringMatrixJson?: string | null, settings?: Record<string,string>): { systemPrompt: string; userPrompt: string } {
+  const procEmail    = settings?.procurement_email   || 'procurement@andersenlab.com'
+  const issuerName   = settings?.issuer_name         || 'Andersen'
+  const issuerLoc    = settings?.issuer_location     || 'Warsaw, Poland'
   const systemPrompt = `You are a senior government procurement specialist at the Andersen. You are producing a formal, comprehensive, publication-ready Request for Proposal (RFP) document issued to external vendors on official Andersen letterhead.
 
 IDENTITY AND TONE
@@ -3437,7 +3761,7 @@ LETTERHEAD STRUCTURE — reproduce EXACTLY inside every page div (all inline sty
 <div style="position:absolute; bottom:0; left:0; right:0; background:#020D1C; color:#B8C0CB; padding:16px 36px; display:flex; justify-content:space-between; align-items:center; font-size:9px; letter-spacing:0.05em; height:68px; box-sizing:border-box;">
   <div style="display:flex; gap:28px;">
     <div><div style="font-family:'Courier New',monospace;font-size:8px;letter-spacing:0.2em;text-transform:uppercase;color:#FFDB00;margin-bottom:3px;">Web</div><div style="font-family:Roboto,Arial,sans-serif;font-size:9px;color:#D8DEE8;">andersenlab.com</div></div>
-    <div><div style="font-family:'Courier New',monospace;font-size:8px;letter-spacing:0.2em;text-transform:uppercase;color:#FFDB00;margin-bottom:3px;">Contact</div><div style="font-family:Roboto,Arial,sans-serif;font-size:9px;color:#D8DEE8;">procurement@andersenlab.com</div></div>
+    <div><div style="font-family:'Courier New',monospace;font-size:8px;letter-spacing:0.2em;text-transform:uppercase;color:#FFDB00;margin-bottom:3px;">Contact</div><div style="font-family:Roboto,Arial,sans-serif;font-size:9px;color:#D8DEE8;">${procEmail}</div></div>
     <div><div style="font-family:'Courier New',monospace;font-size:8px;letter-spacing:0.2em;text-transform:uppercase;color:#FFDB00;margin-bottom:3px;">Offices</div><div style="font-family:Roboto,Arial,sans-serif;font-size:9px;color:#D8DEE8;">Warsaw &middot; Berlin &middot; London &middot; New York</div></div>
   </div>
   <div style="display:flex; flex-direction:column; align-items:flex-end; gap:4px;">
@@ -3459,8 +3783,8 @@ COVER PAGE METADATA TABLE (place inside the content area on page 1, after title 
   <tr><td style="padding:5pt 10pt; border:1px solid #E0E0E0; font-weight:700;">Issue Date</td><td style="padding:5pt 10pt; border:1px solid #E0E0E0;">[insert today date]</td></tr>
   <tr><td style="padding:5pt 10pt; border:1px solid #E0E0E0; font-weight:700;">Proposal Submission Deadline</td><td style="padding:5pt 10pt; border:1px solid #E0E0E0;">[insert deadline]</td></tr>
   <tr><td style="padding:5pt 10pt; border:1px solid #E0E0E0; font-weight:700;">Category</td><td style="padding:5pt 10pt; border:1px solid #E0E0E0;">[insert category]</td></tr>
-  <tr><td style="padding:5pt 10pt; border:1px solid #E0E0E0; font-weight:700;">Issuing Authority</td><td style="padding:5pt 10pt; border:1px solid #E0E0E0;">Andersen, Warsaw, Poland</td></tr>
-  <tr><td style="padding:5pt 10pt; border:1px solid #E0E0E0; font-weight:700;">Submission Email</td><td style="padding:5pt 10pt; border:1px solid #E0E0E0;">procurement@andersenlab.com</td></tr>
+  <tr><td style="padding:5pt 10pt; border:1px solid #E0E0E0; font-weight:700;">Issuing Authority</td><td style="padding:5pt 10pt; border:1px solid #E0E0E0;">${issuerName}, ${issuerLoc}</td></tr>
+  <tr><td style="padding:5pt 10pt; border:1px solid #E0E0E0; font-weight:700;">Submission Email</td><td style="padding:5pt 10pt; border:1px solid #E0E0E0;">${procEmail}</td></tr>
 </table>
 
 COLOR PALETTE -- STRICTLY ENFORCED
@@ -3498,7 +3822,7 @@ CONTENT RULES -- STRICTLY ENFORCED
 2. Scope of Work sub-sections must cover every workstream, phase, and deliverable mentioned. Do not omit or condense.
 3. Section 4 (Technical Requirements) must be a STRUCTURED TABLE with columns: Requirement Area | Specific Requirement | Classification (Mandatory or Preferred). Minimum 15 rows. One requirement per row.
 4. Evaluation Criteria weights must sum to exactly 100 percent.
-5. Section 7 (Submission Requirements and Timeline) must include a FULL procurement milestone table: RFP Issue Date, Clarification Request Deadline, Andersen Responses to Clarifications, Proposal Submission Deadline, Evaluation Period, Award Notification, Contract Signature, Project Kick-off. Derive all dates relative to the Proposal Deadline provided.
+5. Section 7 (Submission Requirements and Timeline) must include a FULL procurement milestone table: RFP Issue Date, Clarification Request Deadline, ${issuerName} Responses to Clarifications, Proposal Submission Deadline, Evaluation Period, Award Notification, Contract Signature, Project Kick-off. Derive all dates relative to the Proposal Deadline provided.
 6. NEVER reference filenames, document names, or external documents anywhere in the RFP body. All information must be stated inline.
 7. Vendor Qualification Requirements must be specific to this project domain.
 8. Where the supporting documents mention specific system names, module names, report names, KPI names, user roles, or data entities -- include them explicitly by name in the RFP.
@@ -3545,7 +3869,7 @@ HTML OUTPUT RULES
   const contractSign  = fmtDate(new Date(deadlineDate.getTime() + 42*24*60*60*1000))
   const kickoff       = fmtDate(new Date(deadlineDate.getTime() + 56*24*60*60*1000))
 
-  const userPrompt = `Generate a COMPLETE, COMPREHENSIVE, multi-page RFP HTML document for the Andersen, Warsaw.
+  const userPrompt = `Generate a COMPLETE, COMPREHENSIVE, multi-page RFP HTML document for ${issuerName}, ${issuerLoc}.
 This must be a detailed government procurement document — every section must be fully written, not summarized.
 Use ONLY the information provided below. Do not add anything not stated here or in the supporting documents.
 
@@ -3576,7 +3900,7 @@ PROCUREMENT MILESTONE DATES (use these exactly in Section 7)
 ${'='.repeat(60)}
 RFP Issue Date:                      ${rfpIssueDate}
 Deadline for Clarification Requests: ${clarDeadline}
-Andersen Responses to Clarifications:     ${qaPublished}
+${issuerName} Responses to Clarifications: ${qaPublished}
 Proposal Submission Deadline:        ${data.deadline || fmtDate(deadlineDate)}
 Evaluation and Scoring Period Ends:  ${evalEnd}
 Award Notification to Vendors:       ${awardNotif}
@@ -3643,18 +3967,18 @@ ${'='.repeat(60)}
    First: a full procurement milestone TABLE using the exact dates provided above in the PROCUREMENT MILESTONE DATES section. All 8 milestones must appear with their exact dates.
    Columns: Milestone | Date | Responsible Party.
    Then: a bulleted list of all documents required in the submission package (technical proposal, financial proposal, implementation plan Gantt chart, team CVs and certifications, company profile and registration, audited financial statements for last 2 years, security and data compliance statement, three client references with contact details).
-   Then: submission instructions — Submission email: procurement@andersenlab.com. State file format requirements (PDF, max 50MB per file, English language), naming convention for files, and that late submissions will not be accepted.
+   Then: submission instructions — Submission email: ${procEmail}. State file format requirements (PDF, max 50MB per file, English language), naming convention for files, and that late submissions will not be accepted.
 
 8. TERMS AND CONDITIONS
-   8 to 12 bullet points covering: confidentiality obligations (all RFP content and project details are confidential), intellectual property (all developed deliverables, code, and documentation vest entirely in Andersen upon payment), right to reject all proposals without explanation, disqualification grounds (misrepresentation, conflict of interest, non-compliance with requirements), no guarantee of award, vendor costs for proposal preparation not reimbursable, governing law (laws of Poland), language of contract (English and Arabic, Arabic prevailing in case of discrepancy), subcontracting restrictions (prior written Andersen approval required), conflict of interest declaration required with submission, Andersen's right to audit vendor premises and references before award.
+   8 to 12 bullet points covering: confidentiality obligations (all RFP content and project details are confidential), intellectual property (all developed deliverables, code, and documentation vest entirely in ${issuerName} upon payment), right to reject all proposals without explanation, disqualification grounds (misrepresentation, conflict of interest, non-compliance with requirements), no guarantee of award, vendor costs for proposal preparation not reimbursable, governing law and dispute resolution (derive the applicable jurisdiction from the project context and location described above — do not assume a jurisdiction), language of contract (derive from the project context and target market described above — specify prevailing language if multiple languages apply), subcontracting restrictions (prior written ${issuerName} approval required), conflict of interest declaration required with submission, ${issuerName}'s right to audit vendor premises and references before award.
 
 REMINDER: Do NOT reference any document filename, BRD name, or attached file anywhere in the output. All content must be stated inline as if you wrote it yourself.`
 
   return { systemPrompt, userPrompt }
 }
 
-async function generateRFPWithLLM(data: any, archDocText: string, brdDocText: string, env: any, scoringMatrixJson?: string | null): Promise<string> {
-  const { systemPrompt, userPrompt } = buildRFPPrompt(data, archDocText, brdDocText, scoringMatrixJson)
+async function generateRFPWithLLM(data: any, archDocText: string, brdDocText: string, env: any, scoringMatrixJson?: string | null, settings?: Record<string,string>): Promise<string> {
+  const { systemPrompt, userPrompt } = buildRFPPrompt(data, archDocText, brdDocText, scoringMatrixJson, settings)
   const llmContent = await callLLM(systemPrompt, userPrompt, env, 'gpt-5-mini', 64000)
   if (llmContent && llmContent.length > 400) {
     return `<div class="rfp-doc">${repairTruncatedHtml(llmContent)}</div>`
@@ -4847,15 +5171,15 @@ function parseQuestionsFromBody(text: string): string[] {
 function getSampleQuestions() {
   return [
     { question: 'What is the expected project implementation timeline from contract signing to full go-live?' },
-    { question: 'Does Andersen have an existing Oracle EBS R12.2 environment, or will this be a greenfield implementation?' },
-    { question: 'What is the scope of data migration — specifically how many years of historical data must be migrated?' },
-    { question: 'Are UAE Pass integration and Active Directory SSO mandatory for Phase 1 go-live?' },
-    { question: 'What are the infrastructure specifications and data center access procedures for vendors?' },
-    { question: 'Is the Medallion Architecture (Bronze/Silver/Gold) a hard requirement or can alternatives be proposed?' },
-    { question: 'What is the current state of master data quality in the legacy systems?' },
-    { question: 'Are there existing integrations with Ministry of Finance or government portals that must remain live?' },
-    { question: 'What are the Arabic language and Hijri calendar requirements across all modules?' },
-    { question: 'What is the budget envelope and preferred commercial model (Fixed Price vs. T&M)?' },
+    { question: 'Is this a greenfield implementation or will the vendor be required to integrate with or migrate from existing legacy systems?' },
+    { question: 'What is the scope of data migration — specifically how many years of historical data must be migrated, and what is the estimated data volume?' },
+    { question: 'Which integrations with third-party systems or external platforms are mandatory for Phase 1 go-live?' },
+    { question: 'What are the infrastructure specifications and access procedures for the target deployment environment?' },
+    { question: 'Are the architectural patterns and technology stack described in the RFP hard requirements, or can vendors propose alternatives with justification?' },
+    { question: 'What is the current state of data quality in the source systems, and will a data cleansing phase be in scope?' },
+    { question: 'Are there regulatory, compliance, or government reporting obligations that the solution must satisfy?' },
+    { question: 'What language, localisation, and accessibility requirements apply to the end-user interfaces?' },
+    { question: 'What is the preferred commercial model (Fixed Price vs. Time & Materials), and will the budget envelope be disclosed during clarification?' },
   ]
 }
 
@@ -4865,21 +5189,21 @@ function getSampleQuestions() {
 function buildVendorProposal(v: any, isAndersen: boolean, isEPAM: boolean): any {
   if (isAndersen) {
     return {
-      technical: `TECHNICAL PROPOSAL — ${v.name}\n\nAndersen Lab proposes a phased, risk-mitigated delivery approach leveraging our certified Oracle EBS team's deep experience across 12+ UAE government implementations.\n\nProposed Timeline: 14 months end-to-end\nTeam: 8 certified Oracle professionals + 3 Tableau/DWH specialists + dedicated PM`,
+      technical: `TECHNICAL PROPOSAL — ${v.name}\n\nWe propose a phased, risk-mitigated delivery approach that aligns directly with the scope and technical requirements stated in this RFP. Our team brings proven expertise in the solution domain and has successfully delivered comparable implementations for large enterprise and public-sector clients.\n\nProposed Timeline: 14 months end-to-end\nTeam: 8 certified specialists + 3 senior engineers + dedicated Project Manager`,
       financial: 4800000,
       status: 'submitted',
     }
   }
   if (isEPAM) {
     return {
-      technical: `TECHNICAL PROPOSAL — EPAM Systems\n\nEPAM Systems proposes a modern, engineering-excellence driven approach to Andersen's ERP and Data Platform requirements.\n\nProposed Timeline: 13 months end-to-end\nTeam: 6 Oracle certified consultants + 4 data engineers + 2 Tableau experts + PM`,
+      technical: `TECHNICAL PROPOSAL — ${v.name}\n\nWe propose a modern, engineering-excellence driven approach fully addressing the stated requirements. Our methodology emphasises iterative delivery, continuous stakeholder validation, and knowledge transfer throughout all project phases.\n\nProposed Timeline: 13 months end-to-end\nTeam: 6 senior certified consultants + 4 specialist engineers + 2 solution architects + PM`,
       financial: 3950000,
       status: 'submitted',
     }
   }
   const financial = 4000000 + Math.floor(Math.random() * 3000000)
   return {
-    technical: `Technical Proposal from ${v.name}:\n\nOur team proposes a comprehensive solution leveraging our ${v.specializations || 'enterprise software'} expertise.\n\nProposed Timeline: 14-18 months.`,
+    technical: `Technical Proposal from ${v.name}:\n\nOur team proposes a comprehensive solution leveraging our ${v.specializations || 'enterprise software'} expertise, directly addressing all mandatory requirements set out in the RFP.\n\nProposed Timeline: 14-18 months.`,
     financial: financial,
     status: 'submitted',
   }

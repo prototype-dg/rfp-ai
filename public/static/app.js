@@ -4841,14 +4841,41 @@ async function generateRfpDoc(rfpId) {
 
   if (btn) { btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating…'; }
 
-  // Show live streaming progress area
+  // Show live parallel generation progress area
   var previewEl = document.getElementById('rfpPreviewArea');
-  var streamBuf = '';
-  var tokenCount = 0;
+  var genStartTime = Date.now();
+  var progressSteps = [
+    { key: 'outline',    icon: 'fa-sitemap',     label: 'Phase 1 — Building document outline and locking shared vocabulary…' },
+    { key: 'sections',   icon: 'fa-layer-group',  label: 'Phase 2 — Generating all 8 sections in parallel…' },
+    { key: 'assembling', icon: 'fa-puzzle-piece', label: 'Phase 3 — Assembling and repairing document…' },
+    { key: 'fallback',   icon: 'fa-sync',         label: 'Fallback — Using sequential generation…' },
+  ];
+  var currentStep = 0;
+
+  function renderProgressPanel(stepKey, detail) {
+    var elapsed = Math.round((Date.now() - genStartTime) / 1000);
+    var stepInfo = progressSteps.find(function(s) { return s.key === stepKey; }) || { icon: 'fa-spinner', label: stepKey };
+    var stepsHtml = progressSteps.filter(function(s) { return s.key !== 'fallback'; }).map(function(s, idx) {
+      var isDone = progressSteps.findIndex(function(x) { return x.key === stepKey; }) > idx;
+      var isActive = s.key === stepKey;
+      return '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;opacity:' + (isDone || isActive ? '1' : '0.35') + '">'
+        + '<i class="fas ' + (isDone ? 'fa-check-circle' : (isActive ? 'fa-spinner fa-spin' : 'fa-circle')) + '" style="color:' + (isDone ? 'var(--cpc-gold)' : (isActive ? 'var(--cpc-gold-deep)' : '#9ca3af')) + ';width:16px"></i>'
+        + '<span style="font-size:0.82rem;color:' + (isActive ? 'var(--cpc-ink)' : (isDone ? '#4b5563' : '#9ca3af')) + '">' + s.label + '</span>'
+        + '</div>';
+    }).join('');
+    return '<div style="background:#fffde7;border:1px solid #ffe082;border-radius:8px;padding:16px 20px;margin-bottom:12px">'
+      + '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">'
+      + '<i class="fas fa-bolt" style="color:var(--cpc-gold-deep);font-size:1.1rem"></i>'
+      + '<strong style="font-size:0.9rem;color:var(--cpc-ink)">Parallel RFP Generation</strong>'
+      + '<span style="margin-left:auto;font-size:0.78rem;color:#9ca3af">' + elapsed + 's elapsed</span>'
+      + '</div>'
+      + stepsHtml
+      + (detail ? '<p style="font-size:0.78rem;color:#6b7280;margin:8px 0 0 0;border-top:1px solid #ffe082;padding-top:8px">' + detail + '</p>' : '')
+      + '</div>';
+  }
+
   if (previewEl) {
-    previewEl.innerHTML = '<div id="rfpStreamProgress" style="color:var(--cpc-gold-deep);font-size:0.85rem;padding:0.5rem 0;display:flex;align-items:center;gap:8px">'
-      + '<i class="fas fa-spinner fa-spin"></i><span id="rfpStreamTokens">Connecting to AI…</span></div>'
-      + '<div id="rfpStreamContent" style="font-size:0.85rem;color:#666;white-space:pre-wrap;max-height:300px;overflow:auto"></div>';
+    previewEl.innerHTML = renderProgressPanel('outline', 'Connecting to AI…');
   }
 
   var data = {
@@ -4903,18 +4930,18 @@ async function generateRfpDoc(rfpId) {
           throw new Error(evt.error);
         }
 
+        if (evt.progress) {
+          // Parallel generation phase progress event
+          if (previewEl) {
+            previewEl.innerHTML = renderProgressPanel(evt.progress, evt.detail || null);
+          }
+          if (btn) { btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> ' + (evt.progress === 'outline' ? 'Phase 1/3…' : evt.progress === 'sections' ? 'Phase 2/3…' : 'Assembling…'); }
+        }
+
         if (evt.token) {
-          streamBuf += evt.token;
-          tokenCount += evt.token.length;
-          // Update live counter
-          var tokEl = document.getElementById('rfpStreamTokens');
-          if (tokEl) tokEl.textContent = 'Generating… ' + tokenCount + ' chars';
-          // Show rolling preview of the last ~800 chars
-          var contentEl = document.getElementById('rfpStreamContent');
-          if (contentEl) {
-            var preview = streamBuf.length > 800 ? '…' + streamBuf.slice(-800) : streamBuf;
-            contentEl.textContent = preview;
-            contentEl.scrollTop = contentEl.scrollHeight;
+          // Legacy single-call token event — keep for fallback compatibility
+          if (previewEl) {
+            previewEl.innerHTML = renderProgressPanel('fallback', null);
           }
         }
 
