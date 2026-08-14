@@ -324,12 +324,9 @@ apiRouter.get('/rfps/:id/pdf', async (c) => {
         .replace(/background-position\s*:[^;]+;\s*/gi, '')
         // Remove fixed min-height — prevents blank space at bottom of short pages
         .replace(/min-height\s*:\s*297mm\s*;?\s*/gi, '')
-        // Fix 2b — Remove LLM-generated CPC/old-letterhead footer text divs.
-        // These appear as absolute-positioned bottom divs (old pattern) or plain footer divs.
-        // Pattern 1: position:absolute with bottom:Nmm
-        .replace(/<div[^>]*position\s*:\s*absolute[^>]*bottom\s*:\s*\d+[^>]*>[\s\S]*?<\/div>/gi, '')
-        .replace(/<div[^>]*bottom\s*:\s*\d+[^>]*position\s*:\s*absolute[^>]*>[\s\S]*?<\/div>/gi, '')
-        // Pattern 2: any div whose text contains CPC/Crown Prince Court footer markers
+        // Remove only CPC/Crown Prince Court legacy footer text divs (plain text match — safe).
+        // NOTE: Do NOT strip position:absolute+bottom:N divs — the Andersen navy footer
+        //       uses exactly that pattern (position:absolute; bottom:0) and must be preserved.
         .replace(/<div[^>]*>[^<]*Crown Prince[^<]*<\/div>/gi, '')
         .replace(/<div[^>]*>[^<]*Confidential[^<]*Page \d+[^<]*<\/div>/gi, '')
 
@@ -344,18 +341,31 @@ apiRouter.get('/rfps/:id/pdf', async (c) => {
       // page-break-after:always is preserved in LLM page div inline styles (see Fix 2 note above).
       // The CSS below adds a safety net using the body > div > div selector which correctly
       // targets the LLM page divs (body > outer-wrapper-div > page-divs).
+      // Bug fix: Use @page size that exactly matches LLM page divs (794×1123 px at 96dpi = A4).
+      // Previously we used default A4 paper (841px effective height at 96dpi) which made each
+      // 1123px-tall LLM page div overflow into ~1.34 PDF pages → 9 HTML pages → 64 PDF pages.
+      // Setting @page size to 794px×1123px means 1 LLM page div = exactly 1 PDF page.
+      const PAGE_W = 794
+      const PAGE_H = 1123
       const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <style>
+  /* Match paper size to LLM page div dimensions (96dpi A4: 794×1123px). */
+  @page { size: ${PAGE_W}px ${PAGE_H}px; margin: 0; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: Arial, Calibri, 'Segoe UI', sans-serif; font-size: 11pt; color: #1A1A1A; background: #fff; }
-  /* Safety net: ensure every LLM page div forces a page break.
-     LLM structure: <body><div>  ← outer wrapper
-                            <div style="...page-break-after:always">  ← page div
-     body > div > div targets each page div regardless of LLM class names. */
-  body > div > div { page-break-after: always; }
+  body { font-family: Arial, Calibri, 'Segoe UI', sans-serif; font-size: 11pt; color: #1A1A1A; background: #fff; width: ${PAGE_W}px; }
+  /* Each LLM page div is exactly PAGE_H tall — enforce hard clip so nothing bleeds. */
+  body > div > div {
+    width: ${PAGE_W}px !important;
+    height: ${PAGE_H}px !important;
+    max-height: ${PAGE_H}px !important;
+    overflow: hidden !important;
+    page-break-after: always;
+    page-break-inside: avoid;
+    position: relative;
+  }
   body > div > div:last-child { page-break-after: avoid; }
   h1, h2, h3 { color: #1A1A1A; }
   table { border-collapse: collapse; width: 100%; }
@@ -371,7 +381,14 @@ apiRouter.get('/rfps/:id/pdf', async (c) => {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${renderSecret}`,
         },
-        body: JSON.stringify({ html, letterhead_data_uri: letterheadDataUri }),
+        // Pass explicit page dimensions so Puppeteer uses 794×1123px paper —
+        // matches LLM page divs exactly → 1 div = 1 PDF page.
+        body: JSON.stringify({
+          html,
+          letterhead_data_uri: letterheadDataUri,
+          page_width: `${PAGE_W}px`,
+          page_height: `${PAGE_H}px`,
+        }),
       })
 
       if (!renderRes.ok) {
@@ -405,8 +422,7 @@ apiRouter.get('/rfps/:id/pdf', async (c) => {
     .replace(/background-repeat\s*:[^;]+;\s*/gi, '')
     .replace(/background-position\s*:[^;]+;\s*/gi, '')
     .replace(/min-height\s*:\s*297mm\s*;?\s*/gi, '')
-    .replace(/<div[^>]*position\s*:\s*absolute[^>]*bottom\s*:\s*\d+[^>]*>[\s\S]*?<\/div>/gi, '')
-    .replace(/<div[^>]*bottom\s*:\s*\d+[^>]*position\s*:\s*absolute[^>]*>[\s\S]*?<\/div>/gi, '')
+    // Do NOT strip position:absolute+bottom:N — Andersen navy footer uses this pattern.
     .replace(/<div[^>]*>[^<]*Crown Prince[^<]*<\/div>/gi, '')
     .replace(/<div[^>]*>[^<]*Confidential[^<]*Page \d+[^<]*<\/div>/gi, '')
   const printHtml = `<!DOCTYPE html>
@@ -419,11 +435,17 @@ apiRouter.get('/rfps/:id/pdf', async (c) => {
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { background: #e8e8e8; font-family: Arial, 'Segoe UI', sans-serif; }
   .rfp-doc > div { display: block; box-shadow: 0 2px 12px rgba(0,0,0,0.18); margin: 20px auto !important; }
+  @page { size: 794px 1123px; margin: 0; }
   @media print {
     * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-    html, body { background: white; margin: 0; padding: 0; }
+    html, body { background: white; margin: 0; padding: 0; width: 794px; }
     .no-print { display: none !important; }
-    .rfp-doc > div { box-shadow: none !important; margin: 0 !important; page-break-after: always; }
+    .rfp-doc > div {
+      box-shadow: none !important; margin: 0 !important;
+      width: 794px !important; height: 1123px !important; max-height: 1123px !important;
+      overflow: hidden !important;
+      page-break-after: always; page-break-inside: avoid;
+    }
     .rfp-doc > div:last-child { page-break-after: avoid; }
   }
 </style>
