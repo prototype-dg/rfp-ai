@@ -1480,69 +1480,77 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
       a.content_type?.includes('pdf')
     )
 
-    // ── Email categorization ─────────────────────────────────────
-    // Rules:
-    //  1. spreadsheet attachment  → questions (parse Q&A)
-    //  2. PDF attachment only     → plain communication (log + notify, no proposal created)
-    //  3. no attachment, text only → use LLM to detect decline intent
-    //  4. everything else         → plain_email
+    // ── Email categorization — LLM-FIRST ────────────────────────
+    // Step 1: Run LLM on ALL emails with body text to detect intent.
+    //         LLM returns DECLINE | QUESTIONS | NEUTRAL.
+    // Step 2: Attachment checks are secondary confirmations, not routing gates.
+    //         - spreadsheet attachment upgrades NEUTRAL → questions
+    //         - DECLINE always wins regardless of attachments (thread carry-overs ignored)
+    //
+    // This prevents Outlook carrying the original RFP PDF as a thread attachment
+    // from short-circuiting decline/question detection.
+
+    // Strip quoted reply chain so only vendor's own words go to LLM.
+    const quoteStripPatterns = [
+      /\r?\nFrom:\s*Andersen Procurement/i,
+      /\r?\n-{3,}[ \t]*Original Message[ \t]*-{3,}/i,
+      /\r?\nOn .{5,100}wrote:/i,
+      /\r?\n_{3,}/,
+      /\r?\n>{1}/,  // "> quoted text" lines
+    ]
+    let cleanBody = bodyText
+    for (const pat of quoteStripPatterns) {
+      const idx = cleanBody.search(pat)
+      if (idx > 30) { cleanBody = cleanBody.slice(0, idx); break }
+    }
+    cleanBody = cleanBody.trim()
+
+    // LLM intent classification — runs for ALL emails with body text.
+    let llmVerdict = 'NEUTRAL'
+    const openAiKey = (c.env as any).OPENAI_API_KEY || (globalThis as any).OPENAI_API_KEY || ''
+    if (openAiKey && cleanBody.length > 0) {
+      try {
+        const intentRes = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${openAiKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: 'gpt-4o-mini',
+            max_tokens: 10,
+            temperature: 0,
+            messages: [
+              {
+                role: 'system',
+                content: 'You are an intent classifier for a procurement system. A vendor has received an RFP invitation and is replying by email. Analyse only the vendor\'s own words (quoted original message text is already stripped). Reply with exactly one word — no punctuation, no explanation:\n- DECLINE — the vendor is declining, withdrawing, expressing inability or unwillingness to participate, or otherwise opting out.\n- QUESTIONS — the vendor is asking questions about the RFP or submitting a question list.\n- NEUTRAL — anything else: acknowledgements, confirmations of participation, or unclear intent.',
+              },
+              {
+                role: 'user',
+                content: `Subject: ${subject}\n\nVendor reply:\n${cleanBody.slice(0, 4000)}`,
+              },
+            ],
+          }),
+        })
+        if (intentRes.ok) {
+          const intentData = await intentRes.json() as any
+          const raw = (intentData?.choices?.[0]?.message?.content || '').trim().toUpperCase()
+          // Use startsWith to tolerate punctuation (e.g. "DECLINE." from model)
+          if (raw.startsWith('DECLINE')) llmVerdict = 'DECLINE'
+          else if (raw.startsWith('QUESTIONS')) llmVerdict = 'QUESTIONS'
+          else llmVerdict = 'NEUTRAL'
+        }
+      } catch(_) {}
+    }
+
+    // Map LLM verdict + attachment signals → final email category
     let emailCategory = 'plain_email'
-
-    if (spreadsheetAttachment) {
+    if (llmVerdict === 'DECLINE') {
+      // Decline wins regardless of attachments
+      emailCategory = 'decline'
+    } else if (spreadsheetAttachment || llmVerdict === 'QUESTIONS') {
+      // Spreadsheet is a hard signal for Q&A; LLM QUESTIONS also routes here
       emailCategory = 'questions'
-    } else if (pdfAttachment) {
-      emailCategory = 'plain_email'  // PDF emails are comms only — no proposal entity
-    } else if (!hasAttachment && bodyText.trim().length > 0) {
-      // Text-only email: use LLM exclusively to detect decline intent.
-      //
-      // Strip quoted reply chain before analysis — everything after the first
-      // "From: Andersen Procurement" / "-----Original Message-----" / "On ... wrote:" line
-      // so the LLM only sees the vendor's own words, not the original invitation text.
-      const quoteStripPatterns = [
-        /\r?\nFrom:\s*Andersen Procurement/i,
-        /\r?\n-{3,}[ \t]*Original Message[ \t]*-{3,}/i,
-        /\r?\nOn .{5,100}wrote:/i,
-        /\r?\n_{3,}/,
-        /\r?\n>{1}/,  // "> quoted text" lines
-      ]
-      let cleanBody = bodyText
-      for (const pat of quoteStripPatterns) {
-        const idx = cleanBody.search(pat)
-        if (idx > 30) { cleanBody = cleanBody.slice(0, idx); break }
-      }
-      cleanBody = cleanBody.trim()
-
-      // LLM-only intent classification — no keyword fallback.
-      // The LLM understands intent expressed in any language, phrasing, or level of formality.
-      const openAiKey = (c.env as any).OPENAI_API_KEY || (globalThis as any).OPENAI_API_KEY || ''
-      if (openAiKey && cleanBody.length > 0) {
-        try {
-          const intentRes = await fetch('https://api.openai.com/v1/chat/completions', {
-            method: 'POST',
-            headers: { 'Authorization': `Bearer ${openAiKey}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              model: 'gpt-4o-mini',
-              max_tokens: 10,
-              temperature: 0,
-              messages: [
-                {
-                  role: 'system',
-                  content: 'You are an intent classifier for a procurement system. A vendor has received an RFP invitation and is replying by email. Analyse only the vendor\'s own words (quoted original message text is already stripped). Reply with exactly one word:\n- DECLINE — the vendor is declining, withdrawing, expressing inability or unwillingness to participate, or otherwise opting out of this RFP.\n- NEUTRAL — anything else: acknowledgements, questions, confirmations of participation, or unclear intent.',
-                },
-                {
-                  role: 'user',
-                  content: `Subject: ${subject}\n\nVendor reply:\n${cleanBody.slice(0, 4000)}`,
-                },
-              ],
-            }),
-          })
-          if (intentRes.ok) {
-            const intentData = await intentRes.json() as any
-            const verdict = (intentData?.choices?.[0]?.message?.content || '').trim().toUpperCase()
-            if (verdict === 'DECLINE') emailCategory = 'decline'
-          }
-        } catch(_) {}
-      }
+    } else {
+      // NEUTRAL — plain communication (PDF carry-overs, acks, etc.)
+      emailCategory = 'plain_email'
     }
 
     console.log(`[webhook] Email category: ${emailCategory} | from: ${fromAddress} | vendor: ${vendorDisplayName} | attachments: ${attachments.length}`)
