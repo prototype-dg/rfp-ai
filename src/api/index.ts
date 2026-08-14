@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { initDb, seedVendors } from '../db/seed'
 import type { Bindings } from '../types'
-import { emblemPngBase64 } from '../emblem-data'
+// emblem-data import removed — email template now uses inline SVG (no external image dependency)
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
 const WORKER_VERSION = '2026-07-29-v52'  // v52: PDF fixes — correct page-break-after, robust footer regex (both property orders), single+double quote padding strip
@@ -1213,6 +1213,7 @@ Please include this reference code in ALL correspondence regarding this RFP.
             to: [vendor.contact_email],
             subject: `Q&A Consolidated Response – ${rfp?.title || 'Andersen RFP'} (Ref: ${rfp?.ref_number || ''})`,
             text: emailText,
+            html: buildAndersenEmailHtml(emailText),
             attachments: [{ filename: xlsxFilename, content: xlsxBase64 }],
           }
           const sendRes = await fetch('https://api.resend.com/emails', {
@@ -1492,11 +1493,11 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
     } else if (pdfAttachment) {
       emailCategory = 'plain_email'  // PDF emails are comms only — no proposal entity
     } else if (!hasAttachment && bodyText.trim().length > 0) {
-      // Text-only email: detect decline intent via LLM + keyword fallback
+      // Text-only email: use LLM exclusively to detect decline intent.
       //
       // Strip quoted reply chain before analysis — everything after the first
       // "From: Andersen Procurement" / "-----Original Message-----" / "On ... wrote:" line
-      // so the LLM and keywords only see the vendor's own words, not the original invitation.
+      // so the LLM only sees the vendor's own words, not the original invitation text.
       const quoteStripPatterns = [
         /\r?\nFrom:\s*Andersen Procurement/i,
         /\r?\n-{3,}[ \t]*Original Message[ \t]*-{3,}/i,
@@ -1511,55 +1512,36 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
       }
       cleanBody = cleanBody.trim()
 
-      // Comprehensive decline keyword list — applied to stripped body only
-      const declineKeywords = [
-        'not interested', 'decline to participate', 'declining to participate',
-        'unable to participate', 'cannot participate', 'regret to inform',
-        'pass on this opportunity', 'withdraw from', 'will not be submitting',
-        'no thank you', 'not in a position', 'unable to bid',
-        'not going to participate', 'not participate', 'will not participate',
-        'unable to submit', 'cannot submit', 'not able to participate',
-        'not able to submit', 'not in a position to participate',
-        'unable to respond', 'cannot respond', 'will not be responding',
-        'not bidding', 'not tendering', 'unable to tender',
-        'respectfully decline', 'must decline', 'have to decline',
-        'choosing not to participate', 'opted not to participate',
-        'will not be able to participate', 'are not going to participate',
-        'not going to be able', 'not able to bid', 'not able to tender',
-        'withdrawing from', 'withdraw our', 'not in a position to bid',
-        'cannot take part', 'unable to take part', 'not able to take part',
-      ]
-      const cleanBodyLower = cleanBody.toLowerCase()
-      const keywordHit = declineKeywords.some(kw => cleanBodyLower.includes(kw))
-
-      if (keywordHit) {
-        // Keywords matched on clean text — no need for LLM
-        emailCategory = 'decline'
-      } else {
-        // No keyword hit — ask LLM on stripped body only
-        const openAiKey = (c.env as any).OPENAI_API_KEY || (globalThis as any).OPENAI_API_KEY || ''
-        if (openAiKey) {
-          try {
-            const intentRes = await fetch('https://api.openai.com/v1/chat/completions', {
-              method: 'POST',
-              headers: { 'Authorization': `Bearer ${openAiKey}`, 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                model: 'gpt-4o-mini',
-                max_tokens: 10,
-                temperature: 0,
-                messages: [
-                  { role: 'system', content: 'You categorize vendor reply emails for a procurement system. The vendor received an RFP invitation and is replying. Reply with exactly one word: DECLINE if the vendor is declining, withdrawing, or expressing inability/unwillingness to participate in the RFP. Reply NEUTRAL for acknowledgements, questions, or anything else.' },
-                  { role: 'user', content: `Subject: ${subject}\n\nVendor reply (quoted text removed):\n${cleanBody.slice(0, 600)}` },
-                ],
-              }),
-            })
-            if (intentRes.ok) {
-              const intentData = await intentRes.json() as any
-              const verdict = (intentData?.choices?.[0]?.message?.content || '').trim().toUpperCase()
-              if (verdict === 'DECLINE') emailCategory = 'decline'
-            }
-          } catch(_) {}
-        }
+      // LLM-only intent classification — no keyword fallback.
+      // The LLM understands intent expressed in any language, phrasing, or level of formality.
+      const openAiKey = (c.env as any).OPENAI_API_KEY || (globalThis as any).OPENAI_API_KEY || ''
+      if (openAiKey && cleanBody.length > 0) {
+        try {
+          const intentRes = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${openAiKey}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              model: 'gpt-4o-mini',
+              max_tokens: 10,
+              temperature: 0,
+              messages: [
+                {
+                  role: 'system',
+                  content: 'You are an intent classifier for a procurement system. A vendor has received an RFP invitation and is replying by email. Analyse only the vendor\'s own words (quoted original message text is already stripped). Reply with exactly one word:\n- DECLINE — the vendor is declining, withdrawing, expressing inability or unwillingness to participate, or otherwise opting out of this RFP.\n- NEUTRAL — anything else: acknowledgements, questions, confirmations of participation, or unclear intent.',
+                },
+                {
+                  role: 'user',
+                  content: `Subject: ${subject}\n\nVendor reply:\n${cleanBody.slice(0, 800)}`,
+                },
+              ],
+            }),
+          })
+          if (intentRes.ok) {
+            const intentData = await intentRes.json() as any
+            const verdict = (intentData?.choices?.[0]?.message?.content || '').trim().toUpperCase()
+            if (verdict === 'DECLINE') emailCategory = 'decline'
+          }
+        } catch(_) {}
       }
     }
 
@@ -1637,6 +1619,7 @@ procurement@cpc-rfp.website`
                 to: [fromAddress],
                 subject: `RE: ${subject || 'Q&A Query'} — Q&A Period Closed`,
                 text: rejectionBody,
+                html: buildAndersenEmailHtml(rejectionBody),
               }),
             })
           } catch(_) {}
@@ -4536,22 +4519,12 @@ SUBMISSION PORTAL:     ${submissionUrl}
 ──────────────────────────────────────────────`
 }
 
-async function sendRealEmail(
-  to: string, subject: string, bodyText: string, rfp: any, env?: any, pdfBase64?: string, pdfFilenameHint?: string
-): Promise<{ ok: boolean; id?: string; error?: string; simulated?: boolean }> {
-  const toAddr = (to || '').toLowerCase().trim()
-  // No domain restriction — send to any valid vendor email address.
-  const RESEND_API_KEY = env?.RESEND_API_KEY || (globalThis as any).RESEND_API_KEY || ''
-  if (!RESEND_API_KEY) {
-    return { ok: false, error: 'RESEND_API_KEY not configured' }
-  }
-
-  // ── Andersen Email Template ──────────────────────────────────────────
-  // Colors: --a-yellow #FFDB00 | --a-navy #020D1C | --a-ink #020303
-  //         --a-ink #020303 | --a-line #E0E0E0 | --a-yellow-tint #FFFCE0
+/** Build the Andersen-branded HTML email wrapper around plain-text body content.
+ *  All three outbound send paths use this helper so the letterhead is consistent. */
+function buildAndersenEmailHtml(bodyText: string): string {
   const safeBody = bodyText.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
   const bodyHtmlContent = safeBody.replace(/\n/g,'<br>')
-  const htmlBody = `<!DOCTYPE html>
+  return `<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Andersen Procurement</title></head>
@@ -4562,18 +4535,22 @@ async function sendRealEmail(
 
       <!-- ── Header ── -->
       <tr>
-        <td style="background:#020303;border-radius:12px 12px 0 0;padding:28px 36px">
+        <td style="background:#020D1C;border-radius:12px 12px 0 0;padding:24px 36px">
           <table width="100%" cellpadding="0" cellspacing="0" border="0">
             <tr>
-              <td style="padding-right:16px;vertical-align:middle;width:60px">
-                <img src="data:image/jpeg;base64,${emblemPngBase64}" alt="Andersen Logo" width="52" height="72" style="display:block;border:0;outline:none;object-fit:contain">
+              <td style="padding-right:20px;vertical-align:middle;width:48px">
+                <!-- Andersen geometric diamond mark — inline SVG, no external dependency -->
+                <svg width="44" height="44" viewBox="0 0 44 44" xmlns="http://www.w3.org/2000/svg" style="display:block">
+                  <polygon points="22,2 42,22 22,42 2,22" fill="none" stroke="#FFDB00" stroke-width="2.5"/>
+                  <polygon points="22,9 35,22 22,35 9,22" fill="#FFDB00"/>
+                </svg>
               </td>
               <td style="vertical-align:middle">
-                <div style="font-family:Georgia,'Times New Roman',serif;font-size:19px;font-weight:700;color:#FFDB00;letter-spacing:0.02em;line-height:1.2">Andersen</div>
-                <div style="font-family:'Courier New',monospace;font-size:9px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:#E9DCC4;margin-top:4px;opacity:0.85">PROCUREMENT &amp; CONTRACTING</div>
+                <div style="font-family:Georgia,'Times New Roman',serif;font-size:22px;font-weight:700;color:#FFDB00;letter-spacing:0.04em;line-height:1.15">Andersen</div>
+                <div style="font-family:'Courier New',monospace;font-size:8.5px;font-weight:700;letter-spacing:0.22em;text-transform:uppercase;color:#8fa3bb;margin-top:5px">PROCUREMENT &amp; CONTRACTING</div>
               </td>
               <td align="right" style="vertical-align:middle">
-                <div style="font-family:'Courier New',monospace;font-size:9px;color:#FFDB00;letter-spacing:0.12em;text-transform:uppercase;opacity:0.75">Warsaw, Poland</div>
+                <div style="font-family:'Courier New',monospace;font-size:8px;color:#FFDB00;letter-spacing:0.14em;text-transform:uppercase;opacity:0.7">Warsaw, Poland</div>
               </td>
             </tr>
           </table>
@@ -4594,16 +4571,16 @@ async function sendRealEmail(
 
       <!-- ── Footer ── -->
       <tr>
-        <td style="background:#FAFAF8;border:1px solid #E0E0E0;border-top:none;border-radius:0 0 12px 12px;padding:20px 36px">
+        <td style="background:#020D1C;border-radius:0 0 12px 12px;padding:18px 36px">
           <table width="100%" cellpadding="0" cellspacing="0" border="0">
             <tr>
               <td>
-                <div style="font-family:'Courier New',monospace;font-size:9px;letter-spacing:0.14em;text-transform:uppercase;color:#020D1C;font-weight:700;margin-bottom:4px">Official Procurement Correspondence</div>
-                <div style="font-size:11px;color:#556170;line-height:1.5">Andersen &nbsp;·&nbsp; Warsaw, Poland<br>
+                <div style="font-family:'Courier New',monospace;font-size:8px;letter-spacing:0.16em;text-transform:uppercase;color:#FFDB00;font-weight:700;margin-bottom:4px">Official Procurement Correspondence</div>
+                <div style="font-size:11px;color:#8fa3bb;line-height:1.5">Andersen &nbsp;·&nbsp; Warsaw, Poland<br>
                 <a href="mailto:procurement@cpc-rfp.website" style="color:#FFDB00;text-decoration:none">procurement@cpc-rfp.website</a></div>
               </td>
-              <td align="right" style="vertical-align:bottom">
-                <div style="font-family:'Courier New',monospace;font-size:8px;color:#6b7280;letter-spacing:0.06em;text-transform:uppercase">AI RFP Management System</div>
+              <td align="right" style="vertical-align:middle">
+                <div style="font-family:'Courier New',monospace;font-size:7.5px;color:#4a6080;letter-spacing:0.06em;text-transform:uppercase">AI RFP Management System</div>
               </td>
             </tr>
           </table>
@@ -4613,8 +4590,8 @@ async function sendRealEmail(
       <!-- ── Disclaimer ── -->
       <tr>
         <td style="padding:14px 0 0;text-align:center">
-          <div style="font-size:10px;color:#6b7280;line-height:1.5">This is an official procurement communication from the Andersen.<br>
-          Please do not reply to this message unless instructed.</div>
+          <div style="font-size:10px;color:#6b7280;line-height:1.5">This is an official procurement communication from Andersen.<br>
+          Please do not reply to this message unless instructed to do so.</div>
         </td>
       </tr>
 
@@ -4623,6 +4600,19 @@ async function sendRealEmail(
 </table>
 </body>
 </html>`
+}
+
+async function sendRealEmail(
+  to: string, subject: string, bodyText: string, rfp: any, env?: any, pdfBase64?: string, pdfFilenameHint?: string
+): Promise<{ ok: boolean; id?: string; error?: string; simulated?: boolean }> {
+  const toAddr = (to || '').toLowerCase().trim()
+  // No domain restriction — send to any valid vendor email address.
+  const RESEND_API_KEY = env?.RESEND_API_KEY || (globalThis as any).RESEND_API_KEY || ''
+  if (!RESEND_API_KEY) {
+    return { ok: false, error: 'RESEND_API_KEY not configured' }
+  }
+
+  const htmlBody = buildAndersenEmailHtml(bodyText)
 
   // Attach PDF if provided (base64 string from client-side html2pdf generation)
   const attachments: any[] = pdfBase64
