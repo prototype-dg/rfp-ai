@@ -946,8 +946,16 @@ Write the complete HTML for section "${sectionSpec?.heading || sectionKey}" now.
 
       // ── PHASE 3: Assemble into full HTML document ──────────────────────────
       // Cover page is generated from outline meta (no LLM call needed)
-      const tocItems = Object.values(s).map((sec: any) => sec?.heading || '').filter(Boolean)
-      const tocHtml = tocItems.map((h: string) => `<li style="margin-bottom:4pt;font-family:Roboto,Arial,sans-serif;font-size:10.5pt;color:#020303;">${h}</li>`).join('')
+      // Strip leading "N. " or "N.N " prefix from heading if present — the <ol>
+      // was replaced with a plain <ul> to avoid double-numbering like "1. 1. Background".
+      const tocItems = Object.values(s).map((sec: any) => {
+        const h = (sec?.heading || '').trim()
+        // Remove leading numbering pattern: "1. ", "1.2 ", "Section 1: ", etc.
+        return h.replace(/^(\d+\.?\d*\.?\s+|Section\s+\d+[:\s]+)/i, '').trim()
+      }).filter(Boolean)
+      const tocHtml = tocItems.map((h: string, idx: number) => 
+        `<li style="margin-bottom:5pt;font-family:Roboto,Arial,sans-serif;font-size:10.5pt;color:#020303;display:flex;gap:8pt;"><span style="min-width:18pt;font-weight:600;color:#020303;">${idx+1}.</span><span>${h}</span></li>`
+      ).join('')
 
       const coverContent = `
 <h1 style="font-family:Roboto,Arial,sans-serif;font-size:20pt;font-weight:700;text-align:center;color:#020303;margin:0 0 10pt 0;line-height:1.2;">${outline.rfp_meta?.title || body.title || 'Request for Proposal'}</h1>
@@ -961,7 +969,7 @@ Write the complete HTML for section "${sectionSpec?.heading || sectionKey}" now.
   <tr><td style="padding:5pt 10pt;border:1px solid #E0E0E0;font-weight:700;">Submission Email</td><td style="padding:5pt 10pt;border:1px solid #E0E0E0;">${procEmail}</td></tr>
 </table>
 <div style="margin:20pt 0 8pt 0;font-family:Roboto,Arial,sans-serif;font-size:11pt;font-weight:700;color:#020303;border-bottom:2px solid #FFDB00;padding-bottom:4pt;">Table of Contents</div>
-<ol style="margin:0;padding-left:20pt;">${tocHtml}</ol>`
+<ul style="margin:0;padding:0;list-style:none;">${tocHtml}</ul>`
 
       // ── Page wrapper builder ────────────────────────────────────────────────
       // Produces one A4 page div (794×1123px) with full letterhead + navy footer.
@@ -990,7 +998,7 @@ Write the complete HTML for section "${sectionSpec?.heading || sectionKey}" now.
   <span style="flex:1;height:1px;background:#E0E0E0;margin:0 4px;"></span>
   <span style="display:block;width:7px;height:7px;border-radius:50%;background:#FFDB00;"></span>
 </div>
-<div style="padding:20px 56px 20px;position:relative;overflow:hidden;height:909px;box-sizing:border-box;">${content}</div>
+<div style="padding:20px 56px 80px;position:relative;overflow:hidden;height:929px;box-sizing:border-box;">${content}</div>
 <div style="position:absolute;bottom:0;left:0;right:0;background:#020D1C;color:#B8C0CB;padding:16px 36px;display:flex;justify-content:space-between;align-items:center;font-size:9px;letter-spacing:0.05em;height:68px;box-sizing:border-box;">
   <div style="display:flex;gap:28px;">
     <div><div style="font-family:'Courier New',monospace;font-size:8px;letter-spacing:0.2em;text-transform:uppercase;color:#FFDB00;margin-bottom:3px;">Contact</div><div style="font-family:Roboto,Arial,sans-serif;font-size:9px;color:#D8DEE8;">${procEmail}</div></div>
@@ -1003,48 +1011,59 @@ Write the complete HTML for section "${sectionSpec?.heading || sectionKey}" now.
 </div>`
 
       // ── HTML content paginator ──────────────────────────────────────────────
-      // Splits arbitrary section HTML into page-sized chunks, then wraps each
-      // chunk in buildPage(). Fully table-aware: splits <table> elements at
-      // <tr> row boundaries, carrying <thead> to every continuation page so
-      // column headers repeat. Never splits mid-row or mid-list-item.
+      // Splits section HTML into 794×1123px page-sized chunks (one buildPage()
+      // wrapper each). Three budget constants govern how tightly pages pack:
       //
-      // Budget calibration (794px wide page, 909px content area):
-      //   Content area inner width: 794 - 56×2 padding = 682px
-      //   Body text: 11pt / 14px, line-height 1.4 ≈ 20px per line
-      //   Prose lines: ~48 chars @ 14px/char avg → 909/20 ≈ 45 lines ≈ 2160 text chars
-      //   Real LLM tables: 400–680 text chars/row (multi-line cells in 3-col tables)
-      //   PAGE_BUDGET: conservative to absorb LLM verbosity variance
-      const PAGE_BUDGET = 1800   // estimated rendered-text chars per content area
+      //   PROSE_BUDGET  — for paragraphs, headings, and list containers
+      //   TABLE_BUDGET  — for table content (rows measured individually)
+      //   LIST_ITEM_BUDGET — for individual <li> items within a list block
+      //
+      // Calibrated from real RFP 16 analysis (Data Platform Modernization):
+      //   Content area: 909px tall, 682px wide, 11pt/14px body, 1.4 line-height
+      //   ~20px per prose line → ~45 lines → ~2160 plain-text chars theoretically
+      //   Real S1 background: 5 paragraphs × ~1100 chars each → need PROSE_BUDGET ≥ 2200
+      //   Real S3 scope: 91 list items in nested divs → need <li>-level splitting
+      //   Real S4 table: 35 rows × ~360 chars/row → TABLE_BUDGET controls row packing
+      //   Real tables pages 12-18: 3 rows at 1342-1671 chars → budget was too tight
+      //
+      // Architecture:
+      //   paginateHtml()     — main entry point; calls tokenise() on top-level elements
+      //   tokenise()         — extracts top-level element strings (handles nesting)
+      //   splitTable()       — descends <table>, splits at <tr> boundaries
+      //   splitList()        — descends <ol>/<ul>, splits at <li> boundaries
+      //   splitDivChildren() — descends <div>/<section>, splits at child boundaries
+      const PROSE_BUDGET = 2400      // plain-text-equiv chars per page for prose content
+      const TABLE_BUDGET = 2400      // budget for table (calibrated: 4 rows × ~502w/row + thead)
+      // List items: same as prose — they can be dense but benefit from generous packing
+      const LIST_BUDGET  = 2400      // budget for list containers
 
       // ── Weight estimator ──────────────────────────────────────────────────
-      // Returns an approximate "rendered text chars" value for a fragment.
-      // Calibrated from real LLM output (RFP 15 — Data Platform Modernization):
-      //   Prose pages: 600–3500 text chars (headings + paragraphs + bullet lists)
-      //   Table rows:  400–680 text chars/row in 3-col requirement tables
-      //   <tr>   ~50px each → +60 fixed overhead (wrapping cells)
-      //   <h2/3> ~36px each → +80 fixed overhead per heading
-      //   <li>   ~22px each → +20 overhead per item
-      //   <p>    ~14px each → +18 overhead per paragraph margin
+      // Converts HTML fragment to an approximate "rendered height in text chars".
+      // Each rendered pixel ≈ 0.42 text chars (at 14px font, 48 chars/line, 20px/line).
+      //   <tr>   ~45px rendered (multi-line cells) → +55 overhead
+      //   <h2/3> ~34px rendered (heading + margin)  → +70 overhead
+      //   <li>   ~22px rendered (line + margin)      → +18 overhead (text already counted)
+      //   <p>    ~14px extra margin-bottom           → +14 overhead
+      //   <div section heading style> ~34px          → +50 overhead
       function estimateWeight(html: string): number {
         const text = html.replace(/<[^>]+>/g, '').replace(/&[a-zA-Z#0-9]+;/g, ' ').replace(/\s+/g, ' ').trim()
         const base  = text.length
         const trs   = (html.match(/<tr[\s>]/gi)     || []).length
-        const heads = (html.match(/<h[2-4][\s>]/gi) || []).length
+        const heads = (html.match(/<h[1-4][\s>]/gi) || []).length
         const lis   = (html.match(/<li[\s>]/gi)     || []).length
         const ps    = (html.match(/<p[\s>]/gi)      || []).length
-        return base + trs * 60 + heads * 80 + lis * 20 + ps * 18
+        return base + trs * 55 + heads * 70 + lis * 18 + ps * 14
       }
 
-      // ── Low-level HTML tokeniser ──────────────────────────────────────────
-      // Returns an array of top-level element strings from raw HTML.
-      // Does NOT descend into <table> — call splitTable() for those.
-      function tokeniseTopLevel(html: string): string[] {
+      // ── Low-level HTML element tokeniser ─────────────────────────────────
+      // Extracts immediate children of an HTML fragment as separate strings.
+      // Handles nested tags correctly via depth tracking.
+      function tokenise(html: string): string[] {
         const segs: string[] = []
         const voidTags = new Set(['br','hr','img','input','meta','link','col','colgroup','area','base','source','track','wbr'])
         let rem = html.trim()
 
         while (rem.length > 0) {
-          // Skip pure whitespace
           const ws = rem.match(/^\s+/)
           if (ws) { rem = rem.slice(ws[0].length); continue }
 
@@ -1063,19 +1082,17 @@ Write the complete HTML for section "${sectionSpec?.heading || sectionKey}" now.
             segs.push(rem.slice(0, end)); rem = rem.slice(end); continue
           }
 
-          // Find matching close tag (depth-aware, linear scan)
+          // Depth-aware close-tag search
           let depth = 0, scanPos = 0, found = -1
           while (scanPos < rem.length) {
             const sub = rem.slice(scanPos)
             const om = sub.match(/^<([a-zA-Z][a-zA-Z0-9]*)[\s\/>]/)
             if (om && om[1].toLowerCase() === tag && !sub.startsWith('</')) {
-              depth++
-              const te = sub.indexOf('>'); scanPos += (te === -1 ? 1 : te + 1); continue
+              depth++; const te = sub.indexOf('>'); scanPos += (te === -1 ? 1 : te + 1); continue
             }
             const cm = sub.match(/^<\/([a-zA-Z][a-zA-Z0-9]*)\s*>/)
             if (cm && cm[1].toLowerCase() === tag) {
-              depth--
-              if (depth === 0) { found = scanPos + cm[0].length; break }
+              depth--; if (depth === 0) { found = scanPos + cm[0].length; break }
               scanPos += cm[0].length; continue
             }
             scanPos++
@@ -1088,103 +1105,165 @@ Write the complete HTML for section "${sectionSpec?.heading || sectionKey}" now.
       }
 
       // ── Table splitter ────────────────────────────────────────────────────
-      // Splits a single <table> element into multiple table strings, each
-      // containing at most rowsPerPage <tr> rows from <tbody>/<tfoot>.
-      // <thead> is repeated at the top of every continuation table.
-      function splitTable(tableHtml: string, rowsPerPage: number): string[] {
-        // Extract opening <table ...> tag
-        const tableOpenMatch = tableHtml.match(/^(<table[^>]*>)/i)
-        const tableOpen = tableOpenMatch ? tableOpenMatch[1] : '<table>'
+      // Splits <table> at <tr> boundaries. <thead> repeats on every chunk.
+      function splitTable(tableHtml: string): string[] {
+        const tableOpenM = tableHtml.match(/^(<table[^>]*>)/i)
+        const tableOpen  = tableOpenM ? tableOpenM[1] : '<table>'
+        const theadM     = tableHtml.match(/(<thead[\s\S]*?<\/thead>)/i)
+        const thead      = theadM ? theadM[1] : ''
+        const theadW     = estimateWeight(thead)
 
-        // Extract <thead>…</thead> (may be absent)
-        const theadMatch = tableHtml.match(/(<thead[\s\S]*?<\/thead>)/i)
-        const thead = theadMatch ? theadMatch[1] : ''
+        // Strip thead, table open/close, tbody/tfoot wrappers → get raw row HTML
+        let body = tableHtml
+          .replace(/<thead[\s\S]*?<\/thead>/gi, '')
+          .replace(/<\/table\s*>/gi, '').replace(tableOpen, '')
+          .replace(/<\/?tbody[^>]*>/gi, '').replace(/<\/?tfoot[^>]*>/gi, '')
 
-        // Extract all <tr> rows from tbody/tfoot (or bare rows)
-        // We collect every <tr>…</tr> that is NOT inside <thead>
-        let bodyHtml = tableHtml
-          .replace(/<thead[\s\S]*?<\/thead>/gi, '')  // strip thead
-          .replace(/<\/table>/gi, '')
-          .replace(tableOpen, '')
-          .replace(/<\/?tbody[^>]*>/gi, '')
-          .replace(/<\/?tfoot[^>]*>/gi, '')
-
-        // Tokenise rows
+        // Extract individual <tr>...</tr> elements
         const rows: string[] = []
-        let rem = bodyHtml.trim()
+        let rem = body.trim()
         while (rem.length > 0) {
           rem = rem.trimStart()
-          if (!rem.startsWith('<tr')) { const nx = rem.indexOf('<tr'); if (nx === -1) break; rem = rem.slice(nx); continue }
-          // Find end of this <tr>
-          let depth = 0, scanPos = 0, found = -1
-          while (scanPos < rem.length) {
-            const sub = rem.slice(scanPos)
-            if (sub.match(/^<tr[\s>]/i)) { depth++; const te = sub.indexOf('>'); scanPos += te + 1; continue }
+          if (!/^<tr/i.test(rem)) { const nx = rem.search(/<tr/i); if (nx < 0) break; rem = rem.slice(nx); continue }
+          let depth = 0, scan = 0, end = -1
+          while (scan < rem.length) {
+            const sub = rem.slice(scan)
+            if (/^<tr[\s>]/i.test(sub)) { depth++; const te = sub.indexOf('>'); scan += te + 1; continue }
             const cm = sub.match(/^<\/tr\s*>/i)
-            if (cm) { depth--; if (depth === 0) { found = scanPos + cm[0].length; break }; scanPos += cm[0].length; continue }
-            scanPos++
+            if (cm) { depth--; if (!depth) { end = scan + cm[0].length; break }; scan += cm[0].length; continue }
+            scan++
           }
-          if (found === -1) { rows.push(rem); break }
-          rows.push(rem.slice(0, found)); rem = rem.slice(found)
+          if (end < 0) { rows.push(rem); break }
+          rows.push(rem.slice(0, end)); rem = rem.slice(end)
         }
 
-        if (rows.length === 0) return [tableHtml]
+        if (!rows.length) return [tableHtml]
 
-        // Weight-based row grouping: pack rows until PAGE_BUDGET is exceeded,
-        // then start a new table chunk. Hard cap of rowsPerPage per chunk.
-        // thead weight is counted once per chunk (it's repeated on every page).
-        const theadWeight = estimateWeight(thead)
         const chunks: string[] = []
-        let rowBuf: string[] = []
-        let rowWeight = theadWeight
-
+        let buf: string[] = [], bufW = theadW
         for (const row of rows) {
           const rw = estimateWeight(row)
-          if ((rowWeight + rw > PAGE_BUDGET || rowBuf.length >= rowsPerPage) && rowBuf.length > 0) {
-            chunks.push(`${tableOpen}${thead}<tbody>${rowBuf.join('\n')}</tbody></table>`)
-            rowBuf = []; rowWeight = theadWeight
+          if (bufW + rw > TABLE_BUDGET && buf.length) {
+            chunks.push(`${tableOpen}${thead}<tbody>${buf.join('')}</tbody></table>`)
+            buf = []; bufW = theadW
           }
-          rowBuf.push(row); rowWeight += rw
+          buf.push(row); bufW += rw
         }
-        if (rowBuf.length > 0) {
-          chunks.push(`${tableOpen}${thead}<tbody>${rowBuf.join('\n')}</tbody></table>`)
+        if (buf.length) chunks.push(`${tableOpen}${thead}<tbody>${buf.join('')}</tbody></table>`)
+        return chunks.length ? chunks : [tableHtml]
+      }
+
+      // ── List splitter ─────────────────────────────────────────────────────
+      // Splits <ol>/<ul> at <li> boundaries. Preserves list tag + attributes.
+      function splitList(listHtml: string): string[] {
+        const listOpenM = listHtml.match(/^(<(?:ol|ul)[^>]*>)/i)
+        const listOpen  = listOpenM ? listOpenM[1] : '<ul>'
+        const listClose = listOpen.startsWith('<ol') ? '</ol>' : '</ul>'
+
+        // Extract <li> items (depth-aware)
+        const items: string[] = []
+        let rem = listHtml.replace(/^<(?:ol|ul)[^>]*>/i, '').replace(/<\/(?:ol|ul)\s*>$/i, '').trim()
+        while (rem.length > 0) {
+          rem = rem.trimStart()
+          if (!/^<li/i.test(rem)) { const nx = rem.search(/<li/i); if (nx < 0) break; rem = rem.slice(nx); continue }
+          let depth = 0, scan = 0, end = -1
+          while (scan < rem.length) {
+            const sub = rem.slice(scan)
+            if (/^<li[\s>]/i.test(sub)) { depth++; const te = sub.indexOf('>'); scan += te + 1; continue }
+            const cm = sub.match(/^<\/li\s*>/i)
+            if (cm) { depth--; if (!depth) { end = scan + cm[0].length; break }; scan += cm[0].length; continue }
+            scan++
+          }
+          if (end < 0) { items.push(rem); break }
+          items.push(rem.slice(0, end)); rem = rem.slice(end)
         }
-        return chunks
+
+        if (!items.length) return [listHtml]
+
+        const chunks: string[] = []
+        let buf: string[] = [], bufW = 0
+        for (const item of items) {
+          const iw = estimateWeight(item)
+          if (bufW + iw > LIST_BUDGET && buf.length) {
+            chunks.push(`${listOpen}${buf.join('')}${listClose}`)
+            buf = []; bufW = 0
+          }
+          buf.push(item); bufW += iw
+        }
+        if (buf.length) chunks.push(`${listOpen}${buf.join('')}${listClose}`)
+        return chunks.length ? chunks : [listHtml]
+      }
+
+      // ── Div child splitter ────────────────────────────────────────────────
+      // For a <div> or <section> whose children are too heavy for one page,
+      // descend and split at child element boundaries using PROSE_BUDGET.
+      function splitDivChildren(divHtml: string): string[] {
+        const divOpenM = divHtml.match(/^(<(?:div|section)[^>]*>)/i)
+        if (!divOpenM) return [divHtml]
+        const divOpen  = divOpenM[1]
+        const tagName  = divOpenM[1].match(/^<([a-zA-Z]+)/i)![1].toLowerCase()
+        const divClose = `</${tagName}>`
+
+        const inner = divHtml.replace(/^<(?:div|section)[^>]*>/i, '').replace(/<\/(?:div|section)\s*>$/i, '')
+        const children = tokenise(inner)
+        if (children.length <= 1) return [divHtml]
+
+        const chunks: string[] = []
+        let buf = '', bufW = 0
+        for (const child of children) {
+          const cw = estimateWeight(child)
+          if (bufW + cw > PROSE_BUDGET && buf.trim()) {
+            chunks.push(`${divOpen}${buf}${divClose}`)
+            buf = ''; bufW = 0
+          }
+          buf += child; bufW += cw
+        }
+        if (buf.trim()) chunks.push(`${divOpen}${buf}${divClose}`)
+        return chunks.length ? chunks : [divHtml]
       }
 
       // ── Main paginator ────────────────────────────────────────────────────
-      // Converts arbitrary section HTML into an array of page-budget-sized
-      // HTML strings. Each string is safe to pass to buildPage().
+      // Converts section HTML into page-budget-sized chunks for buildPage().
+      // Handles 4 element types specially:
+      //   <table>          → splitTable() at <tr> boundaries
+      //   <ol>/<ul>        → splitList()  at <li> boundaries
+      //   <div>/<section>  → splitDivChildren() if too heavy (scope sections)
+      //   everything else  → atomic, packed by weight into current chunk
       function paginateHtml(html: string): string[] {
         const pages: string[] = []
-        let chunk = ''
-        let weight = 0
+        let chunk = '', weight = 0
 
         function flush() { if (chunk.trim()) { pages.push(chunk); chunk = ''; weight = 0 } }
-        function add(seg: string) {
+
+        function addChunk(seg: string, budget: number) {
           const w = estimateWeight(seg)
-          if (weight + w > PAGE_BUDGET && chunk.trim()) flush()
+          if (weight + w > budget && chunk.trim()) flush()
           chunk += seg; weight += w
         }
 
-        // Table splitting: use weight-based row chunking instead of fixed row count.
-        // splitTable() will use PAGE_BUDGET to decide chunk boundaries per-row.
-        // Hard cap of 8 rows prevents any single page chunk from being huge.
-        const TABLE_ROWS_PER_PAGE = 8
-
-        for (const seg of tokeniseTopLevel(html)) {
-          const tag = (seg.match(/^<([a-zA-Z][a-zA-Z0-9]*)/) || [])[1]?.toLowerCase()
+        for (const seg of tokenise(html)) {
+          const tag = (seg.match(/^<([a-zA-Z][a-zA-Z0-9]*)/) || [])[1]?.toLowerCase() || ''
 
           if (tag === 'table') {
-            // Table-aware split: pre-split into row-budget chunks
-            const tableChunks = splitTable(seg, TABLE_ROWS_PER_PAGE)
-            for (const tc of tableChunks) {
+            // Split at row boundaries; each sub-table placed on page independently
+            for (const tc of splitTable(seg)) {
               const tw = estimateWeight(tc)
-              if (weight + tw > PAGE_BUDGET && chunk.trim()) flush()
+              if (weight + tw > TABLE_BUDGET && chunk.trim()) flush()
               chunk += tc; weight += tw
             }
+          } else if (tag === 'ol' || tag === 'ul') {
+            // Split at list-item boundaries
+            for (const lc of splitList(seg)) {
+              addChunk(lc, LIST_BUDGET)
+            }
+          } else if ((tag === 'div' || tag === 'section') && estimateWeight(seg) > PROSE_BUDGET) {
+            // Heavy div (scope workstream container etc.) — descend and split children
+            for (const dc of splitDivChildren(seg)) {
+              addChunk(dc, PROSE_BUDGET)
+            }
           } else {
-            add(seg)
+            // Prose element (p, h2, h3, dl, blockquote, etc.) — pack by weight
+            addChunk(seg, PROSE_BUDGET)
           }
         }
         flush()
