@@ -6690,13 +6690,13 @@ rfpTabs.proposals = async function(rfpId) {
     } else if (notReadyCount > 0) {
       // Partial — some ready, some not
       evalBtn = '<div style="display:inline-flex;flex-direction:column;gap:6px">'
-        + '<button class="btn-primary" id="evaluateAllBtn" onclick="evaluateAllProposals(' + rfpId + ')" style="background:linear-gradient(135deg,var(--cpc-gold-deep),var(--cpc-gold));border:none"><i class="fas fa-robot"></i>' + t('prop_evaluate_ai') + ' (' + (proposals.length - evaluated - notReadyCount) + ' ready)</button>'
+        + '<button class="btn-primary" id="evaluateAllBtn" onclick="evaluateAllProposals(' + rfpId + ')"><i class="fas fa-robot"></i>' + t('prop_evaluate_ai') + ' (' + (proposals.length - evaluated - notReadyCount) + ' ready)</button>'
         + '<span style="font-size:0.75rem;color:#92400e"><i class="fas fa-hourglass-half" style="margin-right:3px"></i>' + notReadyCount + ' proposal(s) still being prepared — will be skipped for now.</span>'
         + '</div>';
     } else if (evaluated === proposals.length) {
       evalBtn = '<button class="btn-secondary" id="evaluateAllBtn" onclick="evaluateAllProposals(' + rfpId + ')"><i class="fas fa-sync-alt"></i>Re-evaluate All (' + proposals.length + ')</button>';
     } else {
-      evalBtn = '<button class="btn-primary" id="evaluateAllBtn" onclick="evaluateAllProposals(' + rfpId + ')" style="background:linear-gradient(135deg,var(--cpc-gold-deep),var(--cpc-gold));border:none"><i class="fas fa-robot"></i>' + t('prop_evaluate_ai') + ' (' + (proposals.length - evaluated) + ' remaining)</button>';
+      evalBtn = '<button class="btn-primary" id="evaluateAllBtn" onclick="evaluateAllProposals(' + rfpId + ')"><i class="fas fa-robot"></i>' + t('prop_evaluate_ai') + ' (' + (proposals.length - evaluated) + ' remaining)</button>';
     }
   }
 
@@ -6720,7 +6720,7 @@ rfpTabs.proposals = async function(rfpId) {
       + (stageNotReady === proposals.length
           ? '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;font-size:0.8rem;color:#92400e"><i class="fas fa-hourglass-half fa-spin"></i>' + t('banner_subs_preparing_spin') + '</div>'
           : unevaluated > 0
-              ? '<button class="btn-primary" style="flex-shrink:0;white-space:nowrap;display:flex;align-items:center;gap:6px;padding:0.4rem 1rem;font-size:0.82rem;background:linear-gradient(135deg,var(--cpc-gold-deep),var(--cpc-gold));border:none" id="stageEvalBtn" onclick="evaluateAllProposals(' + rfpId + ')"><i class="fas fa-robot" style="font-size:0.78rem"></i>' + t('banner_eval_ai_btn') + '</button>'
+              ? '<button class="btn-primary" style="flex-shrink:0;white-space:nowrap;display:flex;align-items:center;gap:6px;padding:0.4rem 1rem;font-size:0.82rem" id="stageEvalBtn" onclick="evaluateAllProposals(' + rfpId + ')"><i class="fas fa-robot" style="font-size:0.78rem"></i>' + t('banner_eval_ai_btn') + '</button>'
               : '')
       + '</div>';
   } else if (propAwarded) {
