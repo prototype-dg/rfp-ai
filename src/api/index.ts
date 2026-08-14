@@ -1307,28 +1307,23 @@ apiRouter.post('/rfps/:id/emails/send-invitations', async (c) => {
       await c.env.DB.prepare(`DELETE FROM email_log WHERE id=?`).bind(existing.id).run()
     }
 
-    const isAndersen = v.contact_email?.includes('andersenlab.com')
     const baseUrl = new URL(c.req.url).origin
     const emailBody = buildInvitationEmailText(v, rfp, qDeadline, sDeadline, notes, baseUrl)
     let status = 'simulated'
     let sendError = ''
 
-    if (isAndersen) {
-      const result = await sendRealEmail(
-        v.contact_email,
-        `Invitation to Tender – ${rfp?.title || 'Andersen RFP'} (Ref: ${rfp?.ref_number || ''})`,
-        emailBody,
-        rfp,
-        c.env,
-        pdfBase64,
-        pdfFilename
-      )
-      status = result.ok ? 'sent' : 'simulated'
-      sendError = result.error || ''
-      results.push({ vendor: v.name, status, resendId: result.id, error: sendError })
-    } else {
-      results.push({ vendor: v.name, status: 'simulated' })
-    }
+    const result = await sendRealEmail(
+      v.contact_email,
+      `Invitation to Tender – ${rfp?.title || 'Andersen RFP'} (Ref: ${rfp?.ref_number || ''})`,
+      emailBody,
+      rfp,
+      c.env,
+      pdfBase64,
+      pdfFilename
+    )
+    status = result.ok && !result.simulated ? 'sent' : 'simulated'
+    sendError = result.error || ''
+    results.push({ vendor: v.name, status, resendId: result.id, error: sendError })
 
     await c.env.DB.prepare(`
       INSERT INTO email_log (rfp_id, vendor_id, recipient, subject, body, email_type, status, has_pdf, created_at)
@@ -4538,10 +4533,7 @@ async function sendRealEmail(
   to: string, subject: string, bodyText: string, rfp: any, env?: any, pdfBase64?: string, pdfFilenameHint?: string
 ): Promise<{ ok: boolean; id?: string; error?: string; simulated?: boolean }> {
   const toAddr = (to || '').toLowerCase().trim()
-  if (!toAddr.endsWith('@andersenlab.com')) {
-    return { ok: true, id: 'simulated-' + Date.now(), simulated: true }
-  }
-
+  // No domain restriction — send to any valid vendor email address.
   const RESEND_API_KEY = env?.RESEND_API_KEY || (globalThis as any).RESEND_API_KEY || ''
   if (!RESEND_API_KEY) {
     return { ok: false, error: 'RESEND_API_KEY not configured' }
