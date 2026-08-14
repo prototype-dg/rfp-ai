@@ -4945,14 +4945,18 @@ async function generateRfpDoc(rfpId) {
           }
         }
 
-        if (evt.done && evt.rfp) {
-          result = evt.rfp;
+        if (evt.done) {
+          // The SSE done event carries only lightweight metadata (id, title, etc.) — never
+          // the full content field, which is 200k+ chars and would be silently truncated
+          // by TCP fragmentation and the JSON.parse catch block above.
+          // Always fetch the complete RFP object fresh from the DB via GET.
+          result = await apiCall('GET', '/rfps/' + (evt.rfp ? evt.rfp.id : rfpId));
         }
       }
     }
 
     if (!result) {
-      // Backend sent done without rfp object — fetch it ourselves
+      // Fallback: SSE stream ended without a done event — fetch directly.
       result = await apiCall('GET', '/rfps/' + rfpId);
     }
 

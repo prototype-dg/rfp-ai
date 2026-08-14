@@ -1424,7 +1424,18 @@ Write the complete HTML for section "${sectionSpec?.heading || sectionKey}" now.
       }
 
       const rfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(id).first().catch(() => null)
-      await writer.write(encoder.encode(`data: ${JSON.stringify({ done: true, rfp })}\n\n`))
+      // Strip heavy fields (content, rfp_full_text, arch_doc_text, brd_doc_text) from the SSE done
+      // event — sending 200k+ chars as a single SSE data line risks TCP fragmentation and silent
+      // JSON.parse failure on the client. The frontend always fetches the full object via GET.
+      const rfpMeta = rfp ? {
+        id: (rfp as any).id,
+        title: (rfp as any).title,
+        category: (rfp as any).category,
+        budget: (rfp as any).budget,
+        deadline: (rfp as any).deadline,
+        updated_at: (rfp as any).updated_at,
+      } : null
+      await writer.write(encoder.encode(`data: ${JSON.stringify({ done: true, rfp: rfpMeta })}\n\n`))
     } catch (e: any) {
       await writer.write(encoder.encode(`data: ${JSON.stringify({ error: e.message })}\n\n`)).catch(() => {})
     } finally {
