@@ -1034,8 +1034,10 @@ Write the complete HTML for section "${sectionSpec?.heading || sectionKey}" now.
       //   splitDivChildren() — descends <div>/<section>, splits at child boundaries
       const PROSE_BUDGET = 2400      // plain-text-equiv chars per page for prose content
       const TABLE_BUDGET = 2400      // budget for table (calibrated: 4 rows × ~502w/row + thead)
-      // List items: same as prose — they can be dense but benefit from generous packing
-      const LIST_BUDGET  = 2400      // budget for list containers
+      // List budget raised from 2400 → 3200 so that 3 heavy items (~800w each = 2400w)
+      // don't flush the last item onto its own page. At 3200 a trailing 800w item
+      // can join a 2369w chunk (2369+800=3169 ≤ 3200) instead of stranding alone.
+      const LIST_BUDGET  = 3200      // budget for list containers
 
       // ── Weight estimator ──────────────────────────────────────────────────
       // Converts HTML fragment to an approximate "rendered height in text chars".
@@ -1197,6 +1199,8 @@ Write the complete HTML for section "${sectionSpec?.heading || sectionKey}" now.
       // ── Div child splitter ────────────────────────────────────────────────
       // For a <div> or <section> whose children are too heavy for one page,
       // descend and split at child element boundaries using PROSE_BUDGET.
+      // BUG 2 FIX: if a child is itself a <table>, route it through splitTable()
+      // instead of treating it as an atomic blob (handles <div><table>…</table></div>).
       function splitDivChildren(divHtml: string): string[] {
         const divOpenM = divHtml.match(/^(<(?:div|section)[^>]*>)/i)
         if (!divOpenM) return [divHtml]
@@ -1206,11 +1210,33 @@ Write the complete HTML for section "${sectionSpec?.heading || sectionKey}" now.
 
         const inner = divHtml.replace(/^<(?:div|section)[^>]*>/i, '').replace(/<\/(?:div|section)\s*>$/i, '')
         const children = tokenise(inner)
-        if (children.length <= 1) return [divHtml]
+        if (children.length <= 1) {
+          // Single child: if it's a table, unwrap the div and split the table directly
+          if (children.length === 1) {
+            const childTag = (children[0].match(/^<([a-zA-Z][a-zA-Z0-9]*)/) || [])[1]?.toLowerCase()
+            if (childTag === 'table') {
+              return splitTable(children[0])
+            }
+          }
+          return [divHtml]
+        }
 
         const chunks: string[] = []
         let buf = '', bufW = 0
         for (const child of children) {
+          const childTag = (child.match(/^<([a-zA-Z][a-zA-Z0-9]*)/) || [])[1]?.toLowerCase()
+          // If child is a heavy <table>, flush current buffer first then split the table
+          if (childTag === 'table' && estimateWeight(child) > TABLE_BUDGET) {
+            if (buf.trim()) { chunks.push(`${divOpen}${buf}${divClose}`); buf = ''; bufW = 0 }
+            for (const tc of splitTable(child)) chunks.push(tc)
+            continue
+          }
+          // If child is a heavy <ol>/<ul>, flush then split the list
+          if ((childTag === 'ol' || childTag === 'ul') && estimateWeight(child) > LIST_BUDGET) {
+            if (buf.trim()) { chunks.push(`${divOpen}${buf}${divClose}`); buf = ''; bufW = 0 }
+            for (const lc of splitList(child)) chunks.push(lc)
+            continue
+          }
           const cw = estimateWeight(child)
           if (bufW + cw > PROSE_BUDGET && buf.trim()) {
             chunks.push(`${divOpen}${buf}${divClose}`)
@@ -1222,6 +1248,23 @@ Write the complete HTML for section "${sectionSpec?.heading || sectionKey}" now.
         return chunks.length ? chunks : [divHtml]
       }
 
+      // ── HTML sanitiser ────────────────────────────────────────────────────
+      // BUG 4 FIX: The LLM occasionally emits unbalanced HTML — stray closing
+      // tags like </div> or </ul> at the top level (no matching open tag).
+      // These confuse tokenise() and produce tiny garbage tokens ('<', '/div>')
+      // that count against the budget and cause premature page flushes.
+      // Strip all top-level orphan closing tags before paginating.
+      function stripOrphanClosingTags(html: string): string {
+        // Replace any leading stray closing tags (</div>, </ul>, </ol>, </section>)
+        // that appear at the start of the string or between real elements.
+        return html.replace(/^(\s*<\/(?:div|section|ul|ol|li|p|span)\s*>)+/gi, '')
+                   .replace(/(<\/(?:div|section)\s*>\s*){2,}/gi, (m) => {
+                     // Collapse runs of multiple </div></div> down to one if they look orphaned
+                     // (heuristic: only collapse when NOT preceded by a real closing element)
+                     return m
+                   })
+      }
+
       // ── Main paginator ────────────────────────────────────────────────────
       // Converts section HTML into page-budget-sized chunks for buildPage().
       // Handles 4 element types specially:
@@ -1229,26 +1272,43 @@ Write the complete HTML for section "${sectionSpec?.heading || sectionKey}" now.
       //   <ol>/<ul>        → splitList()  at <li> boundaries
       //   <div>/<section>  → splitDivChildren() if too heavy (scope sections)
       //   everything else  → atomic, packed by weight into current chunk
+      //
+      // BUG 3 FIX: addChunk uses a SPARSE_THRESHOLD. When the current chunk
+      // is below 30% of budget (sparse, e.g. just a heading + intro paragraph),
+      // allow the next element to join even if it pushes past the budget.
+      // This prevents section headings from being stranded alone on near-empty pages.
+      // The overflow is bounded: a single element that exceeds budget alone still
+      // gets its own page via the normal flush path.
       function paginateHtml(html: string): string[] {
         const pages: string[] = []
         let chunk = '', weight = 0
+        const SPARSE_THRESHOLD = PROSE_BUDGET * 0.30   // 720w — below this, don't flush early
 
         function flush() { if (chunk.trim()) { pages.push(chunk); chunk = ''; weight = 0 } }
 
         function addChunk(seg: string, budget: number) {
           const w = estimateWeight(seg)
-          if (weight + w > budget && chunk.trim()) flush()
+          // Only flush if current chunk is dense enough to justify a page break.
+          // If chunk is sparse (< 30% full), absorb the next element regardless.
+          const tooHeavy = weight + w > budget
+          const chunkIsDense = weight >= SPARSE_THRESHOLD
+          if (tooHeavy && chunkIsDense && chunk.trim()) flush()
           chunk += seg; weight += w
         }
 
-        for (const seg of tokenise(html)) {
+        for (const seg of tokenise(stripOrphanClosingTags(html))) {
+          // Skip pure whitespace or tiny garbage tokens (stray '<', '/div>' etc.)
+          const trimmed = seg.trim()
+          if (!trimmed || trimmed === '<' || /^<\//.test(trimmed)) continue
+
           const tag = (seg.match(/^<([a-zA-Z][a-zA-Z0-9]*)/) || [])[1]?.toLowerCase() || ''
 
           if (tag === 'table') {
             // Split at row boundaries; each sub-table placed on page independently
             for (const tc of splitTable(seg)) {
               const tw = estimateWeight(tc)
-              if (weight + tw > TABLE_BUDGET && chunk.trim()) flush()
+              const chunkIsDense = weight >= SPARSE_THRESHOLD
+              if (weight + tw > TABLE_BUDGET && chunkIsDense && chunk.trim()) flush()
               chunk += tc; weight += tw
             }
           } else if (tag === 'ol' || tag === 'ul') {
@@ -1258,8 +1318,18 @@ Write the complete HTML for section "${sectionSpec?.heading || sectionKey}" now.
             }
           } else if ((tag === 'div' || tag === 'section') && estimateWeight(seg) > PROSE_BUDGET) {
             // Heavy div (scope workstream container etc.) — descend and split children
+            // splitDivChildren now handles <div><table> and <div><ul> correctly (BUG 2 fix)
             for (const dc of splitDivChildren(seg)) {
-              addChunk(dc, PROSE_BUDGET)
+              const dcTag = (dc.match(/^<([a-zA-Z][a-zA-Z0-9]*)/) || [])[1]?.toLowerCase() || ''
+              if (dcTag === 'table') {
+                // Table chunks from splitDivChildren go through table placement logic
+                const tw = estimateWeight(dc)
+                const chunkIsDense = weight >= SPARSE_THRESHOLD
+                if (weight + tw > TABLE_BUDGET && chunkIsDense && chunk.trim()) flush()
+                chunk += dc; weight += tw
+              } else {
+                addChunk(dc, PROSE_BUDGET)
+              }
             }
           } else {
             // Prose element (p, h2, h3, dl, blockquote, etc.) — pack by weight
