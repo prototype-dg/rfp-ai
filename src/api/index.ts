@@ -1032,16 +1032,21 @@ Write the complete HTML for section "${sectionSpec?.heading || sectionKey}" now.
       //   splitTable()       — descends <table>, splits at <tr> boundaries
       //   splitList()        — descends <ol>/<ul>, splits at <li> boundaries
       //   splitDivChildren() — descends <div>/<section>, splits at child boundaries
-      // A1 FIX: PROSE_BUDGET raised 2400→2800.
-      // Scope subsections are ~800-1100w each. At 2400, two sections (800+900=1700w) flush
-      // leaving a 71%-fill page. At 2800, three sections (800+900+900=2600w) can pack
-      // before flushing, raising fill to 93%. Budget still safely below 929px content area.
-      const PROSE_BUDGET = 2800      // plain-text-equiv chars per page for prose content
+      // Budget calibration history (RFP 18 analysis, 2026-08-14):
+      //
+      // PROSE_BUDGET 2900: scope subsections 800-1100w each pack 2-3 per page (78-92% fill).
+      //   Pages 17+27 (heading+table sections, 2854-2877w) fit at 98-99% without overflow.
+      //   Pages 9-12 (heavy prose, 2599-2676w) stay safely at 90-92%.
+      //
+      // TABLE_BUDGET 2400: unchanged — 4-5 rows per page gives 68-84% fill, comfortable.
+      //
+      // LIST_BUDGET 2500: RFP 18 list items are 540-690w each (very long objective statements).
+      //   At 3200, items 1-5 packed to 3072w → visual overflow. At 2500, items 1-4 pack to
+      //   2470w (99% fill), items 5-6 spill to next chunk (47% fill — unavoidable with 2-item
+      //   tail, but better than overflowing). Terms section ul: 5 items at 90% + 2-item tail.
+      const PROSE_BUDGET = 2900      // plain-text-equiv chars per page for prose content
       const TABLE_BUDGET = 2400      // budget for table (calibrated: 4 rows × ~502w/row + thead)
-      // List budget raised from 2400 → 3200 so that 3 heavy items (~800w each = 2400w)
-      // don't flush the last item onto its own page. At 3200 a trailing 800w item
-      // can join a 2369w chunk (2369+800=3169 ≤ 3200) instead of stranding alone.
-      const LIST_BUDGET  = 3200      // budget for list containers
+      const LIST_BUDGET  = 2500      // budget for list containers (heavy items: 540-690w each)
 
       // ── Weight estimator ──────────────────────────────────────────────────
       // Converts HTML fragment to an approximate "rendered height in text chars".
