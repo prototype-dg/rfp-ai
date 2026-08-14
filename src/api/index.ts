@@ -998,7 +998,10 @@ Write the complete HTML for section "${sectionSpec?.heading || sectionKey}" now.
 </div>`
 
       // Pack sections into pages — cover + s1&s2 on page 2 + s3 on page 3 + s4 on 4 + s5&s6 on 5 + s7 on 6 + s8 on 7
-      const fullHtml = [
+      // IMPORTANT: wrap all page divs in a bare <div> so the DOM depth matches the
+      // old single-call LLM output. Both the preview CSS (.rfp-doc > div > div) and
+      // the Puppeteer PDF CSS (body > div > div) target grandchildren of rfp-doc/body.
+      const pagesHtml = [
         buildPage(coverContent),
         buildPage(html1 + html2),
         buildPage(html3),
@@ -1007,6 +1010,7 @@ Write the complete HTML for section "${sectionSpec?.heading || sectionKey}" now.
         buildPage(html7),
         buildPage(html8),
       ].join('\n')
+      const fullHtml = `<div>${pagesHtml}</div>`
 
       const repairedContent = repairTruncatedHtml(fullHtml)
       const content = repairedContent.length > 400 ? `<div class="rfp-doc">${repairedContent}</div>` : ''
