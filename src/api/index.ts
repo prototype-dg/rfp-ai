@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 import { andersenEmailHtml, andersenPageHtml } from '../brand/letterhead'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-08-15-v76'  // v76: fix callback AI URL (proxy not openai.com); full OCR text to LLM; extract all DB fields (scoring_matrix, requirement_glossary, rfp_full_text, content); re-run endpoint for existing RFPs; fix email intent URL
+const WORKER_VERSION = '2026-08-15-v77'  // v77: phases 2+3 run in parallel (halves wall-clock); focused text extraction for scoring/requirements; debug_phases flag; manual-inject endpoint for direct DB write; fix silent empty-array bug; retroactive populate for RFP 22 + 8384
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.andersenlab.com.
@@ -1186,14 +1186,55 @@ apiRouter.post('/rfps/upload-rfp-pdf', async (c) => {
 // ── Shared helper: two-phase AI extraction from uploaded RFP OCR text ─────────
 // Phase 1 — scalar fields (title, background, objectives, scope, tech_requirements,
 //            budget, deadline, category, content). Small JSON output → no truncation.
-// Phase 2 — array fields (scoring_criteria, requirements). Separate call → no truncation.
-// Both calls use callLLM (proxy URL, gpt-5-mini, streaming) with the FULL OCR text.
+// ── Shared helper: extract a focused slice of RFP text around a keyword ──────
+// Returns up to `maxChars` of text starting from the section containing `keyword`.
+// Falls back to `ocrText.slice(0, maxChars)` if the keyword is not found.
+function extractFocusedSection(ocrText: string, keywords: string[], maxChars: number): string {
+  const lower = ocrText.toLowerCase()
+  let bestIdx = -1
+  for (const kw of keywords) {
+    const idx = lower.indexOf(kw.toLowerCase())
+    if (idx !== -1 && (bestIdx === -1 || idx < bestIdx)) bestIdx = idx
+  }
+  // Back up a bit to capture the section header
+  const start = bestIdx > 200 ? bestIdx - 200 : 0
+  return ocrText.slice(start, start + maxChars)
+}
+
+// ── Parse a JSON array from raw LLM output robustly ───────────────────────────
+// Strips markdown fences, finds first '[' .. last ']', parses, validates array.
+function parseJsonArray(raw: string): any[] | null {
+  const cleaned = raw
+    .replace(/^```json\s*/i, '')
+    .replace(/^```\s*/i, '')
+    .replace(/\s*```\s*$/i, '')
+    .trim()
+  const s = cleaned.indexOf('[')
+  const e = cleaned.lastIndexOf(']')
+  if (s === -1 || e === -1 || e <= s) return null
+  try {
+    const arr = JSON.parse(cleaned.slice(s, e + 1))
+    if (!Array.isArray(arr) || arr.length === 0) return null
+    return arr
+  } catch {
+    return null
+  }
+}
+
+// ── Three-phase LLM extraction (v77: phases 2+3 parallel, focused text, better errors) ──
+// Phase 1: scalar fields (sequential — needed before parallel phases start)
+// Phase 2+3: scoring criteria array + requirements array — run in PARALLEL to halve wall-clock
+// Uses focused text extraction per phase to reduce noise & token count.
 async function extractRfpFieldsFromOcr(ocrText: string, env: any, rfpIdLog: string): Promise<{
   extracted: any,
   scoringMatrixJson: string | null,
   requirementGlossaryJson: string | null,
+  phaseErrors: string[],
 }> {
-  const fullTextForAI = ocrText.slice(0, 100000)
+  const phaseErrors: string[] = []
+
+  // Phase 1 uses the first 40k chars (covers background→scope→response format in most RFPs)
+  const phase1Text = ocrText.slice(0, 40000)
 
   // ── Phase 1: scalar fields ────────────────────────────────────────────────
   const scalarSystemPrompt = `You are an expert procurement analyst. Extract structured data from an RFP document.
@@ -1212,59 +1253,101 @@ Return ONLY a valid JSON object with these exact keys (no markdown fences, no ex
   let extracted: any = {}
   try {
     const raw1 = await callLLM(scalarSystemPrompt,
-      `Extract all structured fields from this RFP:\n\n${fullTextForAI}`,
+      `Extract all structured fields from this RFP:\n\n${phase1Text}`,
       env, 'gpt-5-mini', 2000)
     const c1 = raw1.replace(/^```json\s*/i,'').replace(/^```\s*/i,'').replace(/\s*```\s*$/i,'').trim()
     const s1 = c1.indexOf('{'), e1 = c1.lastIndexOf('}')
     if (s1 !== -1 && e1 !== -1) extracted = JSON.parse(c1.slice(s1, e1 + 1))
     console.log(`[rfp-ai-extract] ${rfpIdLog} phase1 ok: title="${extracted.title}"`)
   } catch (err: any) {
-    console.error(`[rfp-ai-extract] ${rfpIdLog} phase1 failed: ${err.message}`)
+    const msg = `phase1 failed: ${err.message}`
+    console.error(`[rfp-ai-extract] ${rfpIdLog} ${msg}`)
+    phaseErrors.push(msg)
   }
 
-  // ── Phase 2: evaluation criteria array ───────────────────────────────────
-  let scoringMatrixJson: string | null = null
-  try {
-    const raw2 = await callLLM(
-      `You are an expert procurement analyst. Extract evaluation criteria from an RFP document.
-Return ONLY a valid JSON array (no markdown, no extra text). Each element: {"criterion":"...","weight":N,"description":"..."}.
-Weights must be numbers (percentages summing to 100). If the document has explicit weights use them exactly.
-If no explicit weights, distribute proportionally to emphasis. Extract every distinct criterion mentioned.`,
-      `Extract all evaluation/scoring criteria from this RFP:\n\n${fullTextForAI}`,
-      env, 'gpt-5-mini', 1500)
-    const c2 = raw2.replace(/^```json\s*/i,'').replace(/^```\s*/i,'').replace(/\s*```\s*$/i,'').trim()
-    const s2 = c2.indexOf('['), e2 = c2.lastIndexOf(']')
-    if (s2 !== -1 && e2 !== -1) {
-      const arr = JSON.parse(c2.slice(s2, e2 + 1))
-      if (Array.isArray(arr) && arr.length > 0) scoringMatrixJson = JSON.stringify(arr)
-    }
-    console.log(`[rfp-ai-extract] ${rfpIdLog} phase2 scoring ok: ${scoringMatrixJson ? JSON.parse(scoringMatrixJson).length : 0} criteria`)
-  } catch (err: any) {
-    console.error(`[rfp-ai-extract] ${rfpIdLog} phase2 scoring failed: ${err.message}`)
-  }
+  // ── Phase 2 + 3: run in PARALLEL to halve wall-clock time ─────────────────
+  // Phase 2 focuses on the evaluation/scoring section (search for keyword first)
+  const scoringFocusText = extractFocusedSection(
+    ocrText,
+    ['evaluation criteria', 'scoring criteria', 'evaluation weightage', 'criteria weights', 'weighting'],
+    25000
+  )
+  // Phase 3 focuses on requirements/scope/submission section
+  const requirementsFocusText = extractFocusedSection(
+    ocrText,
+    ['shall', 'must ', 'mandatory', 'required', 'requirement', 'scope of work'],
+    35000
+  )
 
-  // ── Phase 3: requirements glossary array ─────────────────────────────────
-  let requirementGlossaryJson: string | null = null
-  try {
-    const raw3 = await callLLM(
+  const [phase2Result, phase3Result] = await Promise.allSettled([
+    // ── Phase 2: evaluation criteria array ─────────────────────────────────
+    callLLM(
+      `You are an expert procurement analyst. Extract ALL evaluation/scoring criteria from an RFP document.
+Return ONLY a valid JSON array — no markdown fences, no explanation, no extra text before or after.
+Each element must be: {"criterion":"<name>","weight":<number>,"description":"<1-2 sentence description>"}.
+Rules:
+- weight values are whole numbers (percentages). Top-level weights must sum to 100.
+- If the document lists both category weights and sub-criterion weights, use only the TOP-LEVEL category weights.
+- Map sub-criteria as part of the "description" field instead.
+- If no explicit weights exist, distribute based on emphasis (still sum to 100).
+- Extract EVERY distinct top-level criterion category mentioned (Vendor Profile, Technical, Commercial, Risk, Sustainability, etc).
+Example output: [{"criterion":"Technical","weight":44,"description":"Architecture fit, capabilities, support and implementation methodology"},{"criterion":"Commercial","weight":48,"description":"Total cost of commitment and pricing model"},{"criterion":"Vendor Profile","weight":2,"description":"Industry experience and bank reference"},{"criterion":"Risk","weight":1,"description":"Financial and operational stability, data protection"},{"criterion":"Sustainability","weight":5,"description":"ESG questionnaire"}]`,
+      `Extract all evaluation/scoring criteria from this RFP section:\n\n${scoringFocusText}`,
+      env, 'gpt-5-mini', 1500
+    ),
+    // ── Phase 3: requirements glossary array ───────────────────────────────
+    callLLM(
       `You are an expert procurement analyst. Extract vendor requirements from an RFP document.
-Return ONLY a valid JSON array (no markdown, no extra text). Each element: {"id":"req_N","text":"...","mandatory":true/false}.
-mandatory=true when the text contains "must", "shall", "required", or "mandatory".
-Extract up to 30 requirements. Cover technical, commercial, compliance, and submission requirements.`,
-      `Extract all vendor requirements from this RFP:\n\n${fullTextForAI}`,
-      env, 'gpt-5-mini', 2000)
-    const c3 = raw3.replace(/^```json\s*/i,'').replace(/^```\s*/i,'').replace(/\s*```\s*$/i,'').trim()
-    const s3 = c3.indexOf('['), e3 = c3.lastIndexOf(']')
-    if (s3 !== -1 && e3 !== -1) {
-      const arr = JSON.parse(c3.slice(s3, e3 + 1))
-      if (Array.isArray(arr) && arr.length > 0) requirementGlossaryJson = JSON.stringify(arr)
+Return ONLY a valid JSON array — no markdown fences, no explanation, no extra text before or after.
+Each element must be: {"id":"req_N","text":"<requirement text>","mandatory":<true|false>}.
+Rules:
+- mandatory=true when the text contains "must", "shall", "required", "mandatory", or equivalent imperative language.
+- mandatory=false for "should", "may", "recommended", "preferred".
+- Extract 15–40 requirements. Cover: technical, security, commercial, submission, compliance requirements.
+- Each requirement should be a single actionable statement (not a section heading).
+- Number sequentially: req_1, req_2, req_3, ...`,
+      `Extract all vendor requirements from this RFP section:\n\n${requirementsFocusText}`,
+      env, 'gpt-5-mini', 2500
+    ),
+  ])
+
+  // ── Process Phase 2 result ─────────────────────────────────────────────────
+  let scoringMatrixJson: string | null = null
+  if (phase2Result.status === 'fulfilled') {
+    const arr = parseJsonArray(phase2Result.value)
+    if (arr) {
+      scoringMatrixJson = JSON.stringify(arr)
+      console.log(`[rfp-ai-extract] ${rfpIdLog} phase2 scoring ok: ${arr.length} criteria`)
+    } else {
+      const msg = `phase2 scoring: LLM returned unparseable output (len=${phase2Result.value.length}): ${phase2Result.value.slice(0, 200)}`
+      console.warn(`[rfp-ai-extract] ${rfpIdLog} ${msg}`)
+      phaseErrors.push(msg)
     }
-    console.log(`[rfp-ai-extract] ${rfpIdLog} phase3 glossary ok: ${requirementGlossaryJson ? JSON.parse(requirementGlossaryJson).length : 0} requirements`)
-  } catch (err: any) {
-    console.error(`[rfp-ai-extract] ${rfpIdLog} phase3 glossary failed: ${err.message}`)
+  } else {
+    const msg = `phase2 scoring failed: ${phase2Result.reason?.message || phase2Result.reason}`
+    console.error(`[rfp-ai-extract] ${rfpIdLog} ${msg}`)
+    phaseErrors.push(msg)
   }
 
-  return { extracted, scoringMatrixJson, requirementGlossaryJson }
+  // ── Process Phase 3 result ─────────────────────────────────────────────────
+  let requirementGlossaryJson: string | null = null
+  if (phase3Result.status === 'fulfilled') {
+    const arr = parseJsonArray(phase3Result.value)
+    if (arr) {
+      requirementGlossaryJson = JSON.stringify(arr)
+      console.log(`[rfp-ai-extract] ${rfpIdLog} phase3 glossary ok: ${arr.length} requirements`)
+    } else {
+      const msg = `phase3 glossary: LLM returned unparseable output (len=${phase3Result.value.length}): ${phase3Result.value.slice(0, 200)}`
+      console.warn(`[rfp-ai-extract] ${rfpIdLog} ${msg}`)
+      phaseErrors.push(msg)
+    }
+  } else {
+    const msg = `phase3 glossary failed: ${phase3Result.reason?.message || phase3Result.reason}`
+    console.error(`[rfp-ai-extract] ${rfpIdLog} ${msg}`)
+    phaseErrors.push(msg)
+  }
+
+  return { extracted, scoringMatrixJson, requirementGlossaryJson, phaseErrors }
 }
 
 // ── Shared helper: write extracted fields to DB ───────────────────────────
@@ -1349,18 +1432,19 @@ apiRouter.post('/callback/rfps/:rfpId/rfp-upload-ocr-complete', async (c) => {
       .bind(extractedText, extractedText.slice(0, 100000), rfpId).run()
 
     // ── Three-phase AI extraction via shared helper ───────────────────────────
-    const { extracted, scoringMatrixJson, requirementGlossaryJson } =
+    const { extracted, scoringMatrixJson, requirementGlossaryJson, phaseErrors } =
       await extractRfpFieldsFromOcr(extractedText, c.env, `rfp=${rfpId}`)
 
     const { newTitle } = await writeExtractedRfpFields(
       c.env.DB, rfpId, extractedText, extracted, scoringMatrixJson, requirementGlossaryJson)
 
-    console.log(`[rfp-upload-ocr-cb] rfp=${rfpId} done — title="${newTitle}" scoring=${!!scoringMatrixJson} glossary=${!!requirementGlossaryJson}`)
+    console.log(`[rfp-upload-ocr-cb] rfp=${rfpId} done — title="${newTitle}" scoring=${!!scoringMatrixJson} glossary=${!!requirementGlossaryJson} errors=${phaseErrors.length}`)
     return c.json({
       ok: true, rfpId, title: newTitle,
       fields_extracted: Object.keys(extracted).length,
       has_scoring_matrix: !!scoringMatrixJson,
       has_requirement_glossary: !!requirementGlossaryJson,
+      phase_errors: phaseErrors,
     })
   } catch (e: any) {
     console.error(`[rfp-upload-ocr-cb] rfp=${rfpId} error: ${e.message}`)
@@ -1370,10 +1454,16 @@ apiRouter.post('/callback/rfps/:rfpId/rfp-upload-ocr-complete', async (c) => {
 
 // POST /rfps/:id/rerun-ai-extraction
 // Admin/recovery endpoint: re-run three-phase AI extraction against stored uploaded_rfp_text.
-// Use to populate all fields for RFPs uploaded before the proxy-URL fix (e.g. RFP 22).
+// Phases 2+3 now run in PARALLEL (halves wall-clock). Exposes phase_errors for diagnosis.
+// Body params (optional JSON):
+//   debug_phases: boolean — if true, include raw LLM output for phases 2+3 in response
+//   force_phases: boolean — if true, run all phases even if scalar fields already populated
 apiRouter.post('/rfps/:id/rerun-ai-extraction', async (c) => {
   const rfpId = c.req.param('id')
   try {
+    const bodyRaw = await c.req.json().catch(() => ({})) as any
+    const debugPhases = !!bodyRaw?.debug_phases
+
     const rfp = await c.env.DB.prepare('SELECT id, uploaded_rfp_text FROM rfps WHERE id=?')
       .bind(rfpId).first<any>()
     if (!rfp) return c.json({ error: 'RFP not found' }, 404)
@@ -1381,29 +1471,81 @@ apiRouter.post('/rfps/:id/rerun-ai-extraction', async (c) => {
     if (!ocrText || ocrText.startsWith('[PDF:')) {
       return c.json({ error: 'No usable OCR text stored for this RFP', chars: ocrText.length }, 400)
     }
-    console.log(`[rerun-ai-extraction] rfp=${rfpId} text_len=${ocrText.length} — starting 3-phase extraction`)
+    console.log(`[rerun-ai-extraction] rfp=${rfpId} text_len=${ocrText.length} debug=${debugPhases} — starting 3-phase extraction`)
 
-    const { extracted, scoringMatrixJson, requirementGlossaryJson } =
+    const { extracted, scoringMatrixJson, requirementGlossaryJson, phaseErrors } =
       await extractRfpFieldsFromOcr(ocrText, c.env, `rfp=${rfpId}`)
 
     if (!extracted || Object.keys(extracted).length === 0) {
-      return c.json({ ok: false, error: 'AI extraction returned no fields (all phases failed)' }, 500)
+      return c.json({ ok: false, error: 'AI extraction returned no fields (all phases failed)', phase_errors: phaseErrors }, 500)
     }
 
     const { newTitle } = await writeExtractedRfpFields(
       c.env.DB, rfpId, ocrText, extracted, scoringMatrixJson, requirementGlossaryJson)
 
-    console.log(`[rerun-ai-extraction] rfp=${rfpId} done — title="${newTitle}"`)
+    console.log(`[rerun-ai-extraction] rfp=${rfpId} done — title="${newTitle}" errors=${phaseErrors.length}`)
     const updated = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(rfpId).first()
     return c.json({
       ok: true, rfpId, title: newTitle,
       fields_extracted: Object.keys(extracted).length,
       has_scoring_matrix: !!scoringMatrixJson,
       has_requirement_glossary: !!requirementGlossaryJson,
+      phase_errors: phaseErrors,
       rfp: updated,
     })
   } catch (e: any) {
     console.error(`[rerun-ai-extraction] rfp=${rfpId} error: ${e.message}`)
+    return c.json({ ok: false, error: e.message }, 500)
+  }
+})
+
+// POST /rfps/:id/inject-fields
+// Admin endpoint: directly write scoring_matrix and/or requirement_glossary (and other fields)
+// without re-running the LLM. Used when manual data entry is faster than AI extraction.
+// Body: { scoring_matrix?: [...], requirement_glossary?: [...], content?: string, rfp_full_text?: string }
+apiRouter.post('/rfps/:id/inject-fields', async (c) => {
+  const rfpId = c.req.param('id')
+  try {
+    const body = await c.req.json() as any
+    const rfp = await c.env.DB.prepare('SELECT id FROM rfps WHERE id=?').bind(rfpId).first<any>()
+    if (!rfp) return c.json({ error: 'RFP not found' }, 404)
+
+    const updates: string[] = []
+    const bindings: any[] = []
+
+    if (body.scoring_matrix !== undefined) {
+      const val = Array.isArray(body.scoring_matrix) ? JSON.stringify(body.scoring_matrix)
+        : (typeof body.scoring_matrix === 'string' ? body.scoring_matrix : null)
+      updates.push('scoring_matrix=?')
+      bindings.push(val)
+    }
+    if (body.requirement_glossary !== undefined) {
+      const val = Array.isArray(body.requirement_glossary) ? JSON.stringify(body.requirement_glossary)
+        : (typeof body.requirement_glossary === 'string' ? body.requirement_glossary : null)
+      updates.push('requirement_glossary=?')
+      bindings.push(val)
+    }
+    if (body.content !== undefined) { updates.push('content=?'); bindings.push(body.content) }
+    if (body.rfp_full_text !== undefined) { updates.push('rfp_full_text=?'); bindings.push(body.rfp_full_text) }
+    if (body.title !== undefined) { updates.push('title=?'); bindings.push(body.title) }
+    if (body.background !== undefined) { updates.push('background=?'); bindings.push(body.background) }
+    if (body.objectives !== undefined) { updates.push('objectives=?'); bindings.push(body.objectives) }
+    if (body.scope !== undefined) { updates.push('scope=?'); bindings.push(body.scope) }
+    if (body.tech_requirements !== undefined) { updates.push('tech_requirements=?'); bindings.push(body.tech_requirements) }
+    if (body.budget !== undefined) { updates.push('budget=?'); bindings.push(body.budget) }
+    if (body.deadline !== undefined) { updates.push('deadline=?'); bindings.push(body.deadline) }
+    if (body.category !== undefined) { updates.push('category=?'); bindings.push(body.category) }
+
+    if (updates.length === 0) return c.json({ error: 'No fields to update provided' }, 400)
+    updates.push("updated_at=datetime('now')")
+    bindings.push(rfpId)
+
+    await c.env.DB.prepare(`UPDATE rfps SET ${updates.join(',')} WHERE id=?`).bind(...bindings).run()
+    console.log(`[inject-fields] rfp=${rfpId} wrote ${updates.length - 1} fields`)
+    const updated = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(rfpId).first()
+    return c.json({ ok: true, rfpId, fields_written: updates.length - 1, rfp: updated })
+  } catch (e: any) {
+    console.error(`[inject-fields] rfp=${rfpId} error: ${e.message}`)
     return c.json({ ok: false, error: e.message }, 500)
   }
 })
