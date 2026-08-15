@@ -26,7 +26,7 @@ GOOGLE_VISION_API_KEY = os.environ.get("GOOGLE_VISION_API_KEY", "")
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("pdf-sidecar")
 
-app = FastAPI(title="PDF Sidecar", version="5.0.0")
+app = FastAPI(title="PDF Sidecar", version="6.0.0")
 bearer = HTTPBearer()
 
 # ---------------------------------------------------------------------------
@@ -164,7 +164,14 @@ def extract_text_google_vision(pdf_bytes: bytes, max_pages: int) -> dict:
 # Core extraction logic (shared by sync and async paths)
 # ---------------------------------------------------------------------------
 async def run_extraction(pdf_url: str, max_pages: int) -> tuple[dict, str, str]:
-    """Downloads PDF and runs extraction. Returns (result, method, filename)."""
+    """Downloads PDF and always runs Google Vision OCR. Returns (result, method, filename).
+
+    We always use Google Vision regardless of PDF size or whether a text layer exists.
+    pdfplumber faithfully reproduces text-layer artifacts (TOC dot-leaders, table pipe
+    separators, repeated whitespace) that degrade downstream LLM extraction quality.
+    Google Vision's layout-aware OCR produces clean, paragraph-structured output even
+    for vector/text-layer PDFs, which is what we need.
+    """
     logger.info(f"Fetching PDF: {pdf_url[:80]}...")
 
     async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
@@ -180,27 +187,10 @@ async def run_extraction(pdf_url: str, max_pages: int) -> tuple[dict, str, str]:
 
     filename = pdf_url.split("/")[-1].split("?")[0] or None
 
-    SKIP_PDFPLUMBER_THRESHOLD = 3 * 1024 * 1024  # 3 MB
-
-    if len(pdf_bytes) > SKIP_PDFPLUMBER_THRESHOLD:
-        logger.info("PDF > 3MB — going straight to Google Vision OCR")
-        method = "google_vision"
-        loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(None, extract_text_google_vision, pdf_bytes, max_pages)
-    else:
-        method = "pdfplumber"
-        try:
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(None, extract_text_pdfplumber, pdf_bytes, max_pages)
-        except Exception as e:
-            logger.error(f"pdfplumber failed: {e}")
-            result = {"text": "", "pages_total": 0, "pages_extracted": 0, "chars": 0, "truncated": False}
-
-        if result["chars"] < 200:
-            logger.info(f"pdfplumber got {result['chars']} chars — falling back to Google Vision OCR")
-            method = "google_vision"
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(None, extract_text_google_vision, pdf_bytes, max_pages)
+    # Always use Google Vision — no pdfplumber fast-path, no size threshold.
+    method = "google_vision"
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(None, extract_text_google_vision, pdf_bytes, max_pages)
 
     logger.info(
         f"[{method}] Extracted {result['chars']} chars from "

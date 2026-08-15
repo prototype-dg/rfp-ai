@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 import { andersenEmailHtml, andersenPageHtml } from '../brand/letterhead'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-08-15-v80'  // v80: extraction no longer writes `content` field — content is reserved for full AI-generated documents only; hasContent guard tightened to 5000+ chars; fixes auto-letterhead appearing on uploaded RFPs
+const WORKER_VERSION = '2026-08-15-v81'  // v81: callLLM gets AbortSignal.timeout(25s) — prevents proxy stall hanging waitUntil() forever; cleanOcrText() strips dot-leaders/pipe-noise before LLM phases; extractFocusedSection skips TOC matches
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.andersenlab.com.
@@ -1189,16 +1189,84 @@ apiRouter.post('/rfps/upload-rfp-pdf', async (c) => {
 // ── Shared helper: extract a focused slice of RFP text around a keyword ──────
 // Returns up to `maxChars` of text starting from the section containing `keyword`.
 // Falls back to `ocrText.slice(0, maxChars)` if the keyword is not found.
+// cleanOcrText — strip lines that are pure OCR formatting noise before sending to LLM.
+// Removes: TOC dot-leaders ("Section .......... 4"), table pipe-only rows ("| | |"),
+// bare page numbers, and lines that are >40% dots with no real words.
+// Keeps: all lines with meaningful word content.
+function cleanOcrText(text: string): string {
+  return text
+    .split('\n')
+    .filter(line => {
+      const t = line.trim()
+      if (!t) return false
+      // Drop lines where >40% of non-space chars are dots (TOC leaders)
+      const nonSpace = t.replace(/\s/g, '')
+      if (nonSpace.length > 8 && (nonSpace.match(/\.+/g) || []).join('').length / nonSpace.length > 0.4) return false
+      // Drop lines that are pure table borders: only pipes, dashes, spaces
+      if (/^[|\-+\s]+$/.test(t)) return false
+      // Drop bare page numbers: optional whitespace + digits only
+      if (/^\s*\d{1,3}\s*$/.test(t)) return false
+      return true
+    })
+    .join('\n')
+}
+
+// extractFocusedSection — find the earliest keyword match that is NOT in a TOC line.
+// A TOC line is identified by having 6+ consecutive dots on the same line (dot-leaders).
+// Falls back to start of cleaned text if no body match found.
+// After locating the anchor, extracts up to maxChars from the cleaned text.
 function extractFocusedSection(ocrText: string, keywords: string[], maxChars: number): string {
   const lower = ocrText.toLowerCase()
   let bestIdx = -1
+
   for (const kw of keywords) {
-    const idx = lower.indexOf(kw.toLowerCase())
-    if (idx !== -1 && (bestIdx === -1 || idx < bestIdx)) bestIdx = idx
+    const kwLower = kw.toLowerCase()
+    let searchFrom = 0
+    while (true) {
+      const idx = lower.indexOf(kwLower, searchFrom)
+      if (idx === -1) break
+      // Identify the line containing this match
+      const lineStart = lower.lastIndexOf('\n', idx) + 1
+      const lineEnd   = lower.indexOf('\n', idx)
+      const lineText  = ocrText.slice(lineStart, lineEnd === -1 ? undefined : lineEnd)
+      // TOC lines have dot-leaders: 6+ consecutive dots, or dots followed by a page number
+      const isTocLine = /\.{6,}/.test(lineText) || /\.{3,}\s*\d+\s*$/.test(lineText.trim())
+      if (!isTocLine) {
+        if (bestIdx === -1 || idx < bestIdx) bestIdx = idx
+        break  // first valid (body) occurrence of this keyword — done with this keyword
+      }
+      searchFrom = idx + 1  // TOC hit — advance and retry same keyword
+    }
   }
-  // Back up a bit to capture the section header
-  const start = bestIdx > 200 ? bestIdx - 200 : 0
-  return ocrText.slice(start, start + maxChars)
+
+  // Clean the full text first, then slice from the anchor point
+  const cleaned = cleanOcrText(ocrText)
+  if (bestIdx === -1) return cleaned.slice(0, maxChars)
+
+  // Find the anchor position in the cleaned text (character offsets shift after cleaning,
+  // so re-search the cleaned text for the same keyword)
+  const cleanedLower = cleaned.toLowerCase()
+  let cleanedAnchor = -1
+  for (const kw of keywords) {
+    const kwLower = kw.toLowerCase()
+    let searchFrom = 0
+    while (true) {
+      const idx = cleanedLower.indexOf(kwLower, searchFrom)
+      if (idx === -1) break
+      const lineStart = cleanedLower.lastIndexOf('\n', idx) + 1
+      const lineEnd   = cleanedLower.indexOf('\n', idx)
+      const lineText  = cleaned.slice(lineStart, lineEnd === -1 ? undefined : lineEnd)
+      const isTocLine = /\.{6,}/.test(lineText) || /\.{3,}\s*\d+\s*$/.test(lineText.trim())
+      if (!isTocLine) {
+        if (cleanedAnchor === -1 || idx < cleanedAnchor) cleanedAnchor = idx
+        break
+      }
+      searchFrom = idx + 1
+    }
+  }
+
+  const start = cleanedAnchor > 200 ? cleanedAnchor - 200 : 0
+  return cleaned.slice(start, start + maxChars)
 }
 
 // ── Parse a JSON array from raw LLM output robustly ───────────────────────────
@@ -4294,8 +4362,13 @@ async function callLLM(systemPrompt: string, userPrompt: string, env: any, model
   // Use streaming to prevent Cloudflare Worker 30s subrequest timeout.
   // With stream:true the LLM sends SSE chunks every few seconds, keeping the
   // connection alive. We collect all chunks and return the assembled text.
+  // AbortSignal.timeout(25000): if the proxy stalls (accepts the TCP connection
+  // but never sends a response byte), this throws AbortError after 25 s so the
+  // extractionTask catch block can write ai_extraction_status='error' instead of
+  // hanging inside waitUntil() until Cloudflare kills the Worker (exceededResources).
   const res = await fetch(`${baseUrl}/chat/completions`, {
     method: 'POST',
+    signal: AbortSignal.timeout(25000),
     headers: {
       'Authorization': `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
