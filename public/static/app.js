@@ -6837,30 +6837,275 @@ function _startProposalReadinessPoll(rfpId, initialNotReadyCount) {
 }
 
 // ── Evaluate all proposals with AI ────────────────────────────────────────────
+// ── Bulk Evaluation Progress Modal ────────────────────────────────────────────
+// Shows a multi-proposal progress overlay while evaluate-all runs.
+// State is keyed by proposal id: 'pending' | 'evaluating' | 'done' | 'skipped' | 'error'
+var _bulkModalState    = {};   // { [proposalId]: { name, state, stage } }
+var _bulkModalTimers   = [];
+var _bulkModalPollId   = null;
+var _bulkModalStartTime = 0;
+
+var _BULK_STAGES = [
+  'Reading documents',
+  'Verifying document type',
+  'Extracting financial data',
+  'Technical & compliance scoring',
+  'Commercial assessment',
+  'Market benchmark',
+  'Generating recommendation',
+];
+
+function _showBulkModal(proposals) {
+  // Remove any existing bulk modal
+  var old = document.getElementById('bulkEvalModal');
+  if (old) old.remove();
+  _bulkModalTimers.forEach(clearTimeout);
+  _bulkModalTimers = [];
+  _bulkModalState  = {};
+  _bulkModalStartTime = Date.now();
+
+  proposals.forEach(function(p) {
+    _bulkModalState[p.id] = { name: p.vendor_name || p.name || ('Proposal #' + p.id), state: 'pending', stage: 0 };
+  });
+
+  _bulkModalRender();
+}
+
+function _bulkModalRender() {
+  var ids = Object.keys(_bulkModalState);
+  var total    = ids.length;
+  var doneCount = ids.filter(function(id){ return _bulkModalState[id].state === 'done' || _bulkModalState[id].state === 'skipped' || _bulkModalState[id].state === 'error'; }).length;
+  var elapsed  = Math.round((Date.now() - _bulkModalStartTime) / 1000);
+  var pct      = total > 0 ? Math.round((doneCount / total) * 100) : 0;
+
+  var rows = ids.map(function(id) {
+    var s = _bulkModalState[id];
+    var isDone    = s.state === 'done';
+    var isSkipped = s.state === 'skipped';
+    var isError   = s.state === 'error';
+    var isActive  = s.state === 'evaluating';
+    var isPending = s.state === 'pending';
+
+    var iconCls = isDone    ? 'fa-check-circle'
+                : isSkipped ? 'fa-minus-circle'
+                : isError   ? 'fa-times-circle'
+                : isActive  ? 'fa-spinner fa-spin'
+                :             'fa-circle';
+    var iconCol = isDone    ? '#22c55e'
+                : isSkipped ? '#9ca3af'
+                : isError   ? '#ef4444'
+                : isActive  ? '#3b82f6'
+                :             '#d1d5db';
+    var bgCol   = isDone    ? '#f0fdf4'
+                : isActive  ? '#eff6ff'
+                : isSkipped ? '#f9fafb'
+                : isError   ? '#fef2f2'
+                :             '#f9fafb';
+    var opacity = isPending ? '0.4' : '1';
+
+    var stageLabel = isActive && _BULK_STAGES[s.stage] ? _BULK_STAGES[s.stage] : '';
+    var statusText = isDone    ? 'Complete'
+                   : isSkipped ? 'Skipped — document not ready'
+                   : isError   ? (s.error || 'Error')
+                   : isActive  ? stageLabel
+                   :             'Waiting…';
+
+    return '<div style="display:flex;align-items:center;gap:10px;padding:9px 14px;border-bottom:1px solid #f3f4f6;opacity:' + opacity + ';transition:opacity 0.3s;background:' + bgCol + '">'
+      + '<div style="width:28px;height:28px;border-radius:50%;background:' + (isActive ? '#dbeafe' : (isDone ? '#dcfce7' : '#f3f4f6')) + ';display:flex;align-items:center;justify-content:center;flex-shrink:0">'
+      + '<i class="fas ' + iconCls + '" style="font-size:0.75rem;color:' + iconCol + '"></i></div>'
+      + '<div style="flex:1;min-width:0">'
+      + '<div style="font-size:0.82rem;font-weight:600;color:' + (isPending ? '#9ca3af' : '#111827') + ';white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + escHtml(s.name) + '</div>'
+      + '<div style="font-size:0.7rem;color:' + (isError ? '#dc2626' : '#6b7280') + ';margin-top:1px">' + escHtml(statusText) + '</div>'
+      + '</div>'
+      + (isDone ? '<div style="font-size:0.68rem;font-weight:700;color:#22c55e;flex-shrink:0"><i class="fas fa-check" style="margin-right:2px"></i>Done</div>'
+                : (isSkipped ? '<div style="font-size:0.68rem;color:#9ca3af;flex-shrink:0">Skipped</div>' : ''))
+      + '</div>';
+  }).join('');
+
+  var html = '<div id="bulkEvalModal" style="position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(2,13,28,0.75);backdrop-filter:blur(4px)">'
+    + '<div style="background:white;border-radius:16px;width:560px;max-width:96vw;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 24px 64px rgba(0,0,0,0.35)">'
+    // Header
+    + '<div style="background:linear-gradient(135deg,var(--cpc-ink,#020D1C),#1a2a40);border-radius:16px 16px 0 0;padding:18px 22px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0">'
+    + '<div>'
+    + '<div style="font-size:0.65rem;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:rgba(255,255,255,0.5);margin-bottom:3px">Bulk AI Evaluation</div>'
+    + '<div style="font-size:1rem;font-weight:700;color:white">' + doneCount + ' / ' + total + ' proposals evaluated</div>'
+    + '</div>'
+    + '<div style="text-align:right">'
+    + '<div style="font-size:0.72rem;color:rgba(255,255,255,0.45)">' + elapsed + 's elapsed</div>'
+    + '</div>'
+    + '</div>'
+    // Progress bar
+    + '<div style="padding:12px 22px 0;flex-shrink:0">'
+    + '<div style="width:100%;height:5px;background:#f3f4f6;border-radius:3px;overflow:hidden">'
+    + '<div style="height:100%;width:' + pct + '%;background:linear-gradient(90deg,var(--cpc-gold-deep,#BA9765),var(--cpc-gold,#FFDB00));border-radius:3px;transition:width 0.5s ease"></div>'
+    + '</div>'
+    + '<div style="display:flex;justify-content:space-between;margin-top:5px">'
+    + '<div style="font-size:0.68rem;color:#6b7280"><i class="fas fa-robot" style="margin-right:4px;color:#3b82f6"></i>AI evaluation in progress — do not close this tab</div>'
+    + '<div style="font-size:0.68rem;font-weight:700;color:#374151">' + pct + '%</div>'
+    + '</div>'
+    + '</div>'
+    // Proposals list
+    + '<div style="overflow-y:auto;flex:1;margin:10px 0 0">'
+    + rows
+    + '</div>'
+    + '</div></div>';
+
+  var existing = document.getElementById('bulkEvalModal');
+  if (existing) {
+    var wrapper = document.createElement('div');
+    wrapper.innerHTML = html;
+    existing.parentNode.replaceChild(wrapper.firstChild, existing);
+  } else {
+    document.body.insertAdjacentHTML('beforeend', html);
+  }
+}
+
+function _bulkModalSimulateProgress(proposalIds) {
+  // Advance each proposal through stages sequentially with realistic timing.
+  // Each proposal gets ~25s total (server processes ~20-35s each).
+  var perProposalMs = 26000; // total simulated time per proposal
+  var perStageMs    = Math.round(perProposalMs / _BULK_STAGES.length);
+
+  proposalIds.forEach(function(id, propIdx) {
+    var propDelay = propIdx * perProposalMs;
+
+    // Start this proposal
+    _bulkModalTimers.push(setTimeout(function() {
+      if (_bulkModalState[id] && _bulkModalState[id].state === 'pending') {
+        _bulkModalState[id].state = 'evaluating';
+        _bulkModalState[id].stage = 0;
+        _bulkModalRender();
+      }
+    }, propDelay));
+
+    // Advance through stages
+    for (var si = 1; si < _BULK_STAGES.length; si++) {
+      (function(stageIdx, delay) {
+        _bulkModalTimers.push(setTimeout(function() {
+          var s = _bulkModalState[id];
+          if (s && s.state === 'evaluating' && s.stage < stageIdx) {
+            s.stage = stageIdx;
+            _bulkModalRender();
+          }
+        }, propDelay + stageIdx * perStageMs));
+      })(si, si * perStageMs);
+    }
+  });
+}
+
+function _bulkModalStartPolling(rfpId) {
+  // Poll proposals list every 8s and sync real completion status to modal rows
+  _bulkModalPollId = setInterval(async function() {
+    try {
+      var fresh = await apiCall('GET', '/rfps/' + rfpId + '/proposals');
+      if (!fresh || !Array.isArray(fresh)) return;
+      var changed = false;
+      fresh.forEach(function(p) {
+        var s = _bulkModalState[p.id];
+        if (!s) return;
+        if ((p.ai_evaluated_at || p.status === 'evaluated' || p.status === 'awarded') && s.state !== 'done') {
+          s.state = 'done';
+          s.stage = _BULK_STAGES.length - 1;
+          changed = true;
+        }
+      });
+      if (changed) _bulkModalRender();
+    } catch(_) {}
+  }, 8000);
+}
+
+function _closeBulkModal() {
+  _bulkModalTimers.forEach(clearTimeout);
+  _bulkModalTimers = [];
+  if (_bulkModalPollId) { clearInterval(_bulkModalPollId); _bulkModalPollId = null; }
+  var m = document.getElementById('bulkEvalModal');
+  if (m) {
+    m.style.transition = 'opacity 0.5s';
+    m.style.opacity = '0';
+    setTimeout(function() { var mm = document.getElementById('bulkEvalModal'); if (mm) mm.remove(); }, 520);
+  }
+}
+
+function _resolveBulkModal(result) {
+  // Stop timers and polling
+  _bulkModalTimers.forEach(clearTimeout);
+  _bulkModalTimers = [];
+  if (_bulkModalPollId) { clearInterval(_bulkModalPollId); _bulkModalPollId = null; }
+
+  // Apply final result state to each row
+  if (result && result.results) {
+    result.results.forEach(function(r) {
+      var s = _bulkModalState[r.id];
+      if (!s) return;
+      if (r.skipped)      { s.state = 'skipped'; }
+      else if (r.error)   { s.state = 'error'; s.error = r.error; }
+      else                { s.state = 'done'; s.stage = _BULK_STAGES.length - 1; }
+    });
+    // Any still pending/evaluating → mark done (server returned, so they finished)
+    Object.keys(_bulkModalState).forEach(function(id) {
+      var s = _bulkModalState[id];
+      if (s.state === 'pending' || s.state === 'evaluating') s.state = 'done';
+    });
+  }
+  _bulkModalRender();
+
+  // Auto-close after 2.5s so user can see the final state
+  setTimeout(_closeBulkModal, 2500);
+}
+
 async function evaluateAllProposals(rfpId) {
   var btn = document.getElementById('evaluateAllBtn');
   if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>' + t('prop_evaluating'); }
+
+  // Build proposal list for modal — use appState.proposals (already loaded)
+  var proposals = (appState.proposals || []).filter(function(p) {
+    var st = p.status || 'submitted';
+    return !['draft'].includes(st); // include all non-draft
+  });
+
+  // Show bulk modal immediately
+  if (proposals.length > 0) {
+    _showBulkModal(proposals);
+    // Simulate per-proposal stage progression (visual only — real completion detected via poll)
+    var proposalIds = proposals.map(function(p){ return p.id; });
+    _bulkModalSimulateProgress(proposalIds);
+    _bulkModalStartPolling(rfpId);
+  }
+
   try {
-    showToast('🤖 AI evaluation started — this may take 1–2 minutes for all proposals…', 'info', 10000);
     var result = await apiCall('POST', '/rfps/' + rfpId + '/proposals/evaluate-all', {});
-    // v49: Handle blocked response (all proposals still processing)
+
+    // Handle blocked (all proposals still OCR-processing)
     if (result && result.blocked) {
+      _closeBulkModal();
       showToast('⏳ ' + (result.message || 'Proposals are still being prepared. Please wait a moment.'), 'info', 8000);
       if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-robot"></i>' + t('prop_evaluate_ai'); }
       return;
     }
-    var count = result.evaluated || 0;
-    var skipped = result.skipped || 0;
+
+    // Resolve modal with final result
+    _resolveBulkModal(result);
+
+    var count   = result.evaluated || 0;
+    var skipped = result.skipped   || 0;
     var msg = '✅ AI evaluation complete — ' + count + ' proposal(s) scored!';
     if (skipped > 0) msg += ' (' + skipped + ' skipped — still preparing)';
     showToast(msg, 'success', 7000);
     addNotification('info', '🤖 AI Evaluation Complete', count + ' proposal(s) scored and ranked by AI.', rfpId, 'proposals', null);
+
     // Award stage becomes ACTIVE now that bulk evaluation is done
     markStageActive(rfpId, 'award');
     var rfpNow = appState.currentRfp;
     if (rfpNow && String(rfpNow.id) === String(rfpId)) renderLifecycleBar(rfpNow);
-    rfpTabs.proposals(rfpId);
+
+    // Fire market benchmark for the RFP after bulk eval (informational)
+    _fireMarketBenchmark(rfpId, null);
+
+    // Refresh proposals tab after modal closes
+    setTimeout(function() { rfpTabs.proposals(rfpId); }, 2800);
+
   } catch(e) {
+    _closeBulkModal();
     showToast('Evaluation failed: ' + (e.message || e), 'error');
     if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-robot"></i>' + t('prop_evaluate_ai'); }
   }
@@ -7790,8 +8035,8 @@ function _fireMarketBenchmark(rfpId, proposalId) {
       // Store benchmark on appState so the panel can read it
       if (!appState._marketBenchmarks) appState._marketBenchmarks = {};
       appState._marketBenchmarks[rfpId] = bm;
-      // Re-render the proposal panel with the new data
-      _refreshPanelFromDB(rfpId, proposalId);
+      // Re-render the proposal panel if we have a specific proposal context
+      if (proposalId) _refreshPanelFromDB(rfpId, proposalId);
     })
     .catch(function() {
       // non-fatal — benchmark is informational only

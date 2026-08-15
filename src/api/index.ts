@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 import { andersenEmailHtml, andersenPageHtml } from '../brand/letterhead'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-08-15-v66'  // v66: eval progress modal (7 business stages) + FX conversion for commercial scoring + market benchmark (WBS-based cost estimate)
+const WORKER_VERSION = '2026-08-15-v67'  // v67: bulk eval progress modal with per-proposal rows, stage simulation, live polling sync
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.andersenlab.com.
