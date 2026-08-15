@@ -7,7 +7,9 @@
 //     - New /render-md-pdf  — accepts {markdown, logo_data_uri?} → PDF (A4, CSS pagination)
 //     - New /render-md-html — accepts {markdown, logo_data_uri?} → styled HTML (for UI preview)
 //     - Legacy /render-pdf  — still accepts {html} for backward compat
-//     - Andersen letterhead: yellow header band + wordmark logo + navy footer (CSS @page)
+//     - Andersen letterhead: yellow header band + wordmark logo + navy footer
+//       rendered via CSS position:fixed — repeats on every page in both preview and PDF.
+//       displayHeaderFooter is DISABLED — Puppeteer HF is unreliable for large templates.
 //     - CSS A4 pagination: page-break-inside:avoid on li/tr/p/h2/h3 — no manual height math
 
 'use strict';
@@ -85,6 +87,12 @@ function buildAndersenHtml(markdown, logoDataUri, opts) {
     <circle cx="740" cy="20"  r="3"   fill="#020303"/>
   </svg>`;
 
+  // NOTE on rendering strategy (v4 revised):
+  // We use CSS position:fixed for the header and footer bands so they repeat
+  // on every printed page via @page margins — NO Puppeteer displayHeaderFooter.
+  // This is the only reliable approach for complex HTML header/footer content.
+  // The same HTML is used for both in-app preview (isPreview:true) and PDF.
+
   // Watermark SVG for body area
   const watermarkSvg = `<svg style="position:absolute;inset:0;width:100%;height:100%;opacity:.045;pointer-events:none" viewBox="0 0 700 700" preserveAspectRatio="xMidYMid slice" fill="none">
     <path d="M-40 220 Q 200 120, 400 260 T 780 300" stroke="#020303" stroke-width="0.5"/>
@@ -99,74 +107,120 @@ function buildAndersenHtml(markdown, logoDataUri, opts) {
   marked.setOptions({ gfm: true, breaks: false });
   const bodyHtml = marked.parse(markdown || '');
 
-  // ── CSS for both modes ──────────────────────────────────────────────────
+  // ── CSS — unified for preview and PDF ──────────────────────────────────
+  // Key design decisions:
+  //   1. @page margins reserve space for fixed header/footer bands on every page.
+  //      top:28mm  = yellow band (≈14mm) + lockup row (≈8mm) + accent rule (≈5mm) + 1mm gap
+  //      bottom:20mm = navy footer band (≈10mm) + 10mm breathing room
+  //      left/right: 16mm standard document margin
+  //   2. .a-header and .a-footer use position:fixed so the browser/Puppeteer
+  //      repeats them on every printed page inside the @page margin boxes.
+  //   3. displayHeaderFooter:false in Puppeteer — we own the full layout.
+  //   4. Preview mode wraps in a scrollable container with box-shadow per A4 page.
   const monoFont = "'Courier New', monospace";
   const css = `
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    @page {
+      size: A4;
+      margin: 28mm 16mm 20mm 16mm;
+    }
+
     html, body {
       font-family: Arial, 'Segoe UI', Helvetica, sans-serif;
       font-size: 10.5pt; line-height: 1.65; color: #020303;
       background: ${isPreview ? '#EDEEF1' : '#fff'};
-      ${isPreview ? 'padding: 40px 0;' : ''}
     }
 
-    /* ── A4 page container ── */
-    .a-page {
-      width: 794px; ${isPreview ? 'min-height: 1123px;' : ''}
-      margin: 0 auto; background: #fff;
-      display: flex; flex-direction: column;
-      ${isPreview ? 'box-shadow: 0 12px 48px rgba(20,25,35,.18);' : ''}
+    /* ── Fixed header — repeats on every printed page ── */
+    .a-header {
+      position: fixed;
+      top: -28mm;          /* pull into the @page top margin */
+      left: -16mm;         /* span edge-to-edge across the margin gutters */
+      right: -16mm;
+      height: 27mm;        /* fills the reserved top margin */
+      background: #fff;
+      display: flex;
+      flex-direction: column;
+      z-index: 1000;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
     }
 
-    /* ── Wordmark lockup ── */
-    .a-lockup { padding: 22px 36px 18px; display: flex; align-items: center; }
-    .a-brand  { display: flex; align-items: center; gap: 18px; }
-    .a-brand img  { height: 44px; width: auto; display: block; }
-    .a-divider    { width: 1px; height: 30px; background: #E0E0E0; }
+    /* Wordmark lockup row */
+    .a-lockup {
+      display: flex; align-items: center;
+      padding: 5px 16mm 4px;
+      flex-shrink: 0;
+    }
+    .a-brand  { display: flex; align-items: center; gap: 14px; }
+    .a-brand img  { height: 36px; width: auto; display: block; }
+    .a-divider    { width: 1px; height: 26px; background: #E0E0E0; }
     .a-tag {
-      font-family: ${monoFont}; font-size: 10px; letter-spacing: .22em;
+      font-family: ${monoFont}; font-size: 9px; letter-spacing: .22em;
       text-transform: uppercase; color: #556170; line-height: 1.6;
     }
     .a-tag b { color: #020303; font-weight: 500; }
 
-    /* ── Yellow topo band ── */
+    /* Yellow topo band */
     .a-band {
-      height: 56px; background: #FFDB00;
+      height: 14mm; background: #FFDB00;
       position: relative; overflow: hidden; flex-shrink: 0;
     }
     .a-badge {
-      position: absolute; top: 50%; transform: translateY(-50%); right: 36px;
-      font-family: ${monoFont}; font-size: 10px; letter-spacing: .24em;
+      position: absolute; top: 50%; transform: translateY(-50%); right: 16mm;
+      font-family: ${monoFont}; font-size: 8px; letter-spacing: .24em;
       text-transform: uppercase; color: #020303; opacity: .55;
     }
 
-    /* ── Dotted accent rule ── */
+    /* Dotted accent rule */
     .a-accent {
-      height: 22px; display: flex; align-items: center;
-      padding: 0 36px; gap: 6px; flex-shrink: 0;
+      height: 6mm; display: flex; align-items: center;
+      padding: 0 16mm; gap: 5px; flex-shrink: 0;
       border-bottom: 1px solid #E0E0E0;
+      background: #fff;
     }
-    .a-tick  { display: block; width: 6px; height: 6px; border-radius: 50%; background: #E0E0E0; }
-    .a-node  { background: #FFDB00 !important; width: 8px !important; height: 8px !important; }
-    .a-grow  { flex: 1; height: 1px; background: #E0E0E0; margin: 0 4px; }
+    .a-tick  { display: block; width: 5px; height: 5px; border-radius: 50%; background: #E0E0E0; flex-shrink: 0; }
+    .a-node  { background: #FFDB00 !important; width: 7px !important; height: 7px !important; }
+    .a-grow  { flex: 1; height: 1px; background: #E0E0E0; margin: 0 3px; }
+
+    /* ── Fixed footer — repeats on every printed page ── */
+    .a-footer {
+      position: fixed;
+      bottom: -20mm;       /* pull into the @page bottom margin */
+      left: -16mm;
+      right: -16mm;
+      height: 19mm;        /* fills the reserved bottom margin */
+      background: #020D1C;
+      color: #B8C0CB;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0 16mm;
+      font-size: 9px; letter-spacing: .05em;
+      z-index: 1000;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .a-foot-cols { display: flex; gap: 28px; }
+    .a-foot-col .a-k { font-family: ${monoFont}; font-size: 8px; letter-spacing: .2em; text-transform: uppercase; color: #FFDB00; margin-bottom: 3px; }
+    .a-foot-col .a-v { font-size: 9px; color: #D8DEE8; line-height: 1.5; }
+    .a-foot-right { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; }
+    .a-foot-right img { height: 18px; filter: brightness(0) invert(1); opacity: .9; }
+    .a-foot-right .a-mono { font-family: ${monoFont}; font-size: 8px; letter-spacing: .2em; text-transform: uppercase; color: #FFDB00; }
 
     /* ── Body writing area ── */
     .a-body {
-      flex: 1; padding: 32px 52px; position: relative;
+      padding: 8pt 0;        /* @page margins already provide left/right */
+      position: relative;
     }
-    .a-body::before, .a-body::after {
-      content: ''; position: absolute; width: 16px; height: 16px;
-      border-color: #E0E0E0; border-style: solid; border-width: 0;
-    }
-    .a-body::before { top: 0; left: 40px; border-top-width: 1px; border-left-width: 1px; }
-    .a-body::after  { bottom: 0; right: 40px; border-bottom-width: 1px; border-right-width: 1px; }
 
     /* ── RFP content typography ── */
     h1 { font-size: 16pt; font-weight: 700; border-bottom: 2px solid #FFDB00; padding-bottom: 6pt; margin: 0 0 12pt; page-break-after: avoid; }
     h2 { font-size: 12pt; font-weight: 700; color: #020303; border-bottom: 1px solid #E0E0E0; margin: 18pt 0 6pt; padding-bottom: 3pt; page-break-after: avoid; }
     h3 { font-size: 10.5pt; font-weight: 700; color: #3A3E45; margin: 12pt 0 4pt; page-break-after: avoid; }
     h4 { font-size: 10pt; font-weight: 600; color: #556170; margin: 10pt 0 3pt; }
-    p  { margin: 0 0 8pt; orphans: 3; widows: 3; page-break-inside: avoid; }
+    p  { margin: 0 0 8pt; orphans: 3; widows: 3; }
     ul, ol { margin: 0 0 8pt; padding-left: 20pt; }
     li { margin-bottom: 3pt; page-break-inside: avoid; orphans: 2; widows: 2; }
     hr { border: none; border-top: 2px solid #FFDB00; margin: 16pt 0; }
@@ -182,30 +236,18 @@ function buildAndersenHtml(markdown, logoDataUri, opts) {
     pre code { background: transparent; padding: 0; }
     strong { color: #111827; }
 
-    /* ── Navy footer ── */
-    .a-foot {
-      background: #020D1C; color: #B8C0CB;
-      padding: 22px 36px; display: flex;
-      justify-content: space-between; align-items: center;
-      flex-shrink: 0; font-size: 10px; letter-spacing: .05em;
+    /* ── Watermark (preview only) ── */
+    .a-watermark {
+      position: fixed; inset: 0; pointer-events: none; z-index: 0;
+      opacity: .035;
     }
-    .a-foot-cols { display: flex; gap: 36px; }
-    .a-foot-col .a-k { font-family: ${monoFont}; font-size: 9px; letter-spacing: .2em; text-transform: uppercase; color: #FFDB00; margin-bottom: 4px; }
-    .a-foot-col .a-v { font-size: 10px; color: #D8DEE8; line-height: 1.5; }
-    .a-foot-right { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
-    .a-foot-right img { height: 20px; filter: brightness(0) invert(1); opacity: .9; }
-    .a-foot-right .a-mono { font-family: ${monoFont}; font-size: 9px; letter-spacing: .2em; text-transform: uppercase; color: #FFDB00; }
 
-    @media print {
-      body { background: #fff; padding: 0; }
-      .a-page { box-shadow: none; margin: 0; }
-      @page { size: A4; margin: 0; }
-      * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-    }
+    * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
   `;
 
-  // ── Header HTML (lockup + band + accent) ────────────────────────────────
+  // ── Fixed header markup (lockup + yellow band + accent rule) ────────────
   const headerHtml = `
+  <div class="a-header">
     <div class="a-lockup">
       <div class="a-brand">
         <img src="${logo}" alt="Andersen"/>
@@ -215,7 +257,7 @@ function buildAndersenHtml(markdown, logoDataUri, opts) {
     </div>
     <div class="a-band">
       ${topoSvg}
-      <div class="a-badge">Andersen &middot; Est. 2007</div>
+      ${refNumber ? `<div class="a-badge">${refNumber}</div>` : `<div class="a-badge">Andersen &middot; Est. 2007</div>`}
     </div>
     <div class="a-accent">
       <span class="a-tick"></span><span class="a-tick"></span>
@@ -227,70 +269,73 @@ function buildAndersenHtml(markdown, logoDataUri, opts) {
       <span class="a-tick"></span><span class="a-tick"></span>
       <span class="a-tick"></span><span class="a-tick a-node"></span>
       <span class="a-tick"></span><span class="a-tick"></span>
-    </div>`;
+    </div>
+  </div>`;
 
-  // ── Footer HTML ─────────────────────────────────────────────────────────
+  // ── Fixed footer markup (navy band) ────────────────────────────────────
   const footerHtml = `
-    <div class="a-foot">
-      <div class="a-foot-cols">
-        <div class="a-foot-col">
-          <div class="a-k">Web</div>
-          <div class="a-v">andersenlab.com</div>
-        </div>
-        <div class="a-foot-col">
-          <div class="a-k">Contact</div>
-          <div class="a-v"><a href="mailto:${email}" style="color:inherit;text-decoration:none">${email}</a></div>
-        </div>
-        <div class="a-foot-col">
-          <div class="a-k">Offices</div>
-          <div class="a-v">Warsaw &middot; Berlin &middot; London &middot; New York</div>
-        </div>
+  <div class="a-footer">
+    <div class="a-foot-cols">
+      <div class="a-foot-col">
+        <div class="a-k">Web</div>
+        <div class="a-v">andersenlab.com</div>
       </div>
-      <div class="a-foot-right">
-        <img src="${logo}" alt="Andersen"/>
-        <div class="a-mono">&copy; Andersen ${year}</div>
+      <div class="a-foot-col">
+        <div class="a-k">Contact</div>
+        <div class="a-v"><a href="mailto:${email}" style="color:inherit;text-decoration:none">${email}</a></div>
       </div>
-    </div>`;
+      <div class="a-foot-col">
+        <div class="a-k">Offices</div>
+        <div class="a-v">Warsaw &middot; Berlin &middot; London &middot; New York</div>
+      </div>
+    </div>
+    <div class="a-foot-right">
+      <img src="${logo}" alt="Andersen"/>
+      <div class="a-mono">&copy; Andersen ${year}</div>
+    </div>
+  </div>`;
 
-  if (isPreview) {
-    // Full preview page — includes letterhead, watermark, footer
-    return `<!DOCTYPE html>
+  // ── Preview-only wrapper styles ─────────────────────────────────────────
+  // For in-browser display we add a scrollable page shadow.
+  // For PDF this is irrelevant — Puppeteer ignores non-print styles.
+  const previewWrapCss = isPreview ? `
+    <style>
+      body { padding: 32mm 0 24mm; }   /* push content clear of fixed bands */
+      .a-preview-page {
+        width: 794px; margin: 0 auto 32px;
+        background: #fff;
+        box-shadow: 0 12px 48px rgba(20,25,35,.18);
+        padding: 16px 0;
+      }
+    </style>` : '';
+
+  // ── Unified HTML — identical structure for preview and PDF ──────────────
+  // The browser / Puppeteer repeats the fixed header+footer on every page.
+  // @page margins create the space; position:fixed pulls elements into it.
+  return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=794,initial-scale=1"/>
 <title>${rfpTitle}</title>
 <style>${css}</style>
+${previewWrapCss}
 </head>
 <body>
-<div class="a-page">
   ${headerHtml}
-  <div class="a-body" style="position:relative">
-    ${watermarkSvg}
-    <div style="position:relative;z-index:1">
-      ${bodyHtml}
-    </div>
-  </div>
   ${footerHtml}
-</div>
-</body>
-</html>`;
-  }
-
-  // PDF mode — clean body only; Puppeteer adds header/footer via displayHeaderFooter
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8"/>
-<style>${css}
-/* Hide letterhead/footer structural divs — Puppeteer injects them via templates */
-.a-lockup, .a-band, .a-accent, .a-foot { display: none; }
-</style>
-</head>
-<body style="background:#fff;padding:0">
-<div class="a-body" style="padding:0">
-  ${bodyHtml}
-</div>
+  ${isPreview ? `
+  <svg class="a-watermark" viewBox="0 0 700 700" preserveAspectRatio="xMidYMid slice" fill="none">
+    <path d="M-40 220 Q 200 120, 400 260 T 780 300" stroke="#020303" stroke-width="0.5"/>
+    <path d="M-40 360 Q 220 240, 420 380 T 780 440" stroke="#020303" stroke-width="0.5"/>
+    <path d="M-40 500 Q 240 380, 440 520 T 780 580" stroke="#020303" stroke-width="0.5"/>
+    <circle cx="200" cy="230" r="6" fill="#FFDB00"/>
+    <circle cx="480" cy="330" r="8" fill="#FFDB00"/>
+    <circle cx="640" cy="480" r="5" fill="#FFDB00"/>
+  </svg>` : ''}
+  <div class="a-body">
+    ${bodyHtml}
+  </div>
 </body>
 </html>`;
 }
@@ -371,47 +416,9 @@ app.post('/render-md-pdf', requireAuth, async (req, res) => {
   }
 
   const logo  = logo_data_uri || LOGO_DATA_URI;
-  const ref   = ref_number ? escHtml(ref_number) : '';
 
-  // Puppeteer header template — Andersen yellow topo band with inline SVG wordmark (left) and ref (right).
-  // IMPORTANT: Puppeteer header/footer templates are isolated HTML snippets.
-  //   - Must be self-contained (inline styles only, no external CSS).
-  //   - Puppeteer injects: <span class="pageNumber">, <span class="totalPages"> etc.
-  //   - Height is determined by the content; set margin-top accordingly in page.pdf().
-  //   - Font size must be set explicitly — template inherits nothing from page CSS.
-  //   - CRITICAL: Do NOT embed the logo as a base64 data URI here — Puppeteer silently
-  //     truncates the template when it exceeds ~32KB, dropping all text content.
-  //     Use an inline SVG wordmark instead.
-  const headerTemplate = `
-    <div style="width:100%;height:100%;background:#FFDB00;display:flex;align-items:center;justify-content:space-between;padding:0 16mm;font-family:Arial,sans-serif;box-sizing:border-box;position:relative;overflow:hidden;">
-      <svg style="position:absolute;inset:0;width:100%;height:100%" viewBox="0 0 794 56" preserveAspectRatio="none" fill="none">
-        <path d="M-10 14 Q 100 4, 220 20 T 460 24 Q 580 30, 810 12" stroke="#020303" stroke-width="0.7" stroke-opacity="0.45"/>
-        <path d="M-10 28 Q 120 14, 240 34 T 480 38 Q 620 44, 810 26" stroke="#020303" stroke-width="0.7" stroke-opacity="0.35"/>
-        <circle cx="120" cy="16" r="3"   fill="#020303" opacity="0.45"/>
-        <circle cx="460" cy="24" r="3.5" fill="#020303" opacity="0.45"/>
-        <circle cx="740" cy="20" r="3"   fill="#020303" opacity="0.45"/>
-      </svg>
-      <div style="position:relative;z-index:1;display:flex;align-items:center;gap:10px">
-        <svg viewBox="0 0 140 32" width="105" height="24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <rect x="0" y="4" width="18" height="18" rx="2" fill="#020303"/>
-          <rect x="3" y="7" width="5" height="12" fill="#FFDB00"/>
-          <rect x="10" y="7" width="5" height="12" fill="#FFDB00"/>
-          <text x="24" y="20" font-family="Arial,sans-serif" font-weight="700" font-size="14" letter-spacing="1" fill="#020303">ANDERSEN</text>
-        </svg>
-        <span style="font-family:'Courier New',monospace;font-size:7pt;letter-spacing:.15em;color:#020303;opacity:.6;border-left:1px solid rgba(2,3,3,.25);padding-left:10px">Software Engineering</span>
-      </div>
-      <span style="font-family:'Courier New',monospace;font-size:8pt;letter-spacing:.18em;text-transform:uppercase;color:#020303;opacity:.55;position:relative;z-index:1">${ref}</span>
-    </div>
-  `;
-
-  // Puppeteer footer template — Andersen navy band with contact (left), page number (right).
-  const footerTemplate = `
-    <div style="width:100%;height:100%;background:#020D1C;display:flex;align-items:center;justify-content:space-between;padding:0 16mm;font-family:Arial,sans-serif;font-size:8pt;box-sizing:border-box;">
-      <span style="font-family:'Courier New',monospace;font-size:7.5pt;letter-spacing:.12em;text-transform:uppercase;color:#FFDB00">&copy; Andersen &nbsp;&middot;&nbsp; procurement@cpc-rfp.website</span>
-      <span style="color:#9ca3af">Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>
-    </div>
-  `;
-
+  // Build unified HTML — header/footer are CSS position:fixed, no displayHeaderFooter.
+  // preview:false produces the same HTML structure but without the preview wrapper styles.
   const bodyHtml = buildAndersenHtml(markdown, logo, {
     ref_number,
     rfp_title,
@@ -423,26 +430,25 @@ app.post('/render-md-pdf', requireAuth, async (req, res) => {
     browser = await launchBrowser();
     const page = await browser.newPage();
 
-    // networkidle0 ensures all fonts/images are loaded before PDF generation
+    // networkidle0 ensures logo base64 image is fully decoded before PDF generation
     await page.setContent(bodyHtml, { waitUntil: 'networkidle0' });
 
     const pdfBuffer = await page.pdf({
       format: 'A4',
       printBackground: true,
 
-      // displayHeaderFooter: true → Puppeteer injects headerTemplate/footerTemplate
-      // on EVERY page. This is far cleaner than CSS @page margin boxes for Puppeteer.
-      displayHeaderFooter: true,
-      headerTemplate,
-      footerTemplate,
+      // displayHeaderFooter: FALSE — header/footer are baked into the HTML via
+      // CSS position:fixed + @page margins. This is more reliable than Puppeteer
+      // HF templates which silently fail with large (>32KB) inline content.
+      displayHeaderFooter: false,
 
-      // Margins:
-      //   top    — yellow topo band is 56px ≈ 15mm; use 22mm to give 7mm breathing room
-      //   bottom — navy footer is ~28px ≈ 7.5mm; use 18mm total
-      //   left/right — 16mm standard document margin
+      // Margins match the @page rule in buildAndersenHtml CSS:
+      //   top    28mm — space for lockup row (~8mm) + yellow band (~14mm) + accent rule (~5mm) + 1mm gap
+      //   bottom 20mm — space for navy footer band (~10mm) + 10mm breathing room
+      //   left/right 16mm — standard document margins
       margin: {
-        top:    '26mm',   // topo band (15mm) + accent (6mm) + breathing room
-        bottom: '18mm',   // navy footer (8mm) + breathing room
+        top:    '28mm',
+        bottom: '20mm',
         left:   '16mm',
         right:  '16mm',
       },
@@ -479,34 +485,8 @@ app.post('/render-pdf', requireAuth, async (req, res) => {
   // Accept markdown field in addition to (or instead of) html.
   if (markdown && typeof markdown === 'string') {
     const logo = logo_data_uri || LOGO_DATA_URI;
-    const ref  = ref_number ? escHtml(ref_number) : '';
 
-    const headerTemplate = `
-      <div style="width:100%;height:100%;background:#FFDB00;display:flex;align-items:center;justify-content:space-between;padding:0 16mm;font-family:Arial,sans-serif;box-sizing:border-box;position:relative;overflow:hidden;">
-        <svg style="position:absolute;inset:0;width:100%;height:100%" viewBox="0 0 794 56" preserveAspectRatio="none" fill="none">
-          <path d="M-10 14 Q 100 4, 220 20 T 460 24 Q 580 30, 810 12" stroke="#020303" stroke-width="0.7" stroke-opacity="0.45"/>
-          <path d="M-10 28 Q 120 14, 240 34 T 480 38 Q 620 44, 810 26" stroke="#020303" stroke-width="0.7" stroke-opacity="0.35"/>
-          <circle cx="120" cy="16" r="3" fill="#020303" opacity="0.45"/>
-          <circle cx="460" cy="24" r="3.5" fill="#020303" opacity="0.45"/>
-        </svg>
-        <div style="position:relative;z-index:1;display:flex;align-items:center;gap:10px">
-          <svg viewBox="0 0 140 32" width="105" height="24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <rect x="0" y="4" width="18" height="18" rx="2" fill="#020303"/>
-            <rect x="3" y="7" width="5" height="12" fill="#FFDB00"/>
-            <rect x="10" y="7" width="5" height="12" fill="#FFDB00"/>
-            <text x="24" y="20" font-family="Arial,sans-serif" font-weight="700" font-size="14" letter-spacing="1" fill="#020303">ANDERSEN</text>
-          </svg>
-          <span style="font-family:'Courier New',monospace;font-size:7pt;letter-spacing:.15em;color:#020303;opacity:.6;border-left:1px solid rgba(2,3,3,.25);padding-left:10px">Software Engineering</span>
-        </div>
-        <span style="font-family:'Courier New',monospace;font-size:8pt;letter-spacing:.18em;text-transform:uppercase;color:#020303;opacity:.55;position:relative;z-index:1">${ref}</span>
-      </div>`;
-
-    const footerTemplate = `
-      <div style="width:100%;height:100%;background:#020D1C;display:flex;align-items:center;justify-content:space-between;padding:0 16mm;font-family:Arial,sans-serif;font-size:8pt;box-sizing:border-box;">
-        <span style="font-family:'Courier New',monospace;font-size:7.5pt;letter-spacing:.12em;text-transform:uppercase;color:#FFDB00">&copy; Andersen &nbsp;&middot;&nbsp; procurement@cpc-rfp.website</span>
-        <span style="color:#9ca3af">Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>
-      </div>`;
-
+    // Same CSS-baked letterhead approach as /render-md-pdf
     const bodyHtml = buildAndersenHtml(markdown, logo, { ref_number, rfp_title, preview: false });
 
     let browser;
@@ -517,10 +497,8 @@ app.post('/render-pdf', requireAuth, async (req, res) => {
       const pdfBuffer = await page.pdf({
         format: 'A4',
         printBackground: true,
-        displayHeaderFooter: true,
-        headerTemplate,
-        footerTemplate,
-        margin: { top: '26mm', bottom: '18mm', left: '16mm', right: '16mm' },
+        displayHeaderFooter: false,
+        margin: { top: '28mm', bottom: '20mm', left: '16mm', right: '16mm' },
       });
       await browser.close();
       browser = null;
