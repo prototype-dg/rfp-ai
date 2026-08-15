@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 // emblem-data import removed — email template now uses inline SVG (no external image dependency)
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-07-29-v52'  // v52: PDF fixes — correct page-break-after, robust footer regex (both property orders), single+double quote padding strip
+const WORKER_VERSION = '2026-08-15-v53'  // v53: PDF via /render-md-pdf (markdown→A4 CSS pagination, Andersen letterhead, no manual height math)
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.andersenlab.com.
@@ -267,8 +267,8 @@ apiRouter.get('/rfps/:id', async (c) => {
   return c.json(rfp)
 })
 
-// GET /rfps/:id/pdf-content — returns raw RFP HTML only (no print wrapper)
-// Used by client-side html2pdf.js to generate a real downloadable PDF
+// GET /rfps/:id/pdf-content — returns raw RFP markdown content
+// Used by clients that need the raw markdown (e.g. debug, re-render).
 apiRouter.get('/rfps/:id/pdf-content', async (c) => {
   const id = c.req.param('id')
   const rfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(id).first()
@@ -277,17 +277,20 @@ apiRouter.get('/rfps/:id/pdf-content', async (c) => {
   return new Response((rfp as any).content || '', {
     status: 200,
     headers: {
-      'Content-Type': 'text/html; charset=utf-8',
+      'Content-Type': 'text/markdown; charset=utf-8',
       'Cache-Control': 'no-cache',
     },
   })
 })
 
-// GET /rfps/:id/pdf — generate a real PDF via the Puppeteer render service on the sidecar VPS.
-// Strips the LLM's page-div wrappers into a continuous HTML document, then calls
-// POST https://api.andersenlab.com/pdf/render-pdf which returns application/pdf bytes.
-// The letterhead is passed as a public URL so Puppeteer can fetch it directly.
-// Falls back to the legacy print-HTML page if the render service is unavailable.
+// GET /rfps/:id/pdf — generate a PDF via the Puppeteer sidecar using markdown input.
+// Sends the stored markdown content to POST /render-md-pdf on the sidecar VPS.
+// The sidecar converts markdown → styled HTML → A4 PDF with:
+//   - Andersen letterhead (yellow band, wordmark logo) on every page via Puppeteer displayHeaderFooter
+//   - Navy footer band with page numbers on every page
+//   - CSS A4 pagination: page-break-inside:avoid on li/tr/p; widows:3; orphans:3
+//   - format:'A4' — browser engine handles page breaks, no manual height math
+// Falls back to a browser-print HTML page if the sidecar is unavailable.
 apiRouter.get('/rfps/:id/pdf', async (c) => {
   const id = c.req.param('id')
   const rfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(id).first()
@@ -296,113 +299,29 @@ apiRouter.get('/rfps/:id/pdf', async (c) => {
 
   const safeRef = ((rfp as any).ref_number || String(id)).replace(/\//g, '_').replace(/[^a-zA-Z0-9_\-]/g, '')
   const filename = `Andersen_RFP_${safeRef}.pdf`
-  const content = (rfp as any).content as string
+  const markdown = (rfp as any).content as string
+  const refNumber = (rfp as any).ref_number as string || ''
+  const rfpTitle  = (rfp as any).title as string || 'Request for Proposal'
 
-  const renderUrl = c.env.PDF_RENDER_URL || (globalThis as any).PDF_RENDER_URL || ''
+  const renderUrl    = c.env.PDF_RENDER_URL    || (globalThis as any).PDF_RENDER_URL    || ''
   const renderSecret = c.env.PDF_RENDER_SECRET || (globalThis as any).PDF_RENDER_SECRET || ''
 
-  // ── Puppeteer path ────────────────────────────────────────────────────────
-  // Version-gate: the render service must be v3+ to handle the new Andersen inline-HTML design.
-  // v2 used format:'A4' + displayHeaderFooter:true + 72mm top margin → white-space bug.
-  // v3 uses page.pdf({width:'794px',height:'1123px'}) + displayHeaderFooter:false + margin:0.
-  // If the service reports v2 (or we can't reach it), skip to the browser-print fallback below.
-  let renderServiceVersion = 0
+  // ── Sidecar path (v4 markdown pipeline) ──────────────────────────────────
   if (renderUrl && renderSecret) {
     try {
-      const healthRes = await fetch(`${renderUrl}/`, {
-        headers: { 'Authorization': `Bearer ${renderSecret}` },
-        signal: AbortSignal.timeout(5000),
-      }).catch(() => null)
-      if (healthRes?.ok) {
-        const health = await healthRes.json().catch(() => ({})) as any
-        renderServiceVersion = parseInt(health?.version || '0', 10)
-        console.log(`[pdf-render] Render service version: ${renderServiceVersion}`)
-      }
-    } catch (_) {}
-  }
-
-  if (renderUrl && renderSecret && renderServiceVersion >= 3) {
-    try {
-      // Andersen letterhead is now fully inline HTML inside every LLM page div.
-      // No headerTemplate image is needed — letterhead_data_uri is intentionally empty.
-      // (The old bg_a4.png CPC letterhead has been removed from R2.)
-      const letterheadDataUri = ''
-
-      // Fix 2 — Clean up LLM HTML for Puppeteer rendering.
-      // Remove: background images (letterhead is now inline HTML — no headerTemplate),
-      //         min-height:297mm (prevents extra blank space at bottom of each page div).
-      // DO NOT strip overflow:hidden from page divs — they need it to clip content
-      //   that would otherwise bleed over the absolute-positioned navy footer.
-      // DO NOT strip page-break-after:always — the LLM inline styles already have it,
-      //   and it is the only thing that forces one PDF page per LLM page div.
-      const continuous = content
-        // Remove background-image declarations (no longer needed — letterhead is inline HTML)
-        .replace(/background-image\s*:\s*url\([^)]*\)\s*;?\s*/gi, '')
-        .replace(/background-size\s*:[^;]+;\s*/gi, '')
-        .replace(/background-repeat\s*:[^;]+;\s*/gi, '')
-        .replace(/background-position\s*:[^;]+;\s*/gi, '')
-        // Remove fixed min-height — prevents blank space at bottom of short pages
-        .replace(/min-height\s*:\s*297mm\s*;?\s*/gi, '')
-        // Remove only CPC/Crown Prince Court legacy footer text divs (plain text match — safe).
-        // NOTE: Do NOT strip position:absolute+bottom:N divs — the Andersen navy footer
-        //       uses exactly that pattern (position:absolute; bottom:0) and must be preserved.
-        .replace(/<div[^>]*>[^<]*Crown Prince[^<]*<\/div>/gi, '')
-        .replace(/<div[^>]*>[^<]*Confidential[^<]*Page \d+[^<]*<\/div>/gi, '')
-
-      // Fix 3 — Remove legacy padding-top:72mm / padding-bottom:28mm from content wrappers.
-      // Old LLM prompt used a background-image letterhead requiring 72mm top padding.
-      // New Andersen letterhead is fully inline HTML — no padding compensation needed.
-      const cleanHtml = continuous
-        .replace(/(style=["'][^"'>]*?)padding-top\s*:\s*72mm\s*;?\s*/gi, '$1')
-        .replace(/(style=["'][^"'>]*?)padding-bottom\s*:\s*28mm\s*;?\s*/gi, '$1')
-
-      // Wrap in a minimal HTML document for Puppeteer.
-      //
-      // Page sizing strategy: we pass page_width/page_height to the render service
-      // which calls page.pdf({ width:'794px', height:'1123px' }) — this is what controls
-      // the actual paper size. The render service has displayHeaderFooter:false and
-      // margin:0 so LLM inline headers/footers render without any Puppeteer overlay.
-      //
-      // The CSS here just provides a safety-net page-break between LLM page divs.
-      // DO NOT set height/max-height/overflow:hidden on page divs in CSS — that would
-      // clip content or cause all content to collapse into a single page.
-      // DO NOT set @page size here — Puppeteer's page.pdf() width/height overrides it.
-      const PAGE_W = 794
-      const PAGE_H = 1123
-      const html = `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: Arial, Calibri, 'Segoe UI', sans-serif; font-size: 11pt; color: #1A1A1A; background: #fff; width: ${PAGE_W}px; }
-  /* Safety-net page break between LLM page divs.
-     LLM structure: body > .rfp-doc > [page divs]
-     Each page div already has page-break-after:always in its inline style. */
-  body > div > div { page-break-after: always; page-break-inside: avoid; }
-  body > div > div:last-child { page-break-after: avoid; }
-  h1, h2, h3 { color: #1A1A1A; }
-  table { border-collapse: collapse; width: 100%; }
-  td, th { border: 1px solid #d1d5db; padding: 6px 10px; }
-</style>
-</head>
-<body>${cleanHtml}</body>
-</html>`
-
-      const renderRes = await fetch(`${renderUrl}/render-pdf`, {
+      const renderRes = await fetch(`${renderUrl}/render-md-pdf`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${renderSecret}`,
         },
-        // page_width/page_height tell the render service to use page.pdf({width, height})
-        // instead of format:'A4'. This matches LLM page div dimensions → 1 div = 1 PDF page.
         body: JSON.stringify({
-          html,
-          letterhead_data_uri: letterheadDataUri,
-          page_width: `${PAGE_W}px`,
-          page_height: `${PAGE_H}px`,
+          markdown,
+          ref_number: refNumber,
+          rfp_title:  rfpTitle,
+          // logo_data_uri is omitted — sidecar uses the embedded Andersen logo by default
         }),
+        signal: AbortSignal.timeout(120000),  // 2 min — Puppeteer can be slow on cold start
       })
 
       if (!renderRes.ok) {
@@ -423,42 +342,43 @@ apiRouter.get('/rfps/:id/pdf', async (c) => {
         },
       })
     } catch (err: any) {
-      console.error('[pdf-render] Puppeteer render failed, falling back to print-HTML:', err.message)
-      // Fall through to legacy path below
+      console.error('[pdf-render] Sidecar failed, falling back to print-HTML:', err.message)
+      // Fall through to legacy browser-print path
     }
   }
 
-  // ── Legacy fallback: print-ready HTML page (browser prints to PDF) ────────
-  // Clean legacy CPC markers from stored content before serving to browser
-  const cleanContent = content
-    .replace(/background-image\s*:\s*url\([^)]*\)\s*;?\s*/gi, '')
-    .replace(/background-size\s*:[^;]+;\s*/gi, '')
-    .replace(/background-repeat\s*:[^;]+;\s*/gi, '')
-    .replace(/background-position\s*:[^;]+;\s*/gi, '')
-    .replace(/min-height\s*:\s*297mm\s*;?\s*/gi, '')
-    // Do NOT strip position:absolute+bottom:N — Andersen navy footer uses this pattern.
-    .replace(/<div[^>]*>[^<]*Crown Prince[^<]*<\/div>/gi, '')
-    .replace(/<div[^>]*>[^<]*Confidential[^<]*Page \d+[^<]*<\/div>/gi, '')
+  // ── Legacy fallback: browser-print HTML page ──────────────────────────────
+  // Used when the sidecar is unreachable. Serves a print-ready HTML page that
+  // the browser can print to PDF via Ctrl+P / window.print().
+  // Content is markdown rendered client-side via marked.js.
   const printHtml = `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${((rfp as any).title || 'RFP').replace(/</g,'&lt;')}</title>
+<title>${rfpTitle.replace(/</g,'&lt;')}</title>
+<script src="https://cdn.jsdelivr.net/npm/marked@13/marked.min.js"><\/script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: #e8e8e8; font-family: Arial, 'Segoe UI', sans-serif; }
-  .rfp-doc > div { display: block; box-shadow: 0 2px 12px rgba(0,0,0,0.18); margin: 20px auto !important; }
-  @page { size: 794px 1123px; margin: 0; }
+  body { font-family: Arial, 'Segoe UI', sans-serif; font-size: 10.5pt; line-height: 1.6; color: #1A1A1A; }
+  #rfp-content { max-width: 800px; margin: 32px auto; padding: 0 24px; }
+  h1 { font-size: 16pt; font-weight: 700; border-bottom: 2px solid #FFDB00; padding-bottom: 6pt; margin: 0 0 12pt; }
+  h2 { font-size: 12pt; font-weight: 700; border-bottom: 1px solid #e5e7eb; margin: 18pt 0 6pt; }
+  h3 { font-size: 10.5pt; font-weight: 700; margin: 12pt 0 4pt; }
+  p  { margin: 0 0 8pt; orphans: 3; widows: 3; }
+  ul, ol { margin: 0 0 8pt; padding-left: 20pt; }
+  li { margin-bottom: 3pt; page-break-inside: avoid; }
+  hr { border: none; border-top: 2px solid #FFDB00; margin: 16pt 0; }
+  table { width: 100%; border-collapse: collapse; font-size: 9.5pt; margin: 8pt 0 12pt; page-break-inside: avoid; }
+  th { background: #020303; color: #FFDB00; font-weight: 700; padding: 6pt 10pt; text-align: left; border: 1px solid #020303; }
+  td { padding: 5pt 10pt; border: 1px solid #d1d5db; vertical-align: top; }
+  tr { page-break-inside: avoid; }
+  tr:nth-child(even) td { background: #f9fafb; }
+  @page { size: A4; margin: 22mm 16mm 18mm 16mm; }
   @media print {
     * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-    html, body { background: white; margin: 0; padding: 0; width: 794px; }
     .no-print { display: none !important; }
-    .rfp-doc > div {
-      box-shadow: none !important; margin: 0 !important;
-      page-break-after: always; page-break-inside: avoid;
-    }
-    .rfp-doc > div:last-child { page-break-after: avoid; }
+    h2, h3 { page-break-after: avoid; }
   }
 </style>
 </head>
@@ -466,16 +386,20 @@ apiRouter.get('/rfps/:id/pdf', async (c) => {
 <div class="no-print" style="position:fixed;top:0;left:0;right:0;z-index:9999;background:#020303;color:white;padding:10px 24px;display:flex;align-items:center;justify-content:space-between;font-family:Arial,sans-serif;font-size:13px;box-shadow:0 2px 8px rgba(0,0,0,0.3)">
   <div style="display:flex;align-items:center;gap:12px">
     <span style="font-weight:700;letter-spacing:0.05em">Andersen — RFP Document</span>
-    <span style="opacity:0.6;font-size:11px">${((rfp as any).ref_number||'').replace(/</g,'&lt;')}</span>
+    <span style="opacity:0.6;font-size:11px">${refNumber.replace(/</g,'&lt;')}</span>
   </div>
   <div style="display:flex;gap:10px">
-    <button onclick="window.print()" style="background:#FFDB00;color:white;border:none;padding:7px 20px;border-radius:5px;font-size:13px;font-weight:600;cursor:pointer;">&#x2193; Save as PDF / Print</button>
+    <button onclick="window.print()" style="background:#FFDB00;color:#020303;border:none;padding:7px 20px;border-radius:5px;font-size:13px;font-weight:600;cursor:pointer;">&#x2193; Save as PDF / Print</button>
     <button onclick="window.close()" style="background:transparent;color:#ccc;border:1px solid #555;padding:7px 14px;border-radius:5px;font-size:12px;cursor:pointer">Close</button>
   </div>
 </div>
 <div class="no-print" style="height:52px"></div>
-${cleanContent}
-<script>window.addEventListener('load', function() { setTimeout(function() { window.print(); }, 800); });</script>
+<div id="rfp-content"></div>
+<script>
+var md = ${JSON.stringify(markdown)};
+document.getElementById('rfp-content').innerHTML = marked.parse(md);
+window.addEventListener('load', function() { setTimeout(function() { window.print(); }, 1200); });
+<\/script>
 </body>
 </html>`
 
