@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 import { andersenEmailHtml, andersenPageHtml } from '../brand/letterhead'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-08-15-v81'  // v81: callLLM gets AbortSignal.timeout(25s) — prevents proxy stall hanging waitUntil() forever; cleanOcrText() strips dot-leaders/pipe-noise before LLM phases; extractFocusedSection skips TOC matches
+const WORKER_VERSION = '2026-08-15-v82'  // v82: callLLM total wall-clock timeout (60s) wraps entire fetch+stream loop — v81 only covered TTFB, stream could still hang forever mid-read
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.andersenlab.com.
@@ -4359,73 +4359,86 @@ async function callLLM(systemPrompt: string, userPrompt: string, env: any, model
   const baseUrl = env?.OPENAI_BASE_URL || 'https://www.genspark.ai/api/llm_proxy/v1'
   if (!apiKey) throw new Error('OPENAI_API_KEY not configured')
 
-  // Use streaming to prevent Cloudflare Worker 30s subrequest timeout.
-  // With stream:true the LLM sends SSE chunks every few seconds, keeping the
-  // connection alive. We collect all chunks and return the assembled text.
-  // AbortSignal.timeout(25000): if the proxy stalls (accepts the TCP connection
-  // but never sends a response byte), this throws AbortError after 25 s so the
-  // extractionTask catch block can write ai_extraction_status='error' instead of
-  // hanging inside waitUntil() until Cloudflare kills the Worker (exceededResources).
-  const res = await fetch(`${baseUrl}/chat/completions`, {
-    method: 'POST',
-    signal: AbortSignal.timeout(25000),
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ],
-      max_tokens: maxTokens,
-      temperature: 0.3,
-      stream: true,
-    }),
-  })
-  if (!res.ok) {
-    const errText = await res.text().catch(() => 'unknown error')
-    throw new Error(`LLM API error ${res.status}: ${errText}`)
-  }
-  if (!res.body) throw new Error('LLM returned no response body')
+  // Total wall-clock timeout wrapping the entire fetch + stream-read loop.
+  // v81 used AbortSignal.timeout(25s) only on fetch() — that only guards against
+  // the proxy never sending HTTP headers (TTFB=0 stall). It does NOT guard against
+  // the proxy sending HTTP 200 headers immediately but then going silent mid-stream
+  // (stream stall after first bytes). In that case AbortSignal has already been
+  // consumed by fetch() and reader.read() blocks forever.
+  // Fix: a single AbortController drives both fetch() and reader.read().
+  // A 60s setTimeout fires the abort — covers the full fetch+stream lifecycle.
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(new Error('callLLM: 60s total timeout')), 60000)
 
-  // Read SSE stream and collect delta content chunks
-  const reader = res.body.getReader()
-  const decoder = new TextDecoder()
-  let fullContent = ''
-  let buffer = ''
+  try {
+    // Use streaming to prevent Cloudflare Worker 30s subrequest timeout.
+    // With stream:true the LLM sends SSE chunks every few seconds, keeping the
+    // connection alive. We collect all chunks and return the assembled text.
+    const res = await fetch(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        max_tokens: maxTokens,
+        temperature: 0.3,
+        stream: true,
+      }),
+    })
+    if (!res.ok) {
+      const errText = await res.text().catch(() => 'unknown error')
+      throw new Error(`LLM API error ${res.status}: ${errText}`)
+    }
+    if (!res.body) throw new Error('LLM returned no response body')
 
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
-    // Process complete SSE lines
-    const lines = buffer.split('\n')
-    buffer = lines.pop() ?? '' // keep incomplete last line in buffer
-    for (const line of lines) {
-      const trimmed = line.trim()
-      if (!trimmed || trimmed === 'data: [DONE]') continue
-      if (!trimmed.startsWith('data: ')) continue
-      try {
-        const json = JSON.parse(trimmed.slice(6))
-        const delta = json.choices?.[0]?.delta?.content
-        if (delta) fullContent += delta
-      } catch {
-        // skip malformed SSE lines
+    // Read SSE stream and collect delta content chunks.
+    // reader.read() is implicitly aborted when controller.abort() fires because
+    // the ReadableStream is bound to the fetch response whose signal is the controller.
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let fullContent = ''
+    let buffer = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      // Process complete SSE lines
+      const lines = buffer.split('\n')
+      buffer = lines.pop() ?? '' // keep incomplete last line in buffer
+      for (const line of lines) {
+        const trimmed = line.trim()
+        if (!trimmed || trimmed === 'data: [DONE]') continue
+        if (!trimmed.startsWith('data: ')) continue
+        try {
+          const json = JSON.parse(trimmed.slice(6))
+          const delta = json.choices?.[0]?.delta?.content
+          if (delta) fullContent += delta
+        } catch {
+          // skip malformed SSE lines
+        }
       }
     }
-  }
-  // Flush any remaining buffer
-  if (buffer.trim().startsWith('data: ') && buffer.trim() !== 'data: [DONE]') {
-    try {
-      const json = JSON.parse(buffer.trim().slice(6))
-      const delta = json.choices?.[0]?.delta?.content
-      if (delta) fullContent += delta
-    } catch { /* ignore */ }
-  }
+    // Flush any remaining buffer
+    if (buffer.trim().startsWith('data: ') && buffer.trim() !== 'data: [DONE]') {
+      try {
+        const json = JSON.parse(buffer.trim().slice(6))
+        const delta = json.choices?.[0]?.delta?.content
+        if (delta) fullContent += delta
+      } catch { /* ignore */ }
+    }
 
-  return fullContent
+    return fullContent
+  } finally {
+    clearTimeout(timeoutId)
+  }
 }
 
 // buildRFPPrompt — pure function, returns {systemPrompt, userPrompt} without calling the LLM.
