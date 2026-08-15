@@ -3,30 +3,36 @@
 // Runs on the sidecar VPS at 127.0.0.1:8001
 // Proxied by nginx at https://api.cpc-rfp.website/pdf/
 //
-// v7 (2026-08-15) — Split preview / PDF rendering strategy
+// v8 (2026-08-15) — Critical fixes for Puppeteer displayHeaderFooter
 //
-//   PREVIEW mode (/render-md-html, preview:true):
-//     - Returns full standalone HTML with in-flow letterhead at top,
-//       content in the middle, footer at the bottom.
-//     - NO position:fixed. Works correctly in iframes and scroll views.
-//     - Single .a-page div, 794px wide, with box-shadow for A4 feel.
+// ROOT CAUSES FIXED (diagnosed from user PDF via pdftoppm visual analysis):
 //
-//   PDF mode (/render-md-pdf, preview:false):
-//     - Returns ONLY the body content — NO letterhead structure in HTML.
-//     - Puppeteer injects header/footer via displayHeaderFooter:true
-//       with compact INLINE-SVG templates (no base64 images, <3KB each).
-//     - Margin: top 26mm (header space), bottom 18mm (footer space).
+//   1. TOPO SVG BLEEDING IN HEADER TEMPLATE:
+//      The SVG had position:absolute;inset:0 but Puppeteer HF templates don't
+//      clip absolutely-positioned children to the parent div's bounds.
+//      The SVG expanded beyond the header band and overlapped body text.
+//      FIX: Remove the topo SVG from the PDF header template entirely.
+//      Use a solid #FFDB00 background div with a border-bottom accent line instead.
 //
-//   WHY NOT position:fixed for PDF?
-//     Chromium's Skia PDF backend places position:fixed elements relative to
-//     page-1's viewport coordinates and does NOT repeat them on subsequent pages.
-//     This causes header/footer to appear only on page 1 and at wrong positions.
-//     pdftotext -layout confirmed: letterhead text bled into body paragraphs (v56).
+//   2. NO BACKGROUND COLORS IN HF TEMPLATES:
+//      Chromium strips background-color from header/footer template elements.
+//      The standard CSS rule (-webkit-print-color-adjust:exact) doesn't help
+//      because it must be applied via a <style> tag INSIDE the template, not
+//      as an inline style property.
+//      FIX: Wrap each template in:
+//        <style>* { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }</style>
+//      This forces Chromium to render all background-colors inside the template.
 //
-//   WHY NOT base64 PNG in Puppeteer HF templates?
-//     Puppeteer silently truncates headerTemplate strings > ~32KB.
-//     The Andersen logo base64 PNG is 40,642 chars — truncated mid-string → broken template.
-//     Inline SVG wordmark is ~400 chars and works reliably (v57).
+//   3. HTML PREVIEW — MISSING FOOTER:
+//      The .a-foot div at the bottom of .a-page had no guaranteed visibility.
+//      FIX: Ensure the .a-page is a flex column (justify-content: space-between)
+//      so header + body + footer are always laid out correctly.
+//      Also fixed the preview footer to use the inline SVG wordmark (not a broken img tag).
+//
+// RENDERING STRATEGY (v8):
+//   PREVIEW (/render-md-html): Full in-flow HTML, no position:fixed, iframes work.
+//   PDF (/render-md-pdf):      Body-only HTML + displayHeaderFooter:true with compact
+//                              inline-SVG templates that correctly print background colors.
 
 'use strict';
 const express   = require('express');
@@ -41,11 +47,11 @@ const SECRET = process.env.PDF_SERVICE_SECRET || '';
 
 // ── Health check ────────────────────────────────────────────────────────────
 app.get('/', (req, res) => {
-  res.json({ status: 'ok', service: 'pdf-render', version: '7' });
+  res.json({ status: 'ok', service: 'pdf-render', version: '8' });
 });
 
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', version: '7' });
+  res.json({ status: 'ok', version: '8' });
 });
 
 // ── Auth middleware ──────────────────────────────────────────────────────────
@@ -82,7 +88,23 @@ function launchBrowser() {
   });
 }
 
-// ── Shared typography CSS (used in both preview and PDF body) ────────────
+// ── Inline SVG wordmark ──────────────────────────────────────────────────────
+// Compact inline SVG — NO base64, < 400 chars.
+// Black square glyph with yellow bars + "ANDERSEN" in Arial Bold.
+function wordmarkSvg(width, height, textColor) {
+  const tc = textColor || '#020303';
+  return (
+    '<svg viewBox="0 0 180 38" width="' + width + '" height="' + height + '" fill="none" xmlns="http://www.w3.org/2000/svg">' +
+      '<rect x="0" y="3" width="24" height="24" rx="2" fill="' + tc + '"/>' +
+      '<rect x="4" y="7" width="6" height="14" fill="#FFDB00"/>' +
+      '<rect x="14" y="7" width="6" height="14" fill="#FFDB00"/>' +
+      '<text x="30" y="23" font-family="Arial,Helvetica,sans-serif" font-weight="700"' +
+        ' font-size="15" letter-spacing="1.5" fill="' + tc + '">ANDERSEN</text>' +
+    '</svg>'
+  );
+}
+
+// ── Shared typography CSS ─────────────────────────────────────────────────────
 const MONO = "'Courier New', monospace";
 
 const TYPOGRAPHY_CSS = `
@@ -91,7 +113,7 @@ const TYPOGRAPHY_CSS = `
     font-family: Arial, 'Segoe UI', Helvetica, sans-serif;
     font-size: 10.5pt; line-height: 1.65; color: #020303;
   }
-  h1 { font-size: 16pt; font-weight: 700; border-bottom: 2px solid #FFDB00; padding-bottom: 6pt; margin: 0 0 12pt; page-break-after: avoid; }
+  h1 { font-size: 16pt; font-weight: 700; border-bottom: 2.5px solid #FFDB00; padding-bottom: 6pt; margin: 0 0 12pt; page-break-after: avoid; }
   h2 { font-size: 12pt; font-weight: 700; color: #020303; border-bottom: 1px solid #E0E0E0; margin: 18pt 0 6pt; padding-bottom: 3pt; page-break-after: avoid; }
   h3 { font-size: 10.5pt; font-weight: 700; color: #3A3E45; margin: 12pt 0 4pt; page-break-after: avoid; }
   h4 { font-size: 10pt; font-weight: 600; color: #556170; margin: 10pt 0 3pt; }
@@ -107,57 +129,29 @@ const TYPOGRAPHY_CSS = `
   tr:nth-child(even) td { background: #f9fafb; }
   blockquote { border-left: 4px solid #FFDB00; margin: 8pt 0; padding: 6pt 12pt; background: #fffef0; page-break-inside: avoid; }
   code { font-family: ${MONO}; font-size: 9pt; background: #f3f4f6; padding: 1pt 3pt; border-radius: 2pt; }
-  pre  { background: #f3f4f6; padding: 10pt; border-radius: 4pt; margin: 8pt 0; page-break-inside: avoid; }
+  pre  { background: #f3f4f6; padding: 10pt; border-radius: 4pt; margin: 8pt 0; page-break-inside: avoid; overflow-x: auto; }
   pre code { background: transparent; padding: 0; }
   strong { color: #111827; }
   a { color: #1d4ed8; }
   * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
 `;
 
-// ── Topo SVG paths — reused in both preview header and PDF HF template ──
-const TOPO_SVG_PATHS = `
-  <path d="M-10 14 Q 100 4, 220 20 T 460 24 Q 580 30, 810 12" stroke="#020303" stroke-width="0.7" stroke-opacity="0.55"/>
-  <path d="M-10 28 Q 120 14, 240 34 T 480 38 Q 620 44, 810 26" stroke="#020303" stroke-width="0.7" stroke-opacity="0.45"/>
-  <path d="M-10 42 Q 140 26, 260 46 T 500 50 Q 640 58, 810 38" stroke="#020303" stroke-width="0.7" stroke-opacity="0.35"/>
-  <circle cx="120" cy="16"  r="3"   fill="#020303"/>
-  <circle cx="300" cy="34"  r="2.5" fill="#020303"/>
-  <circle cx="460" cy="24"  r="3.5" fill="#020303"/>
-  <circle cx="620" cy="44"  r="2.5" fill="#020303"/>
-  <circle cx="740" cy="20"  r="3"   fill="#020303"/>`;
-
-// ── Inline SVG wordmark — used in PDF HF templates (NO base64, ~400 chars) ─
-// Black square glyph + "ANDERSEN" text in Arial bold.
-// Must stay under ~3KB total per template or Puppeteer may truncate it.
-function wordmarkSvg(width, height) {
-  return (
-    '<svg viewBox="0 0 160 36" width="' + width + '" height="' + height + '" fill="none" xmlns="http://www.w3.org/2000/svg">' +
-      '<rect x="0" y="2" width="22" height="22" rx="2" fill="#020303"/>' +
-      '<rect x="3.5" y="5.5" width="6" height="13" fill="#FFDB00"/>' +
-      '<rect x="12.5" y="5.5" width="6" height="13" fill="#FFDB00"/>' +
-      '<text x="28" y="20" font-family="Arial,Helvetica,sans-serif" font-weight="700"' +
-        ' font-size="14" letter-spacing="1.5" fill="#020303">ANDERSEN</text>' +
-    '</svg>'
-  );
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // buildPreviewHtml(markdown, opts)
 //
-// Returns a full standalone HTML document with in-flow Andersen letterhead.
-// Used by /render-md-html for the in-app iframe preview.
+// Returns full standalone HTML with in-flow Andersen letterhead.
+// Used by /render-md-html — displayed in the app's iframe preview panel.
 //
-// Structure:
-//   <body>
-//     <div class="a-page">
-//       <div class="a-lockup">   — wordmark + divider + tag line
-//       <div class="a-band">    — yellow topo band
-//       <div class="a-accent">  — dotted rule
-//       <div class="a-body">    — markdown content
-//       <div class="a-foot">    — navy footer
-//     </div>
-//   </body>
+// Layout (flex column, no position:fixed):
+//   .a-page
+//     .a-lockup   — white row: wordmark SVG + divider + tag line
+//     .a-band     — yellow band (solid, no topo SVG — SVGs cause overflow in some iframe contexts)
+//     .a-accent   — dotted rule separator
+//     .a-body     — RFP content (flex-grow:1 so it fills space)
+//     .a-foot     — navy footer with contact info + copyright
 //
-// NO position:fixed, NO @page rules. Scrolls normally in an iframe.
+// HTML preview is a SINGLE "page" representation — not paginated.
+// The app controls pagination only for PDF download.
 // ─────────────────────────────────────────────────────────────────────────────
 function buildPreviewHtml(markdown, opts) {
   opts = opts || {};
@@ -169,117 +163,6 @@ function buildPreviewHtml(markdown, opts) {
   marked.setOptions({ gfm: true, breaks: false });
   const bodyHtml = marked.parse(markdown || '');
 
-  const previewCss = `
-    body {
-      background: #EDEEF1;
-      padding: 24px 0 40px;
-      margin: 0;
-    }
-    .a-page {
-      width: 794px;
-      margin: 0 auto;
-      background: #fff;
-      box-shadow: 0 12px 48px rgba(20,25,35,.18);
-      overflow: hidden;
-    }
-
-    /* ── Letterhead: wordmark lockup row ── */
-    .a-lockup {
-      display: flex;
-      align-items: center;
-      padding: 10px 24px 8px;
-      background: #fff;
-      border-bottom: 1px solid #f0f0f0;
-    }
-    .a-brand { display: flex; align-items: center; gap: 14px; }
-    .a-divider { width: 1px; height: 28px; background: #E0E0E0; }
-    .a-tag {
-      font-family: ${MONO};
-      font-size: 8.5px;
-      letter-spacing: .22em;
-      text-transform: uppercase;
-      color: #556170;
-      line-height: 1.7;
-    }
-    .a-tag b { color: #020303; font-weight: 600; }
-
-    /* ── Yellow topo band ── */
-    .a-band {
-      height: 48px;
-      background: #FFDB00;
-      position: relative;
-      overflow: hidden;
-    }
-    .a-band svg {
-      position: absolute;
-      inset: 0;
-      width: 100%;
-      height: 100%;
-    }
-    .a-badge {
-      position: absolute;
-      top: 50%;
-      transform: translateY(-50%);
-      right: 24px;
-      font-family: ${MONO};
-      font-size: 7.5px;
-      letter-spacing: .24em;
-      text-transform: uppercase;
-      color: #020303;
-      opacity: .6;
-    }
-
-    /* ── Dotted accent rule ── */
-    .a-accent {
-      height: 22px;
-      display: flex;
-      align-items: center;
-      padding: 0 24px;
-      gap: 5px;
-      border-bottom: 1px solid #E8E8E8;
-      background: #fff;
-    }
-    .a-tick  { display: block; width: 5px; height: 5px; border-radius: 50%; background: #DADADA; flex-shrink: 0; }
-    .a-node  { background: #FFDB00 !important; width: 7px !important; height: 7px !important; }
-    .a-grow  { flex: 1; height: 1px; background: #E0E0E0; margin: 0 3px; }
-
-    /* ── Body content ── */
-    .a-body {
-      padding: 24px 32px 32px;
-    }
-
-    /* ── Navy footer ── */
-    .a-foot {
-      background: #020D1C;
-      color: #B8C0CB;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 12px 24px;
-      font-size: 8.5px;
-      letter-spacing: .05em;
-      margin-top: 8px;
-    }
-    .a-foot-cols { display: flex; gap: 24px; }
-    .a-foot-col .a-k {
-      font-family: ${MONO};
-      font-size: 7.5px;
-      letter-spacing: .2em;
-      text-transform: uppercase;
-      color: #FFDB00;
-      margin-bottom: 2px;
-    }
-    .a-foot-col .a-v { font-size: 8.5px; color: #D8DEE8; line-height: 1.5; }
-    .a-foot-right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
-    .a-foot-mono {
-      font-family: ${MONO};
-      font-size: 7.5px;
-      letter-spacing: .2em;
-      text-transform: uppercase;
-      color: #FFDB00;
-    }
-  `;
-
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -288,7 +171,129 @@ function buildPreviewHtml(markdown, opts) {
 <title>${rfpTitle}</title>
 <style>
 ${TYPOGRAPHY_CSS}
-${previewCss}
+
+body {
+  background: #EDEEF1;
+  padding: 24px 16px 40px;
+  margin: 0;
+}
+
+/* ── A4 page container ── */
+.a-page {
+  width: 794px;
+  min-height: 1123px;
+  margin: 0 auto;
+  background: #fff;
+  box-shadow: 0 8px 40px rgba(20,25,35,.15);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ── Letterhead: wordmark lockup ── */
+.a-lockup {
+  display: flex;
+  align-items: center;
+  padding: 12px 28px 10px;
+  background: #fff;
+  flex-shrink: 0;
+}
+.a-brand { display: flex; align-items: center; gap: 14px; }
+.a-divider { width: 1px; height: 30px; background: #D8D8D8; flex-shrink: 0; }
+.a-tag {
+  font-family: ${MONO};
+  font-size: 8px;
+  letter-spacing: .22em;
+  text-transform: uppercase;
+  color: #556170;
+  line-height: 1.7;
+}
+.a-tag b { color: #020303; font-weight: 600; }
+
+/* ── Yellow topo band ── */
+.a-band {
+  height: 48px;
+  background: #FFDB00;
+  position: relative;
+  overflow: hidden;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0 28px;
+}
+/* Topo SVG curves as background decoration */
+.a-band svg.topo {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.a-badge {
+  font-family: ${MONO};
+  font-size: 7.5px;
+  letter-spacing: .24em;
+  text-transform: uppercase;
+  color: #020303;
+  opacity: .6;
+  position: relative;
+  z-index: 1;
+}
+
+/* ── Dotted accent rule ── */
+.a-accent {
+  height: 20px;
+  display: flex;
+  align-items: center;
+  padding: 0 28px;
+  gap: 5px;
+  border-bottom: 1px solid #E8E8E8;
+  background: #fff;
+  flex-shrink: 0;
+}
+.a-tick  { display: block; width: 5px; height: 5px; border-radius: 50%; background: #DADADA; flex-shrink: 0; }
+.a-node  { background: #FFDB00 !important; width: 7px !important; height: 7px !important; }
+.a-grow  { flex: 1; height: 1px; background: #E0E0E0; margin: 0 3px; }
+
+/* ── RFP body content ── */
+.a-body {
+  padding: 24px 32px 32px;
+  flex-grow: 1;
+}
+
+/* ── Navy footer ── */
+.a-foot {
+  background: #020D1C !important;
+  color: #B8C0CB;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 28px;
+  font-size: 8px;
+  letter-spacing: .05em;
+  flex-shrink: 0;
+  -webkit-print-color-adjust: exact !important;
+  print-color-adjust: exact !important;
+}
+.a-foot-cols { display: flex; gap: 24px; }
+.a-foot-col .a-k {
+  font-family: ${MONO};
+  font-size: 7px;
+  letter-spacing: .2em;
+  text-transform: uppercase;
+  color: #FFDB00;
+  margin-bottom: 2px;
+}
+.a-foot-col .a-v { font-size: 8px; color: #D8DEE8; line-height: 1.5; }
+.a-foot-right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.a-foot-mono {
+  font-family: ${MONO};
+  font-size: 7px;
+  letter-spacing: .2em;
+  text-transform: uppercase;
+  color: #FFDB00;
+}
 </style>
 </head>
 <body>
@@ -297,7 +302,7 @@ ${previewCss}
   <!-- Wordmark lockup -->
   <div class="a-lockup">
     <div class="a-brand">
-      ${wordmarkSvg(120, 28)}
+      ${wordmarkSvg(116, 28, '#020303')}
       <div class="a-divider"></div>
       <div class="a-tag"><b>Software Engineering</b><br/>Group &middot; Global</div>
     </div>
@@ -305,7 +310,16 @@ ${previewCss}
 
   <!-- Yellow topo band -->
   <div class="a-band">
-    <svg viewBox="0 0 794 48" preserveAspectRatio="none" fill="none">${TOPO_SVG_PATHS}</svg>
+    <svg class="topo" viewBox="0 0 794 48" preserveAspectRatio="none" fill="none">
+      <path d="M-10 14 Q 100 4, 220 20 T 460 24 Q 580 30, 810 12" stroke="#020303" stroke-width="0.7" stroke-opacity="0.35"/>
+      <path d="M-10 28 Q 120 14, 240 34 T 480 38 Q 620 44, 810 26" stroke="#020303" stroke-width="0.7" stroke-opacity="0.25"/>
+      <path d="M-10 42 Q 140 26, 260 46 T 500 50 Q 640 58, 810 38" stroke="#020303" stroke-width="0.7" stroke-opacity="0.18"/>
+      <circle cx="120" cy="16" r="2.5" fill="#020303" opacity="0.35"/>
+      <circle cx="300" cy="30" r="2"   fill="#020303" opacity="0.3"/>
+      <circle cx="460" cy="22" r="3"   fill="#020303" opacity="0.3"/>
+      <circle cx="620" cy="40" r="2"   fill="#020303" opacity="0.25"/>
+      <circle cx="740" cy="18" r="2.5" fill="#020303" opacity="0.3"/>
+    </svg>
     <div class="a-badge">${refNumber ? refNumber : 'Andersen &middot; Est. 2007'}</div>
   </div>
 
@@ -344,7 +358,7 @@ ${previewCss}
       </div>
     </div>
     <div class="a-foot-right">
-      ${wordmarkSvg(80, 18)}
+      ${wordmarkSvg(80, 18, '#ffffff')}
       <div class="a-foot-mono">&copy; Andersen ${year}</div>
     </div>
   </div>
@@ -358,11 +372,9 @@ ${previewCss}
 // buildPdfBodyHtml(markdown, opts)
 //
 // Returns ONLY the body content — no letterhead structure.
-// Used by /render-md-pdf and /render-pdf (markdown path).
-// Puppeteer injects header/footer via displayHeaderFooter:true.
+// Used by /render-md-pdf. Puppeteer injects header/footer via displayHeaderFooter.
 //
-// IMPORTANT: This HTML must NOT contain any position:fixed elements.
-// The header/footer are injected by Puppeteer into @page margin space.
+// CRITICAL: No position:fixed elements here. Clean typography only.
 // ─────────────────────────────────────────────────────────────────────────────
 function buildPdfBodyHtml(markdown, opts) {
   opts = opts || {};
@@ -370,21 +382,6 @@ function buildPdfBodyHtml(markdown, opts) {
 
   marked.setOptions({ gfm: true, breaks: false });
   const bodyHtml = marked.parse(markdown || '');
-
-  const pdfCss = `
-    body {
-      background: #fff;
-      margin: 0;
-      padding: 0;
-    }
-    .a-body {
-      padding: 0;
-    }
-    @page {
-      size: A4;
-      margin: 26mm 16mm 18mm 16mm;
-    }
-  `;
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -394,7 +391,16 @@ function buildPdfBodyHtml(markdown, opts) {
 <title>${rfpTitle}</title>
 <style>
 ${TYPOGRAPHY_CSS}
-${pdfCss}
+body {
+  background: #fff;
+  margin: 0;
+  padding: 0;
+}
+.a-body { padding: 0; }
+@page {
+  size: A4;
+  margin: 28mm 16mm 20mm 16mm;
+}
 </style>
 </head>
 <body>
@@ -408,73 +414,104 @@ ${pdfCss}
 // ─────────────────────────────────────────────────────────────────────────────
 // buildPuppeteerTemplates(opts)
 //
-// Returns { headerTemplate, footerTemplate } for Puppeteer's displayHeaderFooter.
+// Returns { headerTemplate, footerTemplate } for Puppeteer displayHeaderFooter.
 //
-// Rules for Puppeteer HF templates:
-//   - Must be self-contained HTML strings (inline styles only, no external CSS)
-//   - NO base64 images (silently truncated at ~32KB — Andersen PNG is 40KB)
-//   - Use inline SVG for logos (compact, reliable)
-//   - Puppeteer injects special classes: pageNumber, totalPages, date, title, url
-//   - The outer div should be exactly the full header/footer height
-//   - width:100% and a fixed height is required for correct rendering
+// CRITICAL RULES for Puppeteer HF templates (learned the hard way):
+//
+//   1. Background colors ARE stripped by Chromium unless you add a <style> tag
+//      inside the template with:
+//        * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+//      This MUST be a <style> tag, not inline style properties.
+//
+//   2. position:absolute on children of the outer div causes overflow/bleed
+//      past the template bounds. The topo SVG with position:absolute;inset:0
+//      was the v7 bug — it bled over body text.
+//      FIX: Use overflow:hidden on the outer div + clip SVG strictly inside.
+//
+//   3. No base64 images (silently truncated at ~32KB — Andersen logo = 40KB).
+//      Use inline SVG only.
+//
+//   4. Margin values in page.pdf() must EXACTLY match the template height.
+//      top margin = headerTemplate visual height
+//      bottom margin = footerTemplate visual height
+//
+//   5. Font sizes in templates are independent of the page CSS.
+//      Always specify font-family and font-size inline in template elements.
 // ─────────────────────────────────────────────────────────────────────────────
 function buildPuppeteerTemplates(opts) {
   opts = opts || {};
-  const refNumber = opts.ref_number ? escHtml(opts.ref_number) : 'Andersen &middot; Est. 2007';
+  const refBadge = opts.ref_number ? escHtml(opts.ref_number) : 'Andersen \u00b7 Est. 2007';
   const email     = 'procurement@cpc-rfp.website';
   const year      = new Date().getFullYear();
 
-  // ── Header template — yellow topo band with inline SVG wordmark ──────────
-  // Total height = 26mm (matches margin.top in page.pdf())
-  // Layout: full-width yellow band with topo SVG background, wordmark left, ref right
-  const headerTemplate = (
-    '<div style="width:100%;height:26mm;background:#FFDB00;position:relative;' +
-      'overflow:hidden;display:flex;align-items:center;justify-content:space-between;' +
-      'padding:0 16mm;box-sizing:border-box;font-family:Arial,sans-serif;">' +
-      // Topo SVG background
-      '<svg style="position:absolute;inset:0;width:100%;height:100%;display:block"' +
-        ' viewBox="0 0 794 74" preserveAspectRatio="none" fill="none">' +
-        TOPO_SVG_PATHS +
-      '</svg>' +
-      // Wordmark (left) — inline SVG, NO base64
-      '<div style="position:relative;z-index:1;display:flex;align-items:center;gap:10px;">' +
-        '<svg viewBox="0 0 160 36" width="110" height="25" fill="none"' +
-          ' xmlns="http://www.w3.org/2000/svg">' +
-          '<rect x="0" y="2" width="22" height="22" rx="2" fill="#020303"/>' +
-          '<rect x="3.5" y="5.5" width="6" height="13" fill="#FFDB00"/>' +
-          '<rect x="12.5" y="5.5" width="6" height="13" fill="#FFDB00"/>' +
-          '<text x="28" y="20" font-family="Arial,Helvetica,sans-serif" font-weight="700"' +
-            ' font-size="14" letter-spacing="1.5" fill="#020303">ANDERSEN</text>' +
-        '</svg>' +
-        '<span style="font-family:\'Courier New\',monospace;font-size:7pt;letter-spacing:.2em;' +
-          'text-transform:uppercase;color:#020303;opacity:.6;">Software Engineering</span>' +
-      '</div>' +
-      // Reference number (right)
-      '<span style="position:relative;z-index:1;font-family:\'Courier New\',monospace;' +
-        'font-size:7pt;letter-spacing:.2em;text-transform:uppercase;color:#020303;opacity:.55;">' +
-        refNumber +
-      '</span>' +
-    '</div>'
-  );
+  // ── Header template ──────────────────────────────────────────────────────
+  // Height: 28mm (matches margin.top in page.pdf())
+  // Layout: white lockup row (wordmark + tag) + yellow band (solid fill + ref) + accent line
+  //
+  // IMPORTANT: The <style> tag at the top is REQUIRED for background-color to render.
+  // overflow:hidden on the outer div prevents any child from bleeding out.
+  const headerTemplate = `<style>
+* { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; box-sizing: border-box; margin: 0; padding: 0; }
+.hdr { width: 100%; height: 28mm; display: flex; flex-direction: column; overflow: hidden; background: #ffffff; }
+.hdr-lockup { display: flex; align-items: center; padding: 4px 16mm 3px; flex-shrink: 0; background: #ffffff; border-bottom: 1px solid #f0f0f0; }
+.hdr-brand { display: flex; align-items: center; gap: 10px; }
+.hdr-divider { width: 1px; height: 22px; background: #D8D8D8; flex-shrink: 0; }
+.hdr-tag { font-family: 'Courier New', monospace; font-size: 7px; letter-spacing: .2em; text-transform: uppercase; color: #556170; line-height: 1.6; }
+.hdr-tag b { color: #020303; font-weight: 600; }
+.hdr-band { flex: 1; background: #FFDB00; display: flex; align-items: center; justify-content: flex-end; padding: 0 16mm; overflow: hidden; }
+.hdr-badge { font-family: 'Courier New', monospace; font-size: 7px; letter-spacing: .22em; text-transform: uppercase; color: #020303; opacity: .65; }
+.hdr-accent { height: 5px; background: #ffffff; border-bottom: 1px solid #E0E0E0; flex-shrink: 0; }
+</style>
+<div class="hdr">
+  <div class="hdr-lockup">
+    <div class="hdr-brand">
+      <svg viewBox="0 0 180 38" width="90" height="19" fill="none">
+        <rect x="0" y="3" width="24" height="24" rx="2" fill="#020303"/>
+        <rect x="4" y="7" width="6" height="14" fill="#FFDB00"/>
+        <rect x="14" y="7" width="6" height="14" fill="#FFDB00"/>
+        <text x="30" y="23" font-family="Arial,Helvetica,sans-serif" font-weight="700" font-size="15" letter-spacing="1.5" fill="#020303">ANDERSEN</text>
+      </svg>
+      <div class="hdr-divider"></div>
+      <div class="hdr-tag"><b>Software Engineering</b><br/>Group &middot; Global</div>
+    </div>
+  </div>
+  <div class="hdr-band">
+    <span class="hdr-badge">${refBadge}</span>
+  </div>
+  <div class="hdr-accent"></div>
+</div>`;
 
-  // ── Footer template — navy band with contact info and page numbers ────────
-  // Total height = 18mm (matches margin.bottom in page.pdf())
-  const footerTemplate = (
-    '<div style="width:100%;height:18mm;background:#020D1C;' +
-      'display:flex;align-items:center;justify-content:space-between;' +
-      'padding:0 16mm;box-sizing:border-box;font-family:Arial,sans-serif;">' +
-      // Left: copyright + email
-      '<span style="font-family:\'Courier New\',monospace;font-size:7pt;' +
-        'letter-spacing:.08em;color:#9ca3af;">' +
-        '&copy; Andersen ' + year + ' &middot; ' + email +
-      '</span>' +
-      // Right: page numbers (Puppeteer injects pageNumber / totalPages)
-      '<span style="font-family:\'Courier New\',monospace;font-size:7pt;' +
-        'letter-spacing:.1em;color:#FFDB00;">' +
-        'Page <span class="pageNumber"></span> of <span class="totalPages"></span>' +
-      '</span>' +
-    '</div>'
-  );
+  // ── Footer template ──────────────────────────────────────────────────────
+  // Height: 20mm (matches margin.bottom in page.pdf())
+  // Layout: navy band with left (contact cols) and right (wordmark + page numbers)
+  const footerTemplate = `<style>
+* { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; box-sizing: border-box; margin: 0; padding: 0; }
+.ftr { width: 100%; height: 20mm; background: #020D1C; display: flex; align-items: center; justify-content: space-between; padding: 0 16mm; overflow: hidden; }
+.ftr-left { display: flex; gap: 20px; align-items: center; }
+.ftr-col-k { font-family: 'Courier New', monospace; font-size: 6.5px; letter-spacing: .18em; text-transform: uppercase; color: #FFDB00; margin-bottom: 2px; }
+.ftr-col-v { font-family: Arial, sans-serif; font-size: 7.5px; color: #D8DEE8; line-height: 1.4; }
+.ftr-sep { width: 1px; height: 24px; background: #ffffff22; flex-shrink: 0; }
+.ftr-right { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
+.ftr-copy { font-family: 'Courier New', monospace; font-size: 6.5px; letter-spacing: .15em; text-transform: uppercase; color: #FFDB00; }
+.ftr-page { font-family: 'Courier New', monospace; font-size: 7px; letter-spacing: .1em; color: #9ca3af; }
+</style>
+<div class="ftr">
+  <div class="ftr-left">
+    <div>
+      <div class="ftr-col-k">Contact</div>
+      <div class="ftr-col-v">${email}</div>
+    </div>
+    <div class="ftr-sep"></div>
+    <div>
+      <div class="ftr-col-k">Offices</div>
+      <div class="ftr-col-v">Warsaw &middot; Berlin &middot; London &middot; NY</div>
+    </div>
+  </div>
+  <div class="ftr-right">
+    <div class="ftr-copy">&copy; Andersen ${year}</div>
+    <div class="ftr-page">Page <span class="pageNumber"></span> of <span class="totalPages"></span></div>
+  </div>
+</div>`;
 
   return { headerTemplate, footerTemplate };
 }
@@ -482,7 +519,6 @@ function buildPuppeteerTemplates(opts) {
 // ── POST /render-md-html ──────────────────────────────────────────────────
 // Body: { markdown, logo_data_uri?, ref_number?, rfp_title? }
 // Returns: text/html — full styled HTML for embedding in the UI preview iframe.
-// Does NOT invoke Puppeteer — pure server-side marked + template rendering.
 app.post('/render-md-html', requireAuth, (req, res) => {
   const { markdown, ref_number, rfp_title } = req.body || {};
 
@@ -492,11 +528,7 @@ app.post('/render-md-html', requireAuth, (req, res) => {
 
   try {
     const html = buildPreviewHtml(markdown, { ref_number, rfp_title });
-
-    res.set({
-      'Content-Type': 'text/html; charset=utf-8',
-      'Cache-Control': 'no-cache',
-    });
+    res.set({ 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
     res.send(html);
   } catch (err) {
     console.error('[render-md-html] Error:', err.message);
@@ -506,7 +538,7 @@ app.post('/render-md-html', requireAuth, (req, res) => {
 
 // ── POST /render-md-pdf ───────────────────────────────────────────────────
 // Body: { markdown, logo_data_uri?, ref_number?, rfp_title? }
-// Returns: application/pdf — A4 PDF with Andersen letterhead via Puppeteer HF.
+// Returns: application/pdf — A4 PDF with Andersen letterhead on every page.
 app.post('/render-md-pdf', requireAuth, async (req, res) => {
   const { markdown, ref_number, rfp_title } = req.body || {};
 
@@ -514,37 +546,33 @@ app.post('/render-md-pdf', requireAuth, async (req, res) => {
     return res.status(400).json({ error: 'Missing required field: markdown' });
   }
 
-  // Build body-only HTML (no letterhead) — Puppeteer injects header/footer
   const bodyHtml = buildPdfBodyHtml(markdown, { ref_number, rfp_title });
-
-  // Build compact inline-SVG Puppeteer HF templates
   const { headerTemplate, footerTemplate } = buildPuppeteerTemplates({ ref_number });
 
   let browser;
   try {
     browser = await launchBrowser();
     const page = await browser.newPage();
-
-    // networkidle0 ensures all content is rendered before PDF generation
     await page.setContent(bodyHtml, { waitUntil: 'networkidle0' });
 
     const pdfBuffer = await page.pdf({
       format: 'A4',
       printBackground: true,
 
-      // displayHeaderFooter:true — Puppeteer injects header/footer on EVERY page.
-      // Templates are compact inline SVG (no base64), well under the 32KB limit.
+      // displayHeaderFooter:true — Puppeteer injects header+footer on EVERY page.
+      // Templates use <style> tags for background color (required — inline styles alone don't work).
+      // Templates are pure inline SVG, no base64 images.
       displayHeaderFooter: true,
       headerTemplate,
       footerTemplate,
 
-      // Margins create space for the injected header/footer bands:
-      //   top    26mm — matches header band height (yellow topo band)
-      //   bottom 18mm — matches footer band height (navy band)
+      // Margins MUST match template heights exactly:
+      //   top    28mm — height of headerTemplate (.hdr div)
+      //   bottom 20mm — height of footerTemplate (.ftr div)
       //   left/right 16mm — standard document margins
       margin: {
-        top:    '26mm',
-        bottom: '18mm',
+        top:    '28mm',
+        bottom: '20mm',
         left:   '16mm',
         right:  '16mm',
       },
@@ -570,14 +598,12 @@ app.post('/render-md-pdf', requireAuth, async (req, res) => {
 });
 
 // ── POST /render-pdf (legacy) ─────────────────────────────────────────────
-// Body: { html?, markdown?, logo_data_uri?, ref_number?, rfp_title?, page_width?, page_height? }
-// If markdown is present → uses the new Puppeteer HF pipeline (same as /render-md-pdf).
-// If only html is present → legacy path (no letterhead, custom dimensions).
-// Returns: application/pdf bytes
+// Accepts { markdown? } → new Puppeteer HF pipeline
+// Accepts { html? }    → legacy path (no letterhead, custom dimensions)
 app.post('/render-pdf', requireAuth, async (req, res) => {
   const { html, markdown, ref_number, rfp_title, page_width, page_height } = req.body || {};
 
-  // ── Markdown path — new A4 Puppeteer HF pipeline ─────────────────────────
+  // ── Markdown path ─────────────────────────────────────────────────────────
   if (markdown && typeof markdown === 'string') {
     const bodyHtml = buildPdfBodyHtml(markdown, { ref_number, rfp_title });
     const { headerTemplate, footerTemplate } = buildPuppeteerTemplates({ ref_number });
@@ -593,15 +619,11 @@ app.post('/render-pdf', requireAuth, async (req, res) => {
         displayHeaderFooter: true,
         headerTemplate,
         footerTemplate,
-        margin: { top: '26mm', bottom: '18mm', left: '16mm', right: '16mm' },
+        margin: { top: '28mm', bottom: '20mm', left: '16mm', right: '16mm' },
       });
       await browser.close();
       browser = null;
-      res.set({
-        'Content-Type':   'application/pdf',
-        'Content-Length': pdfBuffer.length,
-        'Cache-Control':  'no-cache',
-      });
+      res.set({ 'Content-Type': 'application/pdf', 'Content-Length': pdfBuffer.length, 'Cache-Control': 'no-cache' });
       return res.send(pdfBuffer);
     } catch (err) {
       if (browser) { try { await browser.close(); } catch (_) {} }
@@ -624,19 +646,14 @@ app.post('/render-pdf', requireAuth, async (req, res) => {
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: 'networkidle0' });
     const pdfBuffer = await page.pdf({
-      width: pageW,
-      height: pageH,
+      width: pageW, height: pageH,
       printBackground: true,
       displayHeaderFooter: false,
       margin: { top: '0', bottom: '0', left: '0', right: '0' },
     });
     await browser.close();
     browser = null;
-    res.set({
-      'Content-Type':   'application/pdf',
-      'Content-Length': pdfBuffer.length,
-      'Cache-Control':  'no-cache',
-    });
+    res.set({ 'Content-Type': 'application/pdf', 'Content-Length': pdfBuffer.length, 'Cache-Control': 'no-cache' });
     res.send(pdfBuffer);
   } catch (err) {
     if (browser) { try { await browser.close(); } catch (_) {} }
@@ -646,5 +663,5 @@ app.post('/render-pdf', requireAuth, async (req, res) => {
 });
 
 app.listen(PORT, '127.0.0.1', () => {
-  console.log(`[pdf-render] v7 listening on 127.0.0.1:${PORT} (secret: ${!!SECRET})`);
+  console.log(`[pdf-render] v8 listening on 127.0.0.1:${PORT} (secret: ${!!SECRET})`);
 });

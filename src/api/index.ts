@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 import { andersenEmailHtml, andersenPageHtml } from '../brand/letterhead'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-08-15-v57'  // v57: split preview/PDF rendering — preview uses in-flow letterhead (no position:fixed), PDF uses Puppeteer displayHeaderFooter:true with compact inline-SVG templates; fixes header/footer inversion on pages 2+ in PDF
+const WORKER_VERSION = '2026-08-15-v58'  // v58: fix PDF HF background colors (add <style> tag inside templates), fix topo SVG overflow (removed from PDF template, contained in preview), fix preview footer missing
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.andersenlab.com.
