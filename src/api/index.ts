@@ -1,10 +1,10 @@
 import { Hono } from 'hono'
 import { initDb, seedVendors } from '../db/seed'
 import type { Bindings } from '../types'
-// emblem-data import removed — email template now uses inline SVG (no external image dependency)
+import { andersenEmailHtml, andersenPageHtml } from '../brand/letterhead'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-08-15-v53'  // v53: PDF via /render-md-pdf (markdown→A4 CSS pagination, Andersen letterhead, no manual height math)
+const WORKER_VERSION = '2026-08-15-v54'  // v54: exact Andersen letterhead (topo band, accent, navy footer) applied to PDF, email, browser-print fallback; brand/letterhead.ts as single source of truth
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.andersenlab.com.
@@ -347,61 +347,30 @@ apiRouter.get('/rfps/:id/pdf', async (c) => {
     }
   }
 
-  // ── Legacy fallback: browser-print HTML page ──────────────────────────────
-  // Used when the sidecar is unreachable. Serves a print-ready HTML page that
-  // the browser can print to PDF via Ctrl+P / window.print().
-  // Content is markdown rendered client-side via marked.js.
-  const printHtml = `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${rfpTitle.replace(/</g,'&lt;')}</title>
+  // ── Legacy fallback: browser-print HTML page with full Andersen letterhead ──
+  // Used when the sidecar is unreachable. Renders markdown client-side via marked.js,
+  // then wraps it in the andersenPageHtml() template (topo band, accent, navy footer).
+  // The user can print to PDF via the toolbar or Ctrl+P.
+  const printHtml = andersenPageHtml({
+    title:       rfpTitle,
+    refNumber,
+    showToolbar: true,
+    // bodyHtml is a placeholder — will be replaced by client-side marked rendering
+    bodyHtml:    `<div id="rfp-content-inner"></div>
 <script src="https://cdn.jsdelivr.net/npm/marked@13/marked.min.js"><\/script>
-<style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: Arial, 'Segoe UI', sans-serif; font-size: 10.5pt; line-height: 1.6; color: #1A1A1A; }
-  #rfp-content { max-width: 800px; margin: 32px auto; padding: 0 24px; }
-  h1 { font-size: 16pt; font-weight: 700; border-bottom: 2px solid #FFDB00; padding-bottom: 6pt; margin: 0 0 12pt; }
-  h2 { font-size: 12pt; font-weight: 700; border-bottom: 1px solid #e5e7eb; margin: 18pt 0 6pt; }
-  h3 { font-size: 10.5pt; font-weight: 700; margin: 12pt 0 4pt; }
-  p  { margin: 0 0 8pt; orphans: 3; widows: 3; }
-  ul, ol { margin: 0 0 8pt; padding-left: 20pt; }
-  li { margin-bottom: 3pt; page-break-inside: avoid; }
-  hr { border: none; border-top: 2px solid #FFDB00; margin: 16pt 0; }
-  table { width: 100%; border-collapse: collapse; font-size: 9.5pt; margin: 8pt 0 12pt; page-break-inside: avoid; }
-  th { background: #020303; color: #FFDB00; font-weight: 700; padding: 6pt 10pt; text-align: left; border: 1px solid #020303; }
-  td { padding: 5pt 10pt; border: 1px solid #d1d5db; vertical-align: top; }
-  tr { page-break-inside: avoid; }
-  tr:nth-child(even) td { background: #f9fafb; }
-  @page { size: A4; margin: 22mm 16mm 18mm 16mm; }
-  @media print {
-    * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-    .no-print { display: none !important; }
-    h2, h3 { page-break-after: avoid; }
-  }
-</style>
-</head>
-<body>
-<div class="no-print" style="position:fixed;top:0;left:0;right:0;z-index:9999;background:#020303;color:white;padding:10px 24px;display:flex;align-items:center;justify-content:space-between;font-family:Arial,sans-serif;font-size:13px;box-shadow:0 2px 8px rgba(0,0,0,0.3)">
-  <div style="display:flex;align-items:center;gap:12px">
-    <span style="font-weight:700;letter-spacing:0.05em">Andersen — RFP Document</span>
-    <span style="opacity:0.6;font-size:11px">${refNumber.replace(/</g,'&lt;')}</span>
-  </div>
-  <div style="display:flex;gap:10px">
-    <button onclick="window.print()" style="background:#FFDB00;color:#020303;border:none;padding:7px 20px;border-radius:5px;font-size:13px;font-weight:600;cursor:pointer;">&#x2193; Save as PDF / Print</button>
-    <button onclick="window.close()" style="background:transparent;color:#ccc;border:1px solid #555;padding:7px 14px;border-radius:5px;font-size:12px;cursor:pointer">Close</button>
-  </div>
-</div>
-<div class="no-print" style="height:52px"></div>
-<div id="rfp-content"></div>
 <script>
-var md = ${JSON.stringify(markdown)};
-document.getElementById('rfp-content').innerHTML = marked.parse(md);
-window.addEventListener('load', function() { setTimeout(function() { window.print(); }, 1200); });
-<\/script>
-</body>
-</html>`
+(function(){
+  var md = ${JSON.stringify(markdown)};
+  document.getElementById('rfp-content-inner').innerHTML = (typeof marked !== 'undefined')
+    ? marked.parse(md)
+    : '<pre style="white-space:pre-wrap;font-size:11pt">' + md.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</pre>';
+  // Auto-print after load (only in direct-link mode, not in preview tab)
+  if (window.location.search.indexOf('autoprint=0') === -1) {
+    window.addEventListener('load', function() { setTimeout(function() { window.print(); }, 1200); });
+  }
+})();
+<\/script>`,
+  })
 
   return new Response(printHtml, {
     status: 200,
@@ -4617,86 +4586,14 @@ SUBMISSION PORTAL:     ${submissionUrl}
 }
 
 /** Build the Andersen-branded HTML email wrapper around plain-text body content.
- *  All three outbound send paths use this helper so the letterhead is consistent. */
-function buildAndersenEmailHtml(bodyText: string): string {
-  const safeBody = bodyText.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-  const bodyHtmlContent = safeBody.replace(/\n/g,'<br>')
-  return `<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>Andersen Procurement</title></head>
-<body style="margin:0;padding:0;background:#F1F1F1;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif">
-<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#F1F1F1;padding:32px 0">
-  <tr><td align="center">
-    <table width="620" cellpadding="0" cellspacing="0" border="0" style="max-width:620px;width:100%">
-
-      <!-- ── Header ── -->
-      <tr>
-        <td style="background:#020D1C;border-radius:12px 12px 0 0;padding:24px 36px">
-          <table width="100%" cellpadding="0" cellspacing="0" border="0">
-            <tr>
-              <td style="padding-right:20px;vertical-align:middle;width:48px">
-                <!-- Andersen geometric diamond mark — inline SVG, no external dependency -->
-                <svg width="44" height="44" viewBox="0 0 44 44" xmlns="http://www.w3.org/2000/svg" style="display:block">
-                  <polygon points="22,2 42,22 22,42 2,22" fill="none" stroke="#FFDB00" stroke-width="2.5"/>
-                  <polygon points="22,9 35,22 22,35 9,22" fill="#FFDB00"/>
-                </svg>
-              </td>
-              <td style="vertical-align:middle">
-                <div style="font-family:Georgia,'Times New Roman',serif;font-size:22px;font-weight:700;color:#FFDB00;letter-spacing:0.04em;line-height:1.15">Andersen</div>
-                <div style="font-family:'Courier New',monospace;font-size:8.5px;font-weight:700;letter-spacing:0.22em;text-transform:uppercase;color:#8fa3bb;margin-top:5px">PROCUREMENT &amp; CONTRACTING</div>
-              </td>
-              <td align="right" style="vertical-align:middle">
-                <div style="font-family:'Courier New',monospace;font-size:8px;color:#FFDB00;letter-spacing:0.14em;text-transform:uppercase;opacity:0.7">Warsaw, Poland</div>
-              </td>
-            </tr>
-          </table>
-        </td>
-      </tr>
-
-      <!-- ── Gold rule ── -->
-      <tr>
-        <td style="background:#FFDB00;height:3px;font-size:0;line-height:0">&nbsp;</td>
-      </tr>
-
-      <!-- ── Body ── -->
-      <tr>
-        <td style="background:#FFFFFF;padding:36px 36px 28px;border-left:1px solid #E0E0E0;border-right:1px solid #E0E0E0">
-          <div style="font-size:14px;line-height:1.75;color:#020303">${bodyHtmlContent}</div>
-        </td>
-      </tr>
-
-      <!-- ── Footer ── -->
-      <tr>
-        <td style="background:#020D1C;border-radius:0 0 12px 12px;padding:18px 36px">
-          <table width="100%" cellpadding="0" cellspacing="0" border="0">
-            <tr>
-              <td>
-                <div style="font-family:'Courier New',monospace;font-size:8px;letter-spacing:0.16em;text-transform:uppercase;color:#FFDB00;font-weight:700;margin-bottom:4px">Official Procurement Correspondence</div>
-                <div style="font-size:11px;color:#8fa3bb;line-height:1.5">Andersen &nbsp;·&nbsp; Warsaw, Poland<br>
-                <a href="mailto:procurement@cpc-rfp.website" style="color:#FFDB00;text-decoration:none">procurement@cpc-rfp.website</a></div>
-              </td>
-              <td align="right" style="vertical-align:middle">
-                <div style="font-family:'Courier New',monospace;font-size:7.5px;color:#4a6080;letter-spacing:0.06em;text-transform:uppercase">AI RFP Management System</div>
-              </td>
-            </tr>
-          </table>
-        </td>
-      </tr>
-
-      <!-- ── Disclaimer ── -->
-      <tr>
-        <td style="padding:14px 0 0;text-align:center">
-          <div style="font-size:10px;color:#6b7280;line-height:1.5">This is an official procurement communication from Andersen.<br>
-          Please do not reply to this message unless instructed to do so.</div>
-        </td>
-      </tr>
-
-    </table>
-  </td></tr>
-</table>
-</body>
-</html>`
+ *  Delegates to src/brand/letterhead.ts andersenEmailHtml() — single source of truth
+ *  for the Andersen letterhead design (topo band, accent rule, navy footer). */
+function buildAndersenEmailHtml(bodyText: string, opts: { refNumber?: string; subject?: string } = {}): string {
+  return andersenEmailHtml({
+    bodyText,
+    subject:   opts.subject,
+    refNumber: opts.refNumber,
+  })
 }
 
 async function sendRealEmail(

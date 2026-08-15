@@ -66,249 +66,230 @@ function requireAuth(req, res, next) {
 
 function buildAndersenHtml(markdown, logoDataUri, opts) {
   opts = opts || {};
-  const logo  = logoDataUri || LOGO_DATA_URI;
-  const ref   = opts.ref_number   ? escHtml(opts.ref_number)   : '';
-  const title = opts.rfp_title    ? escHtml(opts.rfp_title)    : 'Request for Proposal';
-  const isPreview = !!opts.preview; // true → render as scrollable page for UI display
+  const logo      = logoDataUri || LOGO_DATA_URI;
+  const isPreview = !!opts.preview;
+  const refNumber = opts.ref_number ? escHtml(opts.ref_number) : '';
+  const rfpTitle  = opts.rfp_title  ? escHtml(opts.rfp_title)  : 'Request for Proposal';
+  const email     = 'procurement@cpc-rfp.website';
+  const year      = new Date().getFullYear();
 
-  // Configure marked: GitHub Flavored Markdown — tables, strikethrough etc.
+  // Topographic SVG paths — from Andersen Letterhead.html reference
+  const topoSvg = `<svg style="position:absolute;inset:0;width:100%;height:100%;display:block" viewBox="0 0 794 56" preserveAspectRatio="none" fill="none">
+    <path d="M-10 14 Q 100 4, 220 20 T 460 24 Q 580 30, 810 12" stroke="#020303" stroke-width="0.7" stroke-opacity="0.55"/>
+    <path d="M-10 28 Q 120 14, 240 34 T 480 38 Q 620 44, 810 26" stroke="#020303" stroke-width="0.7" stroke-opacity="0.45"/>
+    <path d="M-10 42 Q 140 26, 260 46 T 500 50 Q 640 58, 810 38" stroke="#020303" stroke-width="0.7" stroke-opacity="0.35"/>
+    <circle cx="120" cy="16"  r="3"   fill="#020303"/>
+    <circle cx="300" cy="34"  r="2.5" fill="#020303"/>
+    <circle cx="460" cy="24"  r="3.5" fill="#020303"/>
+    <circle cx="620" cy="44"  r="2.5" fill="#020303"/>
+    <circle cx="740" cy="20"  r="3"   fill="#020303"/>
+  </svg>`;
+
+  // Watermark SVG for body area
+  const watermarkSvg = `<svg style="position:absolute;inset:0;width:100%;height:100%;opacity:.045;pointer-events:none" viewBox="0 0 700 700" preserveAspectRatio="xMidYMid slice" fill="none">
+    <path d="M-40 220 Q 200 120, 400 260 T 780 300" stroke="#020303" stroke-width="0.5"/>
+    <path d="M-40 360 Q 220 240, 420 380 T 780 440" stroke="#020303" stroke-width="0.5"/>
+    <path d="M-40 500 Q 240 380, 440 520 T 780 580" stroke="#020303" stroke-width="0.5"/>
+    <circle cx="200" cy="230" r="6" fill="#FFDB00"/>
+    <circle cx="480" cy="330" r="8" fill="#FFDB00"/>
+    <circle cx="640" cy="480" r="5" fill="#FFDB00"/>
+  </svg>`;
+
+  // marked.parse: GFM mode — tables, strikethrough etc.
   marked.setOptions({ gfm: true, breaks: false });
-
   const bodyHtml = marked.parse(markdown || '');
 
-  // For PDF: use @page margin boxes + fixed header/footer.
-  // For preview (UI): use a simple sticky header + block footer.
-  const pdfPageCss = isPreview ? '' : `
-    @page {
-      size: A4;
-      margin-top: 28mm;
-      margin-bottom: 26mm;
-      margin-left: 16mm;
-      margin-right: 16mm;
-
-      /* ── Andersen letterhead in top margin ── */
-      @top-left {
-        content: element(header-band);
-        vertical-align: bottom;
-      }
-
-      /* ── Andersen footer in bottom margin ── */
-      @bottom-center {
-        content: element(footer-band);
-        vertical-align: top;
-      }
-    }
-
-    /* Named flow elements for @page margin boxes */
-    #pdf-header-band {
-      position: running(header-band);
-    }
-    #pdf-footer-band {
-      position: running(footer-band);
-    }
-  `;
-
-  // Puppeteer does NOT support CSS @page margin boxes (Prince/WeasyPrint feature).
-  // Instead we use Puppeteer's native displayHeaderFooter with headerTemplate/footerTemplate.
-  // For the body content we add padding-top/bottom so text doesn't overlap header/footer.
-  // This is handled in the /render-md-pdf endpoint.
-  // The CSS below handles typography, tables, and page-break rules only.
-
+  // ── CSS for both modes ──────────────────────────────────────────────────
+  const monoFont = "'Courier New', monospace";
   const css = `
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-    body {
-      font-family: Arial, 'Segoe UI', Calibri, Helvetica, sans-serif;
-      font-size: 10.5pt;
-      line-height: 1.6;
-      color: #1A1A1A;
-      background: #ffffff;
+    html, body {
+      font-family: Arial, 'Segoe UI', Helvetica, sans-serif;
+      font-size: 10.5pt; line-height: 1.65; color: #020303;
+      background: ${isPreview ? '#EDEEF1' : '#fff'};
+      ${isPreview ? 'padding: 40px 0;' : ''}
     }
 
-    /* ─── Content wrapper ─── */
-    .rfp-body {
-      ${isPreview
-        ? 'max-width: 860px; margin: 0 auto; padding: 32px 40px;'
-        : 'padding: 0;'}
+    /* ── A4 page container ── */
+    .a-page {
+      width: 794px; ${isPreview ? 'min-height: 1123px;' : ''}
+      margin: 0 auto; background: #fff;
+      display: flex; flex-direction: column;
+      ${isPreview ? 'box-shadow: 0 12px 48px rgba(20,25,35,.18);' : ''}
     }
 
-    /* ─── Headings ─── */
-    h1 {
-      font-size: 16pt;
-      font-weight: 700;
-      color: #020303;
-      margin: 0 0 12pt 0;
-      padding-bottom: 6pt;
-      border-bottom: 2px solid #FFDB00;
-      page-break-after: avoid;
+    /* ── Wordmark lockup ── */
+    .a-lockup { padding: 22px 36px 18px; display: flex; align-items: center; }
+    .a-brand  { display: flex; align-items: center; gap: 18px; }
+    .a-brand img  { height: 44px; width: auto; display: block; }
+    .a-divider    { width: 1px; height: 30px; background: #E0E0E0; }
+    .a-tag {
+      font-family: ${monoFont}; font-size: 10px; letter-spacing: .22em;
+      text-transform: uppercase; color: #556170; line-height: 1.6;
     }
-    h2 {
-      font-size: 12pt;
-      font-weight: 700;
-      color: #020303;
-      margin: 18pt 0 6pt 0;
-      padding-bottom: 3pt;
-      border-bottom: 1px solid #e5e7eb;
-      page-break-after: avoid;
-    }
-    h3 {
-      font-size: 10.5pt;
-      font-weight: 700;
-      color: #374151;
-      margin: 12pt 0 4pt 0;
-      page-break-after: avoid;
-    }
-    h4 { font-size: 10pt; font-weight: 600; color: #4b5563; margin: 10pt 0 3pt 0; page-break-after: avoid; }
+    .a-tag b { color: #020303; font-weight: 500; }
 
-    /* ─── Paragraphs ─── */
-    p {
-      margin: 0 0 8pt 0;
-      orphans: 3;
-      widows: 3;
-      page-break-inside: avoid;
+    /* ── Yellow topo band ── */
+    .a-band {
+      height: 56px; background: #FFDB00;
+      position: relative; overflow: hidden; flex-shrink: 0;
+    }
+    .a-badge {
+      position: absolute; top: 50%; transform: translateY(-50%); right: 36px;
+      font-family: ${monoFont}; font-size: 10px; letter-spacing: .24em;
+      text-transform: uppercase; color: #020303; opacity: .55;
     }
 
-    /* ─── Lists ─── */
-    ul, ol {
-      margin: 0 0 8pt 0;
-      padding-left: 20pt;
+    /* ── Dotted accent rule ── */
+    .a-accent {
+      height: 22px; display: flex; align-items: center;
+      padding: 0 36px; gap: 6px; flex-shrink: 0;
+      border-bottom: 1px solid #E0E0E0;
     }
-    li {
-      margin-bottom: 3pt;
-      page-break-inside: avoid;
-      orphans: 2;
-      widows: 2;
-    }
+    .a-tick  { display: block; width: 6px; height: 6px; border-radius: 50%; background: #E0E0E0; }
+    .a-node  { background: #FFDB00 !important; width: 8px !important; height: 8px !important; }
+    .a-grow  { flex: 1; height: 1px; background: #E0E0E0; margin: 0 4px; }
 
-    /* ─── Horizontal rules (section dividers) ─── */
-    hr {
-      border: none;
-      border-top: 2px solid #FFDB00;
-      margin: 16pt 0;
+    /* ── Body writing area ── */
+    .a-body {
+      flex: 1; padding: 32px 52px; position: relative;
     }
+    .a-body::before, .a-body::after {
+      content: ''; position: absolute; width: 16px; height: 16px;
+      border-color: #E0E0E0; border-style: solid; border-width: 0;
+    }
+    .a-body::before { top: 0; left: 40px; border-top-width: 1px; border-left-width: 1px; }
+    .a-body::after  { bottom: 0; right: 40px; border-bottom-width: 1px; border-right-width: 1px; }
 
-    /* ─── Tables ─── */
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 9.5pt;
-      margin: 8pt 0 12pt 0;
-      page-break-inside: avoid;
-    }
+    /* ── RFP content typography ── */
+    h1 { font-size: 16pt; font-weight: 700; border-bottom: 2px solid #FFDB00; padding-bottom: 6pt; margin: 0 0 12pt; page-break-after: avoid; }
+    h2 { font-size: 12pt; font-weight: 700; color: #020303; border-bottom: 1px solid #E0E0E0; margin: 18pt 0 6pt; padding-bottom: 3pt; page-break-after: avoid; }
+    h3 { font-size: 10.5pt; font-weight: 700; color: #3A3E45; margin: 12pt 0 4pt; page-break-after: avoid; }
+    h4 { font-size: 10pt; font-weight: 600; color: #556170; margin: 10pt 0 3pt; }
+    p  { margin: 0 0 8pt; orphans: 3; widows: 3; page-break-inside: avoid; }
+    ul, ol { margin: 0 0 8pt; padding-left: 20pt; }
+    li { margin-bottom: 3pt; page-break-inside: avoid; orphans: 2; widows: 2; }
+    hr { border: none; border-top: 2px solid #FFDB00; margin: 16pt 0; }
+    table { width: 100%; border-collapse: collapse; font-size: 9.5pt; margin: 8pt 0 12pt; page-break-inside: avoid; }
     thead { display: table-header-group; }
-    th {
-      background: #020303;
-      color: #FFDB00;
-      font-weight: 700;
-      padding: 6pt 10pt;
-      text-align: left;
-      border: 1px solid #020303;
-      page-break-after: avoid;
-    }
-    td {
-      padding: 5pt 10pt;
-      border: 1px solid #d1d5db;
-      vertical-align: top;
-    }
+    th { background: #020D1C; color: #FFDB00; font-weight: 700; padding: 6pt 10pt; text-align: left; border: 1px solid #020D1C; }
+    td { padding: 5pt 10pt; border: 1px solid #E0E0E0; vertical-align: top; }
     tr { page-break-inside: avoid; orphans: 2; widows: 2; }
     tr:nth-child(even) td { background: #f9fafb; }
-
-    /* ─── Blockquotes ─── */
-    blockquote {
-      border-left: 4px solid #FFDB00;
-      margin: 8pt 0 8pt 0;
-      padding: 6pt 12pt;
-      background: #fffef0;
-      color: #374151;
-      page-break-inside: avoid;
-    }
-
-    /* ─── Code ─── */
-    code {
-      font-family: 'Courier New', Courier, monospace;
-      font-size: 9pt;
-      background: #f3f4f6;
-      padding: 1pt 3pt;
-      border-radius: 2pt;
-    }
-    pre {
-      background: #f3f4f6;
-      padding: 10pt;
-      border-radius: 4pt;
-      overflow: auto;
-      margin: 8pt 0;
-      page-break-inside: avoid;
-    }
+    blockquote { border-left: 4px solid #FFDB00; margin: 8pt 0; padding: 6pt 12pt; background: #fffef0; page-break-inside: avoid; }
+    code { font-family: ${monoFont}; font-size: 9pt; background: #f3f4f6; padding: 1pt 3pt; border-radius: 2pt; }
+    pre  { background: #f3f4f6; padding: 10pt; border-radius: 4pt; margin: 8pt 0; page-break-inside: avoid; }
     pre code { background: transparent; padding: 0; }
-
-    /* ─── Strong / em ─── */
     strong { color: #111827; }
 
-    /* ─── Preview header/footer ─── */
-    .preview-header {
-      background: #020303;
-      padding: 10px 24px;
-      display: flex;
-      align-items: center;
-      gap: 16px;
-      margin-bottom: 0;
+    /* ── Navy footer ── */
+    .a-foot {
+      background: #020D1C; color: #B8C0CB;
+      padding: 22px 36px; display: flex;
+      justify-content: space-between; align-items: center;
+      flex-shrink: 0; font-size: 10px; letter-spacing: .05em;
     }
-    .preview-header img { height: 32px; }
-    .preview-footer {
-      background: #020303;
-      color: #9ca3af;
-      font-size: 8.5pt;
-      padding: 10px 24px;
-      margin-top: 32px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
+    .a-foot-cols { display: flex; gap: 36px; }
+    .a-foot-col .a-k { font-family: ${monoFont}; font-size: 9px; letter-spacing: .2em; text-transform: uppercase; color: #FFDB00; margin-bottom: 4px; }
+    .a-foot-col .a-v { font-size: 10px; color: #D8DEE8; line-height: 1.5; }
+    .a-foot-right { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+    .a-foot-right img { height: 20px; filter: brightness(0) invert(1); opacity: .9; }
+    .a-foot-right .a-mono { font-family: ${monoFont}; font-size: 9px; letter-spacing: .2em; text-transform: uppercase; color: #FFDB00; }
+
+    @media print {
+      body { background: #fff; padding: 0; }
+      .a-page { box-shadow: none; margin: 0; }
+      @page { size: A4; margin: 0; }
+      * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
     }
   `;
 
+  // ── Header HTML (lockup + band + accent) ────────────────────────────────
+  const headerHtml = `
+    <div class="a-lockup">
+      <div class="a-brand">
+        <img src="${logo}" alt="Andersen"/>
+        <div class="a-divider"></div>
+        <div class="a-tag"><b>Software Engineering</b><br/>Group &middot; Global</div>
+      </div>
+    </div>
+    <div class="a-band">
+      ${topoSvg}
+      <div class="a-badge">Andersen &middot; Est. 2007</div>
+    </div>
+    <div class="a-accent">
+      <span class="a-tick"></span><span class="a-tick"></span>
+      <span class="a-tick a-node"></span><span class="a-tick"></span>
+      <span class="a-tick"></span><span class="a-tick"></span>
+      <span class="a-tick a-node"></span><span class="a-tick"></span>
+      <span class="a-grow"></span>
+      <span class="a-tick"></span><span class="a-tick a-node"></span>
+      <span class="a-tick"></span><span class="a-tick"></span>
+      <span class="a-tick"></span><span class="a-tick a-node"></span>
+      <span class="a-tick"></span><span class="a-tick"></span>
+    </div>`;
+
+  // ── Footer HTML ─────────────────────────────────────────────────────────
+  const footerHtml = `
+    <div class="a-foot">
+      <div class="a-foot-cols">
+        <div class="a-foot-col">
+          <div class="a-k">Web</div>
+          <div class="a-v">andersenlab.com</div>
+        </div>
+        <div class="a-foot-col">
+          <div class="a-k">Contact</div>
+          <div class="a-v"><a href="mailto:${email}" style="color:inherit;text-decoration:none">${email}</a></div>
+        </div>
+        <div class="a-foot-col">
+          <div class="a-k">Offices</div>
+          <div class="a-v">Warsaw &middot; Berlin &middot; London &middot; New York</div>
+        </div>
+      </div>
+      <div class="a-foot-right">
+        <img src="${logo}" alt="Andersen"/>
+        <div class="a-mono">&copy; Andersen ${year}</div>
+      </div>
+    </div>`;
+
   if (isPreview) {
-    // UI preview — full scrollable page with sticky header
+    // Full preview page — includes letterhead, watermark, footer
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${title}</title>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=794,initial-scale=1"/>
+<title>${rfpTitle}</title>
 <style>${css}</style>
 </head>
 <body>
-<div class="preview-header">
-  <img src="${logo}" alt="Andersen">
-</div>
-<div class="rfp-body">
-${bodyHtml}
-</div>
-<div class="preview-footer">
-  <span>Andersen — Confidential</span>
-  <span>${ref}</span>
+<div class="a-page">
+  ${headerHtml}
+  <div class="a-body" style="position:relative">
+    ${watermarkSvg}
+    <div style="position:relative;z-index:1">
+      ${bodyHtml}
+    </div>
+  </div>
+  ${footerHtml}
 </div>
 </body>
 </html>`;
   }
 
-  // PDF mode — body only; Puppeteer will add header/footer via displayHeaderFooter
+  // PDF mode — clean body only; Puppeteer adds header/footer via displayHeaderFooter
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<style>
-${css}
-body {
-  /* Top/bottom padding to keep text below Puppeteer header and above footer.
-     These must match the headerTemplate/footerTemplate heights set in the Puppeteer call. */
-  padding-top: 0;
-  padding-bottom: 0;
-}
+<meta charset="UTF-8"/>
+<style>${css}
+/* Hide letterhead/footer structural divs — Puppeteer injects them via templates */
+.a-lockup, .a-band, .a-accent, .a-foot { display: none; }
 </style>
 </head>
-<body>
-<div class="rfp-body">
-${bodyHtml}
+<body style="background:#fff;padding:0">
+<div class="a-body" style="padding:0">
+  ${bodyHtml}
 </div>
 </body>
 </html>`;
@@ -392,45 +373,31 @@ app.post('/render-md-pdf', requireAuth, async (req, res) => {
   const logo  = logo_data_uri || LOGO_DATA_URI;
   const ref   = ref_number ? escHtml(ref_number) : '';
 
-  // Puppeteer header template — yellow band with Andersen logo (left) and ref (right).
+  // Puppeteer header template — Andersen yellow topo band with logo (left) and ref (right).
   // IMPORTANT: Puppeteer header/footer templates are isolated HTML snippets.
   //   - Must be self-contained (inline styles only, no external CSS).
   //   - Puppeteer injects: <span class="pageNumber">, <span class="totalPages"> etc.
   //   - Height is determined by the content; set margin-top accordingly in page.pdf().
   //   - Font size must be set explicitly — template inherits nothing from page CSS.
   const headerTemplate = `
-    <div style="
-      width: 100%;
-      background: #020303;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 6px 16mm;
-      font-family: Arial, sans-serif;
-      font-size: 9pt;
-      box-sizing: border-box;
-    ">
-      <img src="${logo}" style="height: 22px;" />
-      <span style="color: #9ca3af; font-size: 8pt;">${ref}</span>
+    <div style="width:100%;height:100%;background:#FFDB00;display:flex;align-items:center;justify-content:space-between;padding:0 16mm;font-family:Arial,sans-serif;box-sizing:border-box;position:relative;overflow:hidden;">
+      <svg style="position:absolute;inset:0;width:100%;height:100%" viewBox="0 0 794 56" preserveAspectRatio="none" fill="none">
+        <path d="M-10 14 Q 100 4, 220 20 T 460 24 Q 580 30, 810 12" stroke="#020303" stroke-width="0.7" stroke-opacity="0.45"/>
+        <path d="M-10 28 Q 120 14, 240 34 T 480 38 Q 620 44, 810 26" stroke="#020303" stroke-width="0.7" stroke-opacity="0.35"/>
+        <circle cx="120" cy="16" r="3"   fill="#020303" opacity="0.45"/>
+        <circle cx="460" cy="24" r="3.5" fill="#020303" opacity="0.45"/>
+        <circle cx="740" cy="20" r="3"   fill="#020303" opacity="0.45"/>
+      </svg>
+      <img src="${logo}" style="height:20px;position:relative;z-index:1;display:block"/>
+      <span style="font-family:'Courier New',monospace;font-size:8pt;letter-spacing:.18em;text-transform:uppercase;color:#020303;opacity:.55;position:relative;z-index:1">${ref}</span>
     </div>
   `;
 
-  // Puppeteer footer template — navy band with doc title (left), page number (right).
+  // Puppeteer footer template — Andersen navy band with contact (left), page number (right).
   const footerTemplate = `
-    <div style="
-      width: 100%;
-      background: #020303;
-      color: #9ca3af;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 5px 16mm;
-      font-family: Arial, sans-serif;
-      font-size: 8pt;
-      box-sizing: border-box;
-    ">
-      <span>Andersen — Confidential</span>
-      <span>Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>
+    <div style="width:100%;height:100%;background:#020D1C;display:flex;align-items:center;justify-content:space-between;padding:0 16mm;font-family:Arial,sans-serif;font-size:8pt;box-sizing:border-box;">
+      <span style="font-family:'Courier New',monospace;font-size:7.5pt;letter-spacing:.12em;text-transform:uppercase;color:#FFDB00">&copy; Andersen &nbsp;&middot;&nbsp; procurement@cpc-rfp.website</span>
+      <span style="color:#9ca3af">Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>
     </div>
   `;
 
@@ -459,12 +426,12 @@ app.post('/render-md-pdf', requireAuth, async (req, res) => {
       footerTemplate,
 
       // Margins:
-      //   top    — must be >= header band height (~32px ≈ 8.5mm) + some breathing room
-      //   bottom — must be >= footer band height (~28px ≈ 7.5mm) + some breathing room
+      //   top    — yellow topo band is 56px ≈ 15mm; use 22mm to give 7mm breathing room
+      //   bottom — navy footer is ~28px ≈ 7.5mm; use 18mm total
       //   left/right — 16mm standard document margin
       margin: {
-        top:    '22mm',
-        bottom: '18mm',
+        top:    '26mm',   // topo band (15mm) + accent (6mm) + breathing room
+        bottom: '18mm',   // navy footer (8mm) + breathing room
         left:   '16mm',
         right:  '16mm',
       },
@@ -473,10 +440,11 @@ app.post('/render-md-pdf', requireAuth, async (req, res) => {
     await browser.close();
     browser = null;
 
+    const safeFilename = escHtml(ref_number||'document').replace(/[^a-zA-Z0-9_\-]/g,'_');
     res.set({
       'Content-Type':        'application/pdf',
       'Content-Length':      pdfBuffer.length,
-      'Content-Disposition': `attachment; filename="Andersen_RFP_${escHtml(ref_number||'document').replace(/[^a-zA-Z0-9_\-]/g,'_')}.pdf"`,
+      'Content-Disposition': `attachment; filename="Andersen_RFP_${safeFilename}.pdf"`,
       'Cache-Control':       'no-cache',
     });
     res.send(pdfBuffer);
@@ -503,15 +471,21 @@ app.post('/render-pdf', requireAuth, async (req, res) => {
     const ref  = ref_number ? escHtml(ref_number) : '';
 
     const headerTemplate = `
-      <div style="width:100%;background:#020303;display:flex;align-items:center;justify-content:space-between;padding:6px 16mm;font-family:Arial,sans-serif;font-size:9pt;box-sizing:border-box;">
-        <img src="${logo}" style="height:22px;" />
-        <span style="color:#9ca3af;font-size:8pt;">${ref}</span>
+      <div style="width:100%;height:100%;background:#FFDB00;display:flex;align-items:center;justify-content:space-between;padding:0 16mm;font-family:Arial,sans-serif;box-sizing:border-box;position:relative;overflow:hidden;">
+        <svg style="position:absolute;inset:0;width:100%;height:100%" viewBox="0 0 794 56" preserveAspectRatio="none" fill="none">
+          <path d="M-10 14 Q 100 4, 220 20 T 460 24 Q 580 30, 810 12" stroke="#020303" stroke-width="0.7" stroke-opacity="0.45"/>
+          <path d="M-10 28 Q 120 14, 240 34 T 480 38 Q 620 44, 810 26" stroke="#020303" stroke-width="0.7" stroke-opacity="0.35"/>
+          <circle cx="120" cy="16" r="3" fill="#020303" opacity="0.45"/>
+          <circle cx="460" cy="24" r="3.5" fill="#020303" opacity="0.45"/>
+        </svg>
+        <img src="${logo}" style="height:20px;position:relative;z-index:1;display:block"/>
+        <span style="font-family:'Courier New',monospace;font-size:8pt;letter-spacing:.18em;text-transform:uppercase;color:#020303;opacity:.55;position:relative;z-index:1">${ref}</span>
       </div>`;
 
     const footerTemplate = `
-      <div style="width:100%;background:#020303;color:#9ca3af;display:flex;align-items:center;justify-content:space-between;padding:5px 16mm;font-family:Arial,sans-serif;font-size:8pt;box-sizing:border-box;">
-        <span>Andersen — Confidential</span>
-        <span>Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>
+      <div style="width:100%;height:100%;background:#020D1C;display:flex;align-items:center;justify-content:space-between;padding:0 16mm;font-family:Arial,sans-serif;font-size:8pt;box-sizing:border-box;">
+        <span style="font-family:'Courier New',monospace;font-size:7.5pt;letter-spacing:.12em;text-transform:uppercase;color:#FFDB00">&copy; Andersen &nbsp;&middot;&nbsp; procurement@cpc-rfp.website</span>
+        <span style="color:#9ca3af">Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>
       </div>`;
 
     const bodyHtml = buildAndersenHtml(markdown, logo, { ref_number, rfp_title, preview: false });
@@ -527,7 +501,7 @@ app.post('/render-pdf', requireAuth, async (req, res) => {
         displayHeaderFooter: true,
         headerTemplate,
         footerTemplate,
-        margin: { top: '22mm', bottom: '18mm', left: '16mm', right: '16mm' },
+        margin: { top: '26mm', bottom: '18mm', left: '16mm', right: '16mm' },
       });
       await browser.close();
       browser = null;
