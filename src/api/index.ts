@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 import { andersenEmailHtml, andersenPageHtml } from '../brand/letterhead'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-08-15-v86c' // v86c: single-phase extraction — input capped at 30k chars, maxTokens capped at 4000 to keep total stream time <60s inside Worker wall-clock
+const WORKER_VERSION = '2026-08-15-v86d' // v86d: raise TTFB timeout 30s→60s (large inputs cause slow prefill before first token arrives)
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.andersenlab.com.
@@ -4353,11 +4353,13 @@ async function callLLM(systemPrompt: string, userPrompt: string, env: any, model
   // streaming reader loop here is safe: the Worker's HTTP request deadline enforces
   // a hard wall-clock limit on the entire operation including reader.read() waits.
   //
-  // Per-chunk guard: AbortSignal.timeout(30s) is passed to fetch() for TTFB.
-  // Each reader.read() is raced against a 30s per-chunk deadline so a mid-stream
-  // stall throws instead of hanging (defence in depth, not the primary fix).
+  // TTFB guard: 60s — large inputs (20k+ tokens) cause a slow prefill phase before
+  // the model emits its first streaming token. 30s was too tight for single-phase
+  // extraction where the full document is the input. 60s keeps safety margin while
+  // still catching a completely hung proxy.
+  // Per-chunk guard: 60s — matches TTFB so a mid-stream stall is also caught.
   const controller = new AbortController()
-  const ttfbSignal = AbortSignal.timeout(30000)
+  const ttfbSignal = AbortSignal.timeout(60000)
   ttfbSignal.addEventListener('abort', () => controller.abort(ttfbSignal.reason), { once: true })
 
   const res = await fetch(`${baseUrl}/chat/completions`, {
