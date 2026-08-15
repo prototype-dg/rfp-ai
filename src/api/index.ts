@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 import { andersenEmailHtml, andersenPageHtml } from '../brand/letterhead'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-08-15-v84'  // v84: callLLM stream:false — no SSE reader loop; single fetch+AbortSignal.timeout(55s) covers full request+response; proxy stall can no longer hang waitUntil()
+const WORKER_VERSION = '2026-08-15-v85'  // v85: callLLM restored to stream:true SSE reader (proxy requires streaming); OCR callback runs extraction SYNCHRONOUSLY before returning 200 — eliminates waitUntil() entirely; matches rerun-ai-extraction path which always works
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.andersenlab.com.
@@ -1533,36 +1533,34 @@ apiRouter.post('/callback/rfps/:rfpId/rfp-upload-ocr-complete', async (c) => {
     `UPDATE rfps SET uploaded_rfp_text=?, rfp_full_text=?, ai_extraction_status='extracting', updated_at=datetime('now') WHERE id=?`
   ).bind(extractedText, extractedText.slice(0, 100000), rfpId).run()
 
-  // ── Return 200 to sidecar immediately — before any LLM work ────────────────
-  // waitUntil() keeps the Worker alive after the response is sent.
-  // The LLM phases run with no wall-clock pressure from the HTTP request deadline.
-  const env = c.env
-  const db  = c.env.DB
-  const extractionTask = (async () => {
-    try {
-      const { extracted, scoringMatrixJson, requirementGlossaryJson, phaseErrors } =
-        await extractRfpFieldsFromOcr(extractedText, env, `rfp=${rfpId}`)
+  // ── v85: Run extraction SYNCHRONOUSLY before returning 200 ────────────────
+  // Root cause of v81-v84 failures: waitUntil() + stream:true SSE read loop hangs
+  // forever when the proxy stalls mid-stream (no reliable per-chunk timeout in
+  // waitUntil context). rerun-ai-extraction always works because it runs inside
+  // a live HTTP request. This callback now does the same: block here, let the
+  // sidecar wait ~25-30s for our 200. The sidecar HTTP client tolerates this.
+  // No waitUntil(), no extractionTask, no stream:false workaround needed.
+  const db = c.env.DB
+  try {
+    const { extracted, scoringMatrixJson, requirementGlossaryJson, phaseErrors } =
+      await extractRfpFieldsFromOcr(extractedText, c.env, `rfp=${rfpId}`)
 
-      const { newTitle } = await writeExtractedRfpFields(
-        db, rfpId, extractedText, extracted, scoringMatrixJson, requirementGlossaryJson)
+    const { newTitle } = await writeExtractedRfpFields(
+      db, rfpId, extractedText, extracted, scoringMatrixJson, requirementGlossaryJson)
 
-      // Mark extraction complete
-      await db.prepare(
-        `UPDATE rfps SET ai_extraction_status='done', updated_at=datetime('now') WHERE id=?`
-      ).bind(rfpId).run()
+    await db.prepare(
+      `UPDATE rfps SET ai_extraction_status='done', updated_at=datetime('now') WHERE id=?`
+    ).bind(rfpId).run()
 
-      console.log(`[rfp-upload-ocr-cb] rfp=${rfpId} extraction done — title="${newTitle}" scoring=${!!scoringMatrixJson} glossary=${!!requirementGlossaryJson} errors=${phaseErrors.length}`)
-    } catch (e: any) {
-      console.error(`[rfp-upload-ocr-cb] rfp=${rfpId} extraction error: ${e.message}`)
-      await db.prepare(
-        `UPDATE rfps SET ai_extraction_status='error', updated_at=datetime('now') WHERE id=?`
-      ).bind(rfpId).run().catch(() => {})
-    }
-  })()
-
-  c.executionCtx.waitUntil(extractionTask)
-
-  return c.json({ ok: true, rfpId, status: 'extracting' })
+    console.log(`[rfp-upload-ocr-cb] rfp=${rfpId} extraction done — title="${newTitle}" scoring=${!!scoringMatrixJson} glossary=${!!requirementGlossaryJson} errors=${phaseErrors.length}`)
+    return c.json({ ok: true, rfpId, status: 'done' })
+  } catch (e: any) {
+    console.error(`[rfp-upload-ocr-cb] rfp=${rfpId} extraction error: ${e.message}`)
+    await db.prepare(
+      `UPDATE rfps SET ai_extraction_status='error', updated_at=datetime('now') WHERE id=?`
+    ).bind(rfpId).run().catch(() => {})
+    return c.json({ ok: true, rfpId, status: 'error', error: e.message })
+  }
 })
 
 // POST /rfps/:id/rerun-ai-extraction
@@ -4359,25 +4357,29 @@ async function callLLM(systemPrompt: string, userPrompt: string, env: any, model
   const baseUrl = env?.OPENAI_BASE_URL || 'https://www.genspark.ai/api/llm_proxy/v1'
   if (!apiKey) throw new Error('OPENAI_API_KEY not configured')
 
-  // v84: NON-STREAMING fetch (stream: false).
+  // v85: stream:true SSE reader — the proxy REQUIRES streaming to return content.
   //
-  // Root cause of v81/v82/v83 failures: all three tried to timeout a streaming
-  // SSE read loop inside waitUntil(). The proxy stall pattern is:
-  //   HTTP 200 headers arrive immediately → then the proxy goes silent forever.
-  // With stream:true the fetch() resolves the moment headers arrive, so any
-  // timeout on fetch() is already consumed. The stream read loop then blocks
-  // on reader.read() with nothing to abort it (v81), or with an abort mechanism
-  // that doesn't fire inside waitUntil() (v82 setTimeout, v83 addEventListener).
+  // Confirmed via direct curl tests (2026-08-15):
+  //   stream:false → HTTP 200 but content:"" (all tokens consumed as reasoning_tokens)
+  //   stream:true  → HTTP 200, streams valid JSON content in ~10s ✓
   //
-  // With stream:false the proxy must deliver the ENTIRE response body before
-  // fetch() resolves. AbortSignal.timeout(55s) on the fetch() call covers the
-  // full round-trip — headers AND body — in a single await. If the proxy stalls
-  // at any point before the complete body arrives, the signal fires, fetch()
-  // throws TimeoutError, and the extraction catch block writes 'error'.
-  // No reader loop, no per-chunk complexity, no waitUntil() timer issues.
+  // The hang in v81-v83 was caused by running this inside waitUntil() after the
+  // HTTP response was sent — the reader.read() loop blocked forever when the proxy
+  // stalled mid-stream. v85 fixes this at the call site (OCR callback now runs
+  // extraction synchronously inside the HTTP request, not in waitUntil), so the
+  // streaming reader loop here is safe: the Worker's HTTP request deadline enforces
+  // a hard wall-clock limit on the entire operation including reader.read() waits.
+  //
+  // Per-chunk guard: AbortSignal.timeout(30s) is passed to fetch() for TTFB.
+  // Each reader.read() is raced against a 30s per-chunk deadline so a mid-stream
+  // stall throws instead of hanging (defence in depth, not the primary fix).
+  const controller = new AbortController()
+  const ttfbSignal = AbortSignal.timeout(30000)
+  ttfbSignal.addEventListener('abort', () => controller.abort(ttfbSignal.reason), { once: true })
+
   const res = await fetch(`${baseUrl}/chat/completions`, {
     method: 'POST',
-    signal: AbortSignal.timeout(55000),
+    signal: controller.signal,
     headers: {
       'Authorization': `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
@@ -4390,7 +4392,7 @@ async function callLLM(systemPrompt: string, userPrompt: string, env: any, model
       ],
       max_tokens: maxTokens,
       temperature: 0.3,
-      stream: false,
+      stream: true,
     }),
   })
 
@@ -4399,8 +4401,35 @@ async function callLLM(systemPrompt: string, userPrompt: string, env: any, model
     throw new Error(`LLM API error ${res.status}: ${errText}`)
   }
 
-  const data = await res.json() as any
-  const content = data?.choices?.[0]?.message?.content ?? ''
+  // SSE stream reader with per-chunk timeout guard
+  const reader = res.body!.getReader()
+  const decoder = new TextDecoder()
+  let buf = ''
+  const CHUNK_TIMEOUT_MS = 30000
+
+  while (true) {
+    // Race each read against a per-chunk deadline
+    const chunkTimeout = AbortSignal.timeout(CHUNK_TIMEOUT_MS)
+    const readPromise = reader.read()
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      chunkTimeout.addEventListener('abort', () => reject(new Error('LLM stream chunk timeout (30s)')), { once: true })
+    })
+    const { done, value } = await Promise.race([readPromise, timeoutPromise])
+    if (done) break
+    buf += decoder.decode(value, { stream: true })
+  }
+
+  // Parse SSE: extract delta content from each data: line
+  let content = ''
+  for (const line of buf.split('\n')) {
+    if (!line.startsWith('data: ')) continue
+    const payload = line.slice(6).trim()
+    if (payload === '[DONE]') break
+    try {
+      const chunk = JSON.parse(payload)
+      content += chunk?.choices?.[0]?.delta?.content ?? ''
+    } catch { /* skip malformed SSE lines */ }
+  }
   return content
 }
 
