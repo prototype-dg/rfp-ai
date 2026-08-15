@@ -249,7 +249,7 @@ async def extract_and_callback(
 def health():
     return {
         "status": "ok",
-        "version": "5.0.0",
+        "version": "6.0.0",
         "ocr_engine": "google_vision" if GOOGLE_VISION_API_KEY else "unavailable",
         "ocr_dpi": OCR_DPI,
         "ocr_threads": OCR_THREADS,
