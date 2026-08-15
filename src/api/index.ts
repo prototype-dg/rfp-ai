@@ -1551,8 +1551,8 @@ apiRouter.post('/rfps/:id/rerun-ai-extraction', async (c) => {
 
 // POST /rfps/:id/rerun-phase3
 // Runs ONLY Phase 3 (requirement_glossary) as a single isolated LLM call.
-// No parallel calls → no proxy concurrency drop → reliable result.
-// Use after rerun-ai-extraction when phase3 returns 0 bytes due to proxy concurrency limit.
+// Uses stream:false (non-streaming) to avoid SSE empty-stream issues from the proxy.
+// This is reliable since Phase 3 runs as its own standalone request with no concurrency.
 apiRouter.post('/rfps/:id/rerun-phase3', async (c) => {
   const rfpId = c.req.param('id')
   try {
@@ -1569,10 +1569,12 @@ apiRouter.post('/rfps/:id/rerun-phase3', async (c) => {
       ['shall', 'must ', 'mandatory', 'required', 'requirement', 'scope of work'],
       35000
     )
-    console.log(`[rerun-phase3] rfp=${rfpId} focus_len=${requirementsFocusText.length} — single LLM call`)
+    console.log(`[rerun-phase3] rfp=${rfpId} focus_len=${requirementsFocusText.length} — non-streaming single call`)
 
-    const raw = await callLLM(
-      `You are an expert procurement analyst. Extract vendor requirements from an RFP document.
+    const apiKey = c.env.OPENAI_API_KEY || (globalThis as any).OPENAI_API_KEY || ''
+    const baseUrl = c.env.OPENAI_BASE_URL || (globalThis as any).OPENAI_BASE_URL || 'https://www.genspark.ai/api/llm_proxy/v1'
+
+    const systemPrompt = `You are an expert procurement analyst. Extract vendor requirements from an RFP document.
 Return ONLY a valid JSON array — no markdown fences, no explanation, no extra text before or after.
 Each element must be: {"id":"req_N","text":"<requirement text>","mandatory":<true|false>}.
 Rules:
@@ -1580,10 +1582,32 @@ Rules:
 - mandatory=false for "should", "may", "recommended", "preferred".
 - Extract 15–40 requirements. Cover: technical, security, commercial, submission, compliance requirements.
 - Each requirement should be a single actionable statement (not a section heading).
-- Number sequentially: req_1, req_2, req_3, ...`,
-      `Extract all vendor requirements from this RFP section:\n\n${requirementsFocusText}`,
-      c.env, 'gpt-5-mini', 2500
-    )
+- Number sequentially: req_1, req_2, req_3, ...`
+
+    // Use stream:false — single response body, no SSE, avoids proxy streaming drop issues
+    const res = await fetch(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'gpt-5-mini',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: `Extract all vendor requirements from this RFP section:\n\n${requirementsFocusText}` },
+        ],
+        max_tokens: 2500,
+        temperature: 0.3,
+        stream: false,
+      }),
+    })
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => 'unknown')
+      return c.json({ ok: false, error: `LLM error ${res.status}: ${errText.slice(0, 200)}` }, 500)
+    }
+
+    const llmBody: any = await res.json()
+    const raw = llmBody?.choices?.[0]?.message?.content || ''
+    console.log(`[rerun-phase3] rfp=${rfpId} raw_len=${raw.length}`)
 
     const arr = parseJsonArray(raw)
     if (!arr) {
