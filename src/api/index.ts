@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 import { andersenEmailHtml, andersenPageHtml } from '../brand/letterhead'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-08-15-v87' // v87: raise TTFB timeout 60s→180s for local VPS Qwen3B (prefill ~36ms/tok × 6k tok = 216s max; 60s fired before first token on large RFPs)
+const WORKER_VERSION = '2026-08-15-v88b' // v88b: raise maxTokens 600→800 (600 truncated JSON mid-array at pos 2510; 800tok@126ms=101s gen + 41s prefill=142s<180s wall-clock)
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.andersenlab.com.
@@ -1303,19 +1303,24 @@ async function extractRfpFieldsFromOcr(ocrText: string, env: any, rfpIdLog: stri
   const phaseErrors: string[] = []
 
   // ── Dynamic token budget ──────────────────────────────────────────────────
-  // Cloudflare Worker hard wall-clock: 120s per HTTP request.
-  // Proxy streaming rate: ~50-80 tokens/sec for gpt-5-mini.
-  // With 30k chars of input (~22k tokens), the model can produce ~4000 output
-  // tokens in ~50-80s, comfortably within the 120s limit.
-  // Input is capped at 30k chars — enough to cover background, objectives, scope,
-  // evaluation criteria, and requirements sections of any standard RFP.
-  // maxTokens proportional to input: 1 output token per ~7.5 input chars, min 3000.
-  const inputChars = Math.min(ocrText.length, 30000)
-  // maxTokens: 1 output token per ~5 input chars; min 4000, cap 6000.
-  // 30k chars input → 6000 tokens output — enough for 8 scalar fields + 5 scoring
-  // criteria + 40 vendor requirements without truncation. At ~80 tok/s streaming
-  // this adds ~75s total, within the 120s Worker wall-clock.
-  const maxTokens = Math.min(6000, Math.max(4000, Math.ceil(inputChars / 5)))
+  // VPS Qwen2.5-3B-Instruct Q4_K_M measured rates (4-core Xeon, no GPU):
+  //   prefill:    ~34 ms/token  →  1200 tok (6k chars) = 41s prefill
+  //   generation: ~126 ms/token →  400 tok output      = 50s generation
+  // Total budget must stay under ~100s to leave headroom inside the CF Worker
+  // wall-clock (Genspark hosted appears to allow ~180s per request).
+  //
+  // At 30k chars input (~6000 tokens): prefill alone = 204s — blows the budget.
+  // At  6k chars input (~1200 tokens): prefill = 41s, 400 tok output = 50s → ~91s ✓
+  //
+  // Trade-off: smaller input means we only see the first ~6k chars of the RFP.
+  // For most RFPs this covers the cover page, objectives, scope intro, and early
+  // evaluation criteria — enough for title, category, deadline, budget, objectives,
+  // and top-level scoring criteria. Deep vendor_requirements lists may be partial.
+  const inputChars = Math.min(ocrText.length, 6000)
+  // 800 output tokens: ~8 scalar fields + 5 scoring criteria + ~10 vendor_requirements.
+  // At 126ms/tok = 101s generation. Total: 41s prefill + 101s = 142s within ~180s wall-clock.
+  // 600 was too small: JSON truncated mid-array at position 2510 (v88).
+  const maxTokens = 800
   console.log(`[rfp-ai-extract] ${rfpIdLog} single-phase — inputChars=${inputChars} (of ${ocrText.length} total) maxTokens=${maxTokens}`)
 
   const SYSTEM_PROMPT = `You are an expert procurement analyst specializing in processing complex, often imperfect, OCR-scanned documents (like RFPs). Your task is to analyze the provided RFP text and extract a comprehensive, structured JSON object containing all key information.
