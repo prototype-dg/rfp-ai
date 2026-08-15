@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 import { andersenEmailHtml, andersenPageHtml } from '../brand/letterhead'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-08-15-v77'  // v77: phases 2+3 run in parallel (halves wall-clock); focused text extraction for scoring/requirements; debug_phases flag; manual-inject endpoint for direct DB write; fix silent empty-array bug; retroactive populate for RFP 22 + 8384
+const WORKER_VERSION = '2026-08-15-v78'  // v78: ALL 3 phases run in PARALLEL (total wall-clock ~25s vs prior ~60s); phase1 first 40k chars, phase2 scoring section, phase3 requirements section; fixes consistent phase3 timeout
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.andersenlab.com.
@@ -1233,11 +1233,29 @@ async function extractRfpFieldsFromOcr(ocrText: string, env: any, rfpIdLog: stri
 }> {
   const phaseErrors: string[] = []
 
-  // Phase 1 uses the first 40k chars (covers background→scope→response format in most RFPs)
+  // ── Focused text slices per phase (computed before launching all 3 in parallel) ─
+  // Phase 1: first 40k chars covers background, objectives, scope, response format, timeline
   const phase1Text = ocrText.slice(0, 40000)
+  // Phase 2: anchored to the evaluation/scoring section
+  const scoringFocusText = extractFocusedSection(
+    ocrText,
+    ['evaluation criteria', 'scoring criteria', 'evaluation weightage', 'criteria weights', 'weighting'],
+    25000
+  )
+  // Phase 3: anchored to the requirements/scope section
+  const requirementsFocusText = extractFocusedSection(
+    ocrText,
+    ['shall', 'must ', 'mandatory', 'required', 'requirement', 'scope of work'],
+    35000
+  )
 
-  // ── Phase 1: scalar fields ────────────────────────────────────────────────
-  const scalarSystemPrompt = `You are an expert procurement analyst. Extract structured data from an RFP document.
+  // ── All 3 phases in PARALLEL — total wall-clock ~25s instead of ~60s ──────
+  // No sequential dependency: Phase 1 (scalar object), Phase 2 (scoring array),
+  // Phase 3 (requirements array) are completely independent LLM calls.
+  const [phase1Result, phase2Result, phase3Result] = await Promise.allSettled([
+    // ── Phase 1: scalar fields ──────────────────────────────────────────────
+    callLLM(
+      `You are an expert procurement analyst. Extract structured data from an RFP document.
 Return ONLY a valid JSON object with these exact keys (no markdown fences, no extra keys):
 {
   "title": "<full RFP/project title as stated in doc, max 120 chars>",
@@ -1249,37 +1267,10 @@ Return ONLY a valid JSON object with these exact keys (no markdown fences, no ex
   "budget": "<budget ceiling digits only, no currency symbols — empty string if not stated>",
   "deadline": "<proposal submission deadline YYYY-MM-DD — empty string if not found>",
   "content": "<800–1200 char plain-text executive summary of the full RFP: background, objectives, scope, key requirements, evaluation criteria, and timeline>"
-}`
-  let extracted: any = {}
-  try {
-    const raw1 = await callLLM(scalarSystemPrompt,
+}`,
       `Extract all structured fields from this RFP:\n\n${phase1Text}`,
-      env, 'gpt-5-mini', 2000)
-    const c1 = raw1.replace(/^```json\s*/i,'').replace(/^```\s*/i,'').replace(/\s*```\s*$/i,'').trim()
-    const s1 = c1.indexOf('{'), e1 = c1.lastIndexOf('}')
-    if (s1 !== -1 && e1 !== -1) extracted = JSON.parse(c1.slice(s1, e1 + 1))
-    console.log(`[rfp-ai-extract] ${rfpIdLog} phase1 ok: title="${extracted.title}"`)
-  } catch (err: any) {
-    const msg = `phase1 failed: ${err.message}`
-    console.error(`[rfp-ai-extract] ${rfpIdLog} ${msg}`)
-    phaseErrors.push(msg)
-  }
-
-  // ── Phase 2 + 3: run in PARALLEL to halve wall-clock time ─────────────────
-  // Phase 2 focuses on the evaluation/scoring section (search for keyword first)
-  const scoringFocusText = extractFocusedSection(
-    ocrText,
-    ['evaluation criteria', 'scoring criteria', 'evaluation weightage', 'criteria weights', 'weighting'],
-    25000
-  )
-  // Phase 3 focuses on requirements/scope/submission section
-  const requirementsFocusText = extractFocusedSection(
-    ocrText,
-    ['shall', 'must ', 'mandatory', 'required', 'requirement', 'scope of work'],
-    35000
-  )
-
-  const [phase2Result, phase3Result] = await Promise.allSettled([
+      env, 'gpt-5-mini', 2000
+    ),
     // ── Phase 2: evaluation criteria array ─────────────────────────────────
     callLLM(
       `You are an expert procurement analyst. Extract ALL evaluation/scoring criteria from an RFP document.
@@ -1310,6 +1301,26 @@ Rules:
       env, 'gpt-5-mini', 2500
     ),
   ])
+
+  // ── Process Phase 1 result ─────────────────────────────────────────────────
+  let extracted: any = {}
+  if (phase1Result.status === 'fulfilled') {
+    const raw1 = phase1Result.value
+    const c1 = raw1.replace(/^```json\s*/i,'').replace(/^```\s*/i,'').replace(/\s*```\s*$/i,'').trim()
+    const s1 = c1.indexOf('{'), e1 = c1.lastIndexOf('}')
+    try {
+      if (s1 !== -1 && e1 !== -1) extracted = JSON.parse(c1.slice(s1, e1 + 1))
+      console.log(`[rfp-ai-extract] ${rfpIdLog} phase1 ok: title="${extracted.title}"`)
+    } catch (parseErr: any) {
+      const msg = `phase1 parse error: ${parseErr.message} — raw(200): ${raw1.slice(0, 200)}`
+      console.error(`[rfp-ai-extract] ${rfpIdLog} ${msg}`)
+      phaseErrors.push(msg)
+    }
+  } else {
+    const msg = `phase1 failed: ${phase1Result.reason?.message || phase1Result.reason}`
+    console.error(`[rfp-ai-extract] ${rfpIdLog} ${msg}`)
+    phaseErrors.push(msg)
+  }
 
   // ── Process Phase 2 result ─────────────────────────────────────────────────
   let scoringMatrixJson: string | null = null
