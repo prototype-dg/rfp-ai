@@ -1600,12 +1600,18 @@ Rules:
       }),
     })
 
+    const httpStatus = res.status
+    const rawBody = await res.text().catch(() => '')
+    console.log(`[rerun-phase3] rfp=${rfpId} http=${httpStatus} body_len=${rawBody.length} body_preview=${rawBody.slice(0,200)}`)
+
     if (!res.ok) {
-      const errText = await res.text().catch(() => 'unknown')
-      return c.json({ ok: false, error: `LLM error ${res.status}: ${errText.slice(0, 200)}` }, 500)
+      return c.json({ ok: false, error: `LLM error ${httpStatus}: ${rawBody.slice(0, 200)}` }, 500)
     }
 
-    const llmBody: any = await res.json()
+    let llmBody: any = {}
+    try { llmBody = JSON.parse(rawBody) } catch(e: any) {
+      return c.json({ ok: false, error: `LLM JSON parse error: ${e.message}`, raw: rawBody.slice(0,300) }, 500)
+    }
     const raw = llmBody?.choices?.[0]?.message?.content || ''
     console.log(`[rerun-phase3] rfp=${rfpId} raw_len=${raw.length}`)
 
