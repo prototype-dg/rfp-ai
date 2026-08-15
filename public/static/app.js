@@ -4747,22 +4747,39 @@ rfpTabs.generate = function(rfpId, rfp) {
   // Currency + country — stored on rfp; fallback to display currency
   const rfpCurrencyVal    = (rfp && rfp.rfp_currency)    || _settingsCurrency || 'USD';
   const countryOfIssueVal = (rfp && rfp.country_of_issue) || '';
+  // Uploaded RFP fields
+  const isUploaded    = rfp && rfp.upload_source === 'uploaded';
+  const uploadedR2Key = (rfp && rfp.uploaded_rfp_r2_key) || '';
+  const uploadedFilename = (rfp && rfp.uploaded_rfp_filename) || 'Uploaded RFP';
 
   // Init scoring matrix from RFP or defaults
   var scoringMatrix = getScoringMatrix(rfp);
   window._currentScoringMatrix = JSON.parse(JSON.stringify(scoringMatrix));
   setTimeout(function(){ restoreAutoSave(rfpId); }, 200);
 
-  // Build the preview HTML.
-  // When content exists: load an iframe pointing to /api/rfps/:id/preview-html
-  // which proxies to the sidecar /render-md-html — shows the full Andersen letterhead.
-  // When no content yet: show a placeholder prompt.
-  const previewHtml = hasContent
-    ? '<iframe id="rfpLetterheadFrame" src="/api/rfps/' + rfpId + '/preview-html" style="width:100%;height:100%;min-height:700px;border:none;display:block" loading="lazy"></iframe>'
-    : '<div style="text-align:center;padding:3rem 1.5rem;color:#9ca3af">'
+  // Build the right-panel preview HTML:
+  // Priority 1 — AI-generated content exists → show letterhead iframe (same as always)
+  // Priority 2 — Uploaded RFP (no generated content yet) → show original PDF in iframe
+  // Priority 3 — Brand new RFP, nothing yet → show placeholder prompt
+  var previewHtml;
+  if (hasContent) {
+    previewHtml = '<iframe id="rfpLetterheadFrame" src="/api/rfps/' + rfpId + '/preview-html" style="width:100%;height:100%;min-height:700px;border:none;display:block" loading="lazy"></iframe>';
+  } else if (isUploaded && uploadedR2Key) {
+    previewHtml = '<iframe src="/api/proposals/pdf/' + encodeURIComponent(uploadedR2Key) + '" '
+      + 'style="width:100%;height:100%;min-height:700px;border:none;display:block" loading="lazy"></iframe>';
+  } else {
+    previewHtml = '<div style="text-align:center;padding:3rem 1.5rem;color:#9ca3af">'
       + '<i class="fas fa-file-alt" style="font-size:2.5rem;display:block;margin-bottom:1rem;color:#d1d5db"></i>'
       + '<p style="margin:0">Fill in the details and click <strong>Generate with AI</strong> to produce a professional RFP document</p>'
       + '</div>';
+  }
+
+  // Right-panel toolbar label — reflects what's currently shown
+  var previewLabel = hasContent
+    ? '<span style="font-weight:600;color:#374151;font-size:0.88rem;margin-right:4px"><i class="fas fa-eye cpc-gold" style="margin-right:6px"></i>' + t('gen_rfp_preview') + '</span>'
+    : isUploaded && uploadedR2Key
+      ? '<span style="font-weight:600;color:#374151;font-size:0.88rem;margin-right:4px"><i class="fas fa-file-pdf" style="color:#dc2626;margin-right:6px"></i>' + escHtml(uploadedFilename) + '</span>'
+      : '<span style="font-weight:600;color:#374151;font-size:0.88rem;margin-right:4px"><i class="fas fa-eye cpc-gold" style="margin-right:6px"></i>' + t('gen_rfp_preview') + '</span>';
 
   // Inline auto-save event attribute (scheduleFieldSave is global)
   var asc = 'scheduleFieldSave(' + rfpId + ',this.id)';
@@ -4778,9 +4795,19 @@ rfpTabs.generate = function(rfpId, rfp) {
       + '</div>';
   }
 
+  // Info banner for uploaded RFPs (shown instead of or alongside the draft stage bar)
+  var uploadedBanner = (isUploaded && !hasContent)
+    ? '<div style="background:linear-gradient(90deg,#eff6ff,#dbeafe);border:1.5px solid #93c5fd;border-radius:10px;padding:0.65rem 1rem;display:flex;align-items:center;gap:0.75rem;margin-bottom:1rem">'
+      + '<i class="fas fa-file-import" style="color:#2563eb;font-size:1rem;flex-shrink:0"></i>'
+      + '<div style="flex:1"><span style="font-weight:700;color:#1e40af;font-size:0.88rem">RFP imported from PDF</span>'
+      + '<span style="color:#1d4ed8;font-size:0.82rem;margin-left:0.5rem">Fields have been pre-filled by AI · Review and edit, then click <strong>Generate RFP with AI</strong></span></div>'
+      + '</div>'
+    : '';
+
   setContent(
     genStageBar
-    + '<div class="generate-layout" style="display:grid;grid-template-columns:460px 1fr;gap:1.25rem;height:calc(100vh - 240px)">'
+    + uploadedBanner
+    + '<div class="generate-layout" style="display:grid;grid-template-columns:460px 1fr;gap:1.25rem;height:calc(100vh - ' + (isUploaded && !hasContent ? '260' : '240') + 'px)">'
     // ── LEFT: form — fields only, no action buttons ──
     + '<div class="card" style="padding:1.25rem;overflow-y:auto;display:flex;flex-direction:column;gap:0.875rem">'
     + '<h3 style="font-weight:700;color:#1f2937;font-size:0.9rem;margin:0"><i class="fas fa-magic cpc-gold" style="margin-right:6px"></i>' + t('gen_rfp_params') + '</h3>'
@@ -4877,17 +4904,20 @@ rfpTabs.generate = function(rfpId, rfp) {
     // ── RIGHT: preview with sticky toolbar ──
     + '<div class="card" style="overflow-y:auto;padding:0;display:flex;flex-direction:column">'
     + '<div style="position:sticky;top:0;z-index:10;padding:0.625rem 1rem;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;gap:0.5rem;background:#f9fafb;flex-wrap:wrap">'
-    // Left label
-    + '<span style="font-weight:600;color:#374151;font-size:0.88rem;margin-right:4px"><i class="fas fa-eye cpc-gold" style="margin-right:6px"></i>' + t('gen_rfp_preview') + '</span>'
-    // Generate with AI — primary action, always visible
-    + '<button id="genBtn" class="btn-primary btn-sm" style="display:flex;align-items:center;gap:5px;padding:0.3rem 0.75rem;font-size:0.78rem" onclick="generateRfpDoc(' + rfpId + ')"><i class="fas fa-robot" style="font-size:0.72rem"></i>' + t('gen_generate_ai') + '</button>'
+    // Left label — shows "RFP Preview" or filename of uploaded PDF
+    + previewLabel
+    // Generate / Re-generate with AI — primary action, always visible
+    + '<button id="genBtn" class="btn-primary btn-sm" style="display:flex;align-items:center;gap:5px;padding:0.3rem 0.75rem;font-size:0.78rem" onclick="generateRfpDoc(' + rfpId + ')">'
+    + '<i class="fas fa-robot" style="font-size:0.72rem"></i>'
+    + (isUploaded && !hasContent ? 'Generate RFP with AI' : t('gen_generate_ai'))
+    + '</button>'
     // Spacer
     + '<div style="flex:1"></div>'
-    // Copy + PDF (right side, shown only when content exists)
+    // Copy + PDF (right side, shown only when AI-generated content exists)
     + (hasContent ? '<button class="btn-ghost btn-sm" onclick="copyRfpPreview()" title="Copy all text"><i class="fas fa-copy"></i>Copy All</button>' : '')
     + '<button id="genPreviewPdfBtn" class="btn-ghost btn-sm" onclick="downloadRfpPdf(' + rfpId + ')" style="' + (hasContent ? '' : 'display:none') + '"><i class="fas fa-download"></i>PDF</button>'
     + '</div>'
-    + '<div id="rfpPreviewArea" style="padding:16px 24px;flex:1;overflow-y:auto;background:#ffffff;min-height:0">' + previewHtml + '</div>'
+    + '<div id="rfpPreviewArea" style="' + ((isUploaded && uploadedR2Key && !hasContent) ? 'flex:1;min-height:0;overflow:hidden' : 'padding:16px 24px;flex:1;overflow-y:auto;background:#ffffff;min-height:0') + '">' + previewHtml + '</div>'
     + '</div>'
     + '</div>'
   );
@@ -9035,8 +9065,6 @@ function showCreateRfpForm() {
 // ── Step 1b: Upload existing RFP PDF form ──────────────────────────────────────
 function showUploadRfpForm() {
   _uploadRfpFile = null;
-  // Revoke any previous preview object URL to avoid memory leaks
-  if (window._uploadRfpPreviewUrl) { URL.revokeObjectURL(window._uploadRfpPreviewUrl); window._uploadRfpPreviewUrl = null; }
   var defCurrency = _settingsCurrency || 'USD';
   showModal(
     // Header
@@ -9048,32 +9076,26 @@ function showUploadRfpForm() {
     + '<div style="font-size:0.72rem;color:#9ca3af">' + t('upload_rfp_subtitle') + '</div>'
     + '</div></div>'
 
-    // Two-column layout: left=form, right=PDF preview
-    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;align-items:start">'
-
-    // ── LEFT COLUMN ──────────────────────────────────────
-    + '<div>'
-
     // PDF drop zone
     + '<div id="uploadRfpDropzone" '
     + 'onclick="document.getElementById(\'uploadRfpFileInput\').click()" '
     + 'ondragover="event.preventDefault();this.style.borderColor=\'#2563eb\';this.style.background=\'#eff6ff\'" '
     + 'ondragleave="this.style.borderColor=\'#d1d5db\';this.style.background=\'#f9fafb\'" '
     + 'ondrop="handleUploadRfpDrop(event)" '
-    + 'style="border:2px dashed #d1d5db;border-radius:12px;padding:1.5rem 1rem;text-align:center;cursor:pointer;background:#f9fafb;transition:all 0.2s;margin-bottom:0.75rem">'
-    + '<i class="fas fa-file-pdf" style="font-size:2rem;color:#dc2626;display:block;margin-bottom:0.6rem"></i>'
-    + '<div id="uploadRfpDropzoneLabel" style="font-size:0.85rem;font-weight:600;color:#374151;margin-bottom:0.2rem">' + t('upload_rfp_drop_hint') + '</div>'
-    + '<div style="font-size:0.7rem;color:#9ca3af">PDF only · max 20 MB</div>'
+    + 'style="border:2px dashed #d1d5db;border-radius:12px;padding:2rem;text-align:center;cursor:pointer;background:#f9fafb;transition:all 0.2s;margin-bottom:0.875rem">'
+    + '<i class="fas fa-file-pdf" style="font-size:2.2rem;color:#dc2626;display:block;margin-bottom:0.75rem"></i>'
+    + '<div id="uploadRfpDropzoneLabel" style="font-size:0.88rem;font-weight:600;color:#374151;margin-bottom:0.25rem">' + t('upload_rfp_drop_hint') + '</div>'
+    + '<div style="font-size:0.72rem;color:#9ca3af">PDF files only · max 20 MB</div>'
     + '<input type="file" id="uploadRfpFileInput" accept=".pdf" style="display:none" onchange="handleUploadRfpSelect(event)">'
     + '</div>'
 
     // Currency + Country of Issue
-    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;margin-bottom:0.75rem">'
-    + '<div class="form-group" style="margin:0"><label style="display:flex;align-items:center;gap:5px;font-size:0.78rem"><i class="fas fa-coins" style="color:var(--cpc-gold);font-size:0.72rem"></i>' + t('create_rfp_currency') + '</label>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.625rem;margin-bottom:0.875rem">'
+    + '<div class="form-group" style="margin:0"><label style="display:flex;align-items:center;gap:5px"><i class="fas fa-coins" style="color:var(--cpc-gold);font-size:0.75rem"></i>' + t('create_rfp_currency') + '</label>'
     + _buildCurrencySelect('uploadRfpCurrency', defCurrency)
     + '</div>'
-    + '<div class="form-group" style="margin:0"><label style="display:flex;align-items:center;gap:5px;font-size:0.78rem"><i class="fas fa-globe" style="color:#3b82f6;font-size:0.72rem"></i>' + t('create_rfp_country') + '</label>'
-    + '<input id="uploadRfpCountry" placeholder="' + t('ph_rfp_country') + '" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:0.82rem">'
+    + '<div class="form-group" style="margin:0"><label style="display:flex;align-items:center;gap:5px"><i class="fas fa-globe" style="color:#3b82f6;font-size:0.75rem"></i>' + t('create_rfp_country') + '</label>'
+    + '<input id="uploadRfpCountry" placeholder="' + t('ph_rfp_country') + '" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:7px 10px;font-size:0.84rem">'
     + '</div></div>'
 
     // Action buttons
@@ -9081,32 +9103,7 @@ function showUploadRfpForm() {
     + '<button class="btn-primary" id="uploadRfpBtn" style="flex:1" onclick="uploadRfpPdf()"><i class="fas fa-file-import"></i>' + t('upload_rfp_btn') + '</button>'
     + '<button class="btn-ghost" onclick="closeModal()">Cancel</button>'
     + '</div>'
-    + '</div>' // end left column
-
-    // ── RIGHT COLUMN — PDF preview ────────────────────────
-    + '<div id="uploadRfpPreviewCol" style="border-radius:10px;overflow:hidden;background:#f3f4f6;min-height:340px;display:flex;flex-direction:column;align-items:center;justify-content:center;border:1px solid #e5e7eb">'
-    + '<i class="fas fa-file-pdf" style="font-size:3rem;color:#d1d5db;margin-bottom:0.75rem"></i>'
-    + '<p style="font-size:0.78rem;color:#9ca3af;margin:0;text-align:center;padding:0 1rem">PDF preview will appear here after you select a file</p>'
-    + '</div>'
-
-    + '</div>' // end two-column grid
-  , { wide: true });
-}
-
-// Called by _setUploadRfpFile after a PDF is selected — renders an embedded preview
-function _showUploadRfpPreview(file) {
-  var col = document.getElementById('uploadRfpPreviewCol');
-  if (!col) return;
-  // Revoke old URL first
-  if (window._uploadRfpPreviewUrl) { URL.revokeObjectURL(window._uploadRfpPreviewUrl); }
-  window._uploadRfpPreviewUrl = URL.createObjectURL(file);
-  col.innerHTML = '<iframe src="' + window._uploadRfpPreviewUrl + '#toolbar=0&navpanes=0&scrollbar=1" '
-    + 'style="width:100%;height:400px;border:none;border-radius:10px" '
-    + 'title="PDF Preview"></iframe>'
-    + '<div style="font-size:0.7rem;color:#6b7280;padding:4px 8px;text-align:center;background:#f9fafb;width:100%;border-top:1px solid #e5e7eb">'
-    + '<i class="fas fa-file-pdf" style="color:#dc2626;margin-right:4px"></i>' + escHtml(file.name)
-    + ' · ' + (file.size / 1024).toFixed(0) + ' KB'
-    + '</div>';
+  );
 }
 
 function handleUploadRfpDrop(event) {
@@ -9132,10 +9129,8 @@ function _setUploadRfpFile(file) {
   _uploadRfpFile = file;
   var lbl = document.getElementById('uploadRfpDropzoneLabel');
   var dz  = document.getElementById('uploadRfpDropzone');
-  if (lbl) lbl.innerHTML = '<i class="fas fa-check-circle" style="color:#065f46;margin-right:6px"></i><strong style="color:#065f46">' + escHtml(file.name) + '</strong>';
+  if (lbl) lbl.innerHTML = '<i class="fas fa-check-circle" style="color:#065f46;margin-right:6px"></i><strong style="color:#065f46">' + escHtml(file.name) + '</strong> &bull; ' + (file.size/1024).toFixed(0) + ' KB';
   if (dz)  { dz.style.borderColor = '#065f46'; dz.style.background = '#ecfdf5'; }
-  // Render inline PDF preview in the right column
-  _showUploadRfpPreview(file);
 }
 
 async function uploadRfpPdf() {
@@ -9158,7 +9153,6 @@ async function uploadRfpPdf() {
     var data = await resp.json();
     var rfp  = data.rfp;
     _uploadRfpFile = null;
-    if (window._uploadRfpPreviewUrl) { URL.revokeObjectURL(window._uploadRfpPreviewUrl); window._uploadRfpPreviewUrl = null; }
     closeModal();
     showToast(t('upload_rfp_parsed'), 'success', 6000);
     // Navigate to Generate tab so user can review + regenerate
