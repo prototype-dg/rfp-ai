@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 import { andersenEmailHtml, andersenPageHtml } from '../brand/letterhead'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-08-15-v62'  // v62: header single logo + RFP ref in white row; footer table layout; looser orphan/page-break rules
+const WORKER_VERSION = '2026-08-15-v63'  // v63: yellow band height halved (34px), topo patterns rescaled, PDF margin.top 32mm→23mm
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.andersenlab.com.

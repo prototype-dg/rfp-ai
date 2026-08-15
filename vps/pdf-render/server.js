@@ -49,10 +49,10 @@ const SECRET = process.env.PDF_SERVICE_SECRET || '';
 
 // ── Health check ────────────────────────────────────────────────────────────
 app.get('/', (req, res) => {
-  res.json({ status: 'ok', service: 'pdf-render', version: '12' });
+  res.json({ status: 'ok', service: 'pdf-render', version: '13' });
 });
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', version: '12' });
+  res.json({ status: 'ok', version: '13' });
 });
 
 // ── Auth middleware ──────────────────────────────────────────────────────────
@@ -147,15 +147,15 @@ function buildPreviewHtml(markdown, opts) {
   const bodyHtml = marked.parse(markdown || '');
 
   // Topo SVG for yellow band (inside overflow:hidden container — safe in preview)
-  const topoSvg = `<svg class="topo" viewBox="0 0 794 48" preserveAspectRatio="none" fill="none">
-    <path d="M-10 14 Q 100 4, 220 20 T 460 24 Q 580 30, 810 12" stroke="#020303" stroke-width="0.7" stroke-opacity="0.3"/>
-    <path d="M-10 28 Q 120 14, 240 34 T 480 38 Q 620 44, 810 26" stroke="#020303" stroke-width="0.7" stroke-opacity="0.22"/>
-    <path d="M-10 42 Q 140 26, 260 46 T 500 50 Q 640 58, 810 38" stroke="#020303" stroke-width="0.7" stroke-opacity="0.16"/>
-    <circle cx="120" cy="16" r="2.5" fill="#020303" opacity="0.3"/>
-    <circle cx="300" cy="30" r="2"   fill="#020303" opacity="0.25"/>
-    <circle cx="460" cy="22" r="3"   fill="#020303" opacity="0.25"/>
-    <circle cx="620" cy="40" r="2"   fill="#020303" opacity="0.2"/>
-    <circle cx="740" cy="18" r="2.5" fill="#020303" opacity="0.25"/>
+  const topoSvg = `<svg class="topo" viewBox="0 0 794 24" preserveAspectRatio="none" fill="none">
+    <path d="M-10 7  Q 100 2, 220 10 T 460 12 Q 580 15, 810 6"  stroke="#020303" stroke-width="0.7" stroke-opacity="0.3"/>
+    <path d="M-10 14 Q 120 7, 240 17 T 480 19 Q 620 22, 810 13" stroke="#020303" stroke-width="0.7" stroke-opacity="0.22"/>
+    <path d="M-10 21 Q 140 13, 260 23 T 500 24 Q 640 24, 810 19" stroke="#020303" stroke-width="0.7" stroke-opacity="0.16"/>
+    <circle cx="120" cy="8"  r="1.5" fill="#020303" opacity="0.3"/>
+    <circle cx="300" cy="15" r="1.2" fill="#020303" opacity="0.25"/>
+    <circle cx="460" cy="11" r="1.8" fill="#020303" opacity="0.25"/>
+    <circle cx="620" cy="20" r="1.2" fill="#020303" opacity="0.2"/>
+    <circle cx="740" cy="9"  r="1.5" fill="#020303" opacity="0.25"/>
   </svg>`;
 
   // Reusable header HTML string (injected into each page)
@@ -221,7 +221,7 @@ body { background: #EDEEF1; margin: 0; padding: 24px 0 48px; }
 .a-pg-tag b { color:#020303; font-weight:600; }
 
 .a-pg-band {
-  height: 48px; background: #FFDB00;
+  height: 24px; background: #FFDB00;  /* halved from 48px */
   position: relative; overflow: hidden;
   display: flex; align-items: center; justify-content: flex-end;
   padding: 0 28px; flex-shrink: 0;
@@ -291,7 +291,7 @@ body { background: #EDEEF1; margin: 0; padding: 24px 0 48px; }
   // ── Constants (must match CSS above) ──
   var PAGE_W      = 794;   // px — .a-page width
   var PAGE_H      = 1123;  // px — .a-page height
-  var HDR_H       = 88;    // px — lockup(~42) + band(48) + accent(20) - overlap
+  var HDR_H       = 77;    // px — lockup(48) + band(24) + accent(5) = 77px HTML preview header
   var FTR_H       = 44;    // px — .a-pg-footer height
   var BODY_PAD_T  = 20;    // px — .a-pg-body padding-top
   var BODY_PAD_B  = 16;    // px — .a-pg-body padding-bottom
@@ -490,7 +490,7 @@ function buildPdfBodyHtml(markdown, opts) {
 ${TYPOGRAPHY_CSS}
 body { background: #fff; margin: 0; padding: 0; }
 .a-body { padding: 0; }
-@page { size: A4; margin: 32mm 16mm 22mm 16mm; }
+@page { size: A4; margin: 23mm 16mm 22mm 16mm; }  /* 23mm = 87px @ 96dpi (lockup 48 + band 34 + accent 5) */
 </style>
 </head>
 <body><div class="a-body">${bodyHtml}</div></body>
@@ -517,70 +517,76 @@ body { background: #fff; margin: 0; padding: 0; }
 // ─────────────────────────────────────────────────────────────────────────────
 function buildHeaderSvg(refBadge) {
   // Dimensions in px (96 dpi basis — Puppeteer HF template viewport)
-  // Total height = 32mm = 121px @ 96dpi
   // Width = A4 width = 794px
   //
-  // Layout (v12 — fixed):
-  //   Row 1 (0–48px):    white lockup — wordmark LEFT, RFP badge RIGHT (no duplicate logo)
-  //   Row 2 (48–116px):  yellow band — TOPO LINES ONLY (no wordmark, no badge text)
-  //   Row 3 (116–121px): white accent strip with top border
-  const W   = 794;
-  const H   = 121;   // 32mm @ 96dpi
-  const LKH = 48;    // lockup row height (slightly taller for breathing room)
-  const PAD = 60;    // horizontal padding (≈16mm)
+  // Layout (v13 — yellow band halved):
+  //   Row 1 (0–48px):   white lockup — wordmark LEFT, RFP badge RIGHT
+  //   Row 2 (48–82px):  yellow band 34px (was 68px — halved)
+  //   Row 3 (82–87px):  white accent strip with top border
+  //   Total H = 87px ≈ 23mm @ 96dpi  (margin.top updated to match)
+  const W    = 794;
+  const LKH  = 48;   // lockup row height
+  const BAND = 34;   // yellow band height — 50% of previous 68px
+  const ACC  = 5;    // accent strip height
+  const H    = LKH + BAND + ACC;  // = 87px
+  const PAD  = 60;   // horizontal padding
 
   // Wordmark glyph centred in lockup row
   const glyphX = PAD;
-  const glyphY = Math.round((LKH - 16) / 2);  // centre vertically
+  const glyphY = Math.round((LKH - 16) / 2);
 
-  // Topo paths — all y-coords inside the yellow band (y=LKH to y=H-5)
-  const bY = LKH;  // band top y
-  const topo1 = `M-10,${bY+14} Q130,${bY+2} 280,${bY+18} T520,${bY+22} Q650,${bY+28} 810,${bY+10}`;
-  const topo2 = `M-10,${bY+30} Q150,${bY+12} 300,${bY+32} T540,${bY+38} Q660,${bY+46} 810,${bY+24}`;
-  const topo3 = `M-10,${bY+46} Q160,${bY+28} 320,${bY+50} T560,${bY+54} Q680,${bY+60} 810,${bY+40}`;
+  // Topo paths — scaled to fit within 34px band height (bY to bY+BAND-ACC)
+  // Original offsets (0–68px range) are scaled by factor 34/68 = 0.5
+  const bY = LKH;  // band top y = 48
+  const bH = BAND; // band usable height = 34
+  // Scale factor: new offsets = original * (bH / 68)
+  // topo1 original deltas: +7,+2,+18,+22,+28,+10  → halved
+  const topo1 = `M-10,${bY+7}  Q130,${bY+1}  280,${bY+9}  T520,${bY+11} Q650,${bY+14} 810,${bY+5}`;
+  const topo2 = `M-10,${bY+15} Q150,${bY+6}  300,${bY+16} T540,${bY+19} Q660,${bY+23} 810,${bY+12}`;
+  const topo3 = `M-10,${bY+23} Q160,${bY+14} 320,${bY+25} T560,${bY+27} Q680,${bY+30} 810,${bY+20}`;
 
-  // RFP badge — shown in WHITE row right-aligned (not in yellow band)
+  // Dots scaled to new band height
+  const d1y = bY + 8,  d2y = bY + 17, d3y = bY + 10, d4y = bY + 22, d5y = bY + 9;
+
+  // RFP badge — right side of white row
   const badge = String(refBadge || '').slice(0, 50);
 
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">
 
-  <!-- ── Row 1: White lockup ── -->
+  <!-- ── Row 1: White lockup (48px) ── -->
   <rect x="0" y="0" width="${W}" height="${LKH}" fill="#ffffff"/>
   <line x1="0" y1="${LKH}" x2="${W}" y2="${LKH}" stroke="#E8E8E8" stroke-width="1"/>
 
-  <!-- Wordmark glyph: black square + two yellow vertical slots -->
+  <!-- Wordmark glyph -->
   <rect x="${glyphX}" y="${glyphY}" width="16" height="16" rx="2" fill="#020303"/>
   <rect x="${glyphX+3}" y="${glyphY+3}" width="4" height="10" fill="#FFDB00"/>
   <rect x="${glyphX+9}" y="${glyphY+3}" width="4" height="10" fill="#FFDB00"/>
-  <!-- ANDERSEN wordmark (one instance, in white row only) -->
   <text x="${glyphX+22}" y="${glyphY+12}" font-family="Arial,Helvetica,sans-serif" font-weight="700" font-size="12" letter-spacing="1.5" fill="#020303">ANDERSEN</text>
-  <!-- Vertical divider -->
   <line x1="${glyphX+122}" y1="${glyphY+2}" x2="${glyphX+122}" y2="${glyphY+14}" stroke="#D0D0D0" stroke-width="1"/>
-  <!-- Tag lines: Software Engineering Group · Global -->
   <text x="${glyphX+130}" y="${glyphY+8}" font-family="Courier New,monospace" font-weight="600" font-size="6.5" letter-spacing="0.8" fill="#020303">SOFTWARE ENGINEERING</text>
   <text x="${glyphX+130}" y="${glyphY+16}" font-family="Courier New,monospace" font-size="6.5" letter-spacing="0.8" fill="#556170">GROUP · GLOBAL</text>
 
-  <!-- RFP reference number — RIGHT side of white row -->
+  <!-- RFP ref — right of white row -->
   ${badge ? `<text x="${W - PAD}" y="${glyphY+8}" font-family="Courier New,monospace" font-size="7" letter-spacing="1.8" fill="#556170" text-anchor="end">REF</text>
   <text x="${W - PAD}" y="${glyphY+17}" font-family="Courier New,monospace" font-weight="600" font-size="7.5" letter-spacing="1.2" fill="#020303" text-anchor="end">${badge}</text>` : ''}
 
-  <!-- ── Row 2: Yellow band (topo lines only, no logo) ── -->
-  <rect x="0" y="${LKH}" width="${W}" height="${H - LKH - 5}" fill="#FFDB00"/>
+  <!-- ── Row 2: Yellow band (34px — halved from 68px) ── -->
+  <rect x="0" y="${bY}" width="${W}" height="${BAND}" fill="#FFDB00"/>
 
-  <!-- Topo contour lines sweeping across yellow band -->
-  <path d="${topo1}" stroke="#020303" stroke-width="0.9" stroke-opacity="0.25" fill="none"/>
-  <path d="${topo2}" stroke="#020303" stroke-width="0.9" stroke-opacity="0.18" fill="none"/>
-  <path d="${topo3}" stroke="#020303" stroke-width="0.9" stroke-opacity="0.12" fill="none"/>
-  <!-- Topo accent dots -->
-  <circle cx="140" cy="${bY+16}" r="2.5" fill="#020303" opacity="0.25"/>
-  <circle cx="320" cy="${bY+32}" r="2"   fill="#020303" opacity="0.20"/>
-  <circle cx="490" cy="${bY+20}" r="2.8" fill="#020303" opacity="0.20"/>
-  <circle cx="640" cy="${bY+44}" r="2"   fill="#020303" opacity="0.16"/>
-  <circle cx="750" cy="${bY+18}" r="2.5" fill="#020303" opacity="0.20"/>
+  <!-- Topo contour lines scaled to 34px band height -->
+  <path d="${topo1}" stroke="#020303" stroke-width="0.9" stroke-opacity="0.28" fill="none"/>
+  <path d="${topo2}" stroke="#020303" stroke-width="0.9" stroke-opacity="0.20" fill="none"/>
+  <path d="${topo3}" stroke="#020303" stroke-width="0.9" stroke-opacity="0.14" fill="none"/>
+  <!-- Accent dots (scaled positions) -->
+  <circle cx="140" cy="${d1y}" r="2"   fill="#020303" opacity="0.25"/>
+  <circle cx="320" cy="${d2y}" r="1.5" fill="#020303" opacity="0.20"/>
+  <circle cx="490" cy="${d3y}" r="2.2" fill="#020303" opacity="0.20"/>
+  <circle cx="640" cy="${d4y}" r="1.5" fill="#020303" opacity="0.16"/>
+  <circle cx="750" cy="${d5y}" r="2"   fill="#020303" opacity="0.20"/>
 
-  <!-- ── Row 3: White accent strip ── -->
-  <rect x="0" y="${H-5}" width="${W}" height="5" fill="#ffffff"/>
-  <line x1="0" y1="${H-5}" x2="${W}" y2="${H-5}" stroke="#E0E0E0" stroke-width="1"/>
+  <!-- ── Row 3: White accent strip (5px) ── -->
+  <rect x="0" y="${bY + BAND}" width="${W}" height="${ACC}" fill="#ffffff"/>
+  <line x1="0" y1="${bY + BAND}" x2="${W}" y2="${bY + BAND}" stroke="#E0E0E0" stroke-width="1"/>
 </svg>`;
 }
 
@@ -601,7 +607,7 @@ function buildPuppeteerTemplates(opts) {
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { margin: 0; padding: 0; }
 </style>
-<img src="${svgDataUri}" width="794" height="121" style="display:block;width:794px;height:121px;"/>`;
+<img src="${svgDataUri}" width="794" height="87" style="display:block;width:794px;height:87px;"/>`;  // 87px = 48 lockup + 34 band + 5 accent
 
   // Footer template: use a TABLE layout (most reliable in Puppeteer HF frames).
   // Tables render predictably — no flex, no position:absolute, no SVG overlay needed.
@@ -683,7 +689,7 @@ app.post('/render-md-pdf', requireAuth, async (req, res) => {
       displayHeaderFooter: true,
       headerTemplate,
       footerTemplate,
-      margin: { top: '32mm', bottom: '22mm', left: '16mm', right: '16mm' },
+      margin: { top: '23mm', bottom: '22mm', left: '16mm', right: '16mm' },
     });
     await browser.close(); browser = null;
 
@@ -717,7 +723,7 @@ app.post('/render-pdf', requireAuth, async (req, res) => {
       const pdfBuffer = await page.pdf({
         format: 'A4', printBackground: true,
         displayHeaderFooter: true, headerTemplate, footerTemplate,
-        margin: { top: '32mm', bottom: '22mm', left: '16mm', right: '16mm' },
+        margin: { top: '23mm', bottom: '22mm', left: '16mm', right: '16mm' },
       });
       await browser.close(); browser = null;
       res.set({ 'Content-Type': 'application/pdf', 'Content-Length': pdfBuffer.length, 'Cache-Control': 'no-cache' });
