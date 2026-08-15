@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 import { andersenEmailHtml, andersenPageHtml } from '../brand/letterhead'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-08-15-v73'  // v73: Budget Cap label on Generate tab uses per-RFP currency, updates live when currency dropdown changes
+const WORKER_VERSION = '2026-08-15-v74'  // v74: Fix OCR pipeline (ocrResult.ok was always falsy — drop it, use text+chars); fix iframe lazy-load placeholder
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.andersenlab.com.
@@ -1151,19 +1151,26 @@ apiRouter.post('/rfps/upload-rfp-pdf', async (c) => {
     if (r2Key) {
       const pdfUrl = `${workerBase}/proposals/pdf/${encodeURIComponent(r2Key)}`
       const ocrResult = await callSidecar(pdfUrl, c.env, 60)
-      if (ocrResult && ocrResult.ok && ocrResult.chars >= 100) {
+      // NOTE: callSidecar return type has no `ok` field — check text+chars directly.
+      // The sidecar may return ok:1 (int) or omit ok entirely; relying on `.ok` was the bug
+      // that caused 70k-char extractions to fall through to the stub branch.
+      if (ocrResult && ocrResult.text && (ocrResult.chars || ocrResult.text.length) >= 100) {
         extractedText = ocrResult.text.slice(0, 60000)
+        console.log(`[upload-rfp-pdf] OCR success: ${ocrResult.chars} chars, ${ocrResult.pages_extracted}/${ocrResult.pages_total} pages`)
       } else {
-        extractedText = `[PDF: ${file.name}, ${sizeKb}KB — OCR yielded ${ocrResult?.chars || 0} chars]`
+        const chars = ocrResult?.chars ?? (ocrResult?.text?.length ?? 0)
+        console.warn(`[upload-rfp-pdf] OCR insufficient: chars=${chars} text_len=${ocrResult?.text?.length ?? 0}`)
+        extractedText = `[PDF: ${file.name}, ${sizeKb}KB — OCR yielded ${chars} chars]`
       }
     } else {
       extractedText = `[PDF: ${file.name}, ${sizeKb}KB — storage not available, text not extracted]`
     }
 
     // Call AI to extract structured fields from the PDF text
+    // Guard: require at least 500 real chars so the error stub can never accidentally pass
     const aiKey = c.env.OPENAI_API_KEY || (globalThis as any).OPENAI_API_KEY || ''
     let extracted: any = {}
-    if (aiKey && extractedText.length > 100) {
+    if (aiKey && extractedText.length > 500) {
       const textSnippet = extractedText.slice(0, 12000)
       try {
         const aiRes = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -1204,7 +1211,7 @@ Return ONLY the JSON object, no markdown, no explanation.`
 
     // Create RFP record with extracted data
     const refNum = 'AND/PROC/' + new Date().getFullYear() + '/' + String(Math.floor(Math.random()*9000)+1000)
-    const title = (extracted.title || file.name.replace(/\.pdf$/i, '').replace(/_/g, ' ')).slice(0, 120)
+    const title = (extracted.title || file.name.replace(/\.pdf$/i, '').replace(/[_-]+/g, ' ').replace(/\s{2,}/g, ' ').trim()).slice(0, 120)
     const rfpCategory = extracted.category || category
 
     const r = await c.env.DB.prepare(`

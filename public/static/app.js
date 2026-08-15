@@ -4771,7 +4771,7 @@ rfpTabs.generate = function(rfpId, rfp) {
     previewHtml = '<iframe id="rfpLetterheadFrame" src="/api/rfps/' + rfpId + '/preview-html" style="width:100%;height:100%;min-height:700px;border:none;display:block" loading="lazy"></iframe>';
   } else if (isUploaded && uploadedR2Key) {
     previewHtml = '<iframe src="/api/proposals/pdf/' + encodeURIComponent(uploadedR2Key) + '" '
-      + 'style="width:100%;height:100%;min-height:700px;border:none;display:block" loading="lazy"></iframe>';
+      + 'style="width:100%;height:100%;border:none;display:block" loading="eager"></iframe>';
   } else {
     previewHtml = '<div style="text-align:center;padding:3rem 1.5rem;color:#9ca3af">'
       + '<i class="fas fa-file-alt" style="font-size:2.5rem;display:block;margin-bottom:1rem;color:#d1d5db"></i>'
