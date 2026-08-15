@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 import { andersenEmailHtml, andersenPageHtml } from '../brand/letterhead'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-08-15-v78'  // v78: ALL 3 phases run in PARALLEL (total wall-clock ~25s vs prior ~60s); phase1 first 40k chars, phase2 scoring section, phase3 requirements section; fixes consistent phase3 timeout
+const WORKER_VERSION = '2026-08-15-v79'  // v79: callback returns 200 immediately; LLM extraction runs via waitUntil() — no wall-clock pressure; poll signal fixed to wait for scalar fields not just OCR text
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.andersenlab.com.
@@ -1409,7 +1409,12 @@ async function writeExtractedRfpFields(
 
 // POST /callback/rfps/:rfpId/rfp-upload-ocr-complete
 // Called by the PDF sidecar after async OCR of an uploaded RFP PDF.
-// Uses two-phase callLLM (proxy URL, gpt-5-mini, streaming) with FULL OCR text to extract ALL rfp fields.
+//
+// v79 architecture: returns 200 to the sidecar IMMEDIATELY after storing OCR text,
+// then runs all 3 LLM extraction phases via ctx.waitUntil() — completely outside
+// the HTTP response deadline, so the Cloudflare Worker wall-clock limit (30s) no
+// longer applies to the LLM calls. All 3 phases complete reliably.
+//
 // Populates: title, category, background, objectives, scope, tech_requirements, budget, deadline,
 //            content (formatted summary), rfp_full_text (full OCR for eval/Q&A),
 //            scoring_matrix (JSON eval criteria), requirement_glossary (JSON requirement list).
@@ -1418,49 +1423,68 @@ apiRouter.post('/callback/rfps/:rfpId/rfp-upload-ocr-complete', async (c) => {
   const filename = decodeURIComponent(c.req.query('filename') || 'document.pdf')
   const sizeKb   = c.req.query('size_kb') || '?'
   const expectedSecret = c.env.PDF_SIDECAR_SECRET || (globalThis as any).PDF_SIDECAR_SECRET || ''
+
+  // ── Parse body and authenticate ─────────────────────────────────────────────
+  let body: any
   try {
-    const body: any = await c.req.json()
-    if (expectedSecret && body.callback_secret !== expectedSecret) {
-      return c.json({ error: 'Unauthorized' }, 401)
-    }
-
-    // ── Validate OCR output ───────────────────────────────────────────────────
-    const ocrOk = body.text && (body.chars || body.text.length) >= 200
-    let extractedText: string
-    if (ocrOk) {
-      extractedText = body.text.slice(0, 120000)
-      console.log(`[rfp-upload-ocr-cb] rfp=${rfpId} OCR ok: ${body.chars} chars, ${body.pages_extracted}/${body.pages_total} pages`)
-    } else {
-      extractedText = `[PDF: ${filename}, ${sizeKb}KB — OCR yielded ${body.chars || 0} chars. ${body.error || ''}]`
-      console.warn(`[rfp-upload-ocr-cb] rfp=${rfpId} OCR insufficient — storing stub, skipping AI`)
-      await c.env.DB.prepare(`UPDATE rfps SET uploaded_rfp_text=?, updated_at=datetime('now') WHERE id=?`)
-        .bind(extractedText, rfpId).run()
-      return c.json({ ok: false, reason: 'ocr_insufficient', chars: body.chars || 0 })
-    }
-
-    // ── Store raw OCR text + rfp_full_text immediately (never lost if AI fails) ──
-    await c.env.DB.prepare(`UPDATE rfps SET uploaded_rfp_text=?, rfp_full_text=?, updated_at=datetime('now') WHERE id=?`)
-      .bind(extractedText, extractedText.slice(0, 100000), rfpId).run()
-
-    // ── Three-phase AI extraction via shared helper ───────────────────────────
-    const { extracted, scoringMatrixJson, requirementGlossaryJson, phaseErrors } =
-      await extractRfpFieldsFromOcr(extractedText, c.env, `rfp=${rfpId}`)
-
-    const { newTitle } = await writeExtractedRfpFields(
-      c.env.DB, rfpId, extractedText, extracted, scoringMatrixJson, requirementGlossaryJson)
-
-    console.log(`[rfp-upload-ocr-cb] rfp=${rfpId} done — title="${newTitle}" scoring=${!!scoringMatrixJson} glossary=${!!requirementGlossaryJson} errors=${phaseErrors.length}`)
-    return c.json({
-      ok: true, rfpId, title: newTitle,
-      fields_extracted: Object.keys(extracted).length,
-      has_scoring_matrix: !!scoringMatrixJson,
-      has_requirement_glossary: !!requirementGlossaryJson,
-      phase_errors: phaseErrors,
-    })
+    body = await c.req.json()
   } catch (e: any) {
-    console.error(`[rfp-upload-ocr-cb] rfp=${rfpId} error: ${e.message}`)
-    return c.json({ ok: false, error: e.message }, 500)
+    return c.json({ error: 'Invalid JSON body' }, 400)
   }
+  if (expectedSecret && body.callback_secret !== expectedSecret) {
+    return c.json({ error: 'Unauthorized' }, 401)
+  }
+
+  // ── Validate OCR output ─────────────────────────────────────────────────────
+  const ocrOk = body.text && (body.chars || body.text.length) >= 200
+  if (!ocrOk) {
+    const stub = `[PDF: ${filename}, ${sizeKb}KB — OCR yielded ${body.chars || 0} chars. ${body.error || ''}]`
+    console.warn(`[rfp-upload-ocr-cb] rfp=${rfpId} OCR insufficient — storing stub, skipping AI`)
+    await c.env.DB.prepare(`UPDATE rfps SET uploaded_rfp_text=?, updated_at=datetime('now') WHERE id=?`)
+      .bind(stub, rfpId).run()
+    return c.json({ ok: false, reason: 'ocr_insufficient', chars: body.chars || 0 })
+  }
+
+  const extractedText = (body.text as string).slice(0, 120000)
+  console.log(`[rfp-upload-ocr-cb] rfp=${rfpId} OCR ok: ${body.chars} chars, ${body.pages_extracted}/${body.pages_total} pages`)
+
+  // ── Store raw OCR text immediately so it's never lost ──────────────────────
+  // This also clears the "[PDF: … in progress]" placeholder, which the frontend
+  // polls for. We add an ai_extracting marker so the frontend knows LLM is running.
+  await c.env.DB.prepare(
+    `UPDATE rfps SET uploaded_rfp_text=?, rfp_full_text=?, ai_extraction_status='extracting', updated_at=datetime('now') WHERE id=?`
+  ).bind(extractedText, extractedText.slice(0, 100000), rfpId).run()
+
+  // ── Return 200 to sidecar immediately — before any LLM work ────────────────
+  // waitUntil() keeps the Worker alive after the response is sent.
+  // The LLM phases run with no wall-clock pressure from the HTTP request deadline.
+  const env = c.env
+  const db  = c.env.DB
+  const extractionTask = (async () => {
+    try {
+      const { extracted, scoringMatrixJson, requirementGlossaryJson, phaseErrors } =
+        await extractRfpFieldsFromOcr(extractedText, env, `rfp=${rfpId}`)
+
+      const { newTitle } = await writeExtractedRfpFields(
+        db, rfpId, extractedText, extracted, scoringMatrixJson, requirementGlossaryJson)
+
+      // Mark extraction complete
+      await db.prepare(
+        `UPDATE rfps SET ai_extraction_status='done', updated_at=datetime('now') WHERE id=?`
+      ).bind(rfpId).run()
+
+      console.log(`[rfp-upload-ocr-cb] rfp=${rfpId} extraction done — title="${newTitle}" scoring=${!!scoringMatrixJson} glossary=${!!requirementGlossaryJson} errors=${phaseErrors.length}`)
+    } catch (e: any) {
+      console.error(`[rfp-upload-ocr-cb] rfp=${rfpId} extraction error: ${e.message}`)
+      await db.prepare(
+        `UPDATE rfps SET ai_extraction_status='error', updated_at=datetime('now') WHERE id=?`
+      ).bind(rfpId).run().catch(() => {})
+    }
+  })()
+
+  c.executionCtx.waitUntil(extractionTask)
+
+  return c.json({ ok: true, rfpId, status: 'extracting' })
 })
 
 // POST /rfps/:id/rerun-ai-extraction
@@ -1484,15 +1508,20 @@ apiRouter.post('/rfps/:id/rerun-ai-extraction', async (c) => {
     }
     console.log(`[rerun-ai-extraction] rfp=${rfpId} text_len=${ocrText.length} debug=${debugPhases} — starting 3-phase extraction`)
 
+    await c.env.DB.prepare(`UPDATE rfps SET ai_extraction_status='extracting', updated_at=datetime('now') WHERE id=?`).bind(rfpId).run()
+
     const { extracted, scoringMatrixJson, requirementGlossaryJson, phaseErrors } =
       await extractRfpFieldsFromOcr(ocrText, c.env, `rfp=${rfpId}`)
 
     if (!extracted || Object.keys(extracted).length === 0) {
+      await c.env.DB.prepare(`UPDATE rfps SET ai_extraction_status='error', updated_at=datetime('now') WHERE id=?`).bind(rfpId).run()
       return c.json({ ok: false, error: 'AI extraction returned no fields (all phases failed)', phase_errors: phaseErrors }, 500)
     }
 
     const { newTitle } = await writeExtractedRfpFields(
       c.env.DB, rfpId, ocrText, extracted, scoringMatrixJson, requirementGlossaryJson)
+
+    await c.env.DB.prepare(`UPDATE rfps SET ai_extraction_status='done', updated_at=datetime('now') WHERE id=?`).bind(rfpId).run()
 
     console.log(`[rerun-ai-extraction] rfp=${rfpId} done — title="${newTitle}" errors=${phaseErrors.length}`)
     const updated = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(rfpId).first()

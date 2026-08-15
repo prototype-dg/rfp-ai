@@ -225,6 +225,10 @@ export async function initDb(db: D1Database) {
     `ALTER TABLE rfps ADD COLUMN uploaded_rfp_text TEXT`,
     `ALTER TABLE rfps ADD COLUMN uploaded_rfp_filename TEXT`,
     `ALTER TABLE rfps ADD COLUMN upload_source TEXT DEFAULT 'created'`,
+    // v79: track AI field extraction lifecycle — null | 'extracting' | 'done' | 'error'
+    // Set to 'extracting' when waitUntil() task begins, 'done' when writeExtractedRfpFields completes.
+    // Frontend polls this instead of the OCR placeholder to know when scalar fields are ready.
+    `ALTER TABLE rfps ADD COLUMN ai_extraction_status TEXT`,
   ]
   for (const sql of alterMigrations) {
     try {

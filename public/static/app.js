@@ -4756,15 +4756,22 @@ rfpTabs.generate = function(rfpId, rfp) {
   const isUploaded    = rfp && rfp.upload_source === 'uploaded';
   const uploadedR2Key = (rfp && rfp.uploaded_rfp_r2_key) || '';
   const uploadedFilename = (rfp && rfp.uploaded_rfp_filename) || 'Uploaded RFP';
-  // OCR processing state: text placeholder set during async upload, not yet replaced by real content
+  // AI extraction state — v79: use ai_extraction_status column (set by waitUntil task) instead
+  // of the OCR text placeholder. This fires the re-render only after scalar fields are written.
+  // States: null/undefined = not started, 'extracting' = LLM running, 'done' = fields ready, 'error' = failed.
+  // Fallback: if ai_extraction_status is absent (old rows), use the OCR placeholder heuristic.
   const rfpOcrText = (rfp && rfp.uploaded_rfp_text) || '';
-  const isOcrProcessing = isUploaded && rfpOcrText.startsWith('[PDF:') && rfpOcrText.includes('in progress');
+  const aiStatus   = (rfp && rfp.ai_extraction_status) || null;
+  const isOcrProcessing = isUploaded && (
+    aiStatus === 'extracting' ||
+    (aiStatus === null && rfpOcrText.startsWith('[PDF:') && rfpOcrText.includes('in progress'))
+  );
 
   // Init scoring matrix from RFP or defaults
   var scoringMatrix = getScoringMatrix(rfp);
   window._currentScoringMatrix = JSON.parse(JSON.stringify(scoringMatrix));
   setTimeout(function(){ restoreAutoSave(rfpId); }, 200);
-  // If OCR is still processing, start polling to auto-refresh when fields arrive
+  // If AI extraction is still running, start polling to auto-refresh when fields arrive
   if (isOcrProcessing) { setTimeout(function(){ _startRfpFieldPoll(rfpId); }, 500); }
 
   // Build the right-panel preview HTML:
@@ -9356,24 +9363,35 @@ async function uploadRfpPdf() {
   }
 }
 
-// Poll the API for an uploaded RFP until OCR+AI extraction completes (fields populated)
+// Poll the API for an uploaded RFP until AI field extraction completes.
+// v79: uses ai_extraction_status='done' as the completion signal — this is set by the
+// waitUntil() background task AFTER all 3 LLM phases complete and fields are written to DB.
+// Falls back to OCR-placeholder check for legacy rows that predate v79.
 var _rfpFieldPollTimer = null;
 function _startRfpFieldPoll(rfpId) {
   if (_rfpFieldPollTimer) clearInterval(_rfpFieldPollTimer);
   var attempts = 0;
-  var maxAttempts = 20; // 20 × 4s = 80s max wait
+  var maxAttempts = 30; // 30 × 4s = 120s max wait (covers 90s extraction + network)
   _rfpFieldPollTimer = setInterval(async function() {
     attempts++;
     try {
       var r = await fetch(API + '/rfps/' + rfpId);
       if (!r.ok) return;
       var rfp = await r.json();
-      var text = rfp.uploaded_rfp_text || '';
-      var isProcessing = text.startsWith('[PDF:') && text.includes('in progress');
-      if (!isProcessing || attempts >= maxAttempts) {
+      var aiStatus = rfp.ai_extraction_status || null;
+      // Primary signal (v79+): ai_extraction_status transitions to 'done' or 'error'
+      var isDone = aiStatus === 'done' || aiStatus === 'error';
+      // Fallback for legacy rows: OCR text no longer a placeholder AND background field populated
+      if (!isDone && aiStatus === null) {
+        var text = rfp.uploaded_rfp_text || '';
+        var ocrLanded = !text.startsWith('[PDF:') || !text.includes('in progress');
+        var fieldsWritten = !!(rfp.background && rfp.background.trim());
+        isDone = ocrLanded && fieldsWritten;
+      }
+      if (isDone || attempts >= maxAttempts) {
         clearInterval(_rfpFieldPollTimer);
         _rfpFieldPollTimer = null;
-        // Refresh the Generate tab to populate fields
+        // Refresh the Generate tab — fields are now populated in the DB
         navigateTo('rfp_detail', { rfpId: rfpId, tab: 'generate' });
       }
     } catch(e) { /* ignore poll errors */ }
