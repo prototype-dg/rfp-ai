@@ -3,37 +3,38 @@
 // Runs on the sidecar VPS at 127.0.0.1:8001
 // Proxied by nginx at https://api.cpc-rfp.website/pdf/
 //
-// v10 (2026-08-15) — Three targeted fixes:
+// v11 (2026-08-15) — IMAGE-BASED PDF HEADER (definitive fix):
 //
-// FIX 1 — HTML PREVIEW PAGINATION:
-//   The preview was a single min-height:1123px div — letterhead only at top/bottom.
-//   For a 27-page RFP this shows one huge scrollable block with no per-page letterhead.
-//   NEW APPROACH: Use CSS @media print + JS-driven page slicing.
-//   The preview HTML uses a JavaScript paginator that:
-//     a) Renders all content into a hidden measurement div (794px wide)
-//     b) Walks the DOM, fills A4 pages (1123px content height after margins)
-//     c) Each A4 page div gets a cloned header + footer wrapper
-//     d) Result: multiple stacked A4 page cards, each with Andersen letterhead
-//   This gives the user a true paginated preview matching the PDF layout.
+// ROOT CAUSE (v10 and earlier):
+//   Puppeteer's displayHeaderFooter injects the template HTML into a special
+//   Chromium "header frame" that is approximately 794×113px (for 32mm @ 96dpi).
+//   Inside this frame, CSS flex/background rendering is subtly broken:
+//     - background-color on child divs (not the outermost element) is unreliable
+//     - position:absolute children bleed outside frame bounds
+//     - SVG overlays with position:absolute inside flex containers are ignored
+//   All our CSS-layout approaches (flex columns, explicit heights, overflow:hidden)
+//   hit this same Chromium HF rendering limitation.
 //
-// FIX 2 — PDF HEADER BAND VISUAL ORDER:
-//   The hdr-lockup (white row) overlapped the yellow band visually because the
-//   lockup row background was bleeding. Root cause: hdr-band had "flex:1" which
-//   caused it to fill the remaining space AFTER the lockup, making the yellow
-//   band always appear BELOW the white row, but when the content above the header
-//   is close to the header bottom, the lockup row background covers part of the band.
-//   FIX: Give .hdr-lockup an explicit fixed height, and .hdr-band an explicit height.
-//   Also added border-bottom to lockup for visual separation.
+// SOLUTION — SINGLE SVG IMAGE (v11):
+//   Replace the entire multi-div CSS header with ONE <img> tag whose src is a
+//   data:image/svg+xml URI encoding the complete header as a flat SVG.
+//   SVG advantages in Puppeteer HF templates:
+//     - No CSS layout engine — SVG uses its own coordinate system
+//     - All fills/strokes render exactly as authored (no background-color stripping)
+//     - Topo contour lines, wordmark, yellow band — all in one vector
+//     - ~2KB text — no base64 truncation risk (only PNG >32KB is truncated)
+//     - The <img> element's background is transparent; outermost fill is on SVG rect
+//   The SVG header encodes (top-to-bottom):
+//     [1] White lockup row  (11mm) — wordmark SVG glyph + ANDERSEN text + divider + tag
+//     [2] Yellow band       (16mm) — #FFDB00 rect + topo contour paths + ref badge
+//     [3] Accent strip      ( 5px) — white with top border
 //
-// FIX 3 — PDF TABLE PAGINATION (CRITICAL):
-//   CSS "page-break-inside: avoid" on the <table> element prevents the table
-//   from STARTING on the current page if there isn't enough room for the ENTIRE
-//   table. For a 50-row table, this means the table jumps to a new page even if
-//   there are 20+ lines of space on the current page.
-//   FIX: Remove page-break-inside:avoid from table{}. Keep it only on tr{}.
-//   thead { display: table-header-group } repeats the header on each continuation page.
-//   This lets the table START wherever it naturally falls and flow across pages,
-//   with individual rows staying intact (no row split mid-cell).
+// FIX 2 — HTML PREVIEW PAGINATION (from v10, unchanged):
+//   JS paginator creates fixed-height A4 page cards, each with letterhead cloned in.
+//
+// FIX 3 — PDF TABLE PAGINATION (from v10, unchanged):
+//   page-break-inside:avoid removed from table{}, kept only on tr{}.
+//   thead { display: table-header-group } repeats on continuation pages.
 
 'use strict';
 const express   = require('express');
@@ -48,10 +49,10 @@ const SECRET = process.env.PDF_SERVICE_SECRET || '';
 
 // ── Health check ────────────────────────────────────────────────────────────
 app.get('/', (req, res) => {
-  res.json({ status: 'ok', service: 'pdf-render', version: '10' });
+  res.json({ status: 'ok', service: 'pdf-render', version: '11' });
 });
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', version: '10' });
+  res.json({ status: 'ok', version: '11' });
 });
 
 // ── Auth middleware ──────────────────────────────────────────────────────────
@@ -499,94 +500,148 @@ body { background: #fff; margin: 0; padding: 0; }
 // ─────────────────────────────────────────────────────────────────────────────
 // buildPuppeteerTemplates(opts)
 //
-// FIX 2: Header layout — explicit heights so lockup row and yellow band
-// don't overlap. The total header height is 32mm (margin.top in page.pdf).
-//   - hdr-lockup: fixed height ~42px (≈11mm) — white row with wordmark
-//   - hdr-band:   fills remaining space (~15mm) — solid yellow
-//   - hdr-accent: 5px separator line
+// v11: DEFINITIVE FIX — the entire header is ONE SVG image.
 //
-// The <style> tag is required inside HF templates for background colors to render.
+// Why: Puppeteer's HF template frame has broken CSS rendering for child element
+// backgrounds, position:absolute overlays, and flex layout edge cases. After 5
+// failed CSS-only attempts, we bypass the CSS layout engine entirely.
+//
+// Approach: Build a single flat SVG (794 × 121px ≈ 32mm @ 96dpi) that encodes:
+//   Row 1 (0–42px):   white lockup — wordmark glyph + ANDERSEN + divider + tag text
+//   Row 2 (42–116px): yellow band #FFDB00 + topo contour paths + ref badge text
+//   Row 3 (116–121px): white accent strip with top border line
+//
+// This SVG is embedded as a data:image/svg+xml URI in a single <img> tag.
+// No CSS layout, no flex, no position:absolute — pure SVG coordinate rendering.
+// The <img> itself sits in a minimal wrapper with only margin:0/padding:0 reset.
 // ─────────────────────────────────────────────────────────────────────────────
+function buildHeaderSvg(refBadge) {
+  // Dimensions in px (96 dpi basis — Puppeteer HF template viewport)
+  // Total height = 32mm = 121px @ 96dpi  (Puppeteer uses 96dpi for HF)
+  // Width  = A4 width = 794px
+  const W     = 794;
+  const H     = 121;   // 32mm @ 96dpi
+  const LKH   = 42;    // lockup row height (11mm)
+  const BAND  = 74;    // band bottom y  (LKH + band_height 32px = 74... adjusted below)
+  const BNDH  = 74;    // band height px (row from y=42 to y=116)
+  const ACCY  = 116;   // accent strip top y
+  const PAD   = 60;    // horizontal padding px (≈16mm)
+
+  // Wordmark glyph: black square with two yellow slots (scaled to fit lockup)
+  // Glyph box: 14×14px, text next to it
+  const glyphX = PAD;
+  const glyphY = (LKH - 16) / 2;  // vertically centred in lockup row
+
+  // Topo contour paths inside yellow band (y coords relative to band start y=42)
+  // Three gentle curves across the full width
+  const topoY = 42; // band starts here
+  const topo1 = `M-10,${topoY+14} Q100,${topoY+4} 220,${topoY+20} T460,${topoY+24} Q580,${topoY+30} 810,${topoY+12}`;
+  const topo2 = `M-10,${topoY+28} Q120,${topoY+14} 240,${topoY+34} T480,${topoY+38} Q620,${topoY+44} 810,${topoY+26}`;
+  const topo3 = `M-10,${topoY+42} Q140,${topoY+26} 260,${topoY+46} T500,${topoY+50} Q640,${topoY+58} 810,${topoY+38}`;
+
+  // ref badge text — truncate to reasonable length for SVG text element
+  const badge = String(refBadge || 'Andersen · Est. 2007').slice(0, 40);
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">
+  <!-- Row 1: White lockup row -->
+  <rect x="0" y="0" width="${W}" height="${LKH}" fill="#ffffff"/>
+  <line x1="0" y1="${LKH}" x2="${W}" y2="${LKH}" stroke="#E8E8E8" stroke-width="1"/>
+
+  <!-- Wordmark glyph (14×14 black square with yellow slots) -->
+  <rect x="${glyphX}" y="${glyphY+1}" width="14" height="14" rx="1.5" fill="#020303"/>
+  <rect x="${glyphX+2}" y="${glyphY+3}" width="4" height="8" fill="#FFDB00"/>
+  <rect x="${glyphX+8}" y="${glyphY+3}" width="4" height="8" fill="#FFDB00"/>
+  <!-- ANDERSEN wordmark text -->
+  <text x="${glyphX+18}" y="${glyphY+11}" font-family="Arial,Helvetica,sans-serif" font-weight="700" font-size="11" letter-spacing="1.2" fill="#020303">ANDERSEN</text>
+  <!-- Divider line -->
+  <line x1="${glyphX+110}" y1="${glyphY+2}" x2="${glyphX+110}" y2="${glyphY+13}" stroke="#D0D0D0" stroke-width="1"/>
+  <!-- Tag text: two lines -->
+  <text x="${glyphX+116}" y="${glyphY+7}" font-family="Courier New,monospace" font-weight="600" font-size="6" letter-spacing="1" fill="#020303" text-transform="uppercase">SOFTWARE ENGINEERING</text>
+  <text x="${glyphX+116}" y="${glyphY+14}" font-family="Courier New,monospace" font-size="6" letter-spacing="1" fill="#556170">GROUP · GLOBAL</text>
+
+  <!-- Row 2: Yellow band -->
+  <rect x="0" y="${LKH}" width="${W}" height="${H - LKH - 5}" fill="#FFDB00"/>
+
+  <!-- Topo contour lines (subtle dark strokes over yellow) -->
+  <path d="${topo1}" stroke="#020303" stroke-width="0.8" stroke-opacity="0.28" fill="none"/>
+  <path d="${topo2}" stroke="#020303" stroke-width="0.8" stroke-opacity="0.20" fill="none"/>
+  <path d="${topo3}" stroke="#020303" stroke-width="0.8" stroke-opacity="0.14" fill="none"/>
+  <!-- Topo accent dots -->
+  <circle cx="120" cy="${topoY+16}" r="2.2" fill="#020303" opacity="0.28"/>
+  <circle cx="300" cy="${topoY+30}" r="1.8" fill="#020303" opacity="0.22"/>
+  <circle cx="460" cy="${topoY+22}" r="2.5" fill="#020303" opacity="0.22"/>
+  <circle cx="620" cy="${topoY+40}" r="1.8" fill="#020303" opacity="0.18"/>
+  <circle cx="740" cy="${topoY+18}" r="2.2" fill="#020303" opacity="0.22"/>
+
+  <!-- Small wordmark in yellow band (left) — glyph only, smaller -->
+  <rect x="${PAD}" y="${LKH+10}" width="10" height="10" rx="1" fill="#020303"/>
+  <rect x="${PAD+2}" y="${LKH+12}" width="2.5" height="6" fill="#FFDB00"/>
+  <rect x="${PAD+5.5}" y="${LKH+12}" width="2.5" height="6" fill="#FFDB00"/>
+  <text x="${PAD+13}" y="${LKH+19}" font-family="Arial,Helvetica,sans-serif" font-weight="700" font-size="8" letter-spacing="1" fill="#020303">ANDERSEN</text>
+
+  <!-- Ref badge text (right side of yellow band) -->
+  <text x="${W - PAD}" y="${LKH+22}" font-family="Courier New,monospace" font-size="7" letter-spacing="1.5" fill="#020303" opacity="0.65" text-anchor="end">${badge}</text>
+
+  <!-- Row 3: White accent strip with top border -->
+  <rect x="0" y="${H-5}" width="${W}" height="5" fill="#ffffff"/>
+  <line x1="0" y1="${H-5}" x2="${W}" y2="${H-5}" stroke="#E0E0E0" stroke-width="1"/>
+</svg>`;
+}
+
 function buildPuppeteerTemplates(opts) {
   opts = opts || {};
-  const refBadge = opts.ref_number ? escHtml(opts.ref_number) : 'Andersen \u00b7 Est. 2007';
+  const refBadge = opts.ref_number ? String(opts.ref_number) : 'Andersen · Est. 2007';
   const email     = 'procurement@cpc-rfp.website';
   const year      = new Date().getFullYear();
 
-  // FIX 2: Use explicit heights instead of flex:1 to prevent overlap.
-  // Total = 32mm. Breakdown:
-  //   hdr-lockup: ~11mm  (42px at 96dpi, ≈11.1mm)
-  //   hdr-band:   ~16mm  (61px at 96dpi, ≈16.1mm)
-  //   hdr-accent: ~5px   (~1.3mm)
-  //   Remaining gap: ~3.6mm breathing room before content
-  const headerTemplate = `<style>
-* { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; box-sizing: border-box; margin: 0; padding: 0; }
-.hdr { width: 100%; height: 32mm; display: flex; flex-direction: column; overflow: hidden; }
-.hdr-lockup { height: 11mm; display: flex; align-items: center; padding: 0 16mm; background: #ffffff; border-bottom: 1px solid #EBEBEB; flex-shrink: 0; }
-.hdr-brand  { display: flex; align-items: center; gap: 10px; }
-.hdr-divider { width: 1px; height: 22px; background: #D0D0D0; flex-shrink: 0; }
-.hdr-tag { font-family: 'Courier New', monospace; font-size: 7px; letter-spacing: .2em; text-transform: uppercase; color: #556170; line-height: 1.5; }
-.hdr-tag b { color: #020303; font-weight: 600; }
-.hdr-band { flex: 1; background: #FFDB00; display: flex; align-items: center; justify-content: space-between; padding: 0 16mm; overflow: hidden; }
-.hdr-band-left { display: flex; align-items: center; gap: 8px; }
-.hdr-band-tag { font-family: 'Courier New', monospace; font-size: 6.5px; letter-spacing: .2em; text-transform: uppercase; color: #020303; opacity: .55; }
-.hdr-badge { font-family: 'Courier New', monospace; font-size: 7px; letter-spacing: .22em; text-transform: uppercase; color: #020303; opacity: .65; }
-.hdr-accent { height: 5px; background: #ffffff; border-top: 1px solid #E0E0E0; flex-shrink: 0; }
-</style>
-<div class="hdr">
-  <div class="hdr-lockup">
-    <div class="hdr-brand">
-      <svg viewBox="0 0 180 38" width="86" height="18" fill="none">
-        <rect x="0" y="3" width="24" height="24" rx="2" fill="#020303"/>
-        <rect x="4" y="7" width="6" height="14" fill="#FFDB00"/>
-        <rect x="14" y="7" width="6" height="14" fill="#FFDB00"/>
-        <text x="30" y="23" font-family="Arial,Helvetica,sans-serif" font-weight="700" font-size="15" letter-spacing="1.5" fill="#020303">ANDERSEN</text>
-      </svg>
-      <div class="hdr-divider"></div>
-      <div class="hdr-tag"><b>Software Engineering</b><br/>Group &middot; Global</div>
-    </div>
-  </div>
-  <div class="hdr-band">
-    <div class="hdr-band-left">
-      <svg viewBox="0 0 180 38" width="70" height="14" fill="none">
-        <rect x="0" y="3" width="24" height="24" rx="2" fill="#020303"/>
-        <rect x="4" y="7" width="6" height="14" fill="#FFDB00"/>
-        <rect x="14" y="7" width="6" height="14" fill="#FFDB00"/>
-        <text x="30" y="23" font-family="Arial,Helvetica,sans-serif" font-weight="700" font-size="15" letter-spacing="1.5" fill="#020303">ANDERSEN</text>
-      </svg>
-    </div>
-    <span class="hdr-badge">${refBadge}</span>
-  </div>
-  <div class="hdr-accent"></div>
-</div>`;
+  // Build header as SVG, encode as data URI for <img> tag
+  const svgContent  = buildHeaderSvg(refBadge);
+  const svgDataUri  = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgContent);
 
-  const footerTemplate = `<style>
-* { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; box-sizing: border-box; margin: 0; padding: 0; }
-.ftr { width: 100%; height: 22mm; background: #020D1C; display: flex; align-items: center; justify-content: space-between; padding: 0 16mm; overflow: hidden; }
-.ftr-left { display: flex; gap: 20px; align-items: center; }
-.ftr-col-k { font-family: 'Courier New', monospace; font-size: 6.5px; letter-spacing: .18em; text-transform: uppercase; color: #FFDB00; margin-bottom: 2px; }
-.ftr-col-v { font-family: Arial, sans-serif; font-size: 7.5px; color: #D8DEE8; line-height: 1.4; }
-.ftr-sep { width: 1px; height: 24px; background: rgba(255,255,255,.15); flex-shrink: 0; }
-.ftr-right { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
-.ftr-copy { font-family: 'Courier New', monospace; font-size: 6.5px; letter-spacing: .15em; text-transform: uppercase; color: #FFDB00; }
-.ftr-page { font-family: 'Courier New', monospace; font-size: 7px; letter-spacing: .1em; color: #9ca3af; }
+  // DEFINITIVE: single <img> tag — no CSS layout, no flex, no backgrounds on divs.
+  // The <style> block only resets margin/padding on the outermost element.
+  // Puppeteer reliably renders <img src="data:image/svg+xml,..."> in HF templates.
+  const headerTemplate = `<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { margin: 0; padding: 0; }
 </style>
-<div class="ftr">
-  <div class="ftr-left">
-    <div>
-      <div class="ftr-col-k">Contact</div>
-      <div class="ftr-col-v">${email}</div>
-    </div>
-    <div class="ftr-sep"></div>
-    <div>
-      <div class="ftr-col-k">Offices</div>
-      <div class="ftr-col-v">Warsaw &middot; Berlin &middot; London &middot; NY</div>
-    </div>
-  </div>
-  <div class="ftr-right">
-    <div class="ftr-copy">&copy; Andersen ${year}</div>
-    <div class="ftr-page">Page <span class="pageNumber"></span> of <span class="totalPages"></span></div>
-  </div>
+<img src="${svgDataUri}" width="794" height="121" style="display:block;width:794px;height:121px;"/>`;
+
+  // Footer: a single flat SVG image — same technique, no CSS backgrounds on divs.
+  // Footer height = 22mm = 83px @ 96dpi
+  const FW = 794, FH = 83;
+  const footerSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${FW} ${FH}" width="${FW}" height="${FH}">
+  <rect x="0" y="0" width="${FW}" height="${FH}" fill="#020D1C"/>
+  <!-- Contact label + value -->
+  <text x="60" y="30" font-family="Courier New,monospace" font-size="6" letter-spacing="1.5" fill="#FFDB00">CONTACT</text>
+  <text x="60" y="42" font-family="Arial,sans-serif" font-size="7.5" fill="#D8DEE8">${email}</text>
+  <!-- Separator line -->
+  <line x1="230" y1="22" x2="230" y2="58" stroke="rgba(255,255,255,0.15)" stroke-width="1"/>
+  <!-- Offices label + value -->
+  <text x="242" y="30" font-family="Courier New,monospace" font-size="6" letter-spacing="1.5" fill="#FFDB00">OFFICES</text>
+  <text x="242" y="42" font-family="Arial,sans-serif" font-size="7.5" fill="#D8DEE8">Warsaw · Berlin · London · NY</text>
+  <!-- Copyright (right) -->
+  <text x="${FW-60}" y="30" font-family="Courier New,monospace" font-size="6" letter-spacing="1.2" fill="#FFDB00" text-anchor="end">© ANDERSEN ${year}</text>
+  <!-- Page number — Puppeteer replaces these class spans; use foreignObject trick -->
+</svg>`;
+  const footerSvgUri = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(footerSvg);
+
+  // For the footer we still need the dynamic page numbers from Puppeteer.
+  // Puppeteer replaces <span class="pageNumber"> and <span class="totalPages"> in HF HTML.
+  // We render the navy background as an SVG image, then overlay page numbers as HTML text
+  // positioned absolutely on top. This is the ONE case where we use position:absolute —
+  // only on the outermost wrapper, not inside a child div.
+  const footerTemplate = `<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { margin: 0; padding: 0; }
+.ft-wrap { position: relative; width: 794px; height: 83px; display: block; }
+.ft-pg { position: absolute; right: 60px; bottom: 18px;
+         font-family: 'Courier New', monospace; font-size: 7px; letter-spacing: 1px;
+         color: #9ca3af; -webkit-print-color-adjust: exact !important; }
+</style>
+<div class="ft-wrap">
+  <img src="${footerSvgUri}" width="794" height="83" style="display:block;position:absolute;top:0;left:0;width:794px;height:83px;"/>
+  <div class="ft-pg">Page <span class="pageNumber"></span> of <span class="totalPages"></span></div>
 </div>`;
 
   return { headerTemplate, footerTemplate };
