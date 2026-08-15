@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 import { andersenEmailHtml, andersenPageHtml } from '../brand/letterhead'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-08-15-v54'  // v54: exact Andersen letterhead (topo band, accent, navy footer) applied to PDF, email, browser-print fallback; brand/letterhead.ts as single source of truth
+const WORKER_VERSION = '2026-08-15-v55'  // v55: fix letterhead on PDF (inline SVG wordmark in header — base64 logo was silently truncating Puppeteer template); add GET /rfps/:id/preview-html sidecar proxy for in-app letterhead preview
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.andersenlab.com.
@@ -265,6 +265,59 @@ apiRouter.get('/rfps/:id', async (c) => {
   const rfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(id).first()
   if (!rfp) return c.json({ error: 'Not found' }, 404)
   return c.json(rfp)
+})
+
+// GET /rfps/:id/preview-html — returns the full Andersen-letterhead HTML preview
+// Proxies to the sidecar /render-md-html so the in-app iframe shows the real letterhead.
+// Falls back to a plain marked.js HTML page if the sidecar is unavailable.
+apiRouter.get('/rfps/:id/preview-html', async (c) => {
+  const id = c.req.param('id')
+  const rfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(id).first()
+  if (!rfp) return c.json({ error: 'Not found' }, 404)
+  if (!(rfp as any).content) {
+    return new Response(`<!DOCTYPE html><html><body style="font-family:Arial;padding:2rem;color:#9ca3af;text-align:center"><p>No content yet — generate first.</p></body></html>`, {
+      status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    })
+  }
+
+  const markdown   = (rfp as any).content as string
+  const refNumber  = (rfp as any).ref_number as string || ''
+  const rfpTitle   = (rfp as any).title as string || 'Request for Proposal'
+  const renderUrl    = c.env.PDF_RENDER_URL    || (globalThis as any).PDF_RENDER_URL    || ''
+  const renderSecret = c.env.PDF_RENDER_SECRET || (globalThis as any).PDF_RENDER_SECRET || ''
+
+  if (renderUrl && renderSecret) {
+    try {
+      const res = await fetch(`${renderUrl}/render-md-html`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${renderSecret}` },
+        body: JSON.stringify({ markdown, ref_number: refNumber, rfp_title: rfpTitle }),
+        signal: AbortSignal.timeout(30000),
+      })
+      if (res.ok) {
+        const html = await res.text()
+        return new Response(html, {
+          status: 200,
+          headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' },
+        })
+      }
+    } catch (err: any) {
+      console.error('[preview-html] Sidecar failed, using fallback:', err.message)
+    }
+  }
+
+  // Fallback — render markdown client-side with marked.js + minimal styling
+  const fallbackHtml = andersenPageHtml({
+    title:    rfpTitle,
+    refNumber,
+    bodyHtml: `<div id="md-content"></div>
+<script src="https://cdn.jsdelivr.net/npm/marked@13/marked.min.js"><\/script>
+<script>(function(){var md=${JSON.stringify(markdown)};document.getElementById('md-content').innerHTML=(typeof marked!=='undefined')?marked.parse(md):'<pre>'+md+'</pre>';})();<\/script>`,
+  })
+  return new Response(fallbackHtml, {
+    status: 200,
+    headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' },
+  })
 })
 
 // GET /rfps/:id/pdf-content — returns raw RFP markdown content

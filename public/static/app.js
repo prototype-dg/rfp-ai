@@ -4655,9 +4655,12 @@ rfpTabs.generate = function(rfpId, rfp) {
   window._currentScoringMatrix = JSON.parse(JSON.stringify(scoringMatrix));
   setTimeout(function(){ restoreAutoSave(rfpId); }, 200);
 
-  // Build the preview HTML. Markdown content is rendered with marked.js.
+  // Build the preview HTML.
+  // When content exists: load an iframe pointing to /api/rfps/:id/preview-html
+  // which proxies to the sidecar /render-md-html — shows the full Andersen letterhead.
+  // When no content yet: show a placeholder prompt.
   const previewHtml = hasContent
-    ? renderMd(rfp.content)
+    ? '<iframe id="rfpLetterheadFrame" src="/api/rfps/' + rfpId + '/preview-html" style="width:100%;height:100%;min-height:700px;border:none;display:block" loading="lazy"></iframe>'
     : '<div style="text-align:center;padding:3rem 1.5rem;color:#9ca3af">'
       + '<i class="fas fa-file-alt" style="font-size:2.5rem;display:block;margin-bottom:1rem;color:#d1d5db"></i>'
       + '<p style="margin:0">Fill in the details and click <strong>Generate with AI</strong> to produce a professional RFP document</p>'

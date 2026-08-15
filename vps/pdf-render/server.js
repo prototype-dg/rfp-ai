@@ -373,12 +373,15 @@ app.post('/render-md-pdf', requireAuth, async (req, res) => {
   const logo  = logo_data_uri || LOGO_DATA_URI;
   const ref   = ref_number ? escHtml(ref_number) : '';
 
-  // Puppeteer header template — Andersen yellow topo band with logo (left) and ref (right).
+  // Puppeteer header template — Andersen yellow topo band with inline SVG wordmark (left) and ref (right).
   // IMPORTANT: Puppeteer header/footer templates are isolated HTML snippets.
   //   - Must be self-contained (inline styles only, no external CSS).
   //   - Puppeteer injects: <span class="pageNumber">, <span class="totalPages"> etc.
   //   - Height is determined by the content; set margin-top accordingly in page.pdf().
   //   - Font size must be set explicitly — template inherits nothing from page CSS.
+  //   - CRITICAL: Do NOT embed the logo as a base64 data URI here — Puppeteer silently
+  //     truncates the template when it exceeds ~32KB, dropping all text content.
+  //     Use an inline SVG wordmark instead.
   const headerTemplate = `
     <div style="width:100%;height:100%;background:#FFDB00;display:flex;align-items:center;justify-content:space-between;padding:0 16mm;font-family:Arial,sans-serif;box-sizing:border-box;position:relative;overflow:hidden;">
       <svg style="position:absolute;inset:0;width:100%;height:100%" viewBox="0 0 794 56" preserveAspectRatio="none" fill="none">
@@ -388,7 +391,15 @@ app.post('/render-md-pdf', requireAuth, async (req, res) => {
         <circle cx="460" cy="24" r="3.5" fill="#020303" opacity="0.45"/>
         <circle cx="740" cy="20" r="3"   fill="#020303" opacity="0.45"/>
       </svg>
-      <img src="${logo}" style="height:20px;position:relative;z-index:1;display:block"/>
+      <div style="position:relative;z-index:1;display:flex;align-items:center;gap:10px">
+        <svg viewBox="0 0 140 32" width="105" height="24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="0" y="4" width="18" height="18" rx="2" fill="#020303"/>
+          <rect x="3" y="7" width="5" height="12" fill="#FFDB00"/>
+          <rect x="10" y="7" width="5" height="12" fill="#FFDB00"/>
+          <text x="24" y="20" font-family="Arial,sans-serif" font-weight="700" font-size="14" letter-spacing="1" fill="#020303">ANDERSEN</text>
+        </svg>
+        <span style="font-family:'Courier New',monospace;font-size:7pt;letter-spacing:.15em;color:#020303;opacity:.6;border-left:1px solid rgba(2,3,3,.25);padding-left:10px">Software Engineering</span>
+      </div>
       <span style="font-family:'Courier New',monospace;font-size:8pt;letter-spacing:.18em;text-transform:uppercase;color:#020303;opacity:.55;position:relative;z-index:1">${ref}</span>
     </div>
   `;
@@ -478,7 +489,15 @@ app.post('/render-pdf', requireAuth, async (req, res) => {
           <circle cx="120" cy="16" r="3" fill="#020303" opacity="0.45"/>
           <circle cx="460" cy="24" r="3.5" fill="#020303" opacity="0.45"/>
         </svg>
-        <img src="${logo}" style="height:20px;position:relative;z-index:1;display:block"/>
+        <div style="position:relative;z-index:1;display:flex;align-items:center;gap:10px">
+          <svg viewBox="0 0 140 32" width="105" height="24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect x="0" y="4" width="18" height="18" rx="2" fill="#020303"/>
+            <rect x="3" y="7" width="5" height="12" fill="#FFDB00"/>
+            <rect x="10" y="7" width="5" height="12" fill="#FFDB00"/>
+            <text x="24" y="20" font-family="Arial,sans-serif" font-weight="700" font-size="14" letter-spacing="1" fill="#020303">ANDERSEN</text>
+          </svg>
+          <span style="font-family:'Courier New',monospace;font-size:7pt;letter-spacing:.15em;color:#020303;opacity:.6;border-left:1px solid rgba(2,3,3,.25);padding-left:10px">Software Engineering</span>
+        </div>
         <span style="font-family:'Courier New',monospace;font-size:8pt;letter-spacing:.18em;text-transform:uppercase;color:#020303;opacity:.55;position:relative;z-index:1">${ref}</span>
       </div>`;
 
