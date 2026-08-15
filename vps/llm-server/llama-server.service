@@ -1,0 +1,34 @@
+[Unit]
+Description=llama.cpp OpenAI-compatible LLM server (Qwen2.5-3B-Instruct Q4_K_M)
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/llama-server
+Environment=LD_LIBRARY_PATH=/opt/llama-server/llama-b10448
+
+ExecStart=/opt/llama-server/llama-b10448/llama-server \
+  --model /opt/llama-server/models/Qwen2.5-3B-Instruct-Q4_K_M.gguf \
+  --host 127.0.0.1 \
+  --port 11434 \
+  --ctx-size 16384 \
+  --n-predict 6000 \
+  --threads 4 \
+  --batch-size 512 \
+  --cache-type-k q8_0 \
+  --parallel 1 \
+  --alias qwen2.5-3b-instruct \
+  --api-key-file /opt/llama-server/api.key \
+  --log-disable
+
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=120
+TimeoutStopSec=30
+MemoryMax=4G
+MemorySwapMax=0
+
+[Install]
+WantedBy=multi-user.target
