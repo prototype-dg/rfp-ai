@@ -1249,10 +1249,12 @@ async function extractRfpFieldsFromOcr(ocrText: string, env: any, rfpIdLog: stri
     35000
   )
 
-  // ── All 3 phases in PARALLEL — total wall-clock ~25s instead of ~60s ──────
-  // No sequential dependency: Phase 1 (scalar object), Phase 2 (scoring array),
-  // Phase 3 (requirements array) are completely independent LLM calls.
-  const [phase1Result, phase2Result, phase3Result] = await Promise.allSettled([
+  // ── Phases 1+2 in PARALLEL, Phase 3 SEQUENTIAL after ────────────────────
+  // Phase 1 (scalar JSON object) and Phase 2 (scoring array) run together — 2 concurrent streams.
+  // Phase 3 (requirements array) runs ALONE after 1+2 complete — avoids the proxy's 3-concurrent-
+  // stream drop that causes 0-byte responses on the 3rd simultaneous request.
+  // Total wall-clock: max(P1,P2) + P3 ≈ 25s + 20s = ~45s — well within waitUntil() budget.
+  const [phase1Result, phase2Result] = await Promise.allSettled([
     // ── Phase 1: scalar fields ──────────────────────────────────────────────
     callLLM(
       `You are an expert procurement analyst. Extract structured data from an RFP document.
@@ -1286,9 +1288,13 @@ Example output: [{"criterion":"Technical","weight":44,"description":"Architectur
       `Extract all evaluation/scoring criteria from this RFP section:\n\n${scoringFocusText}`,
       env, 'gpt-5-mini', 1500
     ),
-    // ── Phase 3: requirements glossary array ───────────────────────────────
-    callLLM(
-      `You are an expert procurement analyst. Extract vendor requirements from an RFP document.
+  ])
+
+  // ── Phase 3 alone — SEQUENTIAL, no concurrent proxy streams ───────────────
+  const phase3Result = await (async (): Promise<PromiseSettledResult<string>> => {
+    try {
+      const val = await callLLM(
+        `You are an expert procurement analyst. Extract vendor requirements from an RFP document.
 Return ONLY a valid JSON array — no markdown fences, no explanation, no extra text before or after.
 Each element must be: {"id":"req_N","text":"<requirement text>","mandatory":<true|false>}.
 Rules:
@@ -1297,10 +1303,14 @@ Rules:
 - Extract 15–40 requirements. Cover: technical, security, commercial, submission, compliance requirements.
 - Each requirement should be a single actionable statement (not a section heading).
 - Number sequentially: req_1, req_2, req_3, ...`,
-      `Extract all vendor requirements from this RFP section:\n\n${requirementsFocusText}`,
-      env, 'gpt-5-mini', 2500
-    ),
-  ])
+        `Extract all vendor requirements from this RFP section:\n\n${requirementsFocusText}`,
+        env, 'gpt-5-mini', 2500
+      )
+      return { status: 'fulfilled', value: val }
+    } catch (e: any) {
+      return { status: 'rejected', reason: e }
+    }
+  })()
 
   // ── Process Phase 1 result ─────────────────────────────────────────────────
   let extracted: any = {}
@@ -1535,6 +1545,60 @@ apiRouter.post('/rfps/:id/rerun-ai-extraction', async (c) => {
     })
   } catch (e: any) {
     console.error(`[rerun-ai-extraction] rfp=${rfpId} error: ${e.message}`)
+    return c.json({ ok: false, error: e.message }, 500)
+  }
+})
+
+// POST /rfps/:id/rerun-phase3
+// Runs ONLY Phase 3 (requirement_glossary) as a single isolated LLM call.
+// No parallel calls → no proxy concurrency drop → reliable result.
+// Use after rerun-ai-extraction when phase3 returns 0 bytes due to proxy concurrency limit.
+apiRouter.post('/rfps/:id/rerun-phase3', async (c) => {
+  const rfpId = c.req.param('id')
+  try {
+    const rfp = await c.env.DB.prepare('SELECT id, uploaded_rfp_text, requirement_glossary FROM rfps WHERE id=?')
+      .bind(rfpId).first<any>()
+    if (!rfp) return c.json({ error: 'RFP not found' }, 404)
+    const ocrText = rfp.uploaded_rfp_text || ''
+    if (!ocrText || ocrText.startsWith('[PDF:')) {
+      return c.json({ error: 'No usable OCR text stored for this RFP' }, 400)
+    }
+
+    const requirementsFocusText = extractFocusedSection(
+      ocrText,
+      ['shall', 'must ', 'mandatory', 'required', 'requirement', 'scope of work'],
+      35000
+    )
+    console.log(`[rerun-phase3] rfp=${rfpId} focus_len=${requirementsFocusText.length} — single LLM call`)
+
+    const raw = await callLLM(
+      `You are an expert procurement analyst. Extract vendor requirements from an RFP document.
+Return ONLY a valid JSON array — no markdown fences, no explanation, no extra text before or after.
+Each element must be: {"id":"req_N","text":"<requirement text>","mandatory":<true|false>}.
+Rules:
+- mandatory=true when the text contains "must", "shall", "required", "mandatory", or equivalent imperative language.
+- mandatory=false for "should", "may", "recommended", "preferred".
+- Extract 15–40 requirements. Cover: technical, security, commercial, submission, compliance requirements.
+- Each requirement should be a single actionable statement (not a section heading).
+- Number sequentially: req_1, req_2, req_3, ...`,
+      `Extract all vendor requirements from this RFP section:\n\n${requirementsFocusText}`,
+      c.env, 'gpt-5-mini', 2500
+    )
+
+    const arr = parseJsonArray(raw)
+    if (!arr) {
+      return c.json({ ok: false, error: `Phase 3 returned unparseable output (len=${raw.length})`, raw: raw.slice(0, 300) }, 500)
+    }
+
+    const glossaryJson = JSON.stringify(arr)
+    await c.env.DB.prepare(
+      `UPDATE rfps SET requirement_glossary=?, updated_at=datetime('now') WHERE id=?`
+    ).bind(glossaryJson, rfpId).run()
+
+    console.log(`[rerun-phase3] rfp=${rfpId} done — ${arr.length} requirements`)
+    return c.json({ ok: true, rfpId, requirement_count: arr.length, requirement_glossary: arr })
+  } catch (e: any) {
+    console.error(`[rerun-phase3] rfp=${rfpId} error: ${e.message}`)
     return c.json({ ok: false, error: e.message }, 500)
   }
 })
