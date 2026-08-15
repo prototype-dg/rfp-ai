@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=794, initial-scale=1" />
+<title>Andersen — Corporate Letterhead</title>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --a-yellow:        #FFDB00;
+    --a-yellow-hover:  #FFE963;
+    --a-navy:          #020D1C;
+    --a-ink:           #020303;
+    --a-charcoal:      #3A3E45;
+    --a-slate:         #556170;
+    --a-line:          #E0E0E0;
+    --a-mute:          #ADADAD;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{
+    background:#EDEEF1;
+    font-family:Roboto,-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue',Arial,sans-serif;
+    color:var(--a-ink);
+    -webkit-font-smoothing:antialiased;
+    padding:40px 0;
+  }
+
+  /* ---------- A4 PAGE (portrait, 794 × 1123 at 96dpi) ---------- */
+  .page{
+    width:794px;                 /* 210 mm */
+    height:1123px;               /* 297 mm */
+    margin:0 auto;
+    background:#fff;
+    position:relative;
+    overflow:hidden;
+    box-shadow:0 12px 48px rgba(20,25,35,.18);
+    display:flex;
+    flex-direction:column;
+  }
+
+  /* ---------- TOP BAND — the Andersen equivalent of CPC's ornament strip ---------- */
+  .band{
+    height:56px;
+    background:var(--a-yellow);
+    position:relative;
+    overflow:hidden;
+    flex-shrink:0;
+  }
+  .band svg.topo{
+    position:absolute;inset:0;width:100%;height:100%;
+    display:block;
+  }
+  /* right-side small badge — subtle mono meta */
+  .band .badge{
+    position:absolute;
+    top:50%;transform:translateY(-50%);
+    right:36px;
+    font-family:'JetBrains Mono',monospace;
+    font-size:10px;letter-spacing:.24em;
+    text-transform:uppercase;
+    color:var(--a-ink);
+    opacity:.55;
+  }
+
+  /* ---------- DOTTED ACCENT RULE (Andersen equivalent of CPC's circles rule) ---------- */
+  .accent{
+    height:22px;
+    display:flex;align-items:center;
+    padding:0 36px;
+    gap:6px;
+    flex-shrink:0;
+    border-bottom:1px solid var(--a-line);
+  }
+  .accent .tick{
+    display:block;
+    width:6px;height:6px;
+    border-radius:50%;
+    background:var(--a-line);
+  }
+  .accent .tick.node{background:var(--a-yellow);width:8px;height:8px}
+  .accent .grow{flex:1;height:1px;background:var(--a-line);margin:0 4px}
+
+  /* ---------- LOCKUP (wordmark, centered) ---------- */
+  .lockup{
+    padding:22px 36px 18px;
+    display:flex;justify-content:flex-start;align-items:center;
+    flex-shrink:0;
+  }
+  .lockup .brand{
+    display:flex;align-items:center;gap:18px;
+  }
+  .lockup .brand img{
+    height:44px;width:auto;display:block;
+  }
+  .lockup .brand .divider{
+    width:1px;height:30px;background:var(--a-line);
+  }
+  .lockup .brand .tag{
+    font-family:'JetBrains Mono',monospace;
+    font-size:10px;letter-spacing:.22em;
+    text-transform:uppercase;
+    color:var(--a-slate);
+    line-height:1.6;
+  }
+  .lockup .brand .tag b{color:var(--a-ink);font-weight:500}
+
+  /* ---------- SUBTITLE STRIP ---------- */
+  .sub{
+    padding:0 36px 28px;
+    text-align:center;
+    flex-shrink:0;
+  }
+  .sub h1{
+    font-family:Roboto,sans-serif;
+    font-weight:300;font-size:28px;
+    letter-spacing:-.01em;
+    color:var(--a-ink);
+    line-height:1.15;
+  }
+  .sub h1 b{font-weight:700}
+  .sub h1 .mark{background:var(--a-yellow);padding:0 8px}
+  .sub .meta{
+    margin-top:12px;
+    font-family:'JetBrains Mono',monospace;
+    font-size:10px;letter-spacing:.18em;
+    text-transform:uppercase;
+    color:var(--a-slate);
+  }
+
+  /* ---------- BODY (empty writing area) ---------- */
+  .body{
+    flex:1;
+    padding:32px 64px 32px;
+    position:relative;
+  }
+  /* faint corner brackets to hint at the writable area — very light */
+  .body::before,.body::after{
+    content:'';
+    position:absolute;
+    width:16px;height:16px;
+    border-color:var(--a-line);
+    border-style:solid;
+    border-width:0;
+  }
+  .body::before{
+    top:0;left:52px;
+    border-top-width:1px;border-left-width:1px;
+  }
+  .body::after{
+    bottom:0;right:52px;
+    border-bottom-width:1px;border-right-width:1px;
+  }
+
+  /* very faint background node/curve motif on empty body — evokes brand without competing with copy */
+  .body svg.watermark{
+    position:absolute;inset:0;width:100%;height:100%;
+    opacity:.05;pointer-events:none;
+  }
+
+  /* ---------- FOOTER ---------- */
+  .foot{
+    background:var(--a-navy);
+    color:#B8C0CB;
+    padding:22px 36px;
+    display:flex;justify-content:space-between;align-items:center;
+    flex-shrink:0;
+    font-size:10px;letter-spacing:.05em;
+    position:relative;overflow:hidden;
+  }
+  .foot .cols{display:flex;gap:36px}
+  .foot .col .k{
+    font-family:'JetBrains Mono',monospace;
+    font-size:9px;letter-spacing:.2em;
+    text-transform:uppercase;
+    color:var(--a-yellow);
+    margin-bottom:4px;
+  }
+  .foot .col .v{
+    font-family:Roboto,sans-serif;
+    font-size:10px;color:#D8DEE8;
+    line-height:1.5;
+  }
+  .foot .col .v a{color:inherit;text-decoration:none}
+  .foot .wordmark-inv{
+    height:20px;width:auto;display:block;
+    filter:brightness(0) invert(1);
+    opacity:.9;
+  }
+  .foot .right{display:flex;flex-direction:column;align-items:flex-end;gap:8px}
+  .foot .right .mono{
+    font-family:'JetBrains Mono',monospace;
+    font-size:9px;letter-spacing:.2em;
+    text-transform:uppercase;color:var(--a-yellow);
+  }
+
+  /* ---------- print rules ---------- */
+  @media print{
+    body{background:#fff;padding:0}
+    .page{box-shadow:none;margin:0}
+    @page{size:A4;margin:0}
+  }
+</style>
+</head>
+<body>
+
+  <div class="page">
+
+    <!-- 1 — WORDMARK LOCKUP (top-left, above the band) -->
+    <div class="lockup">
+      <div class="brand">
+        <img src="assets/andersen-logo.svg" alt="Andersen" />
+        <div class="divider"></div>
+        <div class="tag">
+          <b>Software Engineering</b><br/>
+          Group &middot; Global
+        </div>
+      </div>
+    </div>
+
+    <!-- 2 — TOP BAND with topographic + node signature -->
+    <div class="band">
+      <svg class="topo" viewBox="0 0 794 56" preserveAspectRatio="none" fill="none">
+        <!-- topographic contour lines, drawn in ink over yellow — analogous to CPC's overlaid geometric ornament -->
+        <path d="M-10 14 Q 100 4, 220 20 T 460 24 Q 580 30, 810 12" stroke="#020303" stroke-width="0.7" stroke-opacity="0.55"/>
+        <path d="M-10 28 Q 120 14, 240 34 T 480 38 Q 620 44, 810 26" stroke="#020303" stroke-width="0.7" stroke-opacity="0.45"/>
+        <path d="M-10 42 Q 140 26, 260 46 T 500 50 Q 640 58, 810 38" stroke="#020303" stroke-width="0.7" stroke-opacity="0.35"/>
+        <!-- nodes -->
+        <circle cx="120" cy="16"  r="3"   fill="#020303"/>
+        <circle cx="300" cy="34"  r="2.5" fill="#020303"/>
+        <circle cx="460" cy="24"  r="3.5" fill="#020303"/>
+        <circle cx="620" cy="44"  r="2.5" fill="#020303"/>
+        <circle cx="740" cy="20"  r="3"   fill="#020303"/>
+      </svg>
+      <div class="badge">Andersen · Est. 2007</div>
+    </div>
+
+    <!-- 2 — dotted accent rule -->
+    <div class="accent">
+      <span class="tick"></span>
+      <span class="tick"></span>
+      <span class="tick node"></span>
+      <span class="tick"></span>
+      <span class="tick"></span>
+      <span class="tick"></span>
+      <span class="tick node"></span>
+      <span class="tick"></span>
+      <span class="grow"></span>
+      <span class="tick"></span>
+      <span class="tick node"></span>
+      <span class="tick"></span>
+      <span class="tick"></span>
+      <span class="tick"></span>
+      <span class="tick node"></span>
+      <span class="tick"></span>
+      <span class="tick"></span>
+    </div>
+
+    <!-- 5 — writing area (empty; watermarked background) -->
+    <div class="body">
+      <svg class="watermark" viewBox="0 0 700 700" preserveAspectRatio="xMidYMid slice" fill="none">
+        <path d="M-40 220 Q 200 120, 400 260 T 780 300" stroke="#020303" stroke-width="0.5"/>
+        <path d="M-40 360 Q 220 240, 420 380 T 780 440" stroke="#020303" stroke-width="0.5"/>
+        <path d="M-40 500 Q 240 380, 440 520 T 780 580" stroke="#020303" stroke-width="0.5"/>
+        <circle cx="200" cy="230" r="6" fill="#FFDB00"/>
+        <circle cx="480" cy="330" r="8" fill="#FFDB00"/>
+        <circle cx="640" cy="480" r="5" fill="#FFDB00"/>
+      </svg>
+    </div>
+
+    <!-- 6 — footer with contact strip -->
+    <div class="foot">
+      <div class="cols">
+        <div class="col">
+          <div class="k">Web</div>
+          <div class="v">andersenlab.com</div>
+        </div>
+        <div class="col">
+          <div class="k">Contact</div>
+          <div class="v"><a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="4e262b2222210e2f202a2b3c3d2b20222f2c602d2123">[email&#160;protected]</a></div>
+        </div>
+        <div class="col">
+          <div class="k">Offices</div>
+          <div class="v">Warsaw · Berlin · London · New York</div>
+        </div>
+      </div>
+      <div class="right">
+        <img class="wordmark-inv" src="assets/andersen-logo.svg" alt="Andersen" />
+        <div class="mono">© Andersen 2026</div>
+      </div>
+    </div>
+
+  </div>
+
+<script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v4513226cdae34746b4dedf0b4dfa099e1781791509496" integrity="sha512-ZE9pZaUXND66v380QUtch/5sE9tPFh2zg45pR2PB0CVkCtOREv2AJKkSidISWkysEuQ0EH8faUU5du78bx87UQ==" data-cf-beacon='{"version":"2024.11.0","token":"4edd5f8ec12a48cfa682ab8261b80a79"}' crossorigin="anonymous"></script>
+</body>
+</html>
