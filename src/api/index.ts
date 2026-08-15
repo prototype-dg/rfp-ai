@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 import { andersenEmailHtml, andersenPageHtml } from '../brand/letterhead'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-08-15-v56'  // v56: fix letterhead on ALL pages — CSS position:fixed header/footer repeats on every page; disable displayHeaderFooter; restore body margins; unified HTML for preview+PDF
+const WORKER_VERSION = '2026-08-15-v57'  // v57: split preview/PDF rendering — preview uses in-flow letterhead (no position:fixed), PDF uses Puppeteer displayHeaderFooter:true with compact inline-SVG templates; fixes header/footer inversion on pages 2+ in PDF
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.andersenlab.com.
