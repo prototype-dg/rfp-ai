@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 import { andersenEmailHtml, andersenPageHtml } from '../brand/letterhead'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-08-15-v90' // v89: drop vendor_requirements from VPS extraction (Qwen2.5-3B too slow: 30 req×25tok=750tok=85s gen, pushes total past wall-clock); scalar+scoring only, 500tok=98s total
+const WORKER_VERSION = '2026-08-15-v91' // v89: drop vendor_requirements from VPS extraction (Qwen2.5-3B too slow: 30 req×25tok=750tok=85s gen, pushes total past wall-clock); scalar+scoring only, 500tok=98s total
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.andersenlab.com.
@@ -1643,6 +1643,45 @@ apiRouter.post('/rfps/:id/rerun-ai-extraction', async (c) => {
   } catch (e: any) {
     console.error(`[rerun-ai-extraction] rfp=${rfpId} error: ${e.message}`)
     return c.json({ ok: false, error: e.message }, 500)
+  }
+})
+
+// POST /callback/rfps/:rfpId/llm-extract-complete
+// Receives async LLM extraction results from the VPS sidecar /llm-extract task.
+apiRouter.post('/callback/rfps/:rfpId/llm-extract-complete', async (c) => {
+  const rfpId = c.req.param('rfpId')
+  const expectedSecret = c.env.PDF_SIDECAR_SECRET || (globalThis as any).PDF_SIDECAR_SECRET || ''
+  let body: any
+  try { body = await c.req.json() } catch { return c.json({ error: 'Invalid JSON' }, 400) }
+  if (expectedSecret && body.callback_secret !== expectedSecret) {
+    return c.json({ error: 'Unauthorized' }, 401)
+  }
+  console.log(`[llm-extract-cb] rfp=${rfpId} ok=${body.ok} prompt_tok=${body.prompt_tokens} completion_tok=${body.completion_tokens}`)
+  if (!body.ok || !body.extracted) {
+    console.error(`[llm-extract-cb] rfp=${rfpId} extraction failed: ${body.error}`)
+    await c.env.DB.prepare(`UPDATE rfps SET ai_extraction_status='error', updated_at=datetime('now') WHERE id=?`)
+      .bind(rfpId).run().catch(() => {})
+    return c.json({ ok: true, rfpId, status: 'error' })
+  }
+  const { scoring_criteria, vendor_requirements, ...scalarFields } = body.extracted
+  const scoringMatrixJson = Array.isArray(scoring_criteria) && scoring_criteria.length > 0
+    ? JSON.stringify(scoring_criteria) : null
+  const requirementGlossaryJson = Array.isArray(vendor_requirements) && vendor_requirements.length > 0
+    ? JSON.stringify(vendor_requirements) : null
+  const rfpRow = await c.env.DB.prepare('SELECT uploaded_rfp_text FROM rfps WHERE id=?').bind(rfpId).first<any>()
+  const ocrText = rfpRow?.uploaded_rfp_text || ''
+  try {
+    const { newTitle } = await writeExtractedRfpFields(
+      c.env.DB, rfpId, ocrText, scalarFields, scoringMatrixJson, requirementGlossaryJson)
+    await c.env.DB.prepare(`UPDATE rfps SET ai_extraction_status='done', updated_at=datetime('now') WHERE id=?`)
+      .bind(rfpId).run()
+    console.log(`[llm-extract-cb] rfp=${rfpId} done — title="${newTitle}" scoring=${!!scoringMatrixJson} glossary=${!!requirementGlossaryJson}`)
+    return c.json({ ok: true, rfpId, status: 'done', title: newTitle })
+  } catch (e: any) {
+    console.error(`[llm-extract-cb] rfp=${rfpId} writeFields error: ${e.message}`)
+    await c.env.DB.prepare(`UPDATE rfps SET ai_extraction_status='error', updated_at=datetime('now') WHERE id=?`)
+      .bind(rfpId).run().catch(() => {})
+    return c.json({ ok: false, rfpId, status: 'error', error: e.message })
   }
 })
 
