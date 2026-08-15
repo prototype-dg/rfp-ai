@@ -49,10 +49,10 @@ const SECRET = process.env.PDF_SERVICE_SECRET || '';
 
 // ── Health check ────────────────────────────────────────────────────────────
 app.get('/', (req, res) => {
-  res.json({ status: 'ok', service: 'pdf-render', version: '13' });
+  res.json({ status: 'ok', service: 'pdf-render', version: '14' });
 });
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', version: '13' });
+  res.json({ status: 'ok', version: '14' });
 });
 
 // ── Auth middleware ──────────────────────────────────────────────────────────
@@ -438,10 +438,48 @@ body { background: #EDEEF1; margin: 0; padding: 24px 0 48px; }
       }
     }
 
-    // Walk top-level children
-    var children = measureContent.children;
+    // Walk top-level children.
+    // HEADING LOOKAHEAD (fixes HTML preview white-space gaps):
+    // When a heading (H1-H4) is followed by a sibling, measure them together.
+    // If they don't both fit on the current page, start a new page BEFORE the
+    // heading — so the heading always lands with its following content, never
+    // stranded at the bottom of a page with a blank gap after it.
+    var children = Array.prototype.slice.call(measureContent.children);
+
+    function measureEl(el) {
+      var c = el.cloneNode(true);
+      measureContent.appendChild(c);
+      var h = c.getBoundingClientRect().height || c.offsetHeight;
+      measureContent.removeChild(c);
+      return h;
+    }
+
     for (var i = 0; i < children.length; i++) {
-      processElement(children[i]);
+      var el  = children[i];
+      var tag = el.tagName;
+      var isHeading = (tag === 'H1' || tag === 'H2' || tag === 'H3' || tag === 'H4');
+
+      if (isHeading && i + 1 < children.length) {
+        var hH   = measureEl(el);
+        var next = children[i + 1];
+        var nH   = measureEl(next);
+        var combinedH = hH + nH;
+
+        if (combinedH <= BODY_H) {
+          // They fit together on one page — if current page can't hold both, break first
+          if (currentH() + combinedH > BODY_H) newPage();
+          addHtml(el.outerHTML, hH);
+          addHtml(next.outerHTML, nH);
+          i++; // next sibling already consumed
+        } else {
+          // Combined too tall (e.g. heading + huge table) — place heading, then sibling normally
+          processElement(el);
+          processElement(next);
+          i++;
+        }
+      } else {
+        processElement(el);
+      }
     }
 
     // Build page divs
@@ -490,7 +528,7 @@ function buildPdfBodyHtml(markdown, opts) {
 ${TYPOGRAPHY_CSS}
 body { background: #fff; margin: 0; padding: 0; }
 .a-body { padding: 0; }
-@page { size: A4; margin: 23mm 16mm 22mm 16mm; }  /* 23mm = 87px @ 96dpi (lockup 48 + band 34 + accent 5) */
+@page { size: A4; margin: 29mm 16mm 22mm 16mm; }  /* 29mm = 87px header + 6mm breathing gap before content */
 </style>
 </head>
 <body><div class="a-body">${bodyHtml}</div></body>
@@ -689,7 +727,7 @@ app.post('/render-md-pdf', requireAuth, async (req, res) => {
       displayHeaderFooter: true,
       headerTemplate,
       footerTemplate,
-      margin: { top: '23mm', bottom: '22mm', left: '16mm', right: '16mm' },
+      margin: { top: '29mm', bottom: '22mm', left: '16mm', right: '16mm' },
     });
     await browser.close(); browser = null;
 
@@ -723,7 +761,7 @@ app.post('/render-pdf', requireAuth, async (req, res) => {
       const pdfBuffer = await page.pdf({
         format: 'A4', printBackground: true,
         displayHeaderFooter: true, headerTemplate, footerTemplate,
-        margin: { top: '23mm', bottom: '22mm', left: '16mm', right: '16mm' },
+        margin: { top: '29mm', bottom: '22mm', left: '16mm', right: '16mm' },
       });
       await browser.close(); browser = null;
       res.set({ 'Content-Type': 'application/pdf', 'Content-Length': pdfBuffer.length, 'Cache-Control': 'no-cache' });
