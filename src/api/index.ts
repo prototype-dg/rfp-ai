@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 import { andersenEmailHtml, andersenPageHtml } from '../brand/letterhead'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-08-15-v79'  // v79: callback returns 200 immediately; LLM extraction runs via waitUntil() — no wall-clock pressure; poll signal fixed to wait for scalar fields not just OCR text
+const WORKER_VERSION = '2026-08-15-v79'  // v79: callback returns 200 immediately via waitUntil() — no wall-clock pressure on LLM; ai_extraction_status tracks done/error; poll waits for done; phases 1+2 parallel then phase 3 sequential (avoids 3-stream proxy drop)
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.andersenlab.com.
