@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 import { andersenEmailHtml, andersenPageHtml } from '../brand/letterhead'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-08-15-v75'  // v75: Upload RFP fully async (INSERT immediately → async OCR → callback → AI extraction → UPDATE); PDF viewer no sidebar
+const WORKER_VERSION = '2026-08-15-v76'  // v76: fix callback AI URL (proxy not openai.com); full OCR text to LLM; extract all DB fields (scoring_matrix, requirement_glossary, rfp_full_text, content); re-run endpoint for existing RFPs; fix email intent URL
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.andersenlab.com.
@@ -1185,7 +1185,10 @@ apiRouter.post('/rfps/upload-rfp-pdf', async (c) => {
 
 // POST /callback/rfps/:rfpId/rfp-upload-ocr-complete
 // Called by the PDF sidecar after async OCR of an uploaded RFP PDF.
-// Runs GPT-4o-mini to extract structured RFP fields, then UPDATEs the rfp row.
+// Uses callLLM (proxy URL, gpt-5-mini, streaming) with FULL OCR text to extract ALL rfp fields.
+// Populates: title, category, background, objectives, scope, tech_requirements, budget, deadline,
+//            content (formatted summary), rfp_full_text (full OCR for eval/Q&A),
+//            scoring_matrix (JSON eval criteria), requirement_glossary (JSON requirement list).
 apiRouter.post('/callback/rfps/:rfpId/rfp-upload-ocr-complete', async (c) => {
   const rfpId   = c.req.param('rfpId')
   const filename = decodeURIComponent(c.req.query('filename') || 'document.pdf')
@@ -1197,11 +1200,12 @@ apiRouter.post('/callback/rfps/:rfpId/rfp-upload-ocr-complete', async (c) => {
       return c.json({ error: 'Unauthorized' }, 401)
     }
 
-    // Validate OCR output
+    // ── Validate OCR output ───────────────────────────────────────────────────
     const ocrOk = body.text && (body.chars || body.text.length) >= 200
     let extractedText: string
     if (ocrOk) {
-      extractedText = body.text.slice(0, 60000)
+      // Store full OCR text — no truncation here; we pass the full text to AI
+      extractedText = body.text.slice(0, 120000)
       console.log(`[rfp-upload-ocr-cb] rfp=${rfpId} OCR ok: ${body.chars} chars, ${body.pages_extracted}/${body.pages_total} pages`)
     } else {
       extractedText = `[PDF: ${filename}, ${sizeKb}KB — OCR yielded ${body.chars || 0} chars. ${body.error || ''}]`
@@ -1211,85 +1215,223 @@ apiRouter.post('/callback/rfps/:rfpId/rfp-upload-ocr-complete', async (c) => {
       return c.json({ ok: false, reason: 'ocr_insufficient', chars: body.chars || 0 })
     }
 
-    // Store raw OCR text first (so it's never lost even if AI fails)
-    await c.env.DB.prepare(`UPDATE rfps SET uploaded_rfp_text=?, updated_at=datetime('now') WHERE id=?`)
-      .bind(extractedText, rfpId).run()
+    // ── Store raw OCR text first (never lost even if AI fails) ───────────────
+    // Also populate rfp_full_text immediately so eval/Q&A can run even before field extraction
+    await c.env.DB.prepare(`UPDATE rfps SET uploaded_rfp_text=?, rfp_full_text=?, updated_at=datetime('now') WHERE id=?`)
+      .bind(extractedText, extractedText.slice(0, 100000), rfpId).run()
 
-    // Run AI extraction
-    const aiKey = c.env.OPENAI_API_KEY || (globalThis as any).OPENAI_API_KEY || ''
+    // ── AI extraction — uses callLLM (streaming, proxy URL, correct model) ───
+    // Pass the full OCR text (up to 100 000 chars) — no arbitrary 14k truncation.
+    // callLLM internally uses OPENAI_BASE_URL (GenSpark proxy) + OPENAI_API_KEY.
     let extracted: any = {}
-    if (aiKey) {
-      const textSnippet = extractedText.slice(0, 14000)
-      try {
-        const aiRes = await fetch('https://api.openai.com/v1/chat/completions', {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${aiKey}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model: 'gpt-4o-mini',
-            temperature: 0,
-            max_tokens: 900,
-            messages: [{
-              role: 'system',
-              content: `You are an expert at parsing RFP (Request for Proposal) documents. Extract structured information from the provided RFP text. Return ONLY a valid JSON object with these exact fields:
-- title: string — full project/RFP title as stated in the document (max 120 chars)
-- background: string — project background/context paragraph (max 600 chars)
-- objectives: string — project objectives (max 600 chars)
-- scope: string — scope of work (max 800 chars)
-- tech_requirements: string — technical/functional requirements (max 600 chars)
-- budget: string — budget amount, numbers only, no currency symbols (empty string if not mentioned)
-- deadline: string — submission deadline in YYYY-MM-DD format (empty string if not found)
-- category: string — best matching category from exactly: IT & Digital Transformation, ERP & Business Applications, Data & Analytics, Cloud & Infrastructure, Cybersecurity, AI & Machine Learning, Digital Marketing, Consulting, Construction, Professional Services
-Return ONLY the JSON object, no markdown fences, no explanation.`
-            }, {
-              role: 'user',
-              content: `Parse this RFP document and return structured JSON:\n\n${textSnippet}`
-            }]
-          })
-        })
-        if (aiRes.ok) {
-          const aiData: any = await aiRes.json()
-          const rawJson  = aiData.choices?.[0]?.message?.content?.trim() || '{}'
-          const cleanJson = rawJson.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '').trim()
-          extracted = JSON.parse(cleanJson)
-          console.log(`[rfp-upload-ocr-cb] rfp=${rfpId} AI extraction ok, title="${extracted.title}"`)
-        } else {
-          console.error(`[rfp-upload-ocr-cb] rfp=${rfpId} AI HTTP ${aiRes.status}`)
-        }
-      } catch (aiErr: any) {
-        console.error(`[rfp-upload-ocr-cb] rfp=${rfpId} AI failed: ${aiErr.message}`)
+    try {
+      const fullTextForAI = extractedText.slice(0, 100000)
+      const rawJson = await callLLM(
+        `You are an expert procurement analyst who extracts structured data from RFP documents.
+You receive the full OCR text of an RFP and must return a single JSON object with ALL of these fields populated as completely and accurately as possible.
+
+Fields to extract:
+- title: Full project/RFP title exactly as stated in the document (max 120 chars)
+- category: Best matching category — choose EXACTLY one from: IT & Digital Transformation, ERP & Business Applications, Data & Analytics, Cloud & Infrastructure, Cybersecurity, AI & Machine Learning, Digital Marketing, Consulting, Construction, Professional Services
+- background: Project background and context — who is the issuing organisation, what problem they face, why this RFP exists (max 800 chars)
+- objectives: Project objectives — what must be achieved (max 700 chars)
+- scope: Full scope of work — all workstreams, deliverables, in-scope items (max 1200 chars)
+- tech_requirements: Technical and functional requirements — architecture, stack, compliance, SLA/NFR, integrations (max 900 chars)
+- budget: Budget ceiling or estimated value — digits only, no currency symbols (empty string if not stated)
+- deadline: Proposal submission deadline in YYYY-MM-DD format (empty string if not found)
+- content: A well-structured plain-text summary of the full RFP (800–1200 chars) covering background, objectives, scope, requirements, evaluation criteria, and timeline — suitable as a standalone executive summary
+- scoring_criteria: JSON array of evaluation criteria extracted from the document. Each item: {"criterion":"...","weight":N,"description":"..."} where weight is a number (percentage). Must sum to 100. If no explicit weights, distribute proportionally based on the document's emphasis.
+- requirements: JSON array of all vendor requirements extracted from the document. Each item: {"id":"req_N","text":"...","mandatory":true/false} where mandatory=true if the text contains "must", "shall", "required", or "mandatory". Extract up to 30 requirements.
+
+Return ONLY a valid JSON object with all fields above. No markdown fences, no explanation, no extra keys.`,
+        `Extract all structured fields from this RFP document:\n\n${fullTextForAI}`,
+        c.env,
+        'gpt-5-mini',
+        3000
+      )
+      // Strip markdown fences if model includes them despite instructions
+      const cleanJson = rawJson.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```\s*$/i, '').trim()
+      // Find the outermost JSON object even if surrounded by stray text
+      const jsonStart = cleanJson.indexOf('{')
+      const jsonEnd   = cleanJson.lastIndexOf('}')
+      if (jsonStart !== -1 && jsonEnd !== -1) {
+        extracted = JSON.parse(cleanJson.slice(jsonStart, jsonEnd + 1))
       }
+      console.log(`[rfp-upload-ocr-cb] rfp=${rfpId} AI extraction ok, title="${extracted.title}", fields=${Object.keys(extracted).length}`)
+    } catch (aiErr: any) {
+      console.error(`[rfp-upload-ocr-cb] rfp=${rfpId} AI extraction failed: ${aiErr.message}`)
+      // Continue — OCR text is already stored, partial update below will write what we have
     }
 
-    // UPDATE rfp with all extracted fields
-    const newTitle = (extracted.title || '').trim().slice(0, 120)
+    // ── Build derived fields ─────────────────────────────────────────────────
+    const newTitle    = (extracted.title || '').trim().slice(0, 120)
+    const newCategory = (extracted.category || '').trim()
+    const newContent  = (extracted.content || '').trim().slice(0, 10000)
+
+    // scoring_matrix: stored as JSON string of [{criterion, weight, description}]
+    let scoringMatrixJson: string | null = null
+    if (Array.isArray(extracted.scoring_criteria) && extracted.scoring_criteria.length > 0) {
+      try { scoringMatrixJson = JSON.stringify(extracted.scoring_criteria) } catch (_) {}
+    }
+
+    // requirement_glossary: stored as JSON string of [{id, text, mandatory}]
+    let requirementGlossaryJson: string | null = null
+    if (Array.isArray(extracted.requirements) && extracted.requirements.length > 0) {
+      try { requirementGlossaryJson = JSON.stringify(extracted.requirements) } catch (_) {}
+    }
+
+    // ── UPDATE all rfp fields in one statement ────────────────────────────────
     await c.env.DB.prepare(`
       UPDATE rfps SET
-        title            = CASE WHEN ? != '' THEN ? ELSE title END,
-        category         = CASE WHEN ? != '' THEN ? ELSE category END,
-        background       = ?,
-        objectives       = ?,
-        scope            = ?,
-        tech_requirements= ?,
-        budget           = ?,
-        deadline         = ?,
-        updated_at       = datetime('now')
+        title              = CASE WHEN ? != '' THEN ? ELSE title END,
+        category           = CASE WHEN ? != '' THEN ? ELSE category END,
+        background         = CASE WHEN ? != '' THEN ? ELSE background END,
+        objectives         = CASE WHEN ? != '' THEN ? ELSE objectives END,
+        scope              = CASE WHEN ? != '' THEN ? ELSE scope END,
+        tech_requirements  = CASE WHEN ? != '' THEN ? ELSE tech_requirements END,
+        budget             = CASE WHEN ? != '' THEN ? ELSE budget END,
+        deadline           = CASE WHEN ? != '' THEN ? ELSE deadline END,
+        content            = CASE WHEN ? != '' THEN ? ELSE content END,
+        scoring_matrix     = CASE WHEN ? IS NOT NULL THEN ? ELSE scoring_matrix END,
+        requirement_glossary = CASE WHEN ? IS NOT NULL THEN ? ELSE requirement_glossary END,
+        updated_at         = datetime('now')
       WHERE id = ?
     `).bind(
-      newTitle, newTitle,
-      extracted.category || '', extracted.category || '',
-      extracted.background || '',
-      extracted.objectives || '',
-      extracted.scope || '',
-      extracted.tech_requirements || '',
-      extracted.budget || '',
-      extracted.deadline || '',
+      newTitle,                          newTitle,
+      newCategory,                       newCategory,
+      extracted.background  || '',       extracted.background  || '',
+      extracted.objectives  || '',       extracted.objectives  || '',
+      extracted.scope       || '',       extracted.scope       || '',
+      extracted.tech_requirements || '', extracted.tech_requirements || '',
+      extracted.budget      || '',       extracted.budget      || '',
+      extracted.deadline    || '',       extracted.deadline    || '',
+      newContent,                        newContent,
+      scoringMatrixJson,                 scoringMatrixJson,
+      requirementGlossaryJson,           requirementGlossaryJson,
       rfpId
     ).run()
 
-    console.log(`[rfp-upload-ocr-cb] rfp=${rfpId} fields updated successfully`)
-    return c.json({ ok: true, rfpId, title: newTitle, fields_extracted: Object.keys(extracted).length })
+    console.log(`[rfp-upload-ocr-cb] rfp=${rfpId} all fields updated — title="${newTitle}" scoring=${!!scoringMatrixJson} glossary=${!!requirementGlossaryJson}`)
+    return c.json({
+      ok: true, rfpId, title: newTitle,
+      fields_extracted: Object.keys(extracted).length,
+      has_scoring_matrix: !!scoringMatrixJson,
+      has_requirement_glossary: !!requirementGlossaryJson,
+    })
   } catch (e: any) {
     console.error(`[rfp-upload-ocr-cb] rfp=${rfpId} error: ${e.message}`)
+    return c.json({ ok: false, error: e.message }, 500)
+  }
+})
+
+// POST /rfps/:id/rerun-ai-extraction
+// Admin endpoint: re-run AI field extraction against stored uploaded_rfp_text.
+// Use to populate fields for RFPs that were uploaded before the fix (e.g. RFP 22).
+apiRouter.post('/rfps/:id/rerun-ai-extraction', async (c) => {
+  const rfpId = c.req.param('id')
+  try {
+    const rfp = await c.env.DB.prepare('SELECT id, uploaded_rfp_text, uploaded_rfp_filename FROM rfps WHERE id=?')
+      .bind(rfpId).first<any>()
+    if (!rfp) return c.json({ error: 'RFP not found' }, 404)
+    const ocrText = rfp.uploaded_rfp_text || ''
+    if (!ocrText || ocrText.startsWith('[PDF:')) {
+      return c.json({ error: 'No usable OCR text stored for this RFP', uploaded_rfp_text_len: ocrText.length }, 400)
+    }
+    console.log(`[rerun-ai-extraction] rfp=${rfpId} text_len=${ocrText.length} — re-running AI extraction`)
+
+    let extracted: any = {}
+    try {
+      const fullTextForAI = ocrText.slice(0, 100000)
+      const rawJson = await callLLM(
+        `You are an expert procurement analyst who extracts structured data from RFP documents.
+You receive the full OCR text of an RFP and must return a single JSON object with ALL of these fields populated as completely and accurately as possible.
+
+Fields to extract:
+- title: Full project/RFP title exactly as stated in the document (max 120 chars)
+- category: Best matching category — choose EXACTLY one from: IT & Digital Transformation, ERP & Business Applications, Data & Analytics, Cloud & Infrastructure, Cybersecurity, AI & Machine Learning, Digital Marketing, Consulting, Construction, Professional Services
+- background: Project background and context — who is the issuing organisation, what problem they face, why this RFP exists (max 800 chars)
+- objectives: Project objectives — what must be achieved (max 700 chars)
+- scope: Full scope of work — all workstreams, deliverables, in-scope items (max 1200 chars)
+- tech_requirements: Technical and functional requirements — architecture, stack, compliance, SLA/NFR, integrations (max 900 chars)
+- budget: Budget ceiling or estimated value — digits only, no currency symbols (empty string if not stated)
+- deadline: Proposal submission deadline in YYYY-MM-DD format (empty string if not found)
+- content: A well-structured plain-text summary of the full RFP (800–1200 chars) covering background, objectives, scope, requirements, evaluation criteria, and timeline — suitable as a standalone executive summary
+- scoring_criteria: JSON array of evaluation criteria extracted from the document. Each item: {"criterion":"...","weight":N,"description":"..."} where weight is a number (percentage). Must sum to 100. If no explicit weights, distribute proportionally based on the document's emphasis.
+- requirements: JSON array of all vendor requirements extracted from the document. Each item: {"id":"req_N","text":"...","mandatory":true/false} where mandatory=true if the text contains "must", "shall", "required", or "mandatory". Extract up to 30 requirements.
+
+Return ONLY a valid JSON object with all fields above. No markdown fences, no explanation, no extra keys.`,
+        `Extract all structured fields from this RFP document:\n\n${fullTextForAI}`,
+        c.env,
+        'gpt-5-mini',
+        3000
+      )
+      const cleanJson = rawJson.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```\s*$/i, '').trim()
+      const jsonStart = cleanJson.indexOf('{')
+      const jsonEnd   = cleanJson.lastIndexOf('}')
+      if (jsonStart !== -1 && jsonEnd !== -1) {
+        extracted = JSON.parse(cleanJson.slice(jsonStart, jsonEnd + 1))
+      }
+      console.log(`[rerun-ai-extraction] rfp=${rfpId} extracted ${Object.keys(extracted).length} fields, title="${extracted.title}"`)
+    } catch (aiErr: any) {
+      console.error(`[rerun-ai-extraction] rfp=${rfpId} AI failed: ${aiErr.message}`)
+      return c.json({ ok: false, error: `AI extraction failed: ${aiErr.message}` }, 500)
+    }
+
+    const newTitle    = (extracted.title || '').trim().slice(0, 120)
+    const newCategory = (extracted.category || '').trim()
+    const newContent  = (extracted.content || '').trim().slice(0, 10000)
+    let scoringMatrixJson: string | null = null
+    if (Array.isArray(extracted.scoring_criteria) && extracted.scoring_criteria.length > 0) {
+      try { scoringMatrixJson = JSON.stringify(extracted.scoring_criteria) } catch (_) {}
+    }
+    let requirementGlossaryJson: string | null = null
+    if (Array.isArray(extracted.requirements) && extracted.requirements.length > 0) {
+      try { requirementGlossaryJson = JSON.stringify(extracted.requirements) } catch (_) {}
+    }
+
+    await c.env.DB.prepare(`
+      UPDATE rfps SET
+        title              = CASE WHEN ? != '' THEN ? ELSE title END,
+        category           = CASE WHEN ? != '' THEN ? ELSE category END,
+        background         = CASE WHEN ? != '' THEN ? ELSE background END,
+        objectives         = CASE WHEN ? != '' THEN ? ELSE objectives END,
+        scope              = CASE WHEN ? != '' THEN ? ELSE scope END,
+        tech_requirements  = CASE WHEN ? != '' THEN ? ELSE tech_requirements END,
+        budget             = CASE WHEN ? != '' THEN ? ELSE budget END,
+        deadline           = CASE WHEN ? != '' THEN ? ELSE deadline END,
+        content            = CASE WHEN ? != '' THEN ? ELSE content END,
+        rfp_full_text      = ?,
+        scoring_matrix     = CASE WHEN ? IS NOT NULL THEN ? ELSE scoring_matrix END,
+        requirement_glossary = CASE WHEN ? IS NOT NULL THEN ? ELSE requirement_glossary END,
+        updated_at         = datetime('now')
+      WHERE id = ?
+    `).bind(
+      newTitle,                          newTitle,
+      newCategory,                       newCategory,
+      extracted.background  || '',       extracted.background  || '',
+      extracted.objectives  || '',       extracted.objectives  || '',
+      extracted.scope       || '',       extracted.scope       || '',
+      extracted.tech_requirements || '', extracted.tech_requirements || '',
+      extracted.budget      || '',       extracted.budget      || '',
+      extracted.deadline    || '',       extracted.deadline    || '',
+      newContent,                        newContent,
+      ocrText.slice(0, 100000),
+      scoringMatrixJson,                 scoringMatrixJson,
+      requirementGlossaryJson,           requirementGlossaryJson,
+      rfpId
+    ).run()
+
+    console.log(`[rerun-ai-extraction] rfp=${rfpId} all fields updated successfully`)
+    const updated = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(rfpId).first()
+    return c.json({
+      ok: true, rfpId, title: newTitle,
+      fields_extracted: Object.keys(extracted).length,
+      has_scoring_matrix: !!scoringMatrixJson,
+      has_requirement_glossary: !!requirementGlossaryJson,
+      rfp: updated,
+    })
+  } catch (e: any) {
+    console.error(`[rerun-ai-extraction] rfp=${rfpId} error: ${e.message}`)
     return c.json({ ok: false, error: e.message }, 500)
   }
 })
@@ -1897,13 +2039,14 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
     // LLM intent classification — runs for ALL emails with body text.
     let llmVerdict = 'NEUTRAL'
     const openAiKey = (c.env as any).OPENAI_API_KEY || (globalThis as any).OPENAI_API_KEY || ''
+    const openAiBase = (c.env as any).OPENAI_BASE_URL || 'https://www.genspark.ai/api/llm_proxy/v1'
     if (openAiKey && cleanBody.length > 0) {
       try {
-        const intentRes = await fetch('https://api.openai.com/v1/chat/completions', {
+        const intentRes = await fetch(`${openAiBase}/chat/completions`, {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${openAiKey}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            model: 'gpt-4o-mini',
+            model: 'gpt-5-mini',
             max_tokens: 10,
             temperature: 0,
             messages: [
