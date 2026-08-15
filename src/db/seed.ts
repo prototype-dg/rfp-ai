@@ -217,6 +217,14 @@ export async function initDb(db: D1Database) {
     // Set to ocrFired at submission time; decremented by each file-ocr-complete callback.
     // When it reaches 0 → status is set to 'ready_for_evaluation'.
     `ALTER TABLE proposals ADD COLUMN ocr_pending_files INTEGER DEFAULT 0`,
+    // v69: RFP currency + country of issue (set at creation time)
+    `ALTER TABLE rfps ADD COLUMN rfp_currency TEXT DEFAULT 'USD'`,
+    `ALTER TABLE rfps ADD COLUMN country_of_issue TEXT DEFAULT ''`,
+    // v69: uploaded RFP PDF — R2 key + raw extracted text (for "Upload existing RFP" flow)
+    `ALTER TABLE rfps ADD COLUMN uploaded_rfp_r2_key TEXT`,
+    `ALTER TABLE rfps ADD COLUMN uploaded_rfp_text TEXT`,
+    `ALTER TABLE rfps ADD COLUMN uploaded_rfp_filename TEXT`,
+    `ALTER TABLE rfps ADD COLUMN upload_source TEXT DEFAULT 'created'`,
   ]
   for (const sql of alterMigrations) {
     try {

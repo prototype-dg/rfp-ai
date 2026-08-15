@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 import { andersenEmailHtml, andersenPageHtml } from '../brand/letterhead'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-08-15-v68'  // v68: currency detection fix (issuer_currency setting + contextual text scan), benchmark spinner, team composition + rates table
+const WORKER_VERSION = '2026-08-15-v69'  // v69: Upload existing RFP PDF flow, currency+country on RFP creation, display currency removed from settings
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.andersenlab.com.
@@ -440,9 +440,9 @@ apiRouter.post('/rfps', async (c) => {
     const body = await c.req.json()
     const refNum = 'AND/PROC/' + new Date().getFullYear() + '/' + String(Math.floor(Math.random()*9000)+1000)
     const r = await c.env.DB.prepare(`
-      INSERT INTO rfps (ref_number, title, category, budget, deadline, scope, tech_requirements, objectives, background, arch_doc_text, stage, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', datetime('now'), datetime('now'))
-    `).bind(refNum, body.title, body.category, body.budget, body.deadline, body.scope, body.tech_requirements||'', body.objectives||'', body.background||'', body.arch_doc_text||'').run()
+      INSERT INTO rfps (ref_number, title, category, budget, deadline, scope, tech_requirements, objectives, background, arch_doc_text, rfp_currency, country_of_issue, upload_source, stage, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'created', 'draft', datetime('now'), datetime('now'))
+    `).bind(refNum, body.title, body.category, body.budget, body.deadline, body.scope, body.tech_requirements||'', body.objectives||'', body.background||'', body.arch_doc_text||'', body.rfp_currency||'USD', body.country_of_issue||'').run()
     const rfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(r.meta.last_row_id).first()
     return c.json(rfp)
   } catch (e: any) {
@@ -459,7 +459,10 @@ apiRouter.put('/rfps/:id', async (c) => {
     const fieldMap: Record<string, string> = {
       title: 'title', category: 'category', budget: 'budget', deadline: 'deadline',
       scope: 'scope', tech_requirements: 'tech_requirements', objectives: 'objectives',
-      background: 'background', content: 'content'
+      background: 'background', content: 'content',
+      rfp_currency: 'rfp_currency', country_of_issue: 'country_of_issue',
+      uploaded_rfp_filename: 'uploaded_rfp_filename', uploaded_rfp_text: 'uploaded_rfp_text',
+      upload_source: 'upload_source',
     }
     const setParts: string[] = []
     const bindings: any[] = []
@@ -1110,6 +1113,119 @@ apiRouter.post('/rfps/:id/upload-arch-doc', async (c) => {
 
     return c.json({ ok: true, column: isBRD ? 'brd_doc_text' : 'arch_doc_text', size: bytes.length, r2Key, ocr_status: 'processing' })
   } catch (e: any) {
+    return c.json({ error: e.message }, 500)
+  }
+})
+
+// POST /rfps/upload-rfp-pdf — upload an existing RFP PDF, run OCR, then call AI to extract fields
+// Flow: (1) store PDF in R2; (2) run sync OCR via sidecar; (3) call AI to extract RFP metadata;
+//       (4) create RFP record with extracted fields; (5) return rfp + extracted data to client.
+apiRouter.post('/rfps/upload-rfp-pdf', async (c) => {
+  try {
+    const formData = await c.req.formData()
+    const file = formData.get('file') as File | null
+    if (!file) return c.json({ error: 'No file uploaded' }, 400)
+
+    const rfpCurrency  = (formData.get('rfp_currency') as string || 'USD').toUpperCase()
+    const countryOfIssue = (formData.get('country_of_issue') as string || '').trim()
+    const category = (formData.get('category') as string || 'IT & Digital Transformation')
+
+    const arrayBuffer = await file.arrayBuffer()
+    const bytes = new Uint8Array(arrayBuffer)
+    const sizeKb = Math.round(bytes.length / 1024)
+
+    // Store PDF in R2 under rfp-uploads/ namespace
+    const bucket: R2Bucket | undefined = (c.env as any).PROPOSALS_BUCKET
+    let r2Key = ''
+    if (bucket) {
+      r2Key = `rfp-uploads/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
+      await bucket.put(r2Key, bytes, {
+        httpMetadata: { contentType: file.type || 'application/pdf' },
+        customMetadata: { docType: 'uploaded_rfp', rfpCurrency, countryOfIssue },
+      })
+    }
+
+    // Run OCR via sidecar (sync — RFP PDFs are usually small + text-layer)
+    const workerBase = `https://a7b32759-e743-4139-9bb0-4bae44886667.vip.gensparksite.com/api`
+    let extractedText = ''
+    if (r2Key) {
+      const pdfUrl = `${workerBase}/proposals/pdf/${encodeURIComponent(r2Key)}`
+      const ocrResult = await callSidecar(pdfUrl, c.env, 60)
+      if (ocrResult && ocrResult.ok && ocrResult.chars >= 100) {
+        extractedText = ocrResult.text.slice(0, 60000)
+      } else {
+        extractedText = `[PDF: ${file.name}, ${sizeKb}KB — OCR yielded ${ocrResult?.chars || 0} chars]`
+      }
+    } else {
+      extractedText = `[PDF: ${file.name}, ${sizeKb}KB — storage not available, text not extracted]`
+    }
+
+    // Call AI to extract structured fields from the PDF text
+    const aiKey = c.env.OPENAI_API_KEY || (globalThis as any).OPENAI_API_KEY || ''
+    let extracted: any = {}
+    if (aiKey && extractedText.length > 100) {
+      const textSnippet = extractedText.slice(0, 12000)
+      try {
+        const aiRes = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${aiKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: 'gpt-4o-mini',
+            temperature: 0,
+            max_tokens: 800,
+            messages: [{
+              role: 'system',
+              content: `You are an expert at parsing RFP (Request for Proposal) documents. Extract structured information from the provided RFP text. Return ONLY a valid JSON object with these fields:
+- title: string — full project/RFP title (max 120 chars)
+- background: string — project background/context (max 600 chars)
+- objectives: string — project objectives (max 600 chars)
+- scope: string — scope of work (max 800 chars)
+- tech_requirements: string — technical requirements (max 600 chars)
+- budget: string — budget amount (numbers only, no currency symbols; empty string if not found)
+- deadline: string — submission deadline in YYYY-MM-DD format (empty string if not found)
+- category: string — best matching procurement category from: IT & Digital Transformation, ERP & Business Applications, Data & Analytics, Cloud & Infrastructure, Cybersecurity, AI & Machine Learning, Digital Marketing, Consulting, Construction, Professional Services
+Return ONLY the JSON object, no markdown, no explanation.`
+            }, {
+              role: 'user',
+              content: `Parse this RFP document and return structured JSON:\n\n${textSnippet}`
+            }]
+          })
+        })
+        if (aiRes.ok) {
+          const aiData: any = await aiRes.json()
+          const rawJson = aiData.choices?.[0]?.message?.content?.trim() || '{}'
+          const cleanJson = rawJson.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '').trim()
+          extracted = JSON.parse(cleanJson)
+        }
+      } catch (aiErr: any) {
+        console.error('[upload-rfp-pdf] AI extraction failed:', aiErr.message)
+      }
+    }
+
+    // Create RFP record with extracted data
+    const refNum = 'AND/PROC/' + new Date().getFullYear() + '/' + String(Math.floor(Math.random()*9000)+1000)
+    const title = (extracted.title || file.name.replace(/\.pdf$/i, '').replace(/_/g, ' ')).slice(0, 120)
+    const rfpCategory = extracted.category || category
+
+    const r = await c.env.DB.prepare(`
+      INSERT INTO rfps (ref_number, title, category, budget, deadline, scope, tech_requirements, objectives, background,
+                        rfp_currency, country_of_issue, uploaded_rfp_r2_key, uploaded_rfp_text, uploaded_rfp_filename,
+                        upload_source, stage, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'uploaded', 'draft', datetime('now'), datetime('now'))
+    `).bind(
+      refNum, title, rfpCategory,
+      extracted.budget || '', extracted.deadline || '',
+      extracted.scope || '', extracted.tech_requirements || '',
+      extracted.objectives || '', extracted.background || '',
+      rfpCurrency, countryOfIssue,
+      r2Key, extractedText, file.name
+    ).run()
+
+    const rfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(r.meta.last_row_id).first()
+    console.log(`[upload-rfp-pdf] created rfp=${r.meta.last_row_id} title="${title}" chars=${extractedText.length}`)
+    return c.json({ ok: true, rfp, extracted, extractedText: extractedText.slice(0, 2000) })
+  } catch (e: any) {
+    console.error('[upload-rfp-pdf] error:', e.message)
     return c.json({ error: e.message }, 500)
   }
 })

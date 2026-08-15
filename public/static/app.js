@@ -623,6 +623,13 @@ var I18N = {
     ph_tech_req:             'Infrastructure, hosting, security, compliance, integration specs...',
     ph_crit_name:            'Criterion name',
     ph_crit_desc:            'Describe what this criterion evaluates...',
+    // === New RFP choice modal (step 0) ===
+    new_rfp_choice_title:    'New RFP',
+    new_rfp_choice_sub:      'How would you like to start?',
+    new_rfp_create_title:    'Create New RFP',
+    new_rfp_create_desc:     'Fill in project details and let AI generate a professional RFP document.',
+    new_rfp_upload_title:    'Upload Existing RFP',
+    new_rfp_upload_desc:     'Upload a PDF of your manually created RFP. AI will parse and import all fields automatically.',
     // === Create RFP modal ===
     create_rfp_title:        'Create New RFP',
     create_rfp_subtitle:     'Enter project basics and optionally upload supporting documents. You will fill in detailed requirements on the Generate tab after creation.',
@@ -634,7 +641,17 @@ var I18N = {
     create_rfp_docs_sub:     '— Optional. AI will read these during generation.',
     create_rfp_upload_hint:  'Click to upload PDF (optional)',
     create_rfp_btn:          'Create RFP',
+    create_rfp_currency:     'RFP Currency',
+    create_rfp_country:      'Country of Issue',
     ph_rfp_title_eg:         'e.g. CRM Modernisation, Fraud Detection Platform, Data Warehouse...',
+    ph_rfp_country:          'e.g. Poland, UAE, Germany...',
+    // === Upload RFP modal ===
+    upload_rfp_title:        'Upload Existing RFP',
+    upload_rfp_subtitle:     'Upload your RFP PDF. AI will extract and pre-fill all fields automatically.',
+    upload_rfp_drop_hint:    'Click or drag & drop your RFP PDF here',
+    upload_rfp_parsing:      'Parsing RFP with AI…',
+    upload_rfp_parsed:       'RFP imported successfully! Review and edit the fields on the Generate tab.',
+    upload_rfp_btn:          'Import RFP',
     // === Generate tab inline texts ===
     gen_fill_hint:           'Fill in the details and click Generate with AI to produce a professional RFP document',
     gen_internal_only:       'Internal only — not published in the RFP document',
@@ -4610,7 +4627,8 @@ function scheduleFieldSave(rfpId, fieldId) {
     var fieldMap = {
       rfpTitle: 'title', rfpCategory: 'category', rfpBudget: 'budget',
       rfpDeadline: 'deadline', rfpBackground: 'background',
-      rfpObjectives: 'objectives', rfpScope: 'scope', rfpTech: 'tech_requirements'
+      rfpObjectives: 'objectives', rfpScope: 'scope', rfpTech: 'tech_requirements',
+      rfpCurrencySelect: 'rfp_currency', rfpCountryInput: 'country_of_issue'
     };
     var apiField = fieldMap[fieldId];
     if (!apiField) return;
@@ -4640,15 +4658,18 @@ function fgLabel(text, fieldId, required) {
 }
 
 rfpTabs.generate = function(rfpId, rfp) {
-  const titleVal = (rfp && rfp.title) || '';
-  const catVal = (rfp && rfp.category) || 'IT & Digital Transformation';
-  const budgetVal = (rfp && rfp.budget) || '';
+  const titleVal    = (rfp && rfp.title) || '';
+  const catVal      = (rfp && rfp.category) || 'IT & Digital Transformation';
+  const budgetVal   = (rfp && rfp.budget) || '';
   const deadlineVal = (rfp && rfp.deadline) || '';
-  const scopeVal = (rfp && rfp.scope) || '';
-  const techVal = (rfp && rfp.tech_requirements) || '';
-  const objVal = (rfp && rfp.objectives) || '';
-  const bgVal = (rfp && rfp.background) || '';
-  const hasContent = rfp && rfp.content;
+  const scopeVal    = (rfp && rfp.scope) || '';
+  const techVal     = (rfp && rfp.tech_requirements) || '';
+  const objVal      = (rfp && rfp.objectives) || '';
+  const bgVal       = (rfp && rfp.background) || '';
+  const hasContent  = rfp && rfp.content;
+  // Currency + country — stored on rfp; fallback to display currency
+  const rfpCurrencyVal    = (rfp && rfp.rfp_currency)    || _settingsCurrency || 'USD';
+  const countryOfIssueVal = (rfp && rfp.country_of_issue) || '';
 
   // Init scoring matrix from RFP or defaults
   var scoringMatrix = getScoringMatrix(rfp);
@@ -4711,6 +4732,37 @@ rfpTabs.generate = function(rfpId, rfp) {
     + fgLabel(t('form_deadline'), 'rfpDeadline', false)
     + '<input type="date" id="rfpDeadline" value="' + escHtml(deadlineVal) + '" onchange="' + asc + '">'
     + '</div>'
+
+    // Currency + Country of Issue
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem">'
+    + '<div class="form-group" style="margin:0">'
+    + '<label style="display:flex;align-items:center;gap:5px;font-size:0.82rem;font-weight:600;color:#374151;margin-bottom:4px"><i class="fas fa-coins" style="color:var(--cpc-gold);font-size:0.72rem"></i>' + t('create_rfp_currency') + '</label>'
+    + (function(){
+        // Build currency select with onchange wired to auto-save
+        var groups = [
+          { label: 'Major',        codes: ['USD','EUR','GBP','CHF','JPY','CAD','AUD','NZD'] },
+          { label: 'Asia Pacific', codes: ['CNY','HKD','SGD','KRW','INR','THB','MYR','IDR','PHP','PKR'] },
+          { label: 'Europe',       codes: ['SEK','NOK','DKK','PLN','CZK','HUF','RON','TRY','UAH','RUB'] },
+          { label: 'Middle East',  codes: ['AED','SAR','QAR','KWD','BHD','ILS','EGP'] },
+          { label: 'Americas',     codes: ['BRL','MXN'] },
+          { label: 'Africa',       codes: ['ZAR','NGN'] },
+        ];
+        var html = '<select id="rfpCurrencySelect" onchange="scheduleFieldSave(' + rfpId + ',this.id)" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:7px 10px;font-size:0.84rem;background:#fff">';
+        groups.forEach(function(g) {
+          var opts = g.codes.map(function(code) {
+            var fx = FX_RATES[code]; if (!fx) return '';
+            return '<option value="' + code + '"' + (code === rfpCurrencyVal ? ' selected' : '') + '>' + code + ' — ' + fx.label + '</option>';
+          }).join('');
+          if (opts) html += '<optgroup label="' + g.label + '">' + opts + '</optgroup>';
+        });
+        html += '</select>';
+        return html;
+      })()
+    + '</div>'
+    + '<div class="form-group" style="margin:0">'
+    + '<label style="display:flex;align-items:center;gap:5px;font-size:0.82rem;font-weight:600;color:#374151;margin-bottom:4px"><i class="fas fa-globe" style="color:#3b82f6;font-size:0.72rem"></i>' + t('create_rfp_country') + '</label>'
+    + '<input id="rfpCountryInput" value="' + escHtml(countryOfIssueVal) + '" placeholder="' + t('ph_rfp_country') + '" oninput="scheduleFieldSave(' + rfpId + ',this.id)" onchange="scheduleFieldSave(' + rfpId + ',this.id)" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:7px 10px;font-size:0.84rem">'
+    + '</div></div>'
 
     // Background
     + '<div class="form-group" style="margin:0">'
@@ -4827,13 +4879,15 @@ async function generateRfpDoc(rfpId) {
   Object.keys(_fieldSaveTimers).forEach(function(k){ clearTimeout(_fieldSaveTimers[k]); delete _fieldSaveTimers[k]; });
   var genPayload = {
     title:             title,
-    category:          (document.getElementById('rfpCategory')   || {}).value || '',
-    budget:            (document.getElementById('rfpBudget')     || {}).value || '',
-    deadline:          (document.getElementById('rfpDeadline')   || {}).value || '',
+    category:          (document.getElementById('rfpCategory')      || {}).value || '',
+    budget:            (document.getElementById('rfpBudget')        || {}).value || '',
+    deadline:          (document.getElementById('rfpDeadline')      || {}).value || '',
+    rfp_currency:      (document.getElementById('rfpCurrencySelect')|| {}).value || (_settingsCurrency || 'USD'),
+    country_of_issue:  ((document.getElementById('rfpCountryInput') || {}).value || '').trim(),
     background:        background,
     objectives:        objectives,
     scope:             scope,
-    tech_requirements: (document.getElementById('rfpTech')       || {}).value || '',
+    tech_requirements: (document.getElementById('rfpTech')          || {}).value || '',
     scoring_matrix:    window._currentScoringMatrix || null
   };
   try {
@@ -8758,67 +8812,10 @@ pages.settings = async function() {
   try {
     var s = await apiCall('GET', '/settings');
     procEmail = s.procurement_email || '';
-    // If DB has an issuer_currency that differs from localStorage, sync localStorage → DB
-    // (localStorage is the authoritative source for display currency)
-    if (_settingsCurrency && _settingsCurrency !== 'USD' && s.issuer_currency !== _settingsCurrency) {
-      apiCall('PUT', '/settings', { issuer_currency: _settingsCurrency }).catch(function(){});
-    }
   } catch(e) {}
-
-  // Build currency dropdown options grouped by region
-  var currencyGroups = [
-    { label: 'Major',        codes: ['USD','EUR','GBP','CHF','JPY','CAD','AUD','NZD'] },
-    { label: 'Asia Pacific', codes: ['CNY','HKD','SGD','KRW','INR','THB','MYR','IDR','PHP','PKR'] },
-    { label: 'Europe',       codes: ['SEK','NOK','DKK','PLN','CZK','HUF','RON','TRY','UAH','RUB'] },
-    { label: 'Middle East',  codes: ['AED','SAR','QAR','KWD','BHD','ILS','EGP'] },
-    { label: 'Americas',     codes: ['BRL','MXN'] },
-    { label: 'Africa',       codes: ['ZAR','NGN'] },
-  ];
-  var currencyOptHtml = currencyGroups.map(function(g) {
-    var opts = g.codes.map(function(code) {
-      var fx = FX_RATES[code];
-      if (!fx) return '';
-      var selected = code === _settingsCurrency ? ' selected' : '';
-      return '<option value="' + code + '"' + selected + '>' + code + ' — ' + fx.label + '</option>';
-    }).join('');
-    return opts ? '<optgroup label="' + g.label + '">' + opts + '</optgroup>' : '';
-  }).join('');
 
   setContent(
     '<div style="max-width:680px;margin:0 auto;display:flex;flex-direction:column;gap:1.5rem">'
-
-    // ── Display Currency section ──────────────────────────────────────────────
-    + '<div class="card" style="padding:1.5rem">'
-    + '<h3 style="font-weight:700;font-size:1rem;color:#1f2937;margin:0 0 0.25rem"><i class="fas fa-coins cpc-gold" style="margin-right:8px"></i>' + t('settings_currency_title') + '</h3>'
-    + '<p style="font-size:0.82rem;color:#9ca3af;margin:0 0 1rem">' + t('settings_currency_desc') + '</p>'
-
-    // Currency selector row
-    + '<div style="display:flex;gap:0.75rem;align-items:flex-end;flex-wrap:wrap">'
-    + '<div style="flex:1;min-width:200px">'
-    + '<select id="settingsCurrencySelect" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:8px 10px;font-size:0.88rem;background:#fff">'
-    + currencyOptHtml
-    + '</select>'
-    + '</div>'
-    + '<button class="btn-primary" onclick="saveDisplayCurrency()" style="white-space:nowrap"><i class="fas fa-save"></i>' + t('settings_currency_save_btn') + '</button>'
-    + '</div>'
-
-    // FX rate table (read-only reference) — top 12 pairs vs display currency
-    + '<div style="margin-top:1rem;border-top:1px solid #f3f4f6;padding-top:1rem">'
-    + '<div style="font-size:0.72rem;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:#9ca3af;margin-bottom:0.5rem">FX Reference Rates · ' + FX_RATES_DATE + ' · vs ' + _settingsCurrency + '</div>'
-    + '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:4px 12px">'
-    + ['USD','EUR','GBP','AED','SAR','PLN','JPY','CHF','CAD','AUD','GBP','INR'].filter(function(c){ return c !== _settingsCurrency; }).slice(0, 10).map(function(code) {
-        var src = FX_RATES[code]; var dst = FX_RATES[_settingsCurrency] || FX_RATES.USD;
-        if (!src) return '';
-        var rate = (dst.rate / src.rate);
-        var decimals = rate < 0.01 ? 4 : rate < 1 ? 3 : rate < 100 ? 2 : 0;
-        return '<div style="display:flex;justify-content:space-between;font-size:0.78rem;padding:2px 0;border-bottom:1px solid #f3f4f6">'
-          + '<span style="color:#6b7280">1 ' + code + '</span>'
-          + '<span style="font-weight:600;color:#1f2937;font-family:monospace">' + rate.toFixed(decimals) + ' ' + _settingsCurrency + '</span>'
-          + '</div>';
-      }).join('')
-    + '</div>'
-    + '</div>'
-    + '</div>'
 
     // ── Categories section ────────────────────────────────────────────────────
     + '<div class="card" style="padding:1.5rem">'
@@ -8905,17 +8902,83 @@ async function saveProcurementEmail() {
 }
 
 // ============================================================
-// CREATE RFP MODAL (two-step: step 1 = title + arch doc, step 2 = details)
+// NEW RFP FLOW  (Step 0 → choice modal; Step 1a → create form; Step 1b → upload form)
 // ============================================================
 var _createRfpDocFiles = [];   // array of { slotId, file, label }
+var _uploadRfpFile    = null;  // the selected PDF for the upload flow
 
+// ── Currency dropdown helper (used in both create & upload modals) ────────────
+function _buildCurrencySelect(selectId, selectedCode) {
+  var groups = [
+    { label: 'Major',        codes: ['USD','EUR','GBP','CHF','JPY','CAD','AUD','NZD'] },
+    { label: 'Asia Pacific', codes: ['CNY','HKD','SGD','KRW','INR','THB','MYR','IDR','PHP','PKR'] },
+    { label: 'Europe',       codes: ['SEK','NOK','DKK','PLN','CZK','HUF','RON','TRY','UAH','RUB'] },
+    { label: 'Middle East',  codes: ['AED','SAR','QAR','KWD','BHD','ILS','EGP'] },
+    { label: 'Americas',     codes: ['BRL','MXN'] },
+    { label: 'Africa',       codes: ['ZAR','NGN'] },
+  ];
+  var html = '<select id="' + selectId + '" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:7px 10px;font-size:0.84rem;background:#fff">';
+  groups.forEach(function(g) {
+    var opts = g.codes.map(function(code) {
+      var fx = FX_RATES[code]; if (!fx) return '';
+      return '<option value="' + code + '"' + (code === selectedCode ? ' selected' : '') + '>' + code + ' — ' + fx.label + '</option>';
+    }).join('');
+    if (opts) html += '<optgroup label="' + g.label + '">' + opts + '</optgroup>';
+  });
+  html += '</select>';
+  return html;
+}
+
+// ── Step 0: choice modal ──────────────────────────────────────────────────────
 function showCreateRfpModal() {
+  showModal(
+    // Header
+    '<div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:1.25rem">'
+    + '<div style="width:40px;height:40px;border-radius:50%;background:var(--cpc-gold);display:flex;align-items:center;justify-content:center;color:white;flex-shrink:0">'
+    + '<i class="fas fa-file-circle-plus" style="font-size:1.1rem"></i></div>'
+    + '<div><h3 style="font-size:1.05rem;font-weight:700;margin:0">' + t('new_rfp_choice_title') + '</h3>'
+    + '<div style="font-size:0.75rem;color:#9ca3af">' + t('new_rfp_choice_sub') + '</div>'
+    + '</div></div>'
+
+    // Two choice cards
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1.25rem">'
+
+    // Card 1 — Create
+    + '<button onclick="showCreateRfpForm()" style="background:#fff;border:2px solid #e5e7eb;border-radius:14px;padding:1.5rem 1rem;cursor:pointer;text-align:center;transition:all 0.18s;display:flex;flex-direction:column;align-items:center;gap:0.75rem" '
+    + 'onmouseover="this.style.borderColor=\'var(--cpc-gold)\';this.style.boxShadow=\'0 4px 18px rgba(255,219,0,0.18)\'" '
+    + 'onmouseout="this.style.borderColor=\'#e5e7eb\';this.style.boxShadow=\'none\'">'
+    + '<div style="width:54px;height:54px;border-radius:14px;background:linear-gradient(135deg,#fef9c3,#fde68a);display:flex;align-items:center;justify-content:center">'
+    + '<i class="fas fa-pencil-alt" style="font-size:1.4rem;color:#d97706"></i></div>'
+    + '<div style="font-weight:700;font-size:0.95rem;color:#111827">' + t('new_rfp_create_title') + '</div>'
+    + '<div style="font-size:0.78rem;color:#6b7280;line-height:1.4">' + t('new_rfp_create_desc') + '</div>'
+    + '</button>'
+
+    // Card 2 — Upload
+    + '<button onclick="showUploadRfpForm()" style="background:#fff;border:2px solid #e5e7eb;border-radius:14px;padding:1.5rem 1rem;cursor:pointer;text-align:center;transition:all 0.18s;display:flex;flex-direction:column;align-items:center;gap:0.75rem" '
+    + 'onmouseover="this.style.borderColor=\'#3b82f6\';this.style.boxShadow=\'0 4px 18px rgba(59,130,246,0.12)\'" '
+    + 'onmouseout="this.style.borderColor=\'#e5e7eb\';this.style.boxShadow=\'none\'">'
+    + '<div style="width:54px;height:54px;border-radius:14px;background:linear-gradient(135deg,#dbeafe,#bfdbfe);display:flex;align-items:center;justify-content:center">'
+    + '<i class="fas fa-file-upload" style="font-size:1.4rem;color:#2563eb"></i></div>'
+    + '<div style="font-weight:700;font-size:0.95rem;color:#111827">' + t('new_rfp_upload_title') + '</div>'
+    + '<div style="font-size:0.78rem;color:#6b7280;line-height:1.4">' + t('new_rfp_upload_desc') + '</div>'
+    + '</button>'
+
+    + '</div>'
+    + '<button class="btn-ghost" style="width:100%" onclick="closeModal()">Cancel</button>'
+  );
+}
+
+// ── Step 1a: Create new RFP form ──────────────────────────────────────────────
+function showCreateRfpForm() {
   _createRfpDocFiles = [];
+  // Detect a sensible default currency
+  var defCurrency = _settingsCurrency || 'USD';
   showModal(
     // Header
     '<div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:1rem">'
-    + '<div style="width:36px;height:36px;border-radius:50%;background:var(--cpc-gold);display:flex;align-items:center;justify-content:center;color:white;flex-shrink:0">'
-    + '<i class="fas fa-file-circle-plus" style="font-size:1rem"></i></div>'
+    + '<button onclick="showCreateRfpModal()" style="background:none;border:none;cursor:pointer;color:#6b7280;padding:2px 6px;border-radius:4px;margin-right:4px" title="Back"><i class="fas fa-arrow-left"></i></button>'
+    + '<div style="width:34px;height:34px;border-radius:50%;background:var(--cpc-gold);display:flex;align-items:center;justify-content:center;color:white;flex-shrink:0">'
+    + '<i class="fas fa-pencil-alt" style="font-size:0.9rem"></i></div>'
     + '<div><h3 style="font-size:1rem;font-weight:700;margin:0">' + t('create_rfp_title') + '</h3>'
     + '<div style="font-size:0.72rem;color:#9ca3af">' + t('create_rfp_subtitle') + '</div>'
     + '</div></div>'
@@ -8924,14 +8987,23 @@ function showCreateRfpModal() {
     + '<div class="form-group" style="margin-bottom:0.625rem"><label>' + t('create_rfp_proj_title') + '</label>'
     + '<input id="newRfpTitle" placeholder="' + t('ph_rfp_title_eg') + '"></div>'
 
-    // Category / Budget / Deadline in one row
-    + '<div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:0.625rem;margin-bottom:0.75rem">'
+    // Category / Budget / Deadline
+    + '<div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:0.625rem;margin-bottom:0.625rem">'
     + '<div class="form-group" style="margin:0"><label>' + t('create_rfp_category') + '</label><select id="newRfpCat">'
     + (_settingsCategories || DEFAULT_CATEGORIES).map(function(c){ return '<option>' + c + '</option>'; }).join('')
     + '</select></div>'
-    + '<div class="form-group" style="margin:0"><label>' + t('create_rfp_budget').replace(/USD|AED|EUR/, _settingsCurrency) + '</label><input id="newRfpBudget" placeholder="5,000,000"></div>'
+    + '<div class="form-group" style="margin:0"><label>' + t('create_rfp_budget').replace(/USD|AED|EUR/, defCurrency) + '</label><input id="newRfpBudget" placeholder="5,000,000"></div>'
     + '<div class="form-group" style="margin:0"><label>' + t('create_rfp_deadline') + '</label><input type="date" id="newRfpDeadline" value="' + getDateOffset(30) + '"></div>'
     + '</div>'
+
+    // Currency + Country of Issue
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.625rem;margin-bottom:0.75rem">'
+    + '<div class="form-group" style="margin:0"><label style="display:flex;align-items:center;gap:5px"><i class="fas fa-coins" style="color:var(--cpc-gold);font-size:0.75rem"></i>' + t('create_rfp_currency') + '</label>'
+    + _buildCurrencySelect('newRfpCurrency', defCurrency)
+    + '</div>'
+    + '<div class="form-group" style="margin:0"><label style="display:flex;align-items:center;gap:5px"><i class="fas fa-globe" style="color:#3b82f6;font-size:0.75rem"></i>' + t('create_rfp_country') + '</label>'
+    + '<input id="newRfpCountry" placeholder="' + t('ph_rfp_country') + '" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:7px 10px;font-size:0.84rem">'
+    + '</div></div>'
 
     // Two upload slots
     + '<div style="margin-bottom:1rem">'
@@ -8948,6 +9020,107 @@ function showCreateRfpModal() {
     + '<button class="btn-ghost" onclick="closeModal()">Cancel</button>'
     + '</div>'
   );
+}
+
+// ── Step 1b: Upload existing RFP PDF form ──────────────────────────────────────
+function showUploadRfpForm() {
+  _uploadRfpFile = null;
+  var defCurrency = _settingsCurrency || 'USD';
+  showModal(
+    // Header
+    '<div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:1rem">'
+    + '<button onclick="showCreateRfpModal()" style="background:none;border:none;cursor:pointer;color:#6b7280;padding:2px 6px;border-radius:4px;margin-right:4px" title="Back"><i class="fas fa-arrow-left"></i></button>'
+    + '<div style="width:34px;height:34px;border-radius:50%;background:#2563eb;display:flex;align-items:center;justify-content:center;color:white;flex-shrink:0">'
+    + '<i class="fas fa-file-upload" style="font-size:0.9rem"></i></div>'
+    + '<div><h3 style="font-size:1rem;font-weight:700;margin:0">' + t('upload_rfp_title') + '</h3>'
+    + '<div style="font-size:0.72rem;color:#9ca3af">' + t('upload_rfp_subtitle') + '</div>'
+    + '</div></div>'
+
+    // PDF drop zone
+    + '<div id="uploadRfpDropzone" '
+    + 'onclick="document.getElementById(\'uploadRfpFileInput\').click()" '
+    + 'ondragover="event.preventDefault();this.style.borderColor=\'#2563eb\';this.style.background=\'#eff6ff\'" '
+    + 'ondragleave="this.style.borderColor=\'#d1d5db\';this.style.background=\'#f9fafb\'" '
+    + 'ondrop="handleUploadRfpDrop(event)" '
+    + 'style="border:2px dashed #d1d5db;border-radius:12px;padding:2rem;text-align:center;cursor:pointer;background:#f9fafb;transition:all 0.2s;margin-bottom:0.875rem">'
+    + '<i class="fas fa-file-pdf" style="font-size:2.2rem;color:#dc2626;display:block;margin-bottom:0.75rem"></i>'
+    + '<div id="uploadRfpDropzoneLabel" style="font-size:0.88rem;font-weight:600;color:#374151;margin-bottom:0.25rem">' + t('upload_rfp_drop_hint') + '</div>'
+    + '<div style="font-size:0.72rem;color:#9ca3af">PDF files only · max 20 MB</div>'
+    + '<input type="file" id="uploadRfpFileInput" accept=".pdf" style="display:none" onchange="handleUploadRfpSelect(event)">'
+    + '</div>'
+
+    // Currency + Country of Issue
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.625rem;margin-bottom:0.875rem">'
+    + '<div class="form-group" style="margin:0"><label style="display:flex;align-items:center;gap:5px"><i class="fas fa-coins" style="color:var(--cpc-gold);font-size:0.75rem"></i>' + t('create_rfp_currency') + '</label>'
+    + _buildCurrencySelect('uploadRfpCurrency', defCurrency)
+    + '</div>'
+    + '<div class="form-group" style="margin:0"><label style="display:flex;align-items:center;gap:5px"><i class="fas fa-globe" style="color:#3b82f6;font-size:0.75rem"></i>' + t('create_rfp_country') + '</label>'
+    + '<input id="uploadRfpCountry" placeholder="' + t('ph_rfp_country') + '" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:7px 10px;font-size:0.84rem">'
+    + '</div></div>'
+
+    // Action buttons
+    + '<div style="display:flex;gap:0.5rem">'
+    + '<button class="btn-primary" id="uploadRfpBtn" style="flex:1" onclick="uploadRfpPdf()"><i class="fas fa-file-import"></i>' + t('upload_rfp_btn') + '</button>'
+    + '<button class="btn-ghost" onclick="closeModal()">Cancel</button>'
+    + '</div>'
+  );
+}
+
+function handleUploadRfpDrop(event) {
+  event.preventDefault();
+  var dropzone = document.getElementById('uploadRfpDropzone');
+  if (dropzone) { dropzone.style.borderColor = '#d1d5db'; dropzone.style.background = '#f9fafb'; }
+  var file = event.dataTransfer && event.dataTransfer.files[0];
+  if (file) _setUploadRfpFile(file);
+}
+
+function handleUploadRfpSelect(event) {
+  var file = event.target.files && event.target.files[0];
+  if (file) _setUploadRfpFile(file);
+}
+
+function _setUploadRfpFile(file) {
+  if (!file || file.type !== 'application/pdf') {
+    showToast('Please upload a PDF file.', 'error'); return;
+  }
+  if (file.size > 20 * 1024 * 1024) {
+    showToast('File too large (max 20 MB).', 'error'); return;
+  }
+  _uploadRfpFile = file;
+  var lbl = document.getElementById('uploadRfpDropzoneLabel');
+  var dz  = document.getElementById('uploadRfpDropzone');
+  if (lbl) lbl.innerHTML = '<i class="fas fa-check-circle" style="color:#065f46;margin-right:6px"></i><strong style="color:#065f46">' + escHtml(file.name) + '</strong> &bull; ' + (file.size/1024).toFixed(0) + ' KB';
+  if (dz)  { dz.style.borderColor = '#065f46'; dz.style.background = '#ecfdf5'; }
+}
+
+async function uploadRfpPdf() {
+  if (!_uploadRfpFile) { showToast('Please select a PDF file first.', 'error'); return; }
+  var btn = document.getElementById('uploadRfpBtn');
+  setLoading(btn, true, t('upload_rfp_parsing'));
+  try {
+    var currency   = (document.getElementById('uploadRfpCurrency') || {}).value || _settingsCurrency || 'USD';
+    var country    = ((document.getElementById('uploadRfpCountry') || {}).value || '').trim();
+    var fd = new FormData();
+    fd.append('file', _uploadRfpFile);
+    fd.append('rfp_currency', currency);
+    fd.append('country_of_issue', country);
+
+    var resp = await fetch(API + '/rfps/upload-rfp-pdf', { method: 'POST', body: fd });
+    if (!resp.ok) {
+      var err = await resp.json().catch(function(){ return {}; });
+      throw new Error(err.error || 'Upload failed (' + resp.status + ')');
+    }
+    var data = await resp.json();
+    var rfp  = data.rfp;
+    _uploadRfpFile = null;
+    closeModal();
+    showToast(t('upload_rfp_parsed'), 'success', 6000);
+    // Navigate to Generate tab so user can review + regenerate
+    navigateTo('rfp_detail', { rfpId: rfp.id, tab: 'generate' });
+  } catch(e) {
+    setLoading(btn, false);
+    showToast('Upload failed: ' + (e.message || e), 'error');
+  }
 }
 
 function buildDocUploadSlot(slotId, docLabel, icon, color) {
@@ -8991,6 +9164,8 @@ async function createRfp() {
       category: document.getElementById('newRfpCat') ? document.getElementById('newRfpCat').value : 'IT & Digital Transformation',
       budget: document.getElementById('newRfpBudget') ? document.getElementById('newRfpBudget').value : '',
       deadline: document.getElementById('newRfpDeadline') ? document.getElementById('newRfpDeadline').value : '',
+      rfp_currency: document.getElementById('newRfpCurrency') ? document.getElementById('newRfpCurrency').value : (_settingsCurrency || 'USD'),
+      country_of_issue: document.getElementById('newRfpCountry') ? document.getElementById('newRfpCountry').value.trim() : '',
       scope: '', background: '', objectives: '', tech_requirements: '',
     };
     const rfp = await apiCall('POST', '/rfps', rfpBody);
