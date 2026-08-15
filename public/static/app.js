@@ -7104,11 +7104,85 @@ function _buildEvalTabBodies(p, evalData) {
       + '</ul></div></div>';
   }
 
+  // ── Market Benchmark block ────────────────────────────────────────────────
+  var benchmarkHtml = '';
+  var bm = (appState._marketBenchmarks && appState._marketBenchmarks[rfpId]) || null;
+  // Also try to read from rfp object if stored
+  if (!bm && appState.currentRfp && appState.currentRfp.market_benchmark_json) {
+    try { bm = JSON.parse(appState.currentRfp.market_benchmark_json); } catch(_) {}
+  }
+  if (bm && bm.total_mid) {
+    var bmMin = bm.total_min ? formatBudget(bm.total_min, bm.currency || 'USD') : null;
+    var bmMax = bm.total_max ? formatBudget(bm.total_max, bm.currency || 'USD') : null;
+    var bmMid = formatBudget(bm.total_mid, bm.currency || 'USD');
+    var confColor = bm.confidence === 'high' ? '#059669' : bm.confidence === 'low' ? '#dc2626' : '#d97706';
+    var confBg    = bm.confidence === 'high' ? '#f0fdf4' : bm.confidence === 'low' ? '#fef2f2' : '#fffbeb';
+
+    var wbsRows = '';
+    if (bm.wbs && bm.wbs.length) {
+      wbsRows = bm.wbs.map(function(w) {
+        var sub = w.subtotal ? formatBudget(w.subtotal, bm.currency || 'USD') : '—';
+        return '<tr style="border-bottom:1px solid #f3f4f6">'
+          + '<td style="padding:5px 8px;font-size:0.77rem;color:#374151;font-weight:600">' + escHtml(w.phase || '') + '</td>'
+          + '<td style="padding:5px 8px;font-size:0.75rem;color:#6b7280">' + escHtml(w.description || '') + '</td>'
+          + '<td style="padding:5px 8px;font-size:0.75rem;color:#374151;text-align:right;white-space:nowrap">' + (w.effort_person_days || '—') + ' p-d</td>'
+          + '<td style="padding:5px 8px;font-size:0.75rem;color:#374151;text-align:right;white-space:nowrap">' + sub + '</td>'
+          + '</tr>';
+      }).join('');
+    }
+
+    benchmarkHtml = '<div style="margin-bottom:1rem;border:1px solid #e0d9f7;border-radius:10px;overflow:hidden">'
+      + '<div style="background:linear-gradient(135deg,#4c1d95,#6d28d9);padding:10px 14px;display:flex;align-items:center;justify-content:space-between">'
+      + '<div style="display:flex;align-items:center;gap:8px">'
+      + '<i class="fas fa-globe" style="color:#c4b5fd;font-size:0.9rem"></i>'
+      + '<span style="font-size:0.82rem;font-weight:700;color:white">Market Benchmark</span>'
+      + '<span style="font-size:0.68rem;color:rgba(255,255,255,0.55);margin-left:4px">Informational only — not included in score</span>'
+      + '</div>'
+      + '<span style="font-size:0.68rem;font-weight:700;padding:2px 8px;border-radius:12px;background:' + confBg + ';color:' + confColor + '">' + (bm.confidence || 'medium') + ' confidence</span>'
+      + '</div>'
+      + '<div style="padding:12px 14px">'
+      + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px">'
+      + '<div style="background:#f5f3ff;border-radius:6px;padding:8px 10px;text-align:center">'
+      + '<div style="font-size:0.63rem;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#7c3aed;margin-bottom:2px">Min Estimate</div>'
+      + '<div style="font-size:0.88rem;font-weight:700;color:#4c1d95">' + (bmMin || '—') + '</div></div>'
+      + '<div style="background:#ede9fe;border:1.5px solid #8b5cf6;border-radius:6px;padding:8px 10px;text-align:center">'
+      + '<div style="font-size:0.63rem;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#5b21b6;margin-bottom:2px">Mid Estimate</div>'
+      + '<div style="font-size:0.97rem;font-weight:800;color:#4c1d95">' + bmMid + '</div></div>'
+      + '<div style="background:#f5f3ff;border-radius:6px;padding:8px 10px;text-align:center">'
+      + '<div style="font-size:0.63rem;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#7c3aed;margin-bottom:2px">Max Estimate</div>'
+      + '<div style="font-size:0.88rem;font-weight:700;color:#4c1d95">' + (bmMax || '—') + '</div></div>'
+      + '</div>'
+      + (bm.confidence_rationale ? '<div style="font-size:0.75rem;color:#6b7280;margin-bottom:8px;line-height:1.5"><i class="fas fa-info-circle" style="margin-right:4px;color:#8b5cf6"></i>' + escHtml(bm.confidence_rationale) + '</div>' : '')
+      + (wbsRows ? '<details style="margin-top:2px">'
+        + '<summary style="font-size:0.78rem;font-weight:600;color:#5b21b6;cursor:pointer;padding:4px 0;list-style:none;display:flex;align-items:center;gap:6px"><i class="fas fa-sitemap" style="font-size:0.72rem"></i>Work Breakdown Structure (' + bm.wbs.length + ' phases)</summary>'
+        + '<div style="overflow-x:auto;margin-top:6px;border:1px solid #ede9fe;border-radius:6px">'
+        + '<table style="width:100%;border-collapse:collapse;min-width:380px">'
+        + '<thead><tr style="background:#f5f3ff">'
+        + '<th style="padding:5px 8px;text-align:left;font-size:0.68rem;font-weight:700;color:#7c3aed;text-transform:uppercase">Phase</th>'
+        + '<th style="padding:5px 8px;text-align:left;font-size:0.68rem;font-weight:700;color:#7c3aed;text-transform:uppercase">Description</th>'
+        + '<th style="padding:5px 8px;text-align:right;font-size:0.68rem;font-weight:700;color:#7c3aed;text-transform:uppercase">Effort</th>'
+        + '<th style="padding:5px 8px;text-align:right;font-size:0.68rem;font-weight:700;color:#7c3aed;text-transform:uppercase">Cost</th>'
+        + '</tr></thead><tbody>' + wbsRows + '</tbody></table></div>'
+        + '</details>' : '')
+      + (bm.region ? '<div style="font-size:0.7rem;color:#9ca3af;margin-top:8px"><i class="fas fa-map-marker-alt" style="margin-right:3px"></i>Region: ' + escHtml(bm.region) + '</div>' : '')
+      + '</div></div>';
+  } else if (evalData) {
+    // Benchmark not yet generated — show a trigger button
+    benchmarkHtml = '<div style="margin-bottom:1rem;border:1px solid #e0d9f7;border-radius:10px;padding:14px;background:#f5f3ff;display:flex;align-items:center;justify-content:space-between;gap:12px">'
+      + '<div>'
+      + '<div style="font-size:0.82rem;font-weight:700;color:#4c1d95;margin-bottom:3px"><i class="fas fa-globe" style="margin-right:6px"></i>Market Benchmark</div>'
+      + '<div style="font-size:0.75rem;color:#6b7280">Generate a WBS-based market-average cost estimate for this project. Informational only — does not affect scores.</div>'
+      + '</div>'
+      + '<button onclick="_fireMarketBenchmark(' + rfpId + ',' + p.id + ')" style="flex-shrink:0;padding:8px 16px;background:#6d28d9;color:white;border:none;border-radius:7px;font-size:0.8rem;font-weight:600;cursor:pointer;white-space:nowrap"><i class="fas fa-chart-line" style="margin-right:5px"></i>Run Benchmark</button>'
+      + '</div>';
+  }
+
   var tabSummaryHtml = wrongDocBanner + manualBudgetBanner
     + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem;margin-bottom:1rem">'
     + '<div style="background:#faf9f7;border:1px solid #e5e7eb;border-radius:8px;padding:0.75rem">'
-    + '<div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#9a8c78;margin-bottom:4px">Budget</div>'
+    + '<div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#9a8c78;margin-bottom:4px">Vendor Budget</div>'
     + '<div style="font-size:0.97rem;font-weight:700;color:#020D1C">' + (evalBudget || escHtml(fin)) + '</div>'
+    + (evalData && evalData.rfp_budget_currency ? '<div style="font-size:0.7rem;color:#6b7280;margin-top:2px"><i class="fas fa-exchange-alt" style="margin-right:3px"></i>RFP ceiling in ' + escHtml(evalData.rfp_budget_currency) + '</div>' : '')
     + (evalData && evalData.budget_confidence != null && evalData.budget_confidence < 0.8 ? '<div style="font-size:0.7rem;color:#d97706;margin-top:3px"><i class="fas fa-exclamation-circle" style="margin-right:0.25rem"></i>Low confidence — verify manually</div>' : '')
     + '</div>'
     + '<div style="background:#faf9f7;border:1px solid #e5e7eb;border-radius:8px;padding:0.75rem">'
@@ -7116,6 +7190,7 @@ function _buildEvalTabBodies(p, evalData) {
     + '<div style="font-size:0.97rem;font-weight:700;color:#020D1C">' + escHtml((evalData && evalData.duration_extracted) || dur) + '</div>'
     + '</div>'
     + '</div>'
+    + benchmarkHtml
     + techSummaryHtml
     + strengthsHtml
     + '<div style="margin-bottom:1rem">'
@@ -7418,6 +7493,158 @@ function switchProposalTab(tab) {
 }
 
 // ── Evaluate a single proposal with AI ───────────────────────────────────────
+// ── Evaluation Progress Modal ─────────────────────────────────────────────────
+// Shows a staged, business-readable progress popup during AI evaluation.
+// _evalModalActiveIdx is module-level so _resolveEvalModal (outside the closure) can read it.
+var _evalModalTimer = null;
+var _evalModalActiveIdx = 0;
+var _evalModalStages = [
+  { key: 'reading',     icon: 'fa-file-search',   title: 'Reading Proposal Documents',          desc: 'Extracting and preparing the submitted PDF files for analysis…',                              color: '#3b82f6' },
+  { key: 'classifying', icon: 'fa-tags',           title: 'Verifying Document Type',             desc: 'Confirming this is a valid vendor proposal responding to the RFP…',                         color: '#8b5cf6' },
+  { key: 'budget',      icon: 'fa-coins',          title: 'Extracting Financial Data',           desc: 'Identifying the proposed budget, currency, and project timeline…',                           color: '#f59e0b' },
+  { key: 'technical',   icon: 'fa-microscope',     title: 'Technical & Compliance Scoring',      desc: 'Evaluating each RFP criterion — methodology, architecture, team, references…',               color: '#059669' },
+  { key: 'commercial',  icon: 'fa-balance-scale',  title: 'Commercial Assessment',               desc: 'Comparing proposed cost against the RFP budget ceiling and applying FX conversion…',         color: '#0891b2' },
+  { key: 'market',      icon: 'fa-globe',          title: 'Market Benchmark Analysis',           desc: 'Generating WBS and estimating market-average implementation cost for this region…',           color: '#7c3aed' },
+  { key: 'verdict',     icon: 'fa-gavel',          title: 'Generating Recommendation',           desc: 'Synthesising all scores into a final recommendation — Recommended, Conditional, or Not Recommended…', color: '#dc2626' },
+];
+
+function _renderEvalModalHtml(idx, vendor, startTime, errorMsg) {
+  var stages = _evalModalStages;
+  var elapsed = Math.round((Date.now() - startTime) / 1000);
+  var rows = stages.map(function(s, i) {
+    var isDone   = i < idx;
+    var isActive = i === idx && !errorMsg;
+    var isError  = errorMsg && i === idx;
+    var opacity  = (isDone || isActive || isError) ? '1' : '0.3';
+    var iconCls  = isDone ? 'fa-check-circle' : (isError ? 'fa-times-circle' : (isActive ? 'fa-spinner fa-spin' : 'fa-circle'));
+    var iconCol  = isDone ? '#22c55e' : (isError ? '#ef4444' : (isActive ? s.color : '#d1d5db'));
+    var textCol  = isActive ? '#111827' : (isDone ? '#374151' : '#9ca3af');
+    return '<div style="display:flex;align-items:flex-start;gap:12px;padding:10px 0;border-bottom:1px solid #f3f4f6;opacity:' + opacity + ';transition:opacity 0.4s">'
+      + '<div style="width:32px;height:32px;border-radius:50%;background:' + (isActive ? s.color : (isDone ? '#f0fdf4' : '#f9fafb')) + ';display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px">'
+      + '<i class="fas ' + iconCls + '" style="font-size:0.8rem;color:' + iconCol + '"></i></div>'
+      + '<div style="flex:1;min-width:0">'
+      + '<div style="font-size:0.85rem;font-weight:' + (isActive ? '700' : '600') + ';color:' + textCol + ';margin-bottom:2px">' + s.title + '</div>'
+      + (isActive ? '<div style="font-size:0.77rem;color:#6b7280;line-height:1.5">' + s.desc + '</div>' : '')
+      + (isError  ? '<div style="font-size:0.77rem;color:#dc2626;line-height:1.5">' + escHtml(errorMsg) + '</div>' : '')
+      + '</div>'
+      + (isDone ? '<div style="font-size:0.7rem;color:#22c55e;font-weight:700;flex-shrink:0;margin-top:6px"><i class="fas fa-check" style="margin-right:2px"></i>Done</div>' : '')
+      + '</div>';
+  }).join('');
+
+  var progressPct = errorMsg
+    ? Math.round((idx / (stages.length - 1)) * 100)
+    : (idx >= stages.length - 1 ? 100 : Math.round((idx / (stages.length - 1)) * 100));
+
+  return '<div id="evalProgressModal" style="position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(2,13,28,0.72);backdrop-filter:blur(4px)">'
+    + '<div style="background:white;border-radius:16px;width:520px;max-width:95vw;max-height:90vh;overflow-y:auto;box-shadow:0 24px 64px rgba(0,0,0,0.35)">'
+    + '<div style="background:linear-gradient(135deg,var(--cpc-ink,#020D1C),#2d2519);border-radius:16px 16px 0 0;padding:20px 24px;display:flex;align-items:center;justify-content:space-between">'
+    + '<div>'
+    + '<div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:rgba(255,255,255,0.5);margin-bottom:4px">AI Evaluation in Progress</div>'
+    + '<div style="font-size:1.05rem;font-weight:700;color:white">' + (vendor || 'Vendor') + '</div>'
+    + '</div>'
+    + '<div style="text-align:right">'
+    + '<div style="font-size:0.75rem;color:rgba(255,255,255,0.45)">' + elapsed + 's elapsed</div>'
+    + '<div style="font-size:0.7rem;color:rgba(255,255,255,0.35);margin-top:2px">Step ' + Math.min(idx + 1, stages.length) + ' of ' + stages.length + '</div>'
+    + '</div>'
+    + '</div>'
+    + '<div style="padding:20px 24px">'
+    + '<div style="width:100%;height:4px;background:#f3f4f6;border-radius:2px;margin-bottom:18px;overflow:hidden">'
+    + '<div style="height:100%;width:' + progressPct + '%;background:linear-gradient(90deg,var(--cpc-gold-deep,#BA9765),var(--cpc-gold,#FFDB00));border-radius:2px;transition:width 0.6s ease"></div>'
+    + '</div>'
+    + rows
+    + '</div>'
+    + (errorMsg ? '<div style="padding:0 24px 20px"><button onclick="document.getElementById(\'evalProgressModal\').remove()" style="width:100%;padding:10px;background:#f3f4f6;border:none;border-radius:8px;font-size:0.85rem;font-weight:600;cursor:pointer;color:#374151">Close</button></div>' : '')
+    + '</div></div>';
+}
+
+function _showEvalModal(proposalId, vendorName) {
+  // Remove any existing modal
+  var old = document.getElementById('evalProgressModal');
+  if (old) old.remove();
+
+  _evalModalActiveIdx = 0;
+  var vendor = vendorName ? escHtml(vendorName) : 'Vendor';
+  var startTime = Date.now();
+
+  // Insert initial state (stage 0 active)
+  document.body.insertAdjacentHTML('beforeend', _renderEvalModalHtml(0, vendor, startTime, null));
+
+  // Auto-advance through stages with realistic timing
+  // Actual completion is always driven by _resolveEvalModal() — these are cosmetic only
+  var stageDurations = [2000, 2000, 3000, 8000, 3000, 5000, 2000]; // ms per stage
+  var cumulativeDelay = 0;
+  _evalModalTimer = [];
+
+  for (var si = 1; si < _evalModalStages.length; si++) {
+    cumulativeDelay += stageDurations[si - 1];
+    (function(stageIdx, delay) {
+      var tid = setTimeout(function() {
+        // Only advance if the modal is still open and we haven't been resolved past this stage
+        if (_evalModalActiveIdx < stageIdx) {
+          _evalModalActiveIdx = stageIdx;
+          var modal = document.getElementById('evalProgressModal');
+          if (!modal) return;
+          var newHtml = _renderEvalModalHtml(stageIdx, vendor, startTime, null);
+          // Replace the modal element in-place using a wrapper trick
+          var wrapper = document.createElement('div');
+          wrapper.innerHTML = newHtml;
+          modal.parentNode.replaceChild(wrapper.firstChild, modal);
+        }
+      }, delay);
+      _evalModalTimer.push(tid);
+    })(si, cumulativeDelay);
+  }
+}
+
+function _resolveEvalModal(success, errorMsg) {
+  // Stop all auto-advance timers
+  if (_evalModalTimer) { _evalModalTimer.forEach(clearTimeout); _evalModalTimer = null; }
+  var modal = document.getElementById('evalProgressModal');
+  if (!modal) return;
+
+  if (success) {
+    // Show all-complete state briefly, then fade out and remove
+    _evalModalActiveIdx = _evalModalStages.length; // past last stage = all done
+    modal.style.transition = 'opacity 0.6s';
+    modal.style.opacity = '1';
+    // After 800ms start fading, then remove
+    setTimeout(function() {
+      var m = document.getElementById('evalProgressModal');
+      if (!m) return;
+      m.style.transition = 'opacity 0.5s';
+      m.style.opacity = '0';
+      setTimeout(function() {
+        var m2 = document.getElementById('evalProgressModal');
+        if (m2) m2.remove();
+      }, 520);
+    }, 800);
+  } else {
+    // Show error on whichever stage was last active
+    var errIdx = Math.min(_evalModalActiveIdx, _evalModalStages.length - 1);
+    var newHtml = _buildEvalModalHtml(errIdx, errorMsg || 'Evaluation failed.');
+    var wrapper = document.createElement('div');
+    wrapper.innerHTML = newHtml;
+    modal.parentNode.replaceChild(wrapper.firstChild, modal);
+  }
+}
+
+function _closeEvalModal() {
+  if (_evalModalTimer) { _evalModalTimer.forEach(clearTimeout); _evalModalTimer = null; }
+  var m = document.getElementById('evalProgressModal');
+  if (m) m.remove();
+}
+
+function _buildEvalModalHtml(errorIdx, errorMsg) {
+  // Simplified error-state modal (no live timers needed)
+  return '<div id="evalProgressModal" style="position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(2,13,28,0.72);backdrop-filter:blur(4px)">'
+    + '<div style="background:white;border-radius:16px;width:520px;max-width:95vw;padding:28px 24px;box-shadow:0 24px 64px rgba(0,0,0,0.35);text-align:center">'
+    + '<i class="fas fa-exclamation-triangle" style="font-size:2.4rem;color:#f59e0b;display:block;margin-bottom:14px"></i>'
+    + '<div style="font-size:1rem;font-weight:700;color:#111827;margin-bottom:8px">Evaluation encountered an issue</div>'
+    + '<div style="font-size:0.82rem;color:#6b7280;line-height:1.55;margin-bottom:22px;max-width:380px;margin-left:auto;margin-right:auto">' + escHtml(errorMsg || 'An unexpected error occurred. Please try again.') + '</div>'
+    + '<button onclick="document.getElementById(\'evalProgressModal\').remove()" style="padding:10px 32px;background:var(--cpc-gold-deep,#BA9765);color:white;border:none;border-radius:8px;font-size:0.85rem;font-weight:600;cursor:pointer">Close</button>'
+    + '</div></div>';
+}
+
 async function evaluateSingleProposal(rfpId, proposalId) {
   // Disable any trigger buttons inside the panel
   ['evalSingleBtn_' + proposalId, 'evalSingleBtnFooter_' + proposalId].forEach(function(id) {
@@ -7425,13 +7652,20 @@ async function evaluateSingleProposal(rfpId, proposalId) {
     if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> ' + t('prop_evaluating'); }
   });
 
-  try {
-    showToast('🤖 Sending PDF to OCR engine — this may take 1–2 minutes…', 'info', 120000);
+  // Find vendor name for modal header
+  var vendorName = '';
+  var propForName = appState.proposals ? appState.proposals.find(function(pp){ return pp.id === proposalId; }) : null;
+  if (propForName) vendorName = propForName.vendor_name || propForName.name || '';
 
+  // Show progress modal
+  _showEvalModal(proposalId, vendorName);
+
+  try {
     var result = await apiCall('POST', '/rfps/' + rfpId + '/proposals/' + proposalId + '/evaluate', {});
 
     // ── v49: Blocked — documents still being prepared ──────────────────────
     if (result && result.blocked) {
+      _closeEvalModal();
       showToast('⏳ This proposal\'s documents are still being prepared for evaluation. Please wait a moment and try again.', 'info', 8000);
       ['evalSingleBtn_' + proposalId, 'evalSingleBtnFooter_' + proposalId].forEach(function(id) {
         var btn2 = document.getElementById(id);
@@ -7442,7 +7676,8 @@ async function evaluateSingleProposal(rfpId, proposalId) {
 
     // ── Fast path: got scores immediately (text was already in DB) ─────────
     if (result && result.ok && result.status !== 'processing' && result.compliance_breakdown) {
-      showToast('✅ Evaluation complete! Extracting budget…', 'success', 6000);
+      _resolveEvalModal(true);
+      showToast('✅ Evaluation complete! Extracting budget & market benchmark…', 'success', 6000);
       var p = appState.proposals ? appState.proposals.find(function(pp){ return pp.id === proposalId; }) : null;
       if (p) {
         p.ai_recommendation    = result.recommendation;
@@ -7458,15 +7693,16 @@ async function evaluateSingleProposal(rfpId, proposalId) {
 
     // ── Async path: 202 — OCR is running, start polling ───────────────────
     if (result && result.status === 'processing') {
-      showToast('🔍 OCR started! Polling for results every 5 seconds…', 'info', 120000);
       _pollEvaluationResult(rfpId, proposalId, 'scoring');
       return;
     }
 
     // Unexpected response
+    _closeEvalModal();
     showToast('Evaluation started — refresh in a minute to see results.', 'info');
 
   } catch(e) {
+    _resolveEvalModal(false, e.message || String(e));
     showToast('Evaluation failed: ' + (e.message || e), 'error');
     ['evalSingleBtn_' + proposalId, 'evalSingleBtnFooter_' + proposalId].forEach(function(id) {
       var btn = document.getElementById(id);
@@ -7485,6 +7721,7 @@ function _pollEvaluationResult(rfpId, proposalId, phase) {
       var ev = await apiCall('GET', '/rfps/' + rfpId + '/proposals/' + proposalId + '/evaluation');
       if (ev && ev.ai_evaluated_at && ev.evaluation_data) {
         clearInterval(interval);
+        _resolveEvalModal(true);
         showToast('✅ Evaluation complete! Score: ' + (ev.ai_total_score || 0) + '/100', 'success', 8000);
         // Update local proposal state
         var p = appState.proposals ? appState.proposals.find(function(pp){ return pp.id === proposalId; }) : null;
@@ -7495,10 +7732,11 @@ function _pollEvaluationResult(rfpId, proposalId, phase) {
           p.ai_evaluated_at      = ev.ai_evaluated_at;
           _renderProposalPanel(p, ev.evaluation_data);
         }
-        // Now fire budget extraction
+        // Now fire budget extraction + market benchmark
         _fireBudgetExtraction(rfpId, proposalId);
       } else if (attempts >= maxAttempts) {
         clearInterval(interval);
+        _resolveEvalModal(false, 'OCR is taking longer than expected. Refresh the page in a few minutes.');
         showToast('⚠️ OCR is taking longer than expected. Refresh the page in a few minutes.', 'info', 10000);
       }
       // else: still processing, keep polling
@@ -7516,8 +7754,9 @@ function _fireBudgetExtraction(rfpId, proposalId) {
 
       // Fast path: budget extracted immediately (cached OCR text or stored fields)
       if (budgetResult.ok && budgetResult.status !== 'processing' && budgetResult.budget_amount) {
-        showToast('💰 Budget: ' + (budgetResult.budget_currency || 'USD') + ' ' + budgetResult.budget_amount.toLocaleString() + ' (confidence ' + Math.round((budgetResult.budget_confidence || 0) * 100) + '%)', 'success', 8000);
+        showToast('💰 Budget extracted — running market benchmark…', 'success', 5000);
         _refreshPanelFromDB(rfpId, proposalId);
+        _fireMarketBenchmark(rfpId, proposalId);
         return;
       }
 
@@ -7525,10 +7764,37 @@ function _fireBudgetExtraction(rfpId, proposalId) {
       if (budgetResult.status === 'processing') {
         showToast('💰 Budget OCR started — will update when ready…', 'info', 60000);
         _pollBudgetResult(rfpId, proposalId);
+        // Fire benchmark in parallel regardless (doesn't depend on proposal budget)
+        _fireMarketBenchmark(rfpId, proposalId);
+      } else {
+        // No budget but still fire benchmark
+        _fireMarketBenchmark(rfpId, proposalId);
       }
     })
     .catch(function(e) {
       showToast('⚠️ Budget extraction: ' + (e.message || e), 'info', 6000);
+      _fireMarketBenchmark(rfpId, proposalId);
+    });
+}
+
+// ── Fire market benchmark (async, RFP-level — runs once per evaluation) ───────
+function _fireMarketBenchmark(rfpId, proposalId) {
+  apiCall('POST', '/rfps/' + rfpId + '/market-benchmark', {})
+    .then(function(bmResult) {
+      if (!bmResult || !bmResult.benchmark) return;
+      var bm = bmResult.benchmark;
+      var midFmt = bm.total_mid
+        ? (bm.currency || '') + ' ' + Math.round(bm.total_mid).toLocaleString()
+        : '—';
+      showToast('📊 Market benchmark ready — estimated cost: ' + midFmt, 'success', 8000);
+      // Store benchmark on appState so the panel can read it
+      if (!appState._marketBenchmarks) appState._marketBenchmarks = {};
+      appState._marketBenchmarks[rfpId] = bm;
+      // Re-render the proposal panel with the new data
+      _refreshPanelFromDB(rfpId, proposalId);
+    })
+    .catch(function() {
+      // non-fatal — benchmark is informational only
     });
 }
 
@@ -7565,9 +7831,22 @@ async function _refreshPanelFromDB(rfpId, proposalId) {
       p.ai_recommendation    = ev.evaluation_data.recommendation || ev.ai_recommendation || p.ai_recommendation;
       p.ai_total_score       = ev.ai_total_score != null ? ev.ai_total_score : p.ai_total_score;
       p.ai_validated_at      = ev.ai_evaluated_at || p.ai_evaluated_at;
-      if (ev.evaluation_data.budget_extracted) p.budget_amount = ev.evaluation_data.budget_extracted;
-      if (ev.evaluation_data.budget_currency)  p.budget_currency = ev.evaluation_data.budget_currency;
+      if (ev.evaluation_data.budget_extracted)  p.budget_amount      = ev.evaluation_data.budget_extracted;
+      if (ev.evaluation_data.budget_currency)   p.budget_currency    = ev.evaluation_data.budget_currency;
       if (ev.evaluation_data.duration_extracted) p.proposed_duration = ev.evaluation_data.duration_extracted;
+      // Also refresh the RFP object so market_benchmark_json is up to date
+      apiCall('GET', '/rfps/' + rfpId).then(function(rfpFresh) {
+        if (rfpFresh && rfpFresh.id) {
+          appState.currentRfp = rfpFresh;
+          if (rfpFresh.market_benchmark_json) {
+            try {
+              var bm = JSON.parse(rfpFresh.market_benchmark_json);
+              if (!appState._marketBenchmarks) appState._marketBenchmarks = {};
+              appState._marketBenchmarks[rfpId] = bm;
+            } catch(_) {}
+          }
+        }
+      }).catch(function(){});
       _renderProposalPanel(p, ev.evaluation_data);
     }
   } catch(e) { /* non-fatal */ }

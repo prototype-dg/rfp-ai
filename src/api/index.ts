@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 import { andersenEmailHtml, andersenPageHtml } from '../brand/letterhead'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-08-15-v65'  // v65: vendor portal submit button unblocked — removed early document-type categorization gate
+const WORKER_VERSION = '2026-08-15-v66'  // v66: eval progress modal (7 business stages) + FX conversion for commercial scoring + market benchmark (WBS-based cost estimate)
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.andersenlab.com.
@@ -2551,35 +2551,73 @@ Now evaluate the proposal and return only the JSON object. Do not include any ad
     reasoning = `Evaluation failed: ${evalErr?.message || evalErr}`
   }
 
+  // ── FX rate table (USD base, same as frontend FX_RATES) ─────────────────────
+  const FX_TO_USD: Record<string, number> = {
+    USD:1.0000, EUR:1/0.9245, GBP:1/0.7912, CHF:1/0.8981, JPY:1/147.82,
+    CNY:1/7.2430, INR:1/83.95, CAD:1/1.3862, AUD:1/1.5491, SGD:1/1.3421,
+    HKD:1/7.7830, NZD:1/1.6980, SEK:1/10.327, NOK:1/10.784, DKK:1/6.892,
+    PLN:1/3.974, CZK:1/23.28, HUF:1/369.4, RON:1/4.598, TRY:1/38.62,
+    RUB:1/87.50, AED:1/3.6725, SAR:1/3.75, QAR:1/3.64, KWD:1/0.3071,
+    BHD:1/0.377, ILS:1/3.712, ZAR:1/18.42, BRL:1/5.694, MXN:1/17.89,
+    KRW:1/1390, THB:1/34.32, MYR:1/4.451, IDR:1/16380, PHP:1/56.95,
+    PKR:1/278.4, NGN:1/1620, EGP:1/49.6, UAH:1/41.5,
+  }
+  function toUSD(amount: number, currency: string): number {
+    const rate = FX_TO_USD[(currency || 'USD').toUpperCase()] ?? 1
+    return amount * rate
+  }
+
+  // ── Extract RFP budget currency from text or field ────────────────────────────
+  // Order of precedence: explicit currency symbol/code in rfp.budget field →
+  // currency code found in rfp_full_text near budget number → 'USD' default.
+  function detectRfpCurrency(budgetField: string | null, text: string): string {
+    const currencyPatterns: Array<[RegExp, string]> = [
+      [/\bAED\b/i, 'AED'], [/\bSAR\b/i, 'SAR'], [/\bQAR\b/i, 'QAR'],
+      [/\bKWD\b/i, 'KWD'], [/\bBHD\b/i, 'BHD'], [/\bEUR\b/i, 'EUR'],
+      [/\bGBP\b/i, 'GBP'], [/\bUSD\b/i, 'USD'], [/\bCHF\b/i, 'CHF'],
+      [/\bPLN\b/i, 'PLN'], [/\bSGD\b/i, 'SGD'], [/\bCAD\b/i, 'CAD'],
+      [/\bAUD\b/i, 'AUD'], [/\bJPY\b/i, 'JPY'], [/\bCNY\b/i, 'CNY'],
+      [/\bINR\b/i, 'INR'], [/\bKRW\b/i, 'KRW'], [/د\.إ/,   'AED'],
+      [/ر\.س/,     'SAR'], [/ر\.ق/,     'QAR'], [/د\.ك/,   'KWD'],
+      [/€/,        'EUR'], [/£/,        'GBP'], [/\$/,      'USD'],
+    ]
+    const combined = ((budgetField || '') + ' ' + (text || '')).slice(0, 5000)
+    for (const [re, code] of currencyPatterns) {
+      if (re.test(combined)) return code
+    }
+    return 'USD'
+  }
+
   // ── Commercial / Cost Competitiveness scoring ────────────────────────────────
-  // Runs after technical evaluation. Compares extracted budget against the RFP's
-  // stated budget range (if any) and awards a score out of commercialWeight.
-  // Scoring logic (read from RFP text):
-  //   • If RFP states a budget ceiling (rfp.budget field), compare against it.
-  //   • ≤ budget ceiling             → 100% of commercialWeight
-  //   • ≤ 110% of budget ceiling     → 70%  of commercialWeight
-  //   • ≤ 125% of budget ceiling     → 40%  of commercialWeight
-  //   • > 125% of budget ceiling     → 10%  of commercialWeight
-  //   • Budget not extracted         → 0  (excluded from total; note in reasoning)
+  // Now with full FX conversion: proposal budget and RFP ceiling are both
+  // converted to USD before comparison, so cross-currency bids score correctly.
+  // Scoring logic:
+  //   • ≤ ceiling             → 100% of commercialWeight
+  //   • ≤ 110% of ceiling     → 70%
+  //   • ≤ 125% of ceiling     → 40%
+  //   • > 125% of ceiling     → 10%
+  //   • Budget not extracted  → excluded from total
   let commercialScore: number | null = null
   let commercialJustification = ''
-  const commercialScoreAchieved: number | null = null  // kept as let for mutation below
   let commercialScoreActual: number | null = null
 
+  // Detect RFP budget currency
+  const rfpBudgetCurrency = detectRfpCurrency(rfp.budget || null, rfpFullText)
+
   if (budget.amount && commercialWeight > 0) {
-    // Try to get RFP budget ceiling from rfp.budget field
+    // Parse RFP budget ceiling (numeric value from rfp.budget field or rfp_full_text)
     let rfpBudgetCeiling: number | null = null
     if (rfp.budget) {
-      const rfpBudgetStr = String(rfp.budget).replace(/,/g, '')
-      const rfpBudgetNum = parseFloat(rfpBudgetStr.replace(/[^\d.]/g, ''))
+      const rfpBudgetNum = parseFloat(String(rfp.budget).replace(/[^\d.]/g, ''))
       if (rfpBudgetNum > 0 && rfpBudgetNum < 1e10) rfpBudgetCeiling = rfpBudgetNum
     }
-    // Also search rfp_full_text for "budget" + number pattern as fallback
+    // Fallback: scan rfp_full_text for budget patterns
     if (!rfpBudgetCeiling && rfpFullText) {
       const budgetPatterns = [
-        /total\s+budget[^a-z]*?([\d,]+(?:\.\d+)?)/i,
-        /budget[^a-z]*?(?:aed|usd|eur)?\s*([\d,]+(?:\.\d+)?)/i,
-        /(?:aed|usd|eur)\s*([\d,]+(?:\.\d+)?)\s*(?:total\s+budget|budget\s+ceiling|estimated\s+budget)/i,
+        /total\s+budget[^a-z\d]*([\d,]+(?:\.\d+)?)/i,
+        /budget\s+ceiling[^a-z\d]*([\d,]+(?:\.\d+)?)/i,
+        /(?:AED|USD|EUR|GBP|SAR|QAR|KWD|BHD)\s*([\d,]+(?:\.\d+)?)\s*(?:total|ceiling|estimated|maximum)/i,
+        /(?:total|ceiling|estimated|maximum)\s+(?:budget|cost)[^a-z\d]*([\d,]+(?:\.\d+)?)/i,
       ]
       for (const pat of budgetPatterns) {
         const m = rfpFullText.match(pat)
@@ -2591,30 +2629,34 @@ Now evaluate the proposal and return only the JSON object. Do not include any ad
     }
 
     if (rfpBudgetCeiling) {
-      const ratio = budget.amount / rfpBudgetCeiling
+      // ── FX normalisation: convert both amounts to USD before ratio ────────
+      const proposalUSD = toUSD(budget.amount, budget.currency)
+      const rfpCeilingUSD = toUSD(rfpBudgetCeiling, rfpBudgetCurrency)
+      const ratio = proposalUSD / rfpCeilingUSD
+
       let pct: number
-      if (ratio <= 1.0)  pct = 1.00
+      if (ratio <= 1.0)       pct = 1.00
       else if (ratio <= 1.10) pct = 0.70
       else if (ratio <= 1.25) pct = 0.40
-      else pct = 0.10
+      else                    pct = 0.10
 
       commercialScoreActual = Math.round(pct * commercialWeight * 10) / 10
-      const ratioStr = (ratio * 100).toFixed(0)
-      commercialJustification = `Proposed cost ${budget.currency} ${budget.amount.toLocaleString()} is ${ratioStr}% of the RFP budget ceiling ${budget.currency} ${rfpBudgetCeiling.toLocaleString()}. Score: ${commercialScoreActual}/${commercialWeight} (${Math.round(pct*100)}%).`
+      const ratioStr = (ratio * 100).toFixed(1)
+      const fxNote = budget.currency !== rfpBudgetCurrency
+        ? ` (FX-converted: vendor ${budget.currency} → USD ${Math.round(proposalUSD).toLocaleString()} vs RFP ceiling ${rfpBudgetCurrency} → USD ${Math.round(rfpCeilingUSD).toLocaleString()})`
+        : ''
+      commercialJustification = `Proposed: ${budget.currency} ${budget.amount.toLocaleString()} | RFP ceiling: ${rfpBudgetCurrency} ${rfpBudgetCeiling.toLocaleString()}${fxNote}. Ratio: ${ratioStr}% of ceiling → Score: ${commercialScoreActual}/${commercialWeight} (${Math.round(pct*100)}%).`
     } else {
-      // No RFP budget ceiling found — use market-average heuristic:
-      // Score = commercialWeight × (1 - penalty), where penalty grows with budget size
-      // This rewards lower bids relative to no benchmark (neutral mid score = 60%).
       commercialScoreActual = Math.round(commercialWeight * 0.6 * 10) / 10
-      commercialJustification = `No RFP budget ceiling specified. Awarded ${Math.round(commercialWeight * 0.6 * 10)/10}/${commercialWeight} (neutral 60%) — budget extracted: ${budget.currency} ${budget.amount.toLocaleString()}. Manual review recommended.`
+      commercialJustification = `No RFP budget ceiling found. Awarded neutral 60% (${commercialScoreActual}/${commercialWeight}) — proposed budget: ${budget.currency} ${budget.amount.toLocaleString()}. Manual review recommended.`
     }
     commercialScore = Math.round((commercialScoreActual / commercialWeight) * 100)
-    console.log(`[eval-v48] commercial score=${commercialScoreActual}/${commercialWeight} (${commercialScore}%)`)
+    console.log(`[eval-v66] commercial score=${commercialScoreActual}/${commercialWeight} (${commercialScore}%) rfpCurrency=${rfpBudgetCurrency} proposalCurrency=${budget.currency}`)
   } else {
     commercialJustification = budget.amount
       ? `Commercial criterion weight is 0 — excluded from scoring.`
       : `Budget could not be extracted from proposal text — commercial score omitted.`
-    console.log(`[eval-v48] commercial skipped: budget=${budget.amount} weight=${commercialWeight}`)
+    console.log(`[eval-v66] commercial skipped: budget=${budget.amount} weight=${commercialWeight}`)
   }
 
   // ── Merge commercial into total score ─────────────────────────────────────────
@@ -2659,7 +2701,7 @@ Now evaluate the proposal and return only the JSON object. Do not include any ad
     reasoning = `Score of ${totalScore}/${maxScore} is below the acceptance threshold.`
   }
 
-  console.log(`[eval-v48] FINAL total=${totalScore}/${maxScore} technical=${technicalScore}/${technicalTotal} commercial=${commercialScoreActual ?? 'n/a'}/${commercialWeight} rec=${recommendation}`)
+  console.log(`[eval-v65] FINAL total=${totalScore}/${maxScore} technical=${technicalScore}/${technicalTotal} commercial=${commercialScoreActual ?? 'n/a'}/${commercialWeight} rec=${recommendation}`)
 
   return {
     evaluated_at: new Date().toISOString(),
@@ -2672,6 +2714,7 @@ Now evaluate the proposal and return only the JSON object. Do not include any ad
     compliance_score: totalScore,
     quality_score: totalScore,
     commercial_score: commercialScore,
+    rfp_budget_currency: rfpBudgetCurrency,
     budget_extracted: budget.amount,
     budget_currency: budget.currency,
     budget_confidence: budget.confidence,
@@ -2684,6 +2727,8 @@ Now evaluate the proposal and return only the JSON object. Do not include any ad
     scoring_breakdown: scoringBreakdown,
     glossary_used: 0,
     text_chars_analyzed: proposalText.length,
+    // market_benchmark is populated separately via /market-benchmark endpoint
+    market_benchmark: null as any,
   }
 }
 
@@ -3189,6 +3234,105 @@ apiRouter.get('/rfps/:rfpId/proposals/:proposalId/evaluation', async (c) => {
     ai_evaluated_at: proposal.ai_evaluated_at,
     evaluation_data: evalData,
   })
+})
+
+// ── POST /api/rfps/:rfpId/market-benchmark ────────────────────────────────────
+// Generates a WBS from the RFP (+ optional Arch/BRD docs) and estimates
+// market-average implementation cost for the issuing organisation's region.
+// Result is stored in rfp.market_benchmark_json and returned.
+// Does NOT affect any proposal score — informational only.
+apiRouter.post('/rfps/:rfpId/market-benchmark', async (c) => {
+  const rfpId = c.req.param('rfpId')
+  const db = c.env.DB
+  try {
+    const rfp = await db.prepare('SELECT * FROM rfps WHERE id=?').bind(rfpId).first<any>()
+    if (!rfp) return c.json({ error: 'RFP not found' }, 404)
+
+    // Load issuer region from settings
+    const settingsRows = await db.prepare(`SELECT key, value FROM settings`).all().catch(() => ({ results: [] }))
+    const settings: Record<string, string> = {}
+    for (const r of (settingsRows.results || [])) { settings[(r as any).key] = (r as any).value }
+    const issuerName = settings?.issuer_name     || 'Andersen'
+    const issuerLoc  = settings?.issuer_location || 'Warsaw, Poland'
+
+    const rfpText    = (rfp.rfp_full_text || rfp.content || '').slice(0, 30000)
+    const archText   = (rfp.arch_doc_text || '').slice(0, 10000)
+    const brdText    = (rfp.brd_doc_text  || '').slice(0, 10000)
+    const category   = rfp.category || 'IT / Software Development'
+    const title      = rfp.title || 'Unnamed Project'
+
+    if (!rfpText && !rfp.scope) {
+      return c.json({ error: 'RFP content not yet generated — please generate the RFP document first.' }, 400)
+    }
+
+    const systemPrompt = `You are a senior IT project estimator with deep knowledge of software delivery costs across global markets. You produce structured WBS and market-rate estimates in JSON.`
+
+    const userPrompt = `You are estimating the market-average implementation cost for the following RFP issued by ${issuerName} (${issuerLoc}).
+
+RFP Title: ${title}
+Category: ${category}
+
+RFP Summary:
+${rfpText.slice(0, 15000)}
+${archText ? `\nConceptual Architecture:\n${archText}` : ''}
+${brdText  ? `\nBusiness Requirements (BRD):\n${brdText}`  : ''}
+
+Tasks:
+1. Generate a Work Breakdown Structure (WBS) with 6–12 phases/workstreams appropriate for this type of project.
+2. For each phase, estimate the effort in person-days and the market-average day rate for ${issuerLoc} (in the local currency of that region).
+3. Sum all phases to produce a total market-average cost estimate.
+4. Include a confidence rating (high / medium / low) and brief rationale.
+5. Identify the currency used for the estimate.
+
+Return ONLY valid JSON — no markdown, no commentary:
+{
+  "region": "${issuerLoc}",
+  "currency": "USD",
+  "total_min": 1500000,
+  "total_max": 2200000,
+  "total_mid": 1850000,
+  "confidence": "medium",
+  "confidence_rationale": "Estimate based on regional day rates; actual cost depends on vendor location and team seniority.",
+  "wbs": [
+    {
+      "phase": "Discovery & Requirements",
+      "description": "Stakeholder workshops, requirement validation, gap analysis",
+      "effort_person_days": 45,
+      "day_rate": 800,
+      "subtotal": 36000
+    }
+  ],
+  "assumptions": ["Rates reflect mid-market senior consultant rates for ${issuerLoc}", "Excludes hardware, licences, and hyperscaler cloud costs"]
+}`
+
+    const rawResult = await callLLM(systemPrompt, userPrompt, c.env, 'gpt-5', 4000)
+
+    // Strip markdown fences
+    let clean = rawResult.trim()
+    if (clean.startsWith('```')) {
+      clean = clean.split('\n').slice(1).join('\n').replace(/```\s*$/, '').trim()
+    }
+    const jsonMatch = clean.match(/\{[\s\S]*\}/)
+    if (!jsonMatch) return c.json({ error: 'LLM returned no JSON for market benchmark' }, 500)
+
+    let parsed: any
+    try { parsed = JSON.parse(jsonMatch[0]) } catch (_) {
+      return c.json({ error: 'JSON parse error in market benchmark response' }, 500)
+    }
+
+    // Persist to rfp row (add column if missing — D1 is lenient with ALTER)
+    try {
+      await db.prepare(`ALTER TABLE rfps ADD COLUMN market_benchmark_json TEXT`).run()
+    } catch (_) { /* column already exists */ }
+    await db.prepare(`UPDATE rfps SET market_benchmark_json=?, updated_at=datetime('now') WHERE id=?`)
+      .bind(JSON.stringify(parsed), rfpId).run()
+
+    console.log(`[market-benchmark] rfp=${rfpId} region=${parsed.region} mid=${parsed.total_mid} currency=${parsed.currency}`)
+    return c.json({ ok: true, benchmark: parsed })
+  } catch (err: any) {
+    console.error(`[market-benchmark] error: ${err?.message}`)
+    return c.json({ error: err?.message || 'Market benchmark failed' }, 500)
+  }
 })
 
 // ── POST /api/rfps/:rfpId/proposals/:proposalId/manual-override ──────────────
