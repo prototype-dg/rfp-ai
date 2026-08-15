@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 import { andersenEmailHtml, andersenPageHtml } from '../brand/letterhead'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-08-15-v88b' // v88b: raise maxTokens 600→800 (600 truncated JSON mid-array at pos 2510; 800tok@126ms=101s gen + 41s prefill=142s<180s wall-clock)
+const WORKER_VERSION = '2026-08-15-v89' // v89: drop vendor_requirements from VPS extraction (Qwen2.5-3B too slow: 30 req×25tok=750tok=85s gen, pushes total past wall-clock); scalar+scoring only, 500tok=98s total
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.andersenlab.com.
@@ -1289,11 +1289,12 @@ function parseJsonArray(raw: string): any[] | null {
   }
 }
 
-// ── Single-phase LLM extraction (v86) ────────────────────────────────────────
-// One LLM call receives the full OCR text and returns a single JSON object
-// containing all scalar fields + scoring_criteria array + vendor_requirements array.
-// Token budget is proportional to text size so the model never truncates output
-// on large documents.
+// ── Single-phase LLM extraction (v86/v89) ────────────────────────────────────
+// One LLM call returns scalar fields + scoring_criteria only.
+// vendor_requirements is omitted on the VPS Qwen2.5-3B path: the model generates
+// at ~8.8 tok/s; 30 requirements × 25 tok = 750 tok = 85s generation extra, which
+// pushes total (prefill + gen) past the CF Worker wall-clock.
+// Scalar fields + scoring_criteria fits in ~500 tok = 57s generation + 41s prefill = 98s.
 async function extractRfpFieldsFromOcr(ocrText: string, env: any, rfpIdLog: string): Promise<{
   extracted: any,
   scoringMatrixJson: string | null,
@@ -1318,9 +1319,10 @@ async function extractRfpFieldsFromOcr(ocrText: string, env: any, rfpIdLog: stri
   // and top-level scoring criteria. Deep vendor_requirements lists may be partial.
   const inputChars = Math.min(ocrText.length, 6000)
   // 800 output tokens: ~8 scalar fields + 5 scoring criteria + ~10 vendor_requirements.
-  // At 126ms/tok = 101s generation. Total: 41s prefill + 101s = 142s within ~180s wall-clock.
-  // 600 was too small: JSON truncated mid-array at position 2510 (v88).
-  const maxTokens = 800
+  // 500 output tokens: ~8 scalar fields + 5 scoring criteria. No vendor_requirements.
+  // At ~114ms/tok (observed) = 57s generation. Total: 41s prefill + 57s gen = 98s.
+  // vendor_requirements requires 750+ extra tokens (85s) — too slow for this model.
+  const maxTokens = 500
   console.log(`[rfp-ai-extract] ${rfpIdLog} single-phase — inputChars=${inputChars} (of ${ocrText.length} total) maxTokens=${maxTokens}`)
 
   const SYSTEM_PROMPT = `You are an expert procurement analyst specializing in processing complex, often imperfect, OCR-scanned documents (like RFPs). Your task is to analyze the provided RFP text and extract a comprehensive, structured JSON object containing all key information.
@@ -1343,9 +1345,6 @@ async function extractRfpFieldsFromOcr(ocrText: string, env: any, rfpIdLog: stri
   "deadline": "<string, YYYY-MM-DD, empty string if not found>",
   "scoring_criteria": [
     {"criterion": "<string>", "weight": <number>, "description": "<string, 1-2 sentences>"}
-  ],
-  "vendor_requirements": [
-    {"id": "req_<number>", "text": "<string>", "mandatory": <boolean>}
   ]
 }
 
@@ -1367,13 +1366,7 @@ async function extractRfpFieldsFromOcr(ocrText: string, env: any, rfpIdLog: stri
     *   **WEIGHT SUMMATION RULE:** The \`"weight"\` values for all top-level categories must sum to **100**. If explicit weights aren't provided, distribute them logically based on emphasis (e.g., Commercial and Technical often have high weights).
     *   **DESCRIPTION RULE:** If the document lists sub-criteria (e.g., for "Technical": "Architecture", "Functionality", "Support"), combine them into the \`"description"\` field of the top-level category.
 
-3.  **Vendor Requirements (\`vendor_requirements\`):**
-    *   **Extract 15-40 requirements** from the text.
-    *   Each requirement must be an **actionable statement**, not just a heading.
-    *   **\`mandatory\`:** Set to \`true\` if the requirement text uses strong imperative language like "must", "shall", "required", "mandatory", or the phrase "is expected to".
-    *   **\`mandatory\`:** Set to \`false\` if the language is suggestive like "should", "may", "recommended", or "preferred".
-    *   **Coverage:** Ensure the extracted requirements cover a wide range of areas including technical capabilities, security, commercial obligations (e.g., pricing format), submission rules (e.g., format, deadlines), and compliance (e.g., confidentiality, conflict of interest).
-    *   **ID:** Number them sequentially starting from \`req_1\`.`
+Do NOT output a \`vendor_requirements\` key. Return only the keys listed above.`
 
   const inputText = ocrText.slice(0, inputChars)
   const USER_PROMPT = `Extract all structured fields from this RFP document and return a single JSON object as specified:\n\n${inputText}`
