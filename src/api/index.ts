@@ -1242,11 +1242,11 @@ async function extractRfpFieldsFromOcr(ocrText: string, env: any, rfpIdLog: stri
     ['evaluation criteria', 'scoring criteria', 'evaluation weightage', 'criteria weights', 'weighting'],
     25000
   )
-  // Phase 3: anchored to the requirements/scope section
+  // Phase 3: anchored to requirements/scope section — 8k chars to avoid proxy throttling
   const requirementsFocusText = extractFocusedSection(
     ocrText,
     ['shall', 'must ', 'mandatory', 'required', 'requirement', 'scope of work'],
-    35000
+    8000
   )
 
   // ── Phases 1+2 in PARALLEL, Phase 3 SEQUENTIAL after ────────────────────
@@ -1564,10 +1564,12 @@ apiRouter.post('/rfps/:id/rerun-phase3', async (c) => {
       return c.json({ error: 'No usable OCR text stored for this RFP' }, 400)
     }
 
+    // Use a compact 8k-char slice to avoid proxy throttling on large inputs.
+    // extractFocusedSection anchors to the requirements section; 8k covers 3-6 pages of dense text.
     const requirementsFocusText = extractFocusedSection(
       ocrText,
       ['shall', 'must ', 'mandatory', 'required', 'requirement', 'scope of work'],
-      35000
+      8000
     )
     console.log(`[rerun-phase3] rfp=${rfpId} focus_len=${requirementsFocusText.length} — non-streaming single call`)
 
