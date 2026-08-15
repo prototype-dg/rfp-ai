@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 import { andersenEmailHtml, andersenPageHtml } from '../brand/letterhead'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-08-15-v86'  // v86: single-phase LLM extraction — full document in one call with dynamic token budget proportional to text size; scoring_criteria + vendor_requirements returned inside same JSON object
+const WORKER_VERSION = '2026-08-15-v86b' // v86b: single-phase extraction — chunk timeout raised to 60s for large docs; input capped at 80k chars to keep streaming time within limits
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.andersenlab.com.
@@ -1363,7 +1363,10 @@ async function extractRfpFieldsFromOcr(ocrText: string, env: any, rfpIdLog: stri
     *   **Coverage:** Ensure the extracted requirements cover a wide range of areas including technical capabilities, security, commercial obligations (e.g., pricing format), submission rules (e.g., format, deadlines), and compliance (e.g., confidentiality, conflict of interest).
     *   **ID:** Number them sequentially starting from \`req_1\`.`
 
-  const USER_PROMPT = `Extract all structured fields from this RFP document and return a single JSON object as specified:\n\n${ocrText}`
+  // Cap input at 80k chars — the model processes ~60k tokens of input comfortably;
+  // beyond 80k chars the streaming response time grows without quality improvement.
+  const inputText = ocrText.slice(0, 80000)
+  const USER_PROMPT = `Extract all structured fields from this RFP document and return a single JSON object as specified:\n\n${inputText}`
 
   let extracted: any = {}
   let scoringMatrixJson: string | null = null
@@ -4384,14 +4387,14 @@ async function callLLM(systemPrompt: string, userPrompt: string, env: any, model
   const reader = res.body!.getReader()
   const decoder = new TextDecoder()
   let buf = ''
-  const CHUNK_TIMEOUT_MS = 30000
+  const CHUNK_TIMEOUT_MS = 60000
 
   while (true) {
     // Race each read against a per-chunk deadline
     const chunkTimeout = AbortSignal.timeout(CHUNK_TIMEOUT_MS)
     const readPromise = reader.read()
     const timeoutPromise = new Promise<never>((_, reject) => {
-      chunkTimeout.addEventListener('abort', () => reject(new Error('LLM stream chunk timeout (30s)')), { once: true })
+      chunkTimeout.addEventListener('abort', () => reject(new Error('LLM stream chunk timeout (60s)')), { once: true })
     })
     const { done, value } = await Promise.race([readPromise, timeoutPromise])
     if (done) break
