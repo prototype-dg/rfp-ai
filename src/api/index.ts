@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 import { andersenEmailHtml, andersenPageHtml } from '../brand/letterhead'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-08-15-v86e' // v86e: raise maxTokens cap 4000→6000 (JSON was truncating mid-vendor_requirements at 4000 tokens)
+const WORKER_VERSION = '2026-08-15-v87' // v87: raise TTFB timeout 60s→180s for local VPS Qwen3B (prefill ~36ms/tok × 6k tok = 216s max; 60s fired before first token on large RFPs)
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.andersenlab.com.
@@ -4357,13 +4357,15 @@ async function callLLM(systemPrompt: string, userPrompt: string, env: any, model
   // streaming reader loop here is safe: the Worker's HTTP request deadline enforces
   // a hard wall-clock limit on the entire operation including reader.read() waits.
   //
-  // TTFB guard: 60s — large inputs (20k+ tokens) cause a slow prefill phase before
-  // the model emits its first streaming token. 30s was too tight for single-phase
-  // extraction where the full document is the input. 60s keeps safety margin while
-  // still catching a completely hung proxy.
-  // Per-chunk guard: 60s — matches TTFB so a mid-stream stall is also caught.
+  // TTFB guard: 180s — large inputs (30k chars ≈ 6k tokens) cause a slow prefill
+  // phase before the local Qwen2.5-3B model emits its first streaming token.
+  // Measured: 36ms/token × 6000 tokens = 216s worst-case prefill. 60s fired before
+  // first token on large RFPs. 180s matches nginx proxy_read_timeout and leaves
+  // headroom for worst-case prefill without being so loose it hides a truly hung server.
+  // Per-chunk guard: 60s — generation is fast once started (~100ms/tok); 60s catches
+  // a mid-stream stall without affecting normal operation.
   const controller = new AbortController()
-  const ttfbSignal = AbortSignal.timeout(60000)
+  const ttfbSignal = AbortSignal.timeout(180000)
   ttfbSignal.addEventListener('abort', () => controller.abort(ttfbSignal.reason), { once: true })
 
   const res = await fetch(`${baseUrl}/chat/completions`, {
