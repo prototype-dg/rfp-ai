@@ -4719,6 +4719,11 @@ function scheduleFieldSave(rfpId, fieldId) {
       }
       // Keep appState in sync
       if (appState.currentRfp) appState.currentRfp[apiField] = el.value;
+      // Live-update the budget cap label when currency changes
+      if (fieldId === 'rfpCurrencySelect') {
+        var budgetLbl = document.getElementById('lbl-rfpBudget');
+        if (budgetLbl) budgetLbl.textContent = t('form_budget_aed').replace(/USD|AED|EUR|\w+/, el.value);
+      }
     }).catch(function() {
       var ind2 = document.getElementById('fsi-' + fieldId);
       if (ind2) { ind2.innerHTML = '<i class="fas fa-exclamation-circle" style="font-size:0.65rem"></i> error'; ind2.style.opacity='1'; ind2.style.color='#ef4444'; }
@@ -4826,7 +4831,7 @@ rfpTabs.generate = function(rfpId, rfp) {
     + (_settingsCategories || DEFAULT_CATEGORIES).map(function(c){ return '<option value="' + c + '"' + (catVal===c?' selected':'') + '>' + c + '</option>'; }).join('')
     + '</select></div>'
     + '<div class="form-group" style="margin:0">'
-    + fgLabel(t('form_budget_aed').replace(/USD|AED|EUR/, _settingsCurrency), 'rfpBudget', false)
+    + fgLabel('<span id="lbl-rfpBudget">' + t('form_budget_aed').replace(/USD|AED|EUR|\w+/, rfpCurrencyVal) + '</span>', 'rfpBudget', false)
     + '<input id="rfpBudget" placeholder="' + t('ph_budget') + '" value="' + escHtml(budgetVal) + '" oninput="' + asc + '" onchange="' + asc + '" title="Internal evaluation cap only — used to score vendor proposals commercially. This value is never published in the RFP document sent to vendors.">'
     + '<div style="font-size:0.7rem;color:#6b7280;margin-top:3px;line-height:1.35"><i class="fas fa-lock" style="font-size:0.65rem;margin-right:3px;color:#9ca3af"></i>' + t('gen_internal_only') + '</div>'
     + '</div></div>'
