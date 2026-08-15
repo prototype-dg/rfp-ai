@@ -4748,7 +4748,11 @@ rfpTabs.generate = function(rfpId, rfp) {
   const techVal     = (rfp && rfp.tech_requirements) || '';
   const objVal      = (rfp && rfp.objectives) || '';
   const bgVal       = (rfp && rfp.background) || '';
-  const hasContent  = rfp && rfp.content;
+  // hasContent = true only when `content` holds a full AI-generated RFP document.
+  // A real generated doc is 80k+ chars markdown. The AI extraction Phase 1 used to write
+  // a short ~1k executive summary to `content`, which incorrectly triggered the letterhead
+  // view on uploaded RFPs. Guard: require at least 5000 chars to treat it as a real document.
+  const hasContent  = rfp && rfp.content && rfp.content.length >= 5000;
   // Currency + country — stored on rfp; fallback to display currency
   const rfpCurrencyVal    = (rfp && rfp.rfp_currency)    || _settingsCurrency || 'USD';
   const countryOfIssueVal = (rfp && rfp.country_of_issue) || '';

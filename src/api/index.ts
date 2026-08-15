@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 import { andersenEmailHtml, andersenPageHtml } from '../brand/letterhead'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-08-15-v79'  // v79: callback returns 200 immediately via waitUntil() — no wall-clock pressure on LLM; ai_extraction_status tracks done/error; poll waits for done; phases 1+2 parallel then phase 3 sequential (avoids 3-stream proxy drop)
+const WORKER_VERSION = '2026-08-15-v80'  // v80: extraction no longer writes `content` field — content is reserved for full AI-generated documents only; hasContent guard tightened to 5000+ chars; fixes auto-letterhead appearing on uploaded RFPs
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.andersenlab.com.
@@ -1267,8 +1267,7 @@ Return ONLY a valid JSON object with these exact keys (no markdown fences, no ex
   "scope": "<all workstreams, deliverables, and in-scope items — max 1200 chars>",
   "tech_requirements": "<technical and functional requirements, architecture constraints, SLA/NFR, compliance — max 900 chars>",
   "budget": "<budget ceiling digits only, no currency symbols — empty string if not stated>",
-  "deadline": "<proposal submission deadline YYYY-MM-DD — empty string if not found>",
-  "content": "<800–1200 char plain-text executive summary of the full RFP: background, objectives, scope, key requirements, evaluation criteria, and timeline>"
+  "deadline": "<proposal submission deadline YYYY-MM-DD — empty string if not found>"
 }`,
       `Extract all structured fields from this RFP:\n\n${phase1Text}`,
       env, 'gpt-5-mini', 2000
@@ -1382,7 +1381,10 @@ async function writeExtractedRfpFields(
 ) {
   const newTitle    = (extracted.title || '').trim().slice(0, 120)
   const newCategory = (extracted.category || '').trim()
-  const newContent  = (extracted.content || '').trim().slice(0, 10000)
+  // NOTE: `content` is intentionally NOT written here.
+  // `content` is reserved exclusively for the full AI-generated RFP document (80k+ chars).
+  // Writing the short extraction summary (~1k chars) to `content` causes the frontend
+  // to show the Andersen letterhead instead of the original uploaded PDF. (fixed v80)
   await db.prepare(`
     UPDATE rfps SET
       title              = CASE WHEN ? != '' THEN ? ELSE title END,
@@ -1393,7 +1395,6 @@ async function writeExtractedRfpFields(
       tech_requirements  = CASE WHEN ? != '' THEN ? ELSE tech_requirements END,
       budget             = CASE WHEN ? != '' THEN ? ELSE budget END,
       deadline           = CASE WHEN ? != '' THEN ? ELSE deadline END,
-      content            = CASE WHEN ? != '' THEN ? ELSE content END,
       rfp_full_text      = ?,
       scoring_matrix     = CASE WHEN ? IS NOT NULL THEN ? ELSE scoring_matrix END,
       requirement_glossary = CASE WHEN ? IS NOT NULL THEN ? ELSE requirement_glossary END,
@@ -1408,7 +1409,6 @@ async function writeExtractedRfpFields(
     extracted.tech_requirements || '', extracted.tech_requirements || '',
     extracted.budget      || '',       extracted.budget      || '',
     extracted.deadline    || '',       extracted.deadline    || '',
-    newContent,                        newContent,
     ocrText.slice(0, 100000),
     scoringMatrixJson,                 scoringMatrixJson,
     requirementGlossaryJson,           requirementGlossaryJson,
