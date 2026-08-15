@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 import { andersenEmailHtml, andersenPageHtml } from '../brand/letterhead'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-08-15-v69'  // v69: Upload existing RFP PDF flow, currency+country on RFP creation, display currency removed from settings
+const WORKER_VERSION = '2026-08-15-v70'  // v70: Unified eval progress panel (matches RFP gen), evalAllProposals fixed, evalProgressArea div, I18N DE/FR/PL/AR for v69 keys, PDF preview in Upload RFP modal
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.andersenlab.com.

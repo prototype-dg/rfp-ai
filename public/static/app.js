@@ -1167,6 +1167,13 @@ var I18N = {
     ph_tech_req:             'Infrastruktur, Hosting, Sicherheit, Compliance, Integrationsanforderungen...',
     ph_crit_name:            'Kriteriumsname',
     ph_crit_desc:            'Beschreiben Sie, was dieses Kriterium bewertet...',
+    // === New RFP choice modal (step 0) ===
+    new_rfp_choice_title:    'Neue Ausschreibung',
+    new_rfp_choice_sub:      'Wie möchten Sie beginnen?',
+    new_rfp_create_title:    'Neue Ausschreibung erstellen',
+    new_rfp_create_desc:     'Projektdetails eingeben und KI ein professionelles Ausschreibungsdokument generieren lassen.',
+    new_rfp_upload_title:    'Bestehende Ausschreibung hochladen',
+    new_rfp_upload_desc:     'PDF Ihrer manuell erstellten Ausschreibung hochladen. KI liest und importiert alle Felder automatisch.',
     // === Create RFP modal ===
     create_rfp_title:        'Neue Ausschreibung erstellen',
     create_rfp_subtitle:     'Projektdaten eingeben und optional Dokumente hochladen. Details im Erstellen-Tab nach Erstellung.',
@@ -1178,7 +1185,17 @@ var I18N = {
     create_rfp_docs_sub:     '— Optional. KI liest diese während der Erstellung.',
     create_rfp_upload_hint:  'Zum Hochladen klicken (PDF, optional)',
     create_rfp_btn:          'Ausschreibung erstellen',
+    create_rfp_currency:     'Ausschreibungswährung',
+    create_rfp_country:      'Ausschreibungsland',
     ph_rfp_title_eg:         'z.B. CRM-Modernisierung, Betrugserkennung, Data Warehouse...',
+    ph_rfp_country:          'z.B. Polen, VAE, Deutschland...',
+    // === Upload RFP modal ===
+    upload_rfp_title:        'Bestehende Ausschreibung hochladen',
+    upload_rfp_subtitle:     'Laden Sie Ihr Ausschreibungs-PDF hoch. KI extrahiert und füllt alle Felder automatisch aus.',
+    upload_rfp_drop_hint:    'Klicken oder PDF hier ablegen',
+    upload_rfp_parsing:      'Ausschreibung wird mit KI analysiert…',
+    upload_rfp_parsed:       'Ausschreibung erfolgreich importiert! Bitte Felder im Erstellen-Tab überprüfen und bearbeiten.',
+    upload_rfp_btn:          'Ausschreibung importieren',
     // === Generate tab inline texts ===
     gen_fill_hint:           'Details eingeben und auf "Mit KI erstellen" klicken, um ein professionelles Ausschreibungsdokument zu erzeugen',
     gen_internal_only:       'Intern – wird nicht im Ausschreibungsdokument veröffentlicht',
@@ -1694,6 +1711,13 @@ var I18N = {
     ph_tech_req:             'Infrastructure, hébergement, sécurité, conformité, intégrations...',
     ph_crit_name:            'Nom du critère',
     ph_crit_desc:            'Décrire ce que ce critère évalue...',
+    // === New RFP choice modal (step 0) ===
+    new_rfp_choice_title:    'Nouvel AO',
+    new_rfp_choice_sub:      'Comment souhaitez-vous commencer ?',
+    new_rfp_create_title:    'Créer un nouvel AO',
+    new_rfp_create_desc:     'Renseignez les détails du projet et laissez l\'IA générer un document d\'appel d\'offres professionnel.',
+    new_rfp_upload_title:    'Télécharger un AO existant',
+    new_rfp_upload_desc:     'Téléchargez le PDF de votre AO créé manuellement. L\'IA analysera et importera tous les champs automatiquement.',
     // === Create RFP modal ===
     create_rfp_title:        'Créer un nouvel AO',
     create_rfp_subtitle:     'Saisir les informations de base et télécharger des documents optionnels. Les détails seront ajoutés dans l\'onglet Générer.',
@@ -1705,7 +1729,17 @@ var I18N = {
     create_rfp_docs_sub:     '— Optionnel. L\'IA les lira lors de la génération.',
     create_rfp_upload_hint:  'Cliquer pour télécharger un PDF (optionnel)',
     create_rfp_btn:          'Créer l\'AO',
+    create_rfp_currency:     'Devise de l\'AO',
+    create_rfp_country:      'Pays d\'émission',
     ph_rfp_title_eg:         'ex. Modernisation CRM, Plateforme anti-fraude, Entrepôt de données...',
+    ph_rfp_country:          'ex. Pologne, EAU, Allemagne...',
+    // === Upload RFP modal ===
+    upload_rfp_title:        'Télécharger un AO existant',
+    upload_rfp_subtitle:     'Téléchargez votre PDF d\'AO. L\'IA extraira et pré-remplira tous les champs automatiquement.',
+    upload_rfp_drop_hint:    'Cliquer ou déposer votre PDF AO ici',
+    upload_rfp_parsing:      'Analyse de l\'AO avec l\'IA…',
+    upload_rfp_parsed:       'AO importé avec succès ! Vérifiez et modifiez les champs dans l\'onglet Générer.',
+    upload_rfp_btn:          'Importer l\'AO',
     // === Generate tab inline texts ===
     gen_fill_hint:           'Remplissez les informations et cliquez sur Générer avec IA pour produire un document AO professionnel',
     gen_internal_only:       'Interne uniquement — non publié dans le document AO',
@@ -2221,6 +2255,13 @@ var I18N = {
     ph_tech_req:             'Infrastruktura, hosting, bezpieczeństwo, zgodność, integracje...',
     ph_crit_name:            'Nazwa kryterium',
     ph_crit_desc:            'Opisz co ocenia to kryterium...',
+    // === New RFP choice modal (step 0) ===
+    new_rfp_choice_title:    'Nowy przetarg',
+    new_rfp_choice_sub:      'Jak chcesz zacząć?',
+    new_rfp_create_title:    'Utwórz nowy przetarg',
+    new_rfp_create_desc:     'Wypełnij szczegóły projektu i pozwól AI wygenerować profesjonalny dokument przetargowy.',
+    new_rfp_upload_title:    'Prześlij istniejący przetarg',
+    new_rfp_upload_desc:     'Prześlij PDF swojego ręcznie stworzonego przetargu. AI przeanalizuje i zaimportuje wszystkie pola automatycznie.',
     // === Create RFP modal ===
     create_rfp_title:        'Utwórz nowy przetarg',
     create_rfp_subtitle:     'Wprowadź podstawowe dane i opcjonalnie prześlij dokumenty. Szczegóły dodasz w zakładce Generowanie.',
@@ -2232,7 +2273,17 @@ var I18N = {
     create_rfp_docs_sub:     '— Opcjonalne. AI przeczyta je podczas generowania.',
     create_rfp_upload_hint:  'Kliknij aby przesłać PDF (opcjonalne)',
     create_rfp_btn:          'Utwórz przetarg',
+    create_rfp_currency:     'Waluta przetargu',
+    create_rfp_country:      'Kraj wystawienia',
     ph_rfp_title_eg:         'np. Modernizacja CRM, Platforma wykrywania fraudów, Hurtownia Danych...',
+    ph_rfp_country:          'np. Polska, ZEA, Niemcy...',
+    // === Upload RFP modal ===
+    upload_rfp_title:        'Prześlij istniejący przetarg',
+    upload_rfp_subtitle:     'Prześlij PDF przetargu. AI wyodrębni i wstępnie wypełni wszystkie pola automatycznie.',
+    upload_rfp_drop_hint:    'Kliknij lub upuść plik PDF przetargu tutaj',
+    upload_rfp_parsing:      'Analizowanie przetargu z AI…',
+    upload_rfp_parsed:       'Przetarg zaimportowany pomyślnie! Sprawdź i edytuj pola w zakładce Generowanie.',
+    upload_rfp_btn:          'Importuj przetarg',
     // === Generate tab inline texts ===
     gen_fill_hint:           'Wypełnij szczegóły i kliknij Generuj z AI, aby utworzyć profesjonalny dokument przetargowy',
     gen_internal_only:       'Wewnętrzne — nie jest publikowane w dokumencie przetargowym',
@@ -2790,6 +2841,13 @@ var I18N = {
     ph_tech_req:             'البنية التحتية، الاستضافة، الأمان، الامتثال، متطلبات التكامل...',
     ph_crit_name:            'اسم المعيار',
     ph_crit_desc:            'صف ما يُقيّمه هذا المعيار...',
+    // === New RFP choice modal (step 0) ===
+    new_rfp_choice_title:    'طلب عروض جديد',
+    new_rfp_choice_sub:      'كيف تريد البدء؟',
+    new_rfp_create_title:    'إنشاء طلب عروض جديد',
+    new_rfp_create_desc:     'أدخل تفاصيل المشروع ودع الذكاء الاصطناعي يُنشئ وثيقة طلب عروض احترافية.',
+    new_rfp_upload_title:    'رفع طلب عروض موجود',
+    new_rfp_upload_desc:     'ارفع ملف PDF لطلب عروضك المُنشأ يدوياً. سيقوم الذكاء الاصطناعي بتحليل واستيراد جميع الحقول تلقائياً.',
     // === Create RFP modal ===
     create_rfp_title:        'إنشاء طلب عروض جديد',
     create_rfp_subtitle:     'أدخل الأساسيات وارفع وثائق داعمة اختيارياً. التفاصيل تُضاف في تبويب الإنشاء.',
@@ -2801,7 +2859,17 @@ var I18N = {
     create_rfp_docs_sub:     '— اختياري. سيقرأها الذكاء الاصطناعي أثناء الإنشاء.',
     create_rfp_upload_hint:  'انقر لرفع PDF (اختياري)',
     create_rfp_btn:          'إنشاء طلب العروض',
+    create_rfp_currency:     'عملة طلب العروض',
+    create_rfp_country:      'بلد الإصدار',
     ph_rfp_title_eg:         'مثال: تحديث نظام CRM، منصة كشف الاحتيال، مستودع البيانات...',
+    ph_rfp_country:          'مثال: بولندا، الإمارات، ألمانيا...',
+    // === Upload RFP modal ===
+    upload_rfp_title:        'رفع طلب عروض موجود',
+    upload_rfp_subtitle:     'ارفع ملف PDF لطلب العروض. سيقوم الذكاء الاصطناعي باستخراج جميع الحقول وملئها تلقائياً.',
+    upload_rfp_drop_hint:    'انقر أو اسحب وأفلت ملف PDF هنا',
+    upload_rfp_parsing:      'جارٍ تحليل طلب العروض بالذكاء الاصطناعي…',
+    upload_rfp_parsed:       'تم استيراد طلب العروض بنجاح! راجع وعدّل الحقول في تبويب الإنشاء.',
+    upload_rfp_btn:          'استيراد طلب العروض',
     // === Generate tab inline texts ===
     gen_fill_hint:           'أدخل التفاصيل وانقر على إنشاء بالذكاء الاصطناعي لإنتاج وثيقة طلب عروض احترافية',
     gen_internal_only:       'داخلي فقط — لا يُنشر في وثيقة طلب العروض',
@@ -3290,12 +3358,21 @@ function renderNotifPanel() {
   panel.innerHTML = html;
 }
 
-function showModal(html) {
-  document.getElementById('modalContent').innerHTML = html;
+function showModal(html, opts) {
+  var mc = document.getElementById('modalContent');
+  mc.innerHTML = html;
+  // Support wider modal via opts.wide = true (e.g. PDF preview)
+  if (opts && opts.wide) {
+    mc.style.maxWidth = '900px';
+  } else {
+    mc.style.maxWidth = '';
+  }
   document.getElementById('modalOverlay').classList.add('open');
 }
 
 function closeModal() {
+  var mc = document.getElementById('modalContent');
+  if (mc) mc.style.maxWidth = '';
   document.getElementById('modalOverlay').classList.remove('open');
 }
 
@@ -6835,6 +6912,7 @@ rfpTabs.proposals = async function(rfpId) {
   setContent(
     '<div class="space-y-4">'
     + propStageBar
+    + '<div id="evalProgressArea"></div>'
     + '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.5rem">'
     + '<div><h3 style="font-weight:700;font-size:0.95rem;color:#1f2937;margin:0">' + t('proposals_submitted') + '</h3>'
     + '<p style="font-size:0.8rem;color:#9ca3af;margin:0">' + proposals.length + ' ' + t('proposals_received')
@@ -6890,221 +6968,304 @@ function _startProposalReadinessPoll(rfpId, initialNotReadyCount) {
   }, 5000);
 }
 
-// ── Evaluate all proposals with AI ────────────────────────────────────────────
-// ── Bulk Evaluation Progress Modal ────────────────────────────────────────────
-// Shows a multi-proposal progress overlay while evaluate-all runs.
-// State is keyed by proposal id: 'pending' | 'evaluating' | 'done' | 'skipped' | 'error'
-var _bulkModalState    = {};   // { [proposalId]: { name, state, stage } }
-var _bulkModalTimers   = [];
-var _bulkModalPollId   = null;
-var _bulkModalStartTime = 0;
+// ============================================================
+// UNIFIED EVALUATION PROGRESS PANEL
+// Same visual language as RFP Generation's renderProgressPanel:
+//   - Yellow/amber border + background, inline (not a full-screen overlay)
+//   - Step list with check/spinner/circle icons
+//   - Elapsed timer in the header
+//   - Can render for single proposal (injected in slide panel) OR
+//     bulk evaluation (injected in proposals tab content area)
+// ============================================================
 
-var _BULK_STAGES = [
-  'Reading documents',
-  'Verifying document type',
-  'Extracting financial data',
-  'Technical & compliance scoring',
-  'Commercial assessment',
-  'Market benchmark',
-  'Generating recommendation',
+var _EVAL_STAGES = [
+  { key: 'reading',     icon: 'fa-file-search',   label: 'Reading Proposal Documents' },
+  { key: 'classifying', icon: 'fa-tags',           label: 'Verifying Document Type' },
+  { key: 'budget',      icon: 'fa-coins',          label: 'Extracting Financial Data' },
+  { key: 'technical',   icon: 'fa-microscope',     label: 'Technical & Compliance Scoring' },
+  { key: 'commercial',  icon: 'fa-balance-scale',  label: 'Commercial Assessment' },
+  { key: 'market',      icon: 'fa-globe',          label: 'Market Benchmark Analysis' },
+  { key: 'verdict',     icon: 'fa-gavel',          label: 'Generating Recommendation' },
 ];
 
-function _showBulkModal(proposals) {
-  // Remove any existing bulk modal
-  var old = document.getElementById('bulkEvalModal');
-  if (old) old.remove();
-  _bulkModalTimers.forEach(clearTimeout);
-  _bulkModalTimers = [];
-  _bulkModalState  = {};
-  _bulkModalStartTime = Date.now();
+/**
+ * Render an eval progress panel — identical style to RFP generation's progress panel.
+ * @param {number}  activeIdx   Index of currently active stage (0-based). Pass stages.length to show all done.
+ * @param {string}  header      Panel header text (e.g. vendor name or "3 proposals")
+ * @param {number}  startTime   Date.now() when evaluation started
+ * @param {string|null} errorMsg   If set, show error state on the active stage
+ * @param {Array|null}  bulkRows   If set, show a per-proposal mini-list below the steps (for bulk mode)
+ * @returns {string} HTML string
+ */
+function _renderEvalProgressPanel(activeIdx, header, startTime, errorMsg, bulkRows) {
+  var stages  = _EVAL_STAGES;
+  var elapsed = Math.round((Date.now() - startTime) / 1000);
+  var allDone = activeIdx >= stages.length && !errorMsg;
 
-  proposals.forEach(function(p) {
-    _bulkModalState[p.id] = { name: p.vendor_name || p.name || ('Proposal #' + p.id), state: 'pending', stage: 0 };
-  });
+  // Step list — identical rendering logic to RFP generation's renderProgressPanel
+  var stepsHtml = stages.map(function(s, idx) {
+    var isDone   = allDone || idx < activeIdx;
+    var isActive = !allDone && idx === activeIdx && !errorMsg;
+    var isError  = !allDone && errorMsg && idx === activeIdx;
+    var iconCls  = isDone   ? 'fa-check-circle'
+                 : isError  ? 'fa-times-circle'
+                 : isActive ? 'fa-spinner fa-spin'
+                 :            'fa-circle';
+    var iconCol  = isDone   ? 'var(--cpc-gold)'
+                 : isError  ? '#ef4444'
+                 : isActive ? 'var(--cpc-gold-deep)'
+                 :            '#9ca3af';
+    var textCol  = (isActive || isDone) ? 'var(--cpc-ink)' : '#9ca3af';
+    var opacity  = (isDone || isActive || isError) ? '1' : '0.35';
+    return '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;opacity:' + opacity + '">'
+      + '<i class="fas ' + iconCls + '" style="color:' + iconCol + ';width:16px;flex-shrink:0"></i>'
+      + '<span style="font-size:0.82rem;color:' + textCol + '">' + s.label
+      + (isError ? ' — <span style="color:#ef4444">' + escHtml(errorMsg) + '</span>' : '')
+      + '</span>'
+      + '</div>';
+  }).join('');
 
-  _bulkModalRender();
+  // Per-proposal mini-rows below step list (bulk mode only)
+  var bulkHtml = '';
+  if (bulkRows && bulkRows.length > 0) {
+    bulkHtml = '<div style="margin-top:12px;border-top:1px solid #ffe082;padding-top:10px">'
+      + bulkRows.join('')
+      + '</div>';
+  }
+
+  // Detail line (error message shown below steps, like RFP generation shows `detail`)
+  var detailHtml = (errorMsg && !allDone)
+    ? '<p style="font-size:0.78rem;color:#6b7280;margin:8px 0 0 0;border-top:1px solid #ffe082;padding-top:8px">'
+      + escHtml(errorMsg)
+      + ' <button onclick="var c=document.getElementById(\'evalProgressArea\');if(c)c.innerHTML=\'\'" '
+      + 'style="background:none;border:none;color:#6b7280;text-decoration:underline;cursor:pointer;font-size:0.78rem">Dismiss</button>'
+      + '</p>'
+    : '';
+
+  // Header row — identical structure to RFP generation panel
+  var headerLabel = header ? escHtml(header) + ' · ' : '';
+
+  return '<div style="background:#fffde7;border:1px solid #ffe082;border-radius:8px;padding:16px 20px;margin-bottom:12px">'
+    + '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">'
+    + '<i class="fas fa-bolt" style="color:var(--cpc-gold-deep);font-size:1.1rem"></i>'
+    + '<strong style="font-size:0.9rem;color:var(--cpc-ink)">'
+    + (allDone ? 'AI Evaluation Complete' : 'AI Evaluation in Progress')
+    + '</strong>'
+    + '<span style="margin-left:auto;font-size:0.78rem;color:#9ca3af">' + headerLabel + elapsed + 's elapsed</span>'
+    + '</div>'
+    + stepsHtml
+    + bulkHtml
+    + detailHtml
+    + '</div>';
 }
 
-function _bulkModalRender() {
-  var ids = Object.keys(_bulkModalState);
-  var total    = ids.length;
-  var doneCount = ids.filter(function(id){ return _bulkModalState[id].state === 'done' || _bulkModalState[id].state === 'skipped' || _bulkModalState[id].state === 'error'; }).length;
-  var elapsed  = Math.round((Date.now() - _bulkModalStartTime) / 1000);
-  var pct      = total > 0 ? Math.round((doneCount / total) * 100) : 0;
+// ── Bulk evaluation state ─────────────────────────────────────────────────────
+var _bulkEvalState     = {};   // { [proposalId]: { name, state:'pending'|'evaluating'|'done'|'skipped'|'error', stage:0-6, error } }
+var _bulkEvalTimers    = [];
+var _bulkEvalPollId    = null;
+var _bulkEvalStartTime = 0;
+var _bulkEvalActiveIdx = 0;    // global stage index shown in the shared step list
 
-  var rows = ids.map(function(id) {
-    var s = _bulkModalState[id];
+// Render the bulk progress into the `evalProgressArea` div inside the proposals tab.
+function _renderBulkEvalProgress() {
+  var area = document.getElementById('evalProgressArea');
+  if (!area) return;
+
+  var ids       = Object.keys(_bulkEvalState);
+  var total     = ids.length;
+  var doneCount = ids.filter(function(id) {
+    var st = _bulkEvalState[id].state;
+    return st === 'done' || st === 'skipped' || st === 'error';
+  }).length;
+
+  // Build per-proposal mini rows shown below the shared step list
+  var bulkRows = ids.map(function(id) {
+    var s = _bulkEvalState[id];
     var isDone    = s.state === 'done';
     var isSkipped = s.state === 'skipped';
     var isError   = s.state === 'error';
     var isActive  = s.state === 'evaluating';
     var isPending = s.state === 'pending';
-
-    var iconCls = isDone    ? 'fa-check-circle'
-                : isSkipped ? 'fa-minus-circle'
-                : isError   ? 'fa-times-circle'
-                : isActive  ? 'fa-spinner fa-spin'
-                :             'fa-circle';
-    var iconCol = isDone    ? '#22c55e'
-                : isSkipped ? '#9ca3af'
-                : isError   ? '#ef4444'
-                : isActive  ? '#3b82f6'
-                :             '#d1d5db';
-    var bgCol   = isDone    ? '#f0fdf4'
-                : isActive  ? '#eff6ff'
-                : isSkipped ? '#f9fafb'
-                : isError   ? '#fef2f2'
-                :             '#f9fafb';
-    var opacity = isPending ? '0.4' : '1';
-
-    var stageLabel = isActive && _BULK_STAGES[s.stage] ? _BULK_STAGES[s.stage] : '';
-    var statusText = isDone    ? 'Complete'
-                   : isSkipped ? 'Skipped — document not ready'
-                   : isError   ? (s.error || 'Error')
-                   : isActive  ? stageLabel
-                   :             'Waiting…';
-
-    return '<div style="display:flex;align-items:center;gap:10px;padding:9px 14px;border-bottom:1px solid #f3f4f6;opacity:' + opacity + ';transition:opacity 0.3s;background:' + bgCol + '">'
-      + '<div style="width:28px;height:28px;border-radius:50%;background:' + (isActive ? '#dbeafe' : (isDone ? '#dcfce7' : '#f3f4f6')) + ';display:flex;align-items:center;justify-content:center;flex-shrink:0">'
-      + '<i class="fas ' + iconCls + '" style="font-size:0.75rem;color:' + iconCol + '"></i></div>'
-      + '<div style="flex:1;min-width:0">'
-      + '<div style="font-size:0.82rem;font-weight:600;color:' + (isPending ? '#9ca3af' : '#111827') + ';white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + escHtml(s.name) + '</div>'
-      + '<div style="font-size:0.7rem;color:' + (isError ? '#dc2626' : '#6b7280') + ';margin-top:1px">' + escHtml(statusText) + '</div>'
-      + '</div>'
-      + (isDone ? '<div style="font-size:0.68rem;font-weight:700;color:#22c55e;flex-shrink:0"><i class="fas fa-check" style="margin-right:2px"></i>Done</div>'
-                : (isSkipped ? '<div style="font-size:0.68rem;color:#9ca3af;flex-shrink:0">Skipped</div>' : ''))
+    var iconCls   = isDone    ? 'fa-check-circle'
+                  : isSkipped ? 'fa-minus-circle'
+                  : isError   ? 'fa-times-circle'
+                  : isActive  ? 'fa-spinner fa-spin'
+                  :             'fa-circle';
+    var iconCol   = isDone    ? '#22c55e'
+                  : isSkipped ? '#9ca3af'
+                  : isError   ? '#ef4444'
+                  : isActive  ? 'var(--cpc-gold-deep)'
+                  :             '#d1d5db';
+    var statusTxt = isDone    ? 'Complete'
+                  : isSkipped ? 'Skipped'
+                  : isError   ? (s.error || 'Error')
+                  : isActive  ? (_EVAL_STAGES[s.stage] ? _EVAL_STAGES[s.stage].label : 'Evaluating…')
+                  :             'Waiting…';
+    return '<div style="display:flex;align-items:center;gap:8px;padding:4px 0;opacity:' + (isPending ? '0.4' : '1') + '">'
+      + '<i class="fas ' + iconCls + '" style="color:' + iconCol + ';font-size:0.75rem;width:14px;flex-shrink:0"></i>'
+      + '<span style="font-size:0.8rem;font-weight:600;color:#374151;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + escHtml(s.name) + '</span>'
+      + '<span style="font-size:0.72rem;color:#6b7280;flex-shrink:0">' + escHtml(statusTxt) + '</span>'
       + '</div>';
-  }).join('');
+  });
 
-  var html = '<div id="bulkEvalModal" style="position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(2,13,28,0.75);backdrop-filter:blur(4px)">'
-    + '<div style="background:white;border-radius:16px;width:560px;max-width:96vw;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 24px 64px rgba(0,0,0,0.35)">'
-    // Header
-    + '<div style="background:linear-gradient(135deg,var(--cpc-ink,#020D1C),#1a2a40);border-radius:16px 16px 0 0;padding:18px 22px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0">'
-    + '<div>'
-    + '<div style="font-size:0.65rem;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:rgba(255,255,255,0.5);margin-bottom:3px">Bulk AI Evaluation</div>'
-    + '<div style="font-size:1rem;font-weight:700;color:white">' + doneCount + ' / ' + total + ' proposals evaluated</div>'
-    + '</div>'
-    + '<div style="text-align:right">'
-    + '<div style="font-size:0.72rem;color:rgba(255,255,255,0.45)">' + elapsed + 's elapsed</div>'
-    + '</div>'
-    + '</div>'
-    // Progress bar
-    + '<div style="padding:12px 22px 0;flex-shrink:0">'
-    + '<div style="width:100%;height:5px;background:#f3f4f6;border-radius:3px;overflow:hidden">'
-    + '<div style="height:100%;width:' + pct + '%;background:linear-gradient(90deg,var(--cpc-gold-deep,#BA9765),var(--cpc-gold,#FFDB00));border-radius:3px;transition:width 0.5s ease"></div>'
-    + '</div>'
-    + '<div style="display:flex;justify-content:space-between;margin-top:5px">'
-    + '<div style="font-size:0.68rem;color:#6b7280"><i class="fas fa-robot" style="margin-right:4px;color:#3b82f6"></i>AI evaluation in progress — do not close this tab</div>'
-    + '<div style="font-size:0.68rem;font-weight:700;color:#374151">' + pct + '%</div>'
-    + '</div>'
-    + '</div>'
-    // Proposals list
-    + '<div style="overflow-y:auto;flex:1;margin:10px 0 0">'
-    + rows
-    + '</div>'
-    + '</div></div>';
-
-  var existing = document.getElementById('bulkEvalModal');
-  if (existing) {
-    var wrapper = document.createElement('div');
-    wrapper.innerHTML = html;
-    existing.parentNode.replaceChild(wrapper.firstChild, existing);
-  } else {
-    document.body.insertAdjacentHTML('beforeend', html);
-  }
+  var header = doneCount + ' / ' + total + ' proposals';
+  area.innerHTML = _renderEvalProgressPanel(_bulkEvalActiveIdx, header, _bulkEvalStartTime, null, bulkRows);
 }
 
-function _bulkModalSimulateProgress(proposalIds) {
-  // Advance each proposal through stages sequentially with realistic timing.
-  // Each proposal gets ~25s total (server processes ~20-35s each).
-  var perProposalMs = 26000; // total simulated time per proposal
-  var perStageMs    = Math.round(perProposalMs / _BULK_STAGES.length);
+function _showBulkEvalProgress(proposals) {
+  _bulkEvalTimers.forEach(clearTimeout);
+  _bulkEvalTimers = [];
+  _bulkEvalState  = {};
+  _bulkEvalStartTime = Date.now();
+  _bulkEvalActiveIdx = 0;
+
+  proposals.forEach(function(p) {
+    _bulkEvalState[p.id] = { name: p.vendor_name || p.name || ('Proposal #' + p.id), state: 'pending', stage: 0 };
+  });
+
+  // Inject progress area into content (above the proposals table)
+  var area = document.getElementById('evalProgressArea');
+  if (!area) {
+    // Prepend to the main content area if not found
+    var content = document.getElementById('content');
+    if (content) {
+      var div = document.createElement('div');
+      div.id = 'evalProgressArea';
+      div.style.cssText = 'margin-bottom:1rem';
+      content.insertBefore(div, content.firstChild);
+    }
+  }
+  _renderBulkEvalProgress();
+}
+
+function _bulkSimulateProgress(proposalIds) {
+  var perProposalMs = 26000;
+  var perStageMs    = Math.round(perProposalMs / _EVAL_STAGES.length);
 
   proposalIds.forEach(function(id, propIdx) {
     var propDelay = propIdx * perProposalMs;
 
-    // Start this proposal
-    _bulkModalTimers.push(setTimeout(function() {
-      if (_bulkModalState[id] && _bulkModalState[id].state === 'pending') {
-        _bulkModalState[id].state = 'evaluating';
-        _bulkModalState[id].stage = 0;
-        _bulkModalRender();
+    _bulkEvalTimers.push(setTimeout(function() {
+      if (_bulkEvalState[id] && _bulkEvalState[id].state === 'pending') {
+        _bulkEvalState[id].state = 'evaluating';
+        _bulkEvalState[id].stage = 0;
+        _bulkEvalActiveIdx = 0;
+        _renderBulkEvalProgress();
       }
     }, propDelay));
 
-    // Advance through stages
-    for (var si = 1; si < _BULK_STAGES.length; si++) {
-      (function(stageIdx, delay) {
-        _bulkModalTimers.push(setTimeout(function() {
-          var s = _bulkModalState[id];
+    for (var si = 1; si < _EVAL_STAGES.length; si++) {
+      (function(stageIdx) {
+        _bulkEvalTimers.push(setTimeout(function() {
+          var s = _bulkEvalState[id];
           if (s && s.state === 'evaluating' && s.stage < stageIdx) {
             s.stage = stageIdx;
-            _bulkModalRender();
+            // Advance the global stage indicator to the max active stage
+            if (stageIdx > _bulkEvalActiveIdx) _bulkEvalActiveIdx = stageIdx;
+            _renderBulkEvalProgress();
           }
         }, propDelay + stageIdx * perStageMs));
-      })(si, si * perStageMs);
+      })(si);
     }
   });
 }
 
-function _bulkModalStartPolling(rfpId) {
-  // Poll proposals list every 8s and sync real completion status to modal rows
-  _bulkModalPollId = setInterval(async function() {
+function _bulkStartPolling(rfpId) {
+  _bulkEvalPollId = setInterval(async function() {
     try {
       var fresh = await apiCall('GET', '/rfps/' + rfpId + '/proposals');
       if (!fresh || !Array.isArray(fresh)) return;
       var changed = false;
       fresh.forEach(function(p) {
-        var s = _bulkModalState[p.id];
+        var s = _bulkEvalState[p.id];
         if (!s) return;
         if ((p.ai_evaluated_at || p.status === 'evaluated' || p.status === 'awarded') && s.state !== 'done') {
-          s.state = 'done';
-          s.stage = _BULK_STAGES.length - 1;
-          changed = true;
+          s.state = 'done'; s.stage = _EVAL_STAGES.length - 1; changed = true;
         }
       });
-      if (changed) _bulkModalRender();
+      if (changed) _renderBulkEvalProgress();
     } catch(_) {}
   }, 8000);
 }
 
-function _closeBulkModal() {
-  _bulkModalTimers.forEach(clearTimeout);
-  _bulkModalTimers = [];
-  if (_bulkModalPollId) { clearInterval(_bulkModalPollId); _bulkModalPollId = null; }
-  var m = document.getElementById('bulkEvalModal');
-  if (m) {
-    m.style.transition = 'opacity 0.5s';
-    m.style.opacity = '0';
-    setTimeout(function() { var mm = document.getElementById('bulkEvalModal'); if (mm) mm.remove(); }, 520);
-  }
+function _closeBulkEvalProgress() {
+  _bulkEvalTimers.forEach(clearTimeout); _bulkEvalTimers = [];
+  if (_bulkEvalPollId) { clearInterval(_bulkEvalPollId); _bulkEvalPollId = null; }
+  var area = document.getElementById('evalProgressArea');
+  if (area) { area.style.transition = 'opacity 0.5s'; area.style.opacity = '0'; setTimeout(function(){ if(area.parentNode) area.innerHTML=''; area.style.opacity='1'; }, 520); }
 }
 
-function _resolveBulkModal(result) {
-  // Stop timers and polling
-  _bulkModalTimers.forEach(clearTimeout);
-  _bulkModalTimers = [];
-  if (_bulkModalPollId) { clearInterval(_bulkModalPollId); _bulkModalPollId = null; }
+function _resolveBulkEvalProgress(result) {
+  _bulkEvalTimers.forEach(clearTimeout); _bulkEvalTimers = [];
+  if (_bulkEvalPollId) { clearInterval(_bulkEvalPollId); _bulkEvalPollId = null; }
 
-  // Apply final result state to each row
   if (result && result.results) {
     result.results.forEach(function(r) {
-      var s = _bulkModalState[r.id];
+      var s = _bulkEvalState[r.id];
       if (!s) return;
-      if (r.skipped)      { s.state = 'skipped'; }
-      else if (r.error)   { s.state = 'error'; s.error = r.error; }
-      else                { s.state = 'done'; s.stage = _BULK_STAGES.length - 1; }
+      if (r.skipped)    { s.state = 'skipped'; }
+      else if (r.error) { s.state = 'error'; s.error = r.error; }
+      else              { s.state = 'done'; s.stage = _EVAL_STAGES.length - 1; }
     });
-    // Any still pending/evaluating → mark done (server returned, so they finished)
-    Object.keys(_bulkModalState).forEach(function(id) {
-      var s = _bulkModalState[id];
+    Object.keys(_bulkEvalState).forEach(function(id) {
+      var s = _bulkEvalState[id];
       if (s.state === 'pending' || s.state === 'evaluating') s.state = 'done';
     });
   }
-  _bulkModalRender();
+  _bulkEvalActiveIdx = _EVAL_STAGES.length; // mark all done
+  _renderBulkEvalProgress();
+  setTimeout(_closeBulkEvalProgress, 2500);
+}
 
-  // Auto-close after 2.5s so user can see the final state
-  setTimeout(_closeBulkModal, 2500);
+// ── Single-proposal evaluation progress ──────────────────────────────────────
+// Injected into the slide panel's Summary tab body (id: pTabBody_summary)
+var _singleEvalTimers  = [];
+var _singleEvalActiveIdx = 0;
+var _singleEvalStartTime = 0;
+var _singleEvalVendor   = '';
+
+function _showSingleEvalProgress(vendorName) {
+  _singleEvalTimers.forEach(clearTimeout); _singleEvalTimers = [];
+  _singleEvalActiveIdx = 0;
+  _singleEvalStartTime = Date.now();
+  _singleEvalVendor    = vendorName || 'Vendor';
+
+  var area = document.getElementById('pTabBody_summary');
+  if (area) area.innerHTML = _renderEvalProgressPanel(0, _singleEvalVendor, _singleEvalStartTime, null, null);
+
+  // Auto-advance through stages
+  var stageDurations = [2000, 2000, 3000, 8000, 3000, 5000, 2000];
+  var cumDelay = 0;
+  for (var si = 1; si < _EVAL_STAGES.length; si++) {
+    cumDelay += stageDurations[si - 1];
+    (function(idx, delay) {
+      _singleEvalTimers.push(setTimeout(function() {
+        if (_singleEvalActiveIdx < idx) {
+          _singleEvalActiveIdx = idx;
+          var area2 = document.getElementById('pTabBody_summary');
+          if (area2) area2.innerHTML = _renderEvalProgressPanel(idx, _singleEvalVendor, _singleEvalStartTime, null, null);
+        }
+      }, delay));
+    })(si, cumDelay);
+  }
+}
+
+function _resolveSingleEvalProgress(success, errorMsg) {
+  _singleEvalTimers.forEach(clearTimeout); _singleEvalTimers = [];
+  var area = document.getElementById('pTabBody_summary');
+  if (!area) return;
+  if (success) {
+    // Show all-done state briefly, then panel re-renders with real data
+    area.innerHTML = _renderEvalProgressPanel(_EVAL_STAGES.length, _singleEvalVendor, _singleEvalStartTime, null, null);
+  } else {
+    area.innerHTML = _renderEvalProgressPanel(_singleEvalActiveIdx, _singleEvalVendor, _singleEvalStartTime, errorMsg || 'Evaluation failed.', null);
+  }
+}
+
+function _closeSingleEvalProgress() {
+  _singleEvalTimers.forEach(clearTimeout); _singleEvalTimers = [];
+  var area = document.getElementById('pTabBody_summary');
+  if (area) area.innerHTML = '';
 }
 
 async function evaluateAllProposals(rfpId) {
@@ -7117,13 +7278,13 @@ async function evaluateAllProposals(rfpId) {
     return !['draft'].includes(st); // include all non-draft
   });
 
-  // Show bulk modal immediately
+  // Show bulk progress panel immediately (inline, same style as RFP generation)
   if (proposals.length > 0) {
-    _showBulkModal(proposals);
+    _showBulkEvalProgress(proposals);
     // Simulate per-proposal stage progression (visual only — real completion detected via poll)
     var proposalIds = proposals.map(function(p){ return p.id; });
-    _bulkModalSimulateProgress(proposalIds);
-    _bulkModalStartPolling(rfpId);
+    _bulkSimulateProgress(proposalIds);
+    _bulkStartPolling(rfpId);
   }
 
   try {
@@ -7131,14 +7292,14 @@ async function evaluateAllProposals(rfpId) {
 
     // Handle blocked (all proposals still OCR-processing)
     if (result && result.blocked) {
-      _closeBulkModal();
+      _closeBulkEvalProgress();
       showToast('⏳ ' + (result.message || 'Proposals are still being prepared. Please wait a moment.'), 'info', 8000);
       if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-robot"></i>' + t('prop_evaluate_ai'); }
       return;
     }
 
-    // Resolve modal with final result
-    _resolveBulkModal(result);
+    // Resolve progress panel with final result
+    _resolveBulkEvalProgress(result);
 
     var count   = result.evaluated || 0;
     var skipped = result.skipped   || 0;
@@ -7159,7 +7320,7 @@ async function evaluateAllProposals(rfpId) {
     setTimeout(function() { rfpTabs.proposals(rfpId); }, 2800);
 
   } catch(e) {
-    _closeBulkModal();
+    _closeBulkEvalProgress();
     showToast('Evaluation failed: ' + (e.message || e), 'error');
     if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-robot"></i>' + t('prop_evaluate_ai'); }
   }
@@ -7835,158 +7996,7 @@ function switchProposalTab(tab) {
   });
 }
 
-// ── Evaluate a single proposal with AI ───────────────────────────────────────
-// ── Evaluation Progress Modal ─────────────────────────────────────────────────
-// Shows a staged, business-readable progress popup during AI evaluation.
-// _evalModalActiveIdx is module-level so _resolveEvalModal (outside the closure) can read it.
-var _evalModalTimer = null;
-var _evalModalActiveIdx = 0;
-var _evalModalStages = [
-  { key: 'reading',     icon: 'fa-file-search',   title: 'Reading Proposal Documents',          desc: 'Extracting and preparing the submitted PDF files for analysis…',                              color: '#3b82f6' },
-  { key: 'classifying', icon: 'fa-tags',           title: 'Verifying Document Type',             desc: 'Confirming this is a valid vendor proposal responding to the RFP…',                         color: '#8b5cf6' },
-  { key: 'budget',      icon: 'fa-coins',          title: 'Extracting Financial Data',           desc: 'Identifying the proposed budget, currency, and project timeline…',                           color: '#f59e0b' },
-  { key: 'technical',   icon: 'fa-microscope',     title: 'Technical & Compliance Scoring',      desc: 'Evaluating each RFP criterion — methodology, architecture, team, references…',               color: '#059669' },
-  { key: 'commercial',  icon: 'fa-balance-scale',  title: 'Commercial Assessment',               desc: 'Comparing proposed cost against the RFP budget ceiling and applying FX conversion…',         color: '#0891b2' },
-  { key: 'market',      icon: 'fa-globe',          title: 'Market Benchmark Analysis',           desc: 'Generating WBS and estimating market-average implementation cost for this region…',           color: '#7c3aed' },
-  { key: 'verdict',     icon: 'fa-gavel',          title: 'Generating Recommendation',           desc: 'Synthesising all scores into a final recommendation — Recommended, Conditional, or Not Recommended…', color: '#dc2626' },
-];
-
-function _renderEvalModalHtml(idx, vendor, startTime, errorMsg) {
-  var stages = _evalModalStages;
-  var elapsed = Math.round((Date.now() - startTime) / 1000);
-  var rows = stages.map(function(s, i) {
-    var isDone   = i < idx;
-    var isActive = i === idx && !errorMsg;
-    var isError  = errorMsg && i === idx;
-    var opacity  = (isDone || isActive || isError) ? '1' : '0.3';
-    var iconCls  = isDone ? 'fa-check-circle' : (isError ? 'fa-times-circle' : (isActive ? 'fa-spinner fa-spin' : 'fa-circle'));
-    var iconCol  = isDone ? '#22c55e' : (isError ? '#ef4444' : (isActive ? s.color : '#d1d5db'));
-    var textCol  = isActive ? '#111827' : (isDone ? '#374151' : '#9ca3af');
-    return '<div style="display:flex;align-items:flex-start;gap:12px;padding:10px 0;border-bottom:1px solid #f3f4f6;opacity:' + opacity + ';transition:opacity 0.4s">'
-      + '<div style="width:32px;height:32px;border-radius:50%;background:' + (isActive ? s.color : (isDone ? '#f0fdf4' : '#f9fafb')) + ';display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px">'
-      + '<i class="fas ' + iconCls + '" style="font-size:0.8rem;color:' + iconCol + '"></i></div>'
-      + '<div style="flex:1;min-width:0">'
-      + '<div style="font-size:0.85rem;font-weight:' + (isActive ? '700' : '600') + ';color:' + textCol + ';margin-bottom:2px">' + s.title + '</div>'
-      + (isActive ? '<div style="font-size:0.77rem;color:#6b7280;line-height:1.5">' + s.desc + '</div>' : '')
-      + (isError  ? '<div style="font-size:0.77rem;color:#dc2626;line-height:1.5">' + escHtml(errorMsg) + '</div>' : '')
-      + '</div>'
-      + (isDone ? '<div style="font-size:0.7rem;color:#22c55e;font-weight:700;flex-shrink:0;margin-top:6px"><i class="fas fa-check" style="margin-right:2px"></i>Done</div>' : '')
-      + '</div>';
-  }).join('');
-
-  var progressPct = errorMsg
-    ? Math.round((idx / (stages.length - 1)) * 100)
-    : (idx >= stages.length - 1 ? 100 : Math.round((idx / (stages.length - 1)) * 100));
-
-  return '<div id="evalProgressModal" style="position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(2,13,28,0.72);backdrop-filter:blur(4px)">'
-    + '<div style="background:white;border-radius:16px;width:520px;max-width:95vw;max-height:90vh;overflow-y:auto;box-shadow:0 24px 64px rgba(0,0,0,0.35)">'
-    + '<div style="background:linear-gradient(135deg,var(--cpc-ink,#020D1C),#2d2519);border-radius:16px 16px 0 0;padding:20px 24px;display:flex;align-items:center;justify-content:space-between">'
-    + '<div>'
-    + '<div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:rgba(255,255,255,0.5);margin-bottom:4px">AI Evaluation in Progress</div>'
-    + '<div style="font-size:1.05rem;font-weight:700;color:white">' + (vendor || 'Vendor') + '</div>'
-    + '</div>'
-    + '<div style="text-align:right">'
-    + '<div style="font-size:0.75rem;color:rgba(255,255,255,0.45)">' + elapsed + 's elapsed</div>'
-    + '<div style="font-size:0.7rem;color:rgba(255,255,255,0.35);margin-top:2px">Step ' + Math.min(idx + 1, stages.length) + ' of ' + stages.length + '</div>'
-    + '</div>'
-    + '</div>'
-    + '<div style="padding:20px 24px">'
-    + '<div style="width:100%;height:4px;background:#f3f4f6;border-radius:2px;margin-bottom:18px;overflow:hidden">'
-    + '<div style="height:100%;width:' + progressPct + '%;background:linear-gradient(90deg,var(--cpc-gold-deep,#BA9765),var(--cpc-gold,#FFDB00));border-radius:2px;transition:width 0.6s ease"></div>'
-    + '</div>'
-    + rows
-    + '</div>'
-    + (errorMsg ? '<div style="padding:0 24px 20px"><button onclick="document.getElementById(\'evalProgressModal\').remove()" style="width:100%;padding:10px;background:#f3f4f6;border:none;border-radius:8px;font-size:0.85rem;font-weight:600;cursor:pointer;color:#374151">Close</button></div>' : '')
-    + '</div></div>';
-}
-
-function _showEvalModal(proposalId, vendorName) {
-  // Remove any existing modal
-  var old = document.getElementById('evalProgressModal');
-  if (old) old.remove();
-
-  _evalModalActiveIdx = 0;
-  var vendor = vendorName ? escHtml(vendorName) : 'Vendor';
-  var startTime = Date.now();
-
-  // Insert initial state (stage 0 active)
-  document.body.insertAdjacentHTML('beforeend', _renderEvalModalHtml(0, vendor, startTime, null));
-
-  // Auto-advance through stages with realistic timing
-  // Actual completion is always driven by _resolveEvalModal() — these are cosmetic only
-  var stageDurations = [2000, 2000, 3000, 8000, 3000, 5000, 2000]; // ms per stage
-  var cumulativeDelay = 0;
-  _evalModalTimer = [];
-
-  for (var si = 1; si < _evalModalStages.length; si++) {
-    cumulativeDelay += stageDurations[si - 1];
-    (function(stageIdx, delay) {
-      var tid = setTimeout(function() {
-        // Only advance if the modal is still open and we haven't been resolved past this stage
-        if (_evalModalActiveIdx < stageIdx) {
-          _evalModalActiveIdx = stageIdx;
-          var modal = document.getElementById('evalProgressModal');
-          if (!modal) return;
-          var newHtml = _renderEvalModalHtml(stageIdx, vendor, startTime, null);
-          // Replace the modal element in-place using a wrapper trick
-          var wrapper = document.createElement('div');
-          wrapper.innerHTML = newHtml;
-          modal.parentNode.replaceChild(wrapper.firstChild, modal);
-        }
-      }, delay);
-      _evalModalTimer.push(tid);
-    })(si, cumulativeDelay);
-  }
-}
-
-function _resolveEvalModal(success, errorMsg) {
-  // Stop all auto-advance timers
-  if (_evalModalTimer) { _evalModalTimer.forEach(clearTimeout); _evalModalTimer = null; }
-  var modal = document.getElementById('evalProgressModal');
-  if (!modal) return;
-
-  if (success) {
-    // Show all-complete state briefly, then fade out and remove
-    _evalModalActiveIdx = _evalModalStages.length; // past last stage = all done
-    modal.style.transition = 'opacity 0.6s';
-    modal.style.opacity = '1';
-    // After 800ms start fading, then remove
-    setTimeout(function() {
-      var m = document.getElementById('evalProgressModal');
-      if (!m) return;
-      m.style.transition = 'opacity 0.5s';
-      m.style.opacity = '0';
-      setTimeout(function() {
-        var m2 = document.getElementById('evalProgressModal');
-        if (m2) m2.remove();
-      }, 520);
-    }, 800);
-  } else {
-    // Show error on whichever stage was last active
-    var errIdx = Math.min(_evalModalActiveIdx, _evalModalStages.length - 1);
-    var newHtml = _buildEvalModalHtml(errIdx, errorMsg || 'Evaluation failed.');
-    var wrapper = document.createElement('div');
-    wrapper.innerHTML = newHtml;
-    modal.parentNode.replaceChild(wrapper.firstChild, modal);
-  }
-}
-
-function _closeEvalModal() {
-  if (_evalModalTimer) { _evalModalTimer.forEach(clearTimeout); _evalModalTimer = null; }
-  var m = document.getElementById('evalProgressModal');
-  if (m) m.remove();
-}
-
-function _buildEvalModalHtml(errorIdx, errorMsg) {
-  // Simplified error-state modal (no live timers needed)
-  return '<div id="evalProgressModal" style="position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(2,13,28,0.72);backdrop-filter:blur(4px)">'
-    + '<div style="background:white;border-radius:16px;width:520px;max-width:95vw;padding:28px 24px;box-shadow:0 24px 64px rgba(0,0,0,0.35);text-align:center">'
-    + '<i class="fas fa-exclamation-triangle" style="font-size:2.4rem;color:#f59e0b;display:block;margin-bottom:14px"></i>'
-    + '<div style="font-size:1rem;font-weight:700;color:#111827;margin-bottom:8px">Evaluation encountered an issue</div>'
-    + '<div style="font-size:0.82rem;color:#6b7280;line-height:1.55;margin-bottom:22px;max-width:380px;margin-left:auto;margin-right:auto">' + escHtml(errorMsg || 'An unexpected error occurred. Please try again.') + '</div>'
-    + '<button onclick="document.getElementById(\'evalProgressModal\').remove()" style="padding:10px 32px;background:var(--cpc-gold-deep,#BA9765);color:white;border:none;border-radius:8px;font-size:0.85rem;font-weight:600;cursor:pointer">Close</button>'
-    + '</div></div>';
-}
+// (single + bulk evaluation progress now handled by _showSingleEvalProgress / _showBulkEvalProgress above)
 
 async function evaluateSingleProposal(rfpId, proposalId) {
   // Disable any trigger buttons inside the panel
@@ -7995,20 +8005,20 @@ async function evaluateSingleProposal(rfpId, proposalId) {
     if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> ' + t('prop_evaluating'); }
   });
 
-  // Find vendor name for modal header
+  // Find vendor name for progress panel header
   var vendorName = '';
   var propForName = appState.proposals ? appState.proposals.find(function(pp){ return pp.id === proposalId; }) : null;
   if (propForName) vendorName = propForName.vendor_name || propForName.name || '';
 
-  // Show progress modal
-  _showEvalModal(proposalId, vendorName);
+  // Show inline progress panel in the slide panel's Summary tab
+  _showSingleEvalProgress(vendorName);
 
   try {
     var result = await apiCall('POST', '/rfps/' + rfpId + '/proposals/' + proposalId + '/evaluate', {});
 
     // ── v49: Blocked — documents still being prepared ──────────────────────
     if (result && result.blocked) {
-      _closeEvalModal();
+      _closeSingleEvalProgress();
       showToast('⏳ This proposal\'s documents are still being prepared for evaluation. Please wait a moment and try again.', 'info', 8000);
       ['evalSingleBtn_' + proposalId, 'evalSingleBtnFooter_' + proposalId].forEach(function(id) {
         var btn2 = document.getElementById(id);
@@ -8019,7 +8029,7 @@ async function evaluateSingleProposal(rfpId, proposalId) {
 
     // ── Fast path: got scores immediately (text was already in DB) ─────────
     if (result && result.ok && result.status !== 'processing' && result.compliance_breakdown) {
-      _resolveEvalModal(true);
+      _resolveSingleEvalProgress(true);
       showToast('✅ Evaluation complete! Extracting budget & market benchmark…', 'success', 6000);
       var p = appState.proposals ? appState.proposals.find(function(pp){ return pp.id === proposalId; }) : null;
       if (p) {
@@ -8041,11 +8051,11 @@ async function evaluateSingleProposal(rfpId, proposalId) {
     }
 
     // Unexpected response
-    _closeEvalModal();
+    _closeSingleEvalProgress();
     showToast('Evaluation started — refresh in a minute to see results.', 'info');
 
   } catch(e) {
-    _resolveEvalModal(false, e.message || String(e));
+    _resolveSingleEvalProgress(false, e.message || String(e));
     showToast('Evaluation failed: ' + (e.message || e), 'error');
     ['evalSingleBtn_' + proposalId, 'evalSingleBtnFooter_' + proposalId].forEach(function(id) {
       var btn = document.getElementById(id);
@@ -9025,6 +9035,8 @@ function showCreateRfpForm() {
 // ── Step 1b: Upload existing RFP PDF form ──────────────────────────────────────
 function showUploadRfpForm() {
   _uploadRfpFile = null;
+  // Revoke any previous preview object URL to avoid memory leaks
+  if (window._uploadRfpPreviewUrl) { URL.revokeObjectURL(window._uploadRfpPreviewUrl); window._uploadRfpPreviewUrl = null; }
   var defCurrency = _settingsCurrency || 'USD';
   showModal(
     // Header
@@ -9036,26 +9048,32 @@ function showUploadRfpForm() {
     + '<div style="font-size:0.72rem;color:#9ca3af">' + t('upload_rfp_subtitle') + '</div>'
     + '</div></div>'
 
+    // Two-column layout: left=form, right=PDF preview
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;align-items:start">'
+
+    // ── LEFT COLUMN ──────────────────────────────────────
+    + '<div>'
+
     // PDF drop zone
     + '<div id="uploadRfpDropzone" '
     + 'onclick="document.getElementById(\'uploadRfpFileInput\').click()" '
     + 'ondragover="event.preventDefault();this.style.borderColor=\'#2563eb\';this.style.background=\'#eff6ff\'" '
     + 'ondragleave="this.style.borderColor=\'#d1d5db\';this.style.background=\'#f9fafb\'" '
     + 'ondrop="handleUploadRfpDrop(event)" '
-    + 'style="border:2px dashed #d1d5db;border-radius:12px;padding:2rem;text-align:center;cursor:pointer;background:#f9fafb;transition:all 0.2s;margin-bottom:0.875rem">'
-    + '<i class="fas fa-file-pdf" style="font-size:2.2rem;color:#dc2626;display:block;margin-bottom:0.75rem"></i>'
-    + '<div id="uploadRfpDropzoneLabel" style="font-size:0.88rem;font-weight:600;color:#374151;margin-bottom:0.25rem">' + t('upload_rfp_drop_hint') + '</div>'
-    + '<div style="font-size:0.72rem;color:#9ca3af">PDF files only · max 20 MB</div>'
+    + 'style="border:2px dashed #d1d5db;border-radius:12px;padding:1.5rem 1rem;text-align:center;cursor:pointer;background:#f9fafb;transition:all 0.2s;margin-bottom:0.75rem">'
+    + '<i class="fas fa-file-pdf" style="font-size:2rem;color:#dc2626;display:block;margin-bottom:0.6rem"></i>'
+    + '<div id="uploadRfpDropzoneLabel" style="font-size:0.85rem;font-weight:600;color:#374151;margin-bottom:0.2rem">' + t('upload_rfp_drop_hint') + '</div>'
+    + '<div style="font-size:0.7rem;color:#9ca3af">PDF only · max 20 MB</div>'
     + '<input type="file" id="uploadRfpFileInput" accept=".pdf" style="display:none" onchange="handleUploadRfpSelect(event)">'
     + '</div>'
 
     // Currency + Country of Issue
-    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.625rem;margin-bottom:0.875rem">'
-    + '<div class="form-group" style="margin:0"><label style="display:flex;align-items:center;gap:5px"><i class="fas fa-coins" style="color:var(--cpc-gold);font-size:0.75rem"></i>' + t('create_rfp_currency') + '</label>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;margin-bottom:0.75rem">'
+    + '<div class="form-group" style="margin:0"><label style="display:flex;align-items:center;gap:5px;font-size:0.78rem"><i class="fas fa-coins" style="color:var(--cpc-gold);font-size:0.72rem"></i>' + t('create_rfp_currency') + '</label>'
     + _buildCurrencySelect('uploadRfpCurrency', defCurrency)
     + '</div>'
-    + '<div class="form-group" style="margin:0"><label style="display:flex;align-items:center;gap:5px"><i class="fas fa-globe" style="color:#3b82f6;font-size:0.75rem"></i>' + t('create_rfp_country') + '</label>'
-    + '<input id="uploadRfpCountry" placeholder="' + t('ph_rfp_country') + '" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:7px 10px;font-size:0.84rem">'
+    + '<div class="form-group" style="margin:0"><label style="display:flex;align-items:center;gap:5px;font-size:0.78rem"><i class="fas fa-globe" style="color:#3b82f6;font-size:0.72rem"></i>' + t('create_rfp_country') + '</label>'
+    + '<input id="uploadRfpCountry" placeholder="' + t('ph_rfp_country') + '" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;font-size:0.82rem">'
     + '</div></div>'
 
     // Action buttons
@@ -9063,7 +9081,32 @@ function showUploadRfpForm() {
     + '<button class="btn-primary" id="uploadRfpBtn" style="flex:1" onclick="uploadRfpPdf()"><i class="fas fa-file-import"></i>' + t('upload_rfp_btn') + '</button>'
     + '<button class="btn-ghost" onclick="closeModal()">Cancel</button>'
     + '</div>'
-  );
+    + '</div>' // end left column
+
+    // ── RIGHT COLUMN — PDF preview ────────────────────────
+    + '<div id="uploadRfpPreviewCol" style="border-radius:10px;overflow:hidden;background:#f3f4f6;min-height:340px;display:flex;flex-direction:column;align-items:center;justify-content:center;border:1px solid #e5e7eb">'
+    + '<i class="fas fa-file-pdf" style="font-size:3rem;color:#d1d5db;margin-bottom:0.75rem"></i>'
+    + '<p style="font-size:0.78rem;color:#9ca3af;margin:0;text-align:center;padding:0 1rem">PDF preview will appear here after you select a file</p>'
+    + '</div>'
+
+    + '</div>' // end two-column grid
+  , { wide: true });
+}
+
+// Called by _setUploadRfpFile after a PDF is selected — renders an embedded preview
+function _showUploadRfpPreview(file) {
+  var col = document.getElementById('uploadRfpPreviewCol');
+  if (!col) return;
+  // Revoke old URL first
+  if (window._uploadRfpPreviewUrl) { URL.revokeObjectURL(window._uploadRfpPreviewUrl); }
+  window._uploadRfpPreviewUrl = URL.createObjectURL(file);
+  col.innerHTML = '<iframe src="' + window._uploadRfpPreviewUrl + '#toolbar=0&navpanes=0&scrollbar=1" '
+    + 'style="width:100%;height:400px;border:none;border-radius:10px" '
+    + 'title="PDF Preview"></iframe>'
+    + '<div style="font-size:0.7rem;color:#6b7280;padding:4px 8px;text-align:center;background:#f9fafb;width:100%;border-top:1px solid #e5e7eb">'
+    + '<i class="fas fa-file-pdf" style="color:#dc2626;margin-right:4px"></i>' + escHtml(file.name)
+    + ' · ' + (file.size / 1024).toFixed(0) + ' KB'
+    + '</div>';
 }
 
 function handleUploadRfpDrop(event) {
@@ -9089,8 +9132,10 @@ function _setUploadRfpFile(file) {
   _uploadRfpFile = file;
   var lbl = document.getElementById('uploadRfpDropzoneLabel');
   var dz  = document.getElementById('uploadRfpDropzone');
-  if (lbl) lbl.innerHTML = '<i class="fas fa-check-circle" style="color:#065f46;margin-right:6px"></i><strong style="color:#065f46">' + escHtml(file.name) + '</strong> &bull; ' + (file.size/1024).toFixed(0) + ' KB';
+  if (lbl) lbl.innerHTML = '<i class="fas fa-check-circle" style="color:#065f46;margin-right:6px"></i><strong style="color:#065f46">' + escHtml(file.name) + '</strong>';
   if (dz)  { dz.style.borderColor = '#065f46'; dz.style.background = '#ecfdf5'; }
+  // Render inline PDF preview in the right column
+  _showUploadRfpPreview(file);
 }
 
 async function uploadRfpPdf() {
@@ -9113,6 +9158,7 @@ async function uploadRfpPdf() {
     var data = await resp.json();
     var rfp  = data.rfp;
     _uploadRfpFile = null;
+    if (window._uploadRfpPreviewUrl) { URL.revokeObjectURL(window._uploadRfpPreviewUrl); window._uploadRfpPreviewUrl = null; }
     closeModal();
     showToast(t('upload_rfp_parsed'), 'success', 6000);
     // Navigate to Generate tab so user can review + regenerate
