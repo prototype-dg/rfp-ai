@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 import { andersenEmailHtml, andersenPageHtml } from '../brand/letterhead'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-08-15-v89' // v89: drop vendor_requirements from VPS extraction (Qwen2.5-3B too slow: 30 req×25tok=750tok=85s gen, pushes total past wall-clock); scalar+scoring only, 500tok=98s total
+const WORKER_VERSION = '2026-08-15-v90' // v89: drop vendor_requirements from VPS extraction (Qwen2.5-3B too slow: 30 req×25tok=750tok=85s gen, pushes total past wall-clock); scalar+scoring only, 500tok=98s total
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.andersenlab.com.
@@ -1289,6 +1289,49 @@ function parseJsonArray(raw: string): any[] | null {
   }
 }
 
+// ── Sidecar LLM-extract helper ───────────────────────────────────────────────
+// Calls the sidecar /llm-extract endpoint asynchronously.
+// The sidecar runs llama-server locally and POSTs results to callbackUrl.
+async function callSidecarLlmExtract(
+  rfpId: string | number,
+  ocrText: string,
+  callbackUrl: string,
+  env: any,
+): Promise<boolean> {
+  const sidecarUrl    = env?.PDF_SIDECAR_URL    || (globalThis as any).PDF_SIDECAR_URL    || ''
+  const sidecarSecret = env?.PDF_SIDECAR_SECRET || (globalThis as any).PDF_SIDECAR_SECRET || ''
+  if (!sidecarUrl || !sidecarSecret) {
+    console.warn('[sidecar-llm] PDF_SIDECAR_URL or PDF_SIDECAR_SECRET not configured')
+    return false
+  }
+  try {
+    const res = await fetch(`${sidecarUrl}/llm-extract`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${sidecarSecret}` },
+      body: JSON.stringify({
+        rfp_id: Number(rfpId),
+        ocr_text: ocrText,
+        callback_url: callbackUrl,
+        callback_secret: sidecarSecret,
+        max_input_chars: 20000,
+        max_tokens: 2000,
+      }),
+      signal: AbortSignal.timeout(15000),
+    })
+    if (!res.ok) {
+      const err = await res.text().catch(() => '')
+      console.error(`[sidecar-llm] rfp=${rfpId} HTTP ${res.status}: ${err.slice(0, 200)}`)
+      return false
+    }
+    const body: any = await res.json()
+    console.log(`[sidecar-llm] rfp=${rfpId} queued: status=${body.status}`)
+    return true
+  } catch (e: any) {
+    console.error(`[sidecar-llm] rfp=${rfpId} failed to queue: ${e.message}`)
+    return false
+  }
+}
+
 // ── Single-phase LLM extraction (v86/v89) ────────────────────────────────────
 // One LLM call returns scalar fields + scoring_criteria only.
 // vendor_requirements is omitted on the VPS Qwen2.5-3B path: the model generates
@@ -1525,25 +1568,31 @@ apiRouter.post('/callback/rfps/:rfpId/rfp-upload-ocr-complete', async (c) => {
   // a live HTTP request. This callback now does the same: block here, let the
   // sidecar wait ~25-30s for our 200. The sidecar HTTP client tolerates this.
   // No waitUntil(), no extractionTask, no stream:false workaround needed.
+  // ── v90: Queue async LLM extraction via sidecar ─────────────────────────────
+  // Instead of calling the LLM synchronously (which times out at >100s for large RFPs
+  // on Qwen2.5-3B), we ask the sidecar to run llama-server locally and POST results
+  // back to /api/callback/rfps/:rfpId/llm-extract-complete. The sidecar has a 300s
+  // timeout budget with no CF Worker wall-clock constraint.
+  const workerBaseUrl = new URL(c.req.url).origin
+  const llmCallbackUrl = `${workerBaseUrl}/api/callback/rfps/${rfpId}/llm-extract-complete`
+  const queued = await callSidecarLlmExtract(rfpId, extractedText, llmCallbackUrl, c.env)
+  if (queued) {
+    console.log(`[rfp-upload-ocr-cb] rfp=${rfpId} LLM extraction queued via sidecar`)
+    return c.json({ ok: true, rfpId, status: 'extracting' })
+  }
+  // Sidecar unavailable — fall back to synchronous in-Worker extraction (v85 behavior)
+  console.warn(`[rfp-upload-ocr-cb] rfp=${rfpId} sidecar unavailable — falling back to sync extraction`)
   const db = c.env.DB
   try {
     const { extracted, scoringMatrixJson, requirementGlossaryJson, phaseErrors } =
       await extractRfpFieldsFromOcr(extractedText, c.env, `rfp=${rfpId}`)
-
     const { newTitle } = await writeExtractedRfpFields(
       db, rfpId, extractedText, extracted, scoringMatrixJson, requirementGlossaryJson)
-
-    await db.prepare(
-      `UPDATE rfps SET ai_extraction_status='done', updated_at=datetime('now') WHERE id=?`
-    ).bind(rfpId).run()
-
-    console.log(`[rfp-upload-ocr-cb] rfp=${rfpId} extraction done — title="${newTitle}" scoring=${!!scoringMatrixJson} glossary=${!!requirementGlossaryJson} errors=${phaseErrors.length}`)
+    await db.prepare(`UPDATE rfps SET ai_extraction_status='done', updated_at=datetime('now') WHERE id=?`).bind(rfpId).run()
+    console.log(`[rfp-upload-ocr-cb] rfp=${rfpId} sync extraction done — title="${newTitle}"`)
     return c.json({ ok: true, rfpId, status: 'done' })
   } catch (e: any) {
-    console.error(`[rfp-upload-ocr-cb] rfp=${rfpId} extraction error: ${e.message}`)
-    await db.prepare(
-      `UPDATE rfps SET ai_extraction_status='error', updated_at=datetime('now') WHERE id=?`
-    ).bind(rfpId).run().catch(() => {})
+    await db.prepare(`UPDATE rfps SET ai_extraction_status='error', updated_at=datetime('now') WHERE id=?`).bind(rfpId).run().catch(() => {})
     return c.json({ ok: true, rfpId, status: 'error', error: e.message })
   }
 })
@@ -1555,11 +1604,10 @@ apiRouter.post('/callback/rfps/:rfpId/rfp-upload-ocr-complete', async (c) => {
 //   debug_phases: boolean — if true, include raw LLM output for phases 2+3 in response
 //   force_phases: boolean — if true, run all phases even if scalar fields already populated
 apiRouter.post('/rfps/:id/rerun-ai-extraction', async (c) => {
+  // v90: async — queues extraction via sidecar /llm-extract, returns immediately.
+  // Results arrive via /api/callback/rfps/:rfpId/llm-extract-complete callback.
   const rfpId = c.req.param('id')
   try {
-    const bodyRaw = await c.req.json().catch(() => ({})) as any
-    const debugPhases = !!bodyRaw?.debug_phases
-
     const rfp = await c.env.DB.prepare('SELECT id, uploaded_rfp_text FROM rfps WHERE id=?')
       .bind(rfpId).first<any>()
     if (!rfp) return c.json({ error: 'RFP not found' }, 404)
@@ -1567,33 +1615,31 @@ apiRouter.post('/rfps/:id/rerun-ai-extraction', async (c) => {
     if (!ocrText || ocrText.startsWith('[PDF:')) {
       return c.json({ error: 'No usable OCR text stored for this RFP', chars: ocrText.length }, 400)
     }
-    console.log(`[rerun-ai-extraction] rfp=${rfpId} text_len=${ocrText.length} debug=${debugPhases} — starting 3-phase extraction`)
 
     await c.env.DB.prepare(`UPDATE rfps SET ai_extraction_status='extracting', updated_at=datetime('now') WHERE id=?`).bind(rfpId).run()
 
-    const { extracted, scoringMatrixJson, requirementGlossaryJson, phaseErrors } =
-      await extractRfpFieldsFromOcr(ocrText, c.env, `rfp=${rfpId}`)
+    const workerBaseUrl = new URL(c.req.url).origin
+    const llmCallbackUrl = `${workerBaseUrl}/api/callback/rfps/${rfpId}/llm-extract-complete`
+    const queued = await callSidecarLlmExtract(rfpId, ocrText, llmCallbackUrl, c.env)
 
-    if (!extracted || Object.keys(extracted).length === 0) {
-      await c.env.DB.prepare(`UPDATE rfps SET ai_extraction_status='error', updated_at=datetime('now') WHERE id=?`).bind(rfpId).run()
-      return c.json({ ok: false, error: 'AI extraction returned no fields (all phases failed)', phase_errors: phaseErrors }, 500)
+    if (queued) {
+      console.log(`[rerun-ai-extraction] rfp=${rfpId} queued via sidecar LLM — callback=${llmCallbackUrl}`)
+      return c.json({ ok: true, rfpId, status: 'extracting', message: 'LLM extraction queued. Poll ai_extraction_status for completion.' })
     }
 
+    // Sidecar not available — fall back to synchronous extraction
+    console.warn(`[rerun-ai-extraction] rfp=${rfpId} sidecar unavailable — falling back to sync`)
+    const { extracted, scoringMatrixJson, requirementGlossaryJson, phaseErrors } =
+      await extractRfpFieldsFromOcr(ocrText, c.env, `rfp=${rfpId}`)
+    if (!extracted || Object.keys(extracted).length === 0) {
+      await c.env.DB.prepare(`UPDATE rfps SET ai_extraction_status='error', updated_at=datetime('now') WHERE id=?`).bind(rfpId).run()
+      return c.json({ ok: false, error: 'AI extraction returned no fields', phase_errors: phaseErrors }, 500)
+    }
     const { newTitle } = await writeExtractedRfpFields(
       c.env.DB, rfpId, ocrText, extracted, scoringMatrixJson, requirementGlossaryJson)
-
     await c.env.DB.prepare(`UPDATE rfps SET ai_extraction_status='done', updated_at=datetime('now') WHERE id=?`).bind(rfpId).run()
-
-    console.log(`[rerun-ai-extraction] rfp=${rfpId} done — title="${newTitle}" errors=${phaseErrors.length}`)
-    const updated = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(rfpId).first()
-    return c.json({
-      ok: true, rfpId, title: newTitle,
-      fields_extracted: Object.keys(extracted).length,
-      has_scoring_matrix: !!scoringMatrixJson,
-      has_requirement_glossary: !!requirementGlossaryJson,
-      phase_errors: phaseErrors,
-      rfp: updated,
-    })
+    console.log(`[rerun-ai-extraction] rfp=${rfpId} sync done — title="${newTitle}"`)
+    return c.json({ ok: true, rfpId, status: 'done', title: newTitle, phase_errors: phaseErrors })
   } catch (e: any) {
     console.error(`[rerun-ai-extraction] rfp=${rfpId} error: ${e.message}`)
     return c.json({ ok: false, error: e.message }, 500)
