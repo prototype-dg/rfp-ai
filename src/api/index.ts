@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 import { andersenEmailHtml, andersenPageHtml } from '../brand/letterhead'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-08-15-v86d' // v86d: raise TTFB timeout 30s→60s (large inputs cause slow prefill before first token arrives)
+const WORKER_VERSION = '2026-08-15-v86e' // v86e: raise maxTokens cap 4000→6000 (JSON was truncating mid-vendor_requirements at 4000 tokens)
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.andersenlab.com.
@@ -1311,7 +1311,11 @@ async function extractRfpFieldsFromOcr(ocrText: string, env: any, rfpIdLog: stri
   // evaluation criteria, and requirements sections of any standard RFP.
   // maxTokens proportional to input: 1 output token per ~7.5 input chars, min 3000.
   const inputChars = Math.min(ocrText.length, 30000)
-  const maxTokens = Math.min(4000, Math.max(3000, Math.ceil(inputChars / 7.5)))
+  // maxTokens: 1 output token per ~5 input chars; min 4000, cap 6000.
+  // 30k chars input → 6000 tokens output — enough for 8 scalar fields + 5 scoring
+  // criteria + 40 vendor requirements without truncation. At ~80 tok/s streaming
+  // this adds ~75s total, within the 120s Worker wall-clock.
+  const maxTokens = Math.min(6000, Math.max(4000, Math.ceil(inputChars / 5)))
   console.log(`[rfp-ai-extract] ${rfpIdLog} single-phase — inputChars=${inputChars} (of ${ocrText.length} total) maxTokens=${maxTokens}`)
 
   const SYSTEM_PROMPT = `You are an expert procurement analyst specializing in processing complex, often imperfect, OCR-scanned documents (like RFPs). Your task is to analyze the provided RFP text and extract a comprehensive, structured JSON object containing all key information.
