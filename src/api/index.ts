@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 import { andersenEmailHtml, andersenPageHtml } from '../brand/letterhead'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-08-15-v83'  // v83: callLLM uses Promise.race+AbortSignal.timeout per reader.read() chunk — v82 setTimeout doesn't fire in waitUntil() after HTTP response sent
+const WORKER_VERSION = '2026-08-15-v84'  // v84: callLLM stream:false — no SSE reader loop; single fetch+AbortSignal.timeout(55s) covers full request+response; proxy stall can no longer hang waitUntil()
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.andersenlab.com.
@@ -4359,23 +4359,25 @@ async function callLLM(systemPrompt: string, userPrompt: string, env: any, model
   const baseUrl = env?.OPENAI_BASE_URL || 'https://www.genspark.ai/api/llm_proxy/v1'
   if (!apiKey) throw new Error('OPENAI_API_KEY not configured')
 
-  // Timeout strategy for Cloudflare Workers (including inside waitUntil()):
+  // v84: NON-STREAMING fetch (stream: false).
   //
-  // v81: AbortSignal.timeout(25s) on fetch() only — guards TTFB=0 stall but NOT
-  //      mid-stream hangs (signal already consumed once fetch() resolves).
-  // v82: AbortController + setTimeout(60s) — setTimeout does NOT fire inside
-  //      waitUntil() after the HTTP response has been sent (CF Workers limitation).
-  // v83: AbortSignal.timeout() is a native Web Platform API implemented in the
-  //      Workers runtime itself — it fires correctly inside waitUntil(). Use it
-  //      on BOTH the fetch() call AND each individual reader.read() via Promise.race.
-  //      Per-chunk idle timeout: 20s. If the proxy goes silent after sending headers,
-  //      the next reader.read() races against AbortSignal.timeout(20s) and loses,
-  //      throwing TimeoutError which propagates to the extraction catch block.
-
-  // Guard 1: 20s to receive first byte (TTFB stall)
+  // Root cause of v81/v82/v83 failures: all three tried to timeout a streaming
+  // SSE read loop inside waitUntil(). The proxy stall pattern is:
+  //   HTTP 200 headers arrive immediately → then the proxy goes silent forever.
+  // With stream:true the fetch() resolves the moment headers arrive, so any
+  // timeout on fetch() is already consumed. The stream read loop then blocks
+  // on reader.read() with nothing to abort it (v81), or with an abort mechanism
+  // that doesn't fire inside waitUntil() (v82 setTimeout, v83 addEventListener).
+  //
+  // With stream:false the proxy must deliver the ENTIRE response body before
+  // fetch() resolves. AbortSignal.timeout(55s) on the fetch() call covers the
+  // full round-trip — headers AND body — in a single await. If the proxy stalls
+  // at any point before the complete body arrives, the signal fires, fetch()
+  // throws TimeoutError, and the extraction catch block writes 'error'.
+  // No reader loop, no per-chunk complexity, no waitUntil() timer issues.
   const res = await fetch(`${baseUrl}/chat/completions`, {
     method: 'POST',
-    signal: AbortSignal.timeout(20000),
+    signal: AbortSignal.timeout(55000),
     headers: {
       'Authorization': `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
@@ -4388,67 +4390,18 @@ async function callLLM(systemPrompt: string, userPrompt: string, env: any, model
       ],
       max_tokens: maxTokens,
       temperature: 0.3,
-      stream: true,
+      stream: false,
     }),
   })
+
   if (!res.ok) {
     const errText = await res.text().catch(() => 'unknown error')
     throw new Error(`LLM API error ${res.status}: ${errText}`)
   }
-  if (!res.body) throw new Error('LLM returned no response body')
 
-  // Guard 2: 20s per-chunk idle timeout on every reader.read() call.
-  // If the proxy sends headers then goes silent, the next read() will race
-  // against AbortSignal.timeout(20s) — a native Workers API that fires inside
-  // waitUntil() — and throw TimeoutError, breaking us out of the loop.
-  const reader = res.body.getReader()
-  const decoder = new TextDecoder()
-  let fullContent = ''
-  let buffer = ''
-
-  // Helper: race a single reader.read() against a 20s native timeout
-  const readWithTimeout = (): Promise<ReadableStreamReadResult<Uint8Array>> =>
-    Promise.race([
-      reader.read(),
-      AbortSignal.timeout(20000).throwIfAborted === undefined
-        ? Promise.reject(new Error('AbortSignal.timeout not supported'))
-        : new Promise<never>((_, reject) =>
-            AbortSignal.timeout(20000).addEventListener('abort', (e) =>
-              reject((e.target as AbortSignal).reason ?? new Error('callLLM: read timeout'))
-            )
-          ),
-    ])
-
-  while (true) {
-    const { done, value } = await readWithTimeout()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
-    // Process complete SSE lines
-    const lines = buffer.split('\n')
-    buffer = lines.pop() ?? ''
-    for (const line of lines) {
-      const trimmed = line.trim()
-      if (!trimmed || trimmed === 'data: [DONE]') continue
-      if (!trimmed.startsWith('data: ')) continue
-      try {
-        const json = JSON.parse(trimmed.slice(6))
-        const delta = json.choices?.[0]?.delta?.content
-        if (delta) fullContent += delta
-      } catch {
-        // skip malformed SSE lines
-      }
-    }
-  }
-  // Flush any remaining buffer
-  if (buffer.trim().startsWith('data: ') && buffer.trim() !== 'data: [DONE]') {
-    try {
-      const json = JSON.parse(buffer.trim().slice(6))
-      const delta = json.choices?.[0]?.delta?.content
-      if (delta) fullContent += delta
-    } catch { /* ignore */ }
-  }
-
-  return fullContent
+  const data = await res.json() as any
+  const content = data?.choices?.[0]?.message?.content ?? ''
+  return content
 }
 
 // buildRFPPrompt — pure function, returns {systemPrompt, userPrompt} without calling the LLM.
