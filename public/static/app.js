@@ -4756,11 +4756,16 @@ rfpTabs.generate = function(rfpId, rfp) {
   const isUploaded    = rfp && rfp.upload_source === 'uploaded';
   const uploadedR2Key = (rfp && rfp.uploaded_rfp_r2_key) || '';
   const uploadedFilename = (rfp && rfp.uploaded_rfp_filename) || 'Uploaded RFP';
+  // OCR processing state: text placeholder set during async upload, not yet replaced by real content
+  const rfpOcrText = (rfp && rfp.uploaded_rfp_text) || '';
+  const isOcrProcessing = isUploaded && rfpOcrText.startsWith('[PDF:') && rfpOcrText.includes('in progress');
 
   // Init scoring matrix from RFP or defaults
   var scoringMatrix = getScoringMatrix(rfp);
   window._currentScoringMatrix = JSON.parse(JSON.stringify(scoringMatrix));
   setTimeout(function(){ restoreAutoSave(rfpId); }, 200);
+  // If OCR is still processing, start polling to auto-refresh when fields arrive
+  if (isOcrProcessing) { setTimeout(function(){ _startRfpFieldPoll(rfpId); }, 500); }
 
   // Build the right-panel preview HTML:
   // Priority 1 — AI-generated content exists → show letterhead iframe (same as always)
@@ -4770,7 +4775,8 @@ rfpTabs.generate = function(rfpId, rfp) {
   if (hasContent) {
     previewHtml = '<iframe id="rfpLetterheadFrame" src="/api/rfps/' + rfpId + '/preview-html" style="width:100%;height:100%;min-height:700px;border:none;display:block" loading="lazy"></iframe>';
   } else if (isUploaded && uploadedR2Key) {
-    previewHtml = '<iframe src="/api/proposals/pdf/' + encodeURIComponent(uploadedR2Key) + '" '
+    // #toolbar=0&navpanes=0 hides Chrome/Firefox PDF viewer toolbar and page-thumbnail sidebar
+    previewHtml = '<iframe src="/api/proposals/pdf/' + encodeURIComponent(uploadedR2Key) + '#toolbar=0&navpanes=0" '
       + 'style="width:100%;height:100%;border:none;display:block" loading="eager"></iframe>';
   } else {
     previewHtml = '<div style="text-align:center;padding:3rem 1.5rem;color:#9ca3af">'
@@ -4800,14 +4806,28 @@ rfpTabs.generate = function(rfpId, rfp) {
       + '</div>';
   }
 
-  // Info banner for uploaded RFPs (shown instead of or alongside the draft stage bar)
-  var uploadedBanner = (isUploaded && !hasContent)
-    ? '<div style="background:linear-gradient(90deg,#eff6ff,#dbeafe);border:1.5px solid #93c5fd;border-radius:10px;padding:0.65rem 1rem;display:flex;align-items:center;gap:0.75rem;margin-bottom:1rem">'
-      + '<i class="fas fa-file-import" style="color:#2563eb;font-size:1rem;flex-shrink:0"></i>'
-      + '<div style="flex:1"><span style="font-weight:700;color:#1e40af;font-size:0.88rem">RFP imported from PDF</span>'
-      + '<span style="color:#1d4ed8;font-size:0.82rem;margin-left:0.5rem">Fields have been pre-filled by AI · Review and edit, then click <strong>Generate RFP with AI</strong></span></div>'
-      + '</div>'
-    : '';
+  // Info / processing banner for uploaded RFPs
+  var uploadedBanner = '';
+  if (isUploaded && !hasContent) {
+    if (isOcrProcessing) {
+      // AI extraction still running — amber processing panel, start polling
+      uploadedBanner = '<div id="rfpOcrProcessingBanner" style="background:#fffde7;border:1.5px solid #ffe082;border-radius:10px;padding:0.75rem 1rem;display:flex;align-items:center;gap:0.875rem;margin-bottom:1rem">'
+        + '<i class="fas fa-bolt" style="color:#f59e0b;font-size:1.1rem;flex-shrink:0;animation:spin 1.5s linear infinite"></i>'
+        + '<div style="flex:1">'
+        + '<span style="font-weight:700;color:#92400e;font-size:0.88rem">AI is extracting fields from your PDF…</span>'
+        + '<span style="color:#78350f;font-size:0.82rem;margin-left:0.5rem">This usually takes 20–40 seconds. The form will refresh automatically.</span>'
+        + '</div>'
+        + '<button class="btn-ghost btn-sm" onclick="navigateTo(\'rfp_detail\',{rfpId:' + rfpId + ',tab:\'generate\'})" style="flex-shrink:0;font-size:0.78rem;color:#92400e"><i class="fas fa-sync-alt" style="margin-right:4px"></i>Refresh</button>'
+        + '</div>';
+    } else {
+      // Fields ready — blue info panel
+      uploadedBanner = '<div style="background:linear-gradient(90deg,#eff6ff,#dbeafe);border:1.5px solid #93c5fd;border-radius:10px;padding:0.65rem 1rem;display:flex;align-items:center;gap:0.75rem;margin-bottom:1rem">'
+        + '<i class="fas fa-file-import" style="color:#2563eb;font-size:1rem;flex-shrink:0"></i>'
+        + '<div style="flex:1"><span style="font-weight:700;color:#1e40af;font-size:0.88rem">RFP imported from PDF</span>'
+        + '<span style="color:#1d4ed8;font-size:0.82rem;margin-left:0.5rem">Fields have been pre-filled by AI · Review and edit, then click <strong>Generate RFP with AI</strong></span></div>'
+        + '</div>';
+    }
+  }
 
   setContent(
     genStageBar
@@ -9327,13 +9347,37 @@ async function uploadRfpPdf() {
     var rfp  = data.rfp;
     _uploadRfpFile = null;
     closeModal();
-    showToast(t('upload_rfp_parsed'), 'success', 6000);
-    // Navigate to Generate tab so user can review + regenerate
+    showToast('PDF uploaded — AI is extracting fields in the background. This takes ~30 seconds.', 'success', 8000);
+    // Navigate to Generate tab immediately; the tab will show a processing banner and poll for fields
     navigateTo('rfp_detail', { rfpId: rfp.id, tab: 'generate' });
   } catch(e) {
     setLoading(btn, false);
     showToast('Upload failed: ' + (e.message || e), 'error');
   }
+}
+
+// Poll the API for an uploaded RFP until OCR+AI extraction completes (fields populated)
+var _rfpFieldPollTimer = null;
+function _startRfpFieldPoll(rfpId) {
+  if (_rfpFieldPollTimer) clearInterval(_rfpFieldPollTimer);
+  var attempts = 0;
+  var maxAttempts = 20; // 20 × 4s = 80s max wait
+  _rfpFieldPollTimer = setInterval(async function() {
+    attempts++;
+    try {
+      var r = await fetch(API + '/rfps/' + rfpId);
+      if (!r.ok) return;
+      var rfp = await r.json();
+      var text = rfp.uploaded_rfp_text || '';
+      var isProcessing = text.startsWith('[PDF:') && text.includes('in progress');
+      if (!isProcessing || attempts >= maxAttempts) {
+        clearInterval(_rfpFieldPollTimer);
+        _rfpFieldPollTimer = null;
+        // Refresh the Generate tab to populate fields
+        navigateTo('rfp_detail', { rfpId: rfpId, tab: 'generate' });
+      }
+    } catch(e) { /* ignore poll errors */ }
+  }, 4000);
 }
 
 function buildDocUploadSlot(slotId, docLabel, icon, color) {
