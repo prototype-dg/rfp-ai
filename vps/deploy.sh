@@ -17,7 +17,7 @@ REMOTE="${1:-vps-pdf}"          # uses ~/.ssh/config Host alias by default
 PDF_RENDER_DIR="/opt/pdf-service"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-echo "▶ Deploying pdf-render service (v8) to ${REMOTE}"
+echo "▶ Deploying pdf-render service (v9) to ${REMOTE}"
 
 # 1. Upload server.js + package.json
 echo "  → Copying server.js..."
@@ -46,10 +46,10 @@ sleep 1
 PUBLIC=$(curl -sf https://api.cpc-rfp.website/pdf/ 2>/dev/null || echo '{}')
 echo "  Public health:   ${PUBLIC}"
 
-if [ "${VERSION}" = "8" ]; then
-  echo "✅ pdf-render is v8 — background colors fixed, topo SVG overflow fixed"
+if [ "${VERSION}" = "9" ]; then
+  echo "✅ pdf-render is v9 — margin gap fix (32mm top, 22mm bottom)"
 else
-  echo "⚠️  Expected version 8, got '${VERSION}'"
+  echo "⚠️  Expected version 9, got '${VERSION}'"
   echo "    Check logs: ssh ${REMOTE} 'journalctl -u pdf-render.service -n 50'"
   exit 1
 fi

@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 import { andersenEmailHtml, andersenPageHtml } from '../brand/letterhead'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-08-15-v58'  // v58: fix PDF HF background colors (add <style> tag inside templates), fix topo SVG overflow (removed from PDF template, contained in preview), fix preview footer missing
+const WORKER_VERSION = '2026-08-15-v59'  // v59: fix PDF content clipping — top margin 32mm (28mm header + 4mm gap), bottom 22mm (20mm footer + 2mm gap)
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.andersenlab.com.

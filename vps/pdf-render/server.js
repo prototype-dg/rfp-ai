@@ -47,11 +47,11 @@ const SECRET = process.env.PDF_SERVICE_SECRET || '';
 
 // ── Health check ────────────────────────────────────────────────────────────
 app.get('/', (req, res) => {
-  res.json({ status: 'ok', service: 'pdf-render', version: '8' });
+  res.json({ status: 'ok', service: 'pdf-render', version: '9' });
 });
 
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', version: '8' });
+  res.json({ status: 'ok', version: '9' });
 });
 
 // ── Auth middleware ──────────────────────────────────────────────────────────
@@ -399,7 +399,7 @@ body {
 .a-body { padding: 0; }
 @page {
   size: A4;
-  margin: 28mm 16mm 20mm 16mm;
+  margin: 32mm 16mm 22mm 16mm;
 }
 </style>
 </head>
@@ -566,13 +566,13 @@ app.post('/render-md-pdf', requireAuth, async (req, res) => {
       headerTemplate,
       footerTemplate,
 
-      // Margins MUST match template heights exactly:
-      //   top    28mm — height of headerTemplate (.hdr div)
-      //   bottom 20mm — height of footerTemplate (.ftr div)
+      // Margins = template height + small breathing gap:
+      //   top    32mm — header height (28mm) + 4mm gap before content
+      //   bottom 22mm — footer height (20mm) + 2mm gap after content
       //   left/right 16mm — standard document margins
       margin: {
-        top:    '28mm',
-        bottom: '20mm',
+        top:    '32mm',
+        bottom: '22mm',
         left:   '16mm',
         right:  '16mm',
       },
@@ -619,7 +619,7 @@ app.post('/render-pdf', requireAuth, async (req, res) => {
         displayHeaderFooter: true,
         headerTemplate,
         footerTemplate,
-        margin: { top: '28mm', bottom: '20mm', left: '16mm', right: '16mm' },
+        margin: { top: '32mm', bottom: '22mm', left: '16mm', right: '16mm' },
       });
       await browser.close();
       browser = null;
@@ -663,5 +663,5 @@ app.post('/render-pdf', requireAuth, async (req, res) => {
 });
 
 app.listen(PORT, '127.0.0.1', () => {
-  console.log(`[pdf-render] v8 listening on 127.0.0.1:${PORT} (secret: ${!!SECRET})`);
+  console.log(`[pdf-render] v9 listening on 127.0.0.1:${PORT} (secret: ${!!SECRET})`);
 });
