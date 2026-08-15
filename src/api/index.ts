@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 import { andersenEmailHtml, andersenPageHtml } from '../brand/letterhead'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-08-15-v71'  // v71: Upload RFP modal simplified (no PDF preview in modal); Generate tab shows uploaded PDF in right panel, pre-filled fields in left form, blue info banner
+const WORKER_VERSION = '2026-08-15-v72'  // v72: Country field → searchable dropdown with region groups on Generate tab, Create RFP modal, Upload RFP modal
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.andersenlab.com.

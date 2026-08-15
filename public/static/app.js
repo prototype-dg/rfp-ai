@@ -4865,7 +4865,7 @@ rfpTabs.generate = function(rfpId, rfp) {
     + '</div>'
     + '<div class="form-group" style="margin:0">'
     + '<label style="display:flex;align-items:center;gap:5px;font-size:0.82rem;font-weight:600;color:#374151;margin-bottom:4px"><i class="fas fa-globe" style="color:#3b82f6;font-size:0.72rem"></i>' + t('create_rfp_country') + '</label>'
-    + '<input id="rfpCountryInput" value="' + escHtml(countryOfIssueVal) + '" placeholder="' + t('ph_rfp_country') + '" oninput="scheduleFieldSave(' + rfpId + ',this.id)" onchange="scheduleFieldSave(' + rfpId + ',this.id)" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:7px 10px;font-size:0.84rem">'
+    + _buildCountrySelect('rfpCountryInput', countryOfIssueVal)
     + '</div></div>'
 
     // Background
@@ -8947,6 +8947,174 @@ async function saveProcurementEmail() {
 var _createRfpDocFiles = [];   // array of { slotId, file, label }
 var _uploadRfpFile    = null;  // the selected PDF for the upload flow
 
+// ── Country searchable dropdown ───────────────────────────────────────────────
+// All countries grouped by region. Value = country name (stored as plain text in DB).
+var _COUNTRY_GROUPS = [
+  { label: 'Middle East', countries: [
+    'United Arab Emirates','Saudi Arabia','Qatar','Kuwait','Bahrain','Oman','Jordan','Lebanon','Iraq','Israel','Egypt','Palestine','Yemen','Libya','Tunisia','Algeria','Morocco','Syria',
+  ]},
+  { label: 'Europe', countries: [
+    'Germany','France','United Kingdom','Poland','Netherlands','Belgium','Switzerland','Austria','Sweden','Norway','Denmark','Finland','Italy','Spain','Portugal','Czech Republic',
+    'Hungary','Romania','Slovakia','Bulgaria','Croatia','Slovenia','Serbia','Ukraine','Russia','Turkey','Greece','Ireland','Luxembourg','Estonia','Latvia','Lithuania',
+  ]},
+  { label: 'Asia Pacific', countries: [
+    'China','Japan','South Korea','India','Singapore','Hong Kong','Australia','New Zealand','Malaysia','Indonesia','Thailand','Vietnam','Philippines','Pakistan','Bangladesh',
+    'Sri Lanka','Cambodia','Myanmar','Taiwan',
+  ]},
+  { label: 'Americas', countries: [
+    'United States','Canada','Mexico','Brazil','Argentina','Chile','Colombia','Peru','Ecuador','Venezuela','Bolivia','Paraguay','Uruguay',
+  ]},
+  { label: 'Africa', countries: [
+    'South Africa','Nigeria','Kenya','Ghana','Ethiopia','Tanzania','Uganda','Rwanda','Senegal','Ivory Coast','Cameroon','Angola','Mozambique','Zambia','Zimbabwe',
+  ]},
+  { label: 'Other', countries: [
+    'Afghanistan','Albania','Armenia','Azerbaijan','Belarus','Bosnia and Herzegovina','Georgia','Kazakhstan','Kosovo','Kyrgyzstan','Moldova','Mongolia','Montenegro','North Macedonia',
+    'Tajikistan','Turkmenistan','Uzbekistan','Other',
+  ]},
+];
+
+/**
+ * Build a searchable country dropdown.
+ * Renders a visible text input + hidden <select> + dropdown panel.
+ * The hidden <select> carries the id (selectId) so scheduleFieldSave() reads .value from it.
+ * The input triggers real-time filtering; clicking outside closes the panel.
+ * @param {string} selectId   — id of the hidden <select> (wired to auto-save)
+ * @param {string} selectedVal — pre-selected country name (empty string = none)
+ * @returns {string} HTML
+ */
+function _buildCountrySelect(selectId, selectedVal) {
+  // Flatten for option list
+  var allOptions = [];
+  _COUNTRY_GROUPS.forEach(function(g) {
+    g.countries.forEach(function(c) { allOptions.push({ label: c, group: g.label }); });
+  });
+
+  // Hidden <select> — carries the value; schedule-save reads .value from this
+  var hiddenSelect = '<select id="' + selectId + '" style="display:none">'
+    + '<option value=""></option>'
+    + allOptions.map(function(o) {
+        return '<option value="' + escHtml(o.label) + '"' + (o.label === selectedVal ? ' selected' : '') + '>' + escHtml(o.label) + '</option>';
+      }).join('')
+    + '</select>';
+
+  // Inline JS handlers (all namespaced by selectId to avoid collision)
+  var wrapperId  = selectId + '_wrap';
+  var inputId    = selectId + '_search';
+  var listId     = selectId + '_list';
+
+  // Build grouped option items HTML for the dropdown
+  var itemsHtml = '';
+  _COUNTRY_GROUPS.forEach(function(g) {
+    itemsHtml += '<div style="padding:4px 10px 2px;font-size:0.68rem;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:0.05em;background:#f9fafb;position:sticky;top:0">' + escHtml(g.label) + '</div>';
+    g.countries.forEach(function(c) {
+      var selected = (c === selectedVal);
+      itemsHtml += '<div data-val="' + escHtml(c) + '" '
+        + 'onclick="_csPick(\'' + selectId + '\',this)" '
+        + 'style="padding:6px 12px;font-size:0.83rem;cursor:pointer;color:#1f2937;'
+        + (selected ? 'background:#fef3c7;font-weight:600' : '')
+        + '" onmouseover="this.style.background=\'#f3f4f6\'" onmouseout="this.style.background=\'' + (selected ? '#fef3c7' : '') + '\'">'
+        + escHtml(c) + '</div>';
+    });
+  });
+
+  var inputHtml = '<div id="' + wrapperId + '" style="position:relative">'
+    + '<div style="position:relative">'
+    + '<i class="fas fa-globe" style="position:absolute;left:9px;top:50%;transform:translateY(-50%);color:#3b82f6;font-size:0.72rem;pointer-events:none"></i>'
+    + '<input id="' + inputId + '" type="text" autocomplete="off" '
+    + 'value="' + escHtml(selectedVal) + '" '
+    + 'placeholder="Search country…" '
+    + 'oninput="_csFilter(\'' + selectId + '\')" '
+    + 'onfocus="_csOpen(\'' + selectId + '\')" '
+    + 'style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:7px 10px 7px 28px;font-size:0.84rem;box-sizing:border-box">'
+    + '</div>'
+    + '<div id="' + listId + '" style="display:none;position:absolute;top:calc(100% + 3px);left:0;right:0;background:#fff;border:1px solid #d1d5db;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.12);max-height:220px;overflow-y:auto;z-index:9999">'
+    + itemsHtml
+    + '</div>'
+    + '</div>';
+
+  return hiddenSelect + inputHtml;
+}
+
+// Called when user picks a country from the dropdown list
+function _csPick(selectId, el) {
+  var val = el.getAttribute('data-val') || '';
+  var sel = document.getElementById(selectId);
+  var inp = document.getElementById(selectId + '_search');
+  var lst = document.getElementById(selectId + '_list');
+  if (sel) sel.value = val;
+  if (inp) inp.value = val;
+  if (lst) lst.style.display = 'none';
+  // Trigger auto-save on the Generate tab country select
+  if (selectId === 'rfpCountryInput' && typeof scheduleFieldSave === 'function') {
+    var rfpId = (typeof appState !== 'undefined' && appState.currentRfpId) ? appState.currentRfpId : null;
+    if (rfpId) scheduleFieldSave(rfpId, selectId);
+  }
+  // Also fire a native 'change' event so any other listeners pick up the new value
+  if (sel) { try { sel.dispatchEvent(new Event('change')); } catch(_) {} }
+}
+
+// Filter the visible list items based on what's typed
+function _csFilter(selectId) {
+  var inp  = document.getElementById(selectId + '_search');
+  var lst  = document.getElementById(selectId + '_list');
+  var sel  = document.getElementById(selectId);
+  if (!inp || !lst) return;
+  var q = inp.value.trim().toLowerCase();
+  // Clear the hidden select when text doesn't match a real country (user is typing)
+  if (sel) sel.value = '';
+  lst.style.display = 'block';
+  var items = lst.querySelectorAll('[data-val]');
+  var headers = lst.querySelectorAll('div:not([data-val])');
+  var groupHasVisible = {};
+  items.forEach(function(item) {
+    var match = !q || item.getAttribute('data-val').toLowerCase().indexOf(q) !== -1;
+    item.style.display = match ? '' : 'none';
+    if (match) {
+      // Mark the previous sticky header as having visible items
+      var prev = item.previousElementSibling;
+      while (prev && !prev.hasAttribute('data-val')) {
+        if (prev.style && prev.style.textTransform === 'uppercase') { groupHasVisible[prev.textContent] = true; break; }
+        prev = prev.previousElementSibling;
+      }
+    }
+  });
+  // Hide group headers with no visible items
+  var allDivs = lst.querySelectorAll('div');
+  var lastHeader = null;
+  allDivs.forEach(function(div) {
+    if (!div.hasAttribute('data-val')) { lastHeader = div; return; }
+    if (div.style.display !== 'none' && lastHeader) { lastHeader._hasVisible = true; }
+  });
+  allDivs.forEach(function(div) {
+    if (!div.hasAttribute('data-val')) {
+      div.style.display = (div._hasVisible || !q) ? '' : 'none';
+      div._hasVisible = false; // reset for next filter
+    }
+  });
+}
+
+// Open the dropdown list
+function _csOpen(selectId) {
+  var lst = document.getElementById(selectId + '_list');
+  if (lst) lst.style.display = 'block';
+  // Close on click outside
+  var handler = function(e) {
+    var wrap = document.getElementById(selectId + '_wrap');
+    if (wrap && !wrap.contains(e.target)) {
+      if (lst) lst.style.display = 'none';
+      // If input doesn't match any option, restore the last real select value
+      var sel = document.getElementById(selectId);
+      var inp = document.getElementById(selectId + '_search');
+      if (sel && inp) {
+        if (sel.value) { inp.value = sel.value; }
+        else { inp.value = ''; }
+      }
+      document.removeEventListener('mousedown', handler);
+    }
+  };
+  document.addEventListener('mousedown', handler);
+}
+
 // ── Currency dropdown helper (used in both create & upload modals) ────────────
 function _buildCurrencySelect(selectId, selectedCode) {
   var groups = [
@@ -9042,7 +9210,7 @@ function showCreateRfpForm() {
     + _buildCurrencySelect('newRfpCurrency', defCurrency)
     + '</div>'
     + '<div class="form-group" style="margin:0"><label style="display:flex;align-items:center;gap:5px"><i class="fas fa-globe" style="color:#3b82f6;font-size:0.75rem"></i>' + t('create_rfp_country') + '</label>'
-    + '<input id="newRfpCountry" placeholder="' + t('ph_rfp_country') + '" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:7px 10px;font-size:0.84rem">'
+    + _buildCountrySelect('newRfpCountry', '')
     + '</div></div>'
 
     // Two upload slots
@@ -9095,7 +9263,7 @@ function showUploadRfpForm() {
     + _buildCurrencySelect('uploadRfpCurrency', defCurrency)
     + '</div>'
     + '<div class="form-group" style="margin:0"><label style="display:flex;align-items:center;gap:5px"><i class="fas fa-globe" style="color:#3b82f6;font-size:0.75rem"></i>' + t('create_rfp_country') + '</label>'
-    + '<input id="uploadRfpCountry" placeholder="' + t('ph_rfp_country') + '" style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:7px 10px;font-size:0.84rem">'
+    + _buildCountrySelect('uploadRfpCountry', '')
     + '</div></div>'
 
     // Action buttons
