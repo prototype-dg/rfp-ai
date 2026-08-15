@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 import { andersenEmailHtml, andersenPageHtml } from '../brand/letterhead'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-08-15-v85'  // v85: callLLM restored to stream:true SSE reader (proxy requires streaming); OCR callback runs extraction SYNCHRONOUSLY before returning 200 — eliminates waitUntil() entirely; matches rerun-ai-extraction path which always works
+const WORKER_VERSION = '2026-08-15-v86'  // v86: single-phase LLM extraction — full document in one call with dynamic token budget proportional to text size; scoring_criteria + vendor_requirements returned inside same JSON object
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.andersenlab.com.
@@ -1289,10 +1289,11 @@ function parseJsonArray(raw: string): any[] | null {
   }
 }
 
-// ── Three-phase LLM extraction (v77: phases 2+3 parallel, focused text, better errors) ──
-// Phase 1: scalar fields (sequential — needed before parallel phases start)
-// Phase 2+3: scoring criteria array + requirements array — run in PARALLEL to halve wall-clock
-// Uses focused text extraction per phase to reduce noise & token count.
+// ── Single-phase LLM extraction (v86) ────────────────────────────────────────
+// One LLM call receives the full OCR text and returns a single JSON object
+// containing all scalar fields + scoring_criteria array + vendor_requirements array.
+// Token budget is proportional to text size so the model never truncates output
+// on large documents.
 async function extractRfpFieldsFromOcr(ocrText: string, env: any, rfpIdLog: string): Promise<{
   extracted: any,
   scoringMatrixJson: string | null,
@@ -1301,136 +1302,114 @@ async function extractRfpFieldsFromOcr(ocrText: string, env: any, rfpIdLog: stri
 }> {
   const phaseErrors: string[] = []
 
-  // ── Focused text slices per phase (computed before launching all 3 in parallel) ─
-  // Phase 1: first 40k chars covers background, objectives, scope, response format, timeline
-  const phase1Text = ocrText.slice(0, 40000)
-  // Phase 2: anchored to the evaluation/scoring section
-  const scoringFocusText = extractFocusedSection(
-    ocrText,
-    ['evaluation criteria', 'scoring criteria', 'evaluation weightage', 'criteria weights', 'weighting'],
-    25000
-  )
-  // Phase 3: anchored to requirements/scope section — 8k chars to avoid proxy throttling
-  const requirementsFocusText = extractFocusedSection(
-    ocrText,
-    ['shall', 'must ', 'mandatory', 'required', 'requirement', 'scope of work'],
-    8000
-  )
+  // ── Dynamic token budget ──────────────────────────────────────────────────
+  // Rule of thumb: ~0.75 tokens per char of input, output JSON is ~15% of input.
+  // We target output_tokens = max(4000, ceil(inputChars * 0.15)) capped at 12000
+  // (proxy limit for gpt-5-mini). This ensures a 57k-char doc gets ~8500 output
+  // tokens — enough for full scalar fields + 5 scoring criteria + 40 requirements.
+  const inputChars = ocrText.length
+  const maxTokens = Math.min(12000, Math.max(4000, Math.ceil(inputChars * 0.15)))
+  console.log(`[rfp-ai-extract] ${rfpIdLog} single-phase — inputChars=${inputChars} maxTokens=${maxTokens}`)
 
-  // ── Phases 1+2 in PARALLEL, Phase 3 SEQUENTIAL after ────────────────────
-  // Phase 1 (scalar JSON object) and Phase 2 (scoring array) run together — 2 concurrent streams.
-  // Phase 3 (requirements array) runs ALONE after 1+2 complete — avoids the proxy's 3-concurrent-
-  // stream drop that causes 0-byte responses on the 3rd simultaneous request.
-  // Total wall-clock: max(P1,P2) + P3 ≈ 25s + 20s = ~45s — well within waitUntil() budget.
-  const [phase1Result, phase2Result] = await Promise.allSettled([
-    // ── Phase 1: scalar fields ──────────────────────────────────────────────
-    callLLM(
-      `You are an expert procurement analyst. Extract structured data from an RFP document.
-Return ONLY a valid JSON object with these exact keys (no markdown fences, no extra keys):
+  const SYSTEM_PROMPT = `You are an expert procurement analyst specializing in processing complex, often imperfect, OCR-scanned documents (like RFPs). Your task is to analyze the provided RFP text and extract a comprehensive, structured JSON object containing all key information.
+
+**Instructions:**
+1.  **Analyze the Text:** Carefully read the entire RFP document text provided below. Treat it as a single, noisy data source. Extract information logically, ignoring minor OCR artifacts.
+2.  **Generate JSON:** Produce a **single, valid JSON object** containing the following specific keys. Do not include any explanatory text, markdown formatting (like \`\`\`json), or additional keys outside of the defined structure.
+3.  **Handle Ambiguity:** If a specific piece of information is not explicitly stated in the document, use your best inference based on the context. If you must infer, denote it implicitly within the value (e.g., for budget, leave an empty string \`""\`). For the "Scoring Criteria" section, if exact percentages are not given, derive them based on textual emphasis or distribute the remaining percentage to reach 100%.
+4.  **Data Quality:** The source text is from an OCR process and may contain typos, missing characters, or misaligned formatting. Be resilient to these imperfections and focus on extracting the semantic meaning.
+
+**Output JSON Structure:**
 {
-  "title": "<full RFP/project title as stated in doc, max 120 chars>",
-  "category": "<one of: IT & Digital Transformation | ERP & Business Applications | Data & Analytics | Cloud & Infrastructure | Cybersecurity | AI & Machine Learning | Digital Marketing | Consulting | Construction | Professional Services>",
-  "background": "<who is issuing this RFP, organisational context, why this project exists — max 800 chars>",
-  "objectives": "<what must be achieved by this project — max 700 chars>",
-  "scope": "<all workstreams, deliverables, and in-scope items — max 1200 chars>",
-  "tech_requirements": "<technical and functional requirements, architecture constraints, SLA/NFR, compliance — max 900 chars>",
-  "budget": "<budget ceiling digits only, no currency symbols — empty string if not stated>",
-  "deadline": "<proposal submission deadline YYYY-MM-DD — empty string if not found>"
-}`,
-      `Extract all structured fields from this RFP:\n\n${phase1Text}`,
-      env, 'gpt-5-mini', 2000
-    ),
-    // ── Phase 2: evaluation criteria array ─────────────────────────────────
-    callLLM(
-      `You are an expert procurement analyst. Extract ALL evaluation/scoring criteria from an RFP document.
-Return ONLY a valid JSON array — no markdown fences, no explanation, no extra text before or after.
-Each element must be: {"criterion":"<name>","weight":<number>,"description":"<1-2 sentence description>"}.
-Rules:
-- weight values are whole numbers (percentages). Top-level weights must sum to 100.
-- If the document lists both category weights and sub-criterion weights, use only the TOP-LEVEL category weights.
-- Map sub-criteria as part of the "description" field instead.
-- If no explicit weights exist, distribute based on emphasis (still sum to 100).
-- Extract EVERY distinct top-level criterion category mentioned (Vendor Profile, Technical, Commercial, Risk, Sustainability, etc).
-Example output: [{"criterion":"Technical","weight":44,"description":"Architecture fit, capabilities, support and implementation methodology"},{"criterion":"Commercial","weight":48,"description":"Total cost of commitment and pricing model"},{"criterion":"Vendor Profile","weight":2,"description":"Industry experience and bank reference"},{"criterion":"Risk","weight":1,"description":"Financial and operational stability, data protection"},{"criterion":"Sustainability","weight":5,"description":"ESG questionnaire"}]`,
-      `Extract all evaluation/scoring criteria from this RFP section:\n\n${scoringFocusText}`,
-      env, 'gpt-5-mini', 1500
-    ),
-  ])
+  "title": "<string, max 120 chars>",
+  "category": "<string, one of: IT & Digital Transformation | ERP & Business Applications | Data & Analytics | Cloud & Infrastructure | Cybersecurity | AI & Machine Learning | Digital Marketing | Consulting | Construction | Professional Services>",
+  "background": "<string, max 800 chars>",
+  "objectives": "<string, max 700 chars>",
+  "scope": "<string, max 1200 chars>",
+  "tech_requirements": "<string, max 900 chars>",
+  "budget": "<string, digits only, empty string if not stated>",
+  "deadline": "<string, YYYY-MM-DD, empty string if not found>",
+  "scoring_criteria": [
+    {"criterion": "<string>", "weight": <number>, "description": "<string, 1-2 sentences>"}
+  ],
+  "vendor_requirements": [
+    {"id": "req_<number>", "text": "<string>", "mandatory": <boolean>}
+  ]
+}
 
-  // ── Phase 3 alone — SEQUENTIAL, no concurrent proxy streams ───────────────
-  const phase3Result = await (async (): Promise<PromiseSettledResult<string>> => {
-    try {
-      const val = await callLLM(
-        `You are an expert procurement analyst. Extract vendor requirements from an RFP document.
-Return ONLY a valid JSON array — no markdown fences, no explanation, no extra text before or after.
-Each element must be: {"id":"req_N","text":"<requirement text>","mandatory":<true|false>}.
-Rules:
-- mandatory=true when the text contains "must", "shall", "required", "mandatory", or equivalent imperative language.
-- mandatory=false for "should", "may", "recommended", "preferred".
-- Extract 15–40 requirements. Cover: technical, security, commercial, submission, compliance requirements.
-- Each requirement should be a single actionable statement (not a section heading).
-- Number sequentially: req_1, req_2, req_3, ...`,
-        `Extract all vendor requirements from this RFP section:\n\n${requirementsFocusText}`,
-        env, 'gpt-5-mini', 2500
-      )
-      return { status: 'fulfilled', value: val }
-    } catch (e: any) {
-      return { status: 'rejected', reason: e }
-    }
-  })()
+**Extraction Rules & Details:**
 
-  // ── Process Phase 1 result ─────────────────────────────────────────────────
+1.  **Basic Fields (\`title\`, \`category\`, \`background\`, \`objectives\`, \`scope\`, \`tech_requirements\`, \`budget\`, \`deadline\`):**
+    *   **title:** The full name of the project or RFP (e.g., "Retail Online channels Build 'ila bank'").
+    *   **category:** Choose the most appropriate single category from the provided list.
+    *   **background:** The issuer (e.g., "Bank ABC"), organizational context, and the reason the project exists (usually found in the "BACKGROUND" or "INTRODUCTION" section).
+    *   **objectives:** What the project aims to achieve (from the "Project Objectives" section).
+    *   **scope:** What is included in the project (workstreams, deliverables, in-scope items - found in the "SCOPE OF WORK" and "Project Scope Overview").
+    *   **tech_requirements:** Key technical details like the target architecture (e.g., "modular, API-first, deployable on AWS"), key non-functional requirements (e.g., "≥500 TPS, 99.95% availability"), and compliance mandates (e.g., "secure by design, auditable").
+    *   **budget:** Check for an explicit budget ceiling. If none, return an empty string.
+    *   **deadline:** Find the proposal submission date (e.g., "01/07/2026" -> "2026-07-01"). If not found, return an empty string.
+
+2.  **Scoring Criteria (\`scoring_criteria\`):**
+    *   Extract **ALL** top-level evaluation categories (e.g., "Vendor Profile", "Technical", "Commercial", "Risk", "Sustainability").
+    *   Each object must have \`"criterion"\` (the name), \`"weight"\` (a whole number percentage), and a \`"description"\` (a 1-2 sentence summary of what that category evaluates).
+    *   **WEIGHT SUMMATION RULE:** The \`"weight"\` values for all top-level categories must sum to **100**. If explicit weights aren't provided, distribute them logically based on emphasis (e.g., Commercial and Technical often have high weights).
+    *   **DESCRIPTION RULE:** If the document lists sub-criteria (e.g., for "Technical": "Architecture", "Functionality", "Support"), combine them into the \`"description"\` field of the top-level category.
+
+3.  **Vendor Requirements (\`vendor_requirements\`):**
+    *   **Extract 15-40 requirements** from the text.
+    *   Each requirement must be an **actionable statement**, not just a heading.
+    *   **\`mandatory\`:** Set to \`true\` if the requirement text uses strong imperative language like "must", "shall", "required", "mandatory", or the phrase "is expected to".
+    *   **\`mandatory\`:** Set to \`false\` if the language is suggestive like "should", "may", "recommended", or "preferred".
+    *   **Coverage:** Ensure the extracted requirements cover a wide range of areas including technical capabilities, security, commercial obligations (e.g., pricing format), submission rules (e.g., format, deadlines), and compliance (e.g., confidentiality, conflict of interest).
+    *   **ID:** Number them sequentially starting from \`req_1\`.`
+
+  const USER_PROMPT = `Extract all structured fields from this RFP document and return a single JSON object as specified:\n\n${ocrText}`
+
   let extracted: any = {}
-  if (phase1Result.status === 'fulfilled') {
-    const raw1 = phase1Result.value
-    const c1 = raw1.replace(/^```json\s*/i,'').replace(/^```\s*/i,'').replace(/\s*```\s*$/i,'').trim()
-    const s1 = c1.indexOf('{'), e1 = c1.lastIndexOf('}')
-    try {
-      if (s1 !== -1 && e1 !== -1) extracted = JSON.parse(c1.slice(s1, e1 + 1))
-      console.log(`[rfp-ai-extract] ${rfpIdLog} phase1 ok: title="${extracted.title}"`)
-    } catch (parseErr: any) {
-      const msg = `phase1 parse error: ${parseErr.message} — raw(200): ${raw1.slice(0, 200)}`
-      console.error(`[rfp-ai-extract] ${rfpIdLog} ${msg}`)
-      phaseErrors.push(msg)
-    }
-  } else {
-    const msg = `phase1 failed: ${phase1Result.reason?.message || phase1Result.reason}`
-    console.error(`[rfp-ai-extract] ${rfpIdLog} ${msg}`)
-    phaseErrors.push(msg)
-  }
-
-  // ── Process Phase 2 result ─────────────────────────────────────────────────
   let scoringMatrixJson: string | null = null
-  if (phase2Result.status === 'fulfilled') {
-    const arr = parseJsonArray(phase2Result.value)
-    if (arr) {
-      scoringMatrixJson = JSON.stringify(arr)
-      console.log(`[rfp-ai-extract] ${rfpIdLog} phase2 scoring ok: ${arr.length} criteria`)
-    } else {
-      const msg = `phase2 scoring: LLM returned unparseable output (len=${phase2Result.value.length}): ${phase2Result.value.slice(0, 200)}`
-      console.warn(`[rfp-ai-extract] ${rfpIdLog} ${msg}`)
-      phaseErrors.push(msg)
-    }
-  } else {
-    const msg = `phase2 scoring failed: ${phase2Result.reason?.message || phase2Result.reason}`
-    console.error(`[rfp-ai-extract] ${rfpIdLog} ${msg}`)
-    phaseErrors.push(msg)
-  }
-
-  // ── Process Phase 3 result ─────────────────────────────────────────────────
   let requirementGlossaryJson: string | null = null
-  if (phase3Result.status === 'fulfilled') {
-    const arr = parseJsonArray(phase3Result.value)
-    if (arr) {
-      requirementGlossaryJson = JSON.stringify(arr)
-      console.log(`[rfp-ai-extract] ${rfpIdLog} phase3 glossary ok: ${arr.length} requirements`)
+
+  try {
+    const raw = await callLLM(SYSTEM_PROMPT, USER_PROMPT, env, 'gpt-5-mini', maxTokens)
+
+    // ── Parse the single returned JSON object ─────────────────────────────
+    const cleaned = raw
+      .replace(/^```json\s*/i, '')
+      .replace(/^```\s*/i, '')
+      .replace(/\s*```\s*$/i, '')
+      .trim()
+    const s = cleaned.indexOf('{')
+    const e = cleaned.lastIndexOf('}')
+    if (s === -1 || e === -1 || e <= s) {
+      throw new Error(`No JSON object found in LLM output (len=${raw.length}): ${raw.slice(0, 300)}`)
+    }
+    const parsed = JSON.parse(cleaned.slice(s, e + 1))
+
+    // ── Split into scalar fields vs arrays ────────────────────────────────
+    const { scoring_criteria, vendor_requirements, ...scalarFields } = parsed
+    extracted = scalarFields
+
+    if (Array.isArray(scoring_criteria) && scoring_criteria.length > 0) {
+      scoringMatrixJson = JSON.stringify(scoring_criteria)
+      console.log(`[rfp-ai-extract] ${rfpIdLog} scoring ok: ${scoring_criteria.length} criteria`)
     } else {
-      const msg = `phase3 glossary: LLM returned unparseable output (len=${phase3Result.value.length}): ${phase3Result.value.slice(0, 200)}`
+      const msg = 'scoring_criteria missing or empty in LLM output'
       console.warn(`[rfp-ai-extract] ${rfpIdLog} ${msg}`)
       phaseErrors.push(msg)
     }
-  } else {
-    const msg = `phase3 glossary failed: ${phase3Result.reason?.message || phase3Result.reason}`
+
+    if (Array.isArray(vendor_requirements) && vendor_requirements.length > 0) {
+      requirementGlossaryJson = JSON.stringify(vendor_requirements)
+      console.log(`[rfp-ai-extract] ${rfpIdLog} requirements ok: ${vendor_requirements.length} items`)
+    } else {
+      const msg = 'vendor_requirements missing or empty in LLM output'
+      console.warn(`[rfp-ai-extract] ${rfpIdLog} ${msg}`)
+      phaseErrors.push(msg)
+    }
+
+    console.log(`[rfp-ai-extract] ${rfpIdLog} single-phase ok: title="${extracted.title}"`)
+  } catch (e: any) {
+    const msg = `single-phase extraction failed: ${e.message}`
     console.error(`[rfp-ai-extract] ${rfpIdLog} ${msg}`)
     phaseErrors.push(msg)
   }
