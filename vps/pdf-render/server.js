@@ -49,10 +49,10 @@ const SECRET = process.env.PDF_SERVICE_SECRET || '';
 
 // ── Health check ────────────────────────────────────────────────────────────
 app.get('/', (req, res) => {
-  res.json({ status: 'ok', service: 'pdf-render', version: '11' });
+  res.json({ status: 'ok', service: 'pdf-render', version: '12' });
 });
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', version: '11' });
+  res.json({ status: 'ok', version: '12' });
 });
 
 // ── Auth middleware ──────────────────────────────────────────────────────────
@@ -94,13 +94,13 @@ const MONO = "'Courier New', monospace";
 const TYPOGRAPHY_CSS = `
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { font-family: Arial, 'Segoe UI', Helvetica, sans-serif; font-size: 10.5pt; line-height: 1.65; color: #020303; }
-  h1 { font-size: 16pt; font-weight: 700; border-bottom: 2.5px solid #FFDB00; padding-bottom: 6pt; margin: 0 0 12pt; page-break-after: avoid; }
-  h2 { font-size: 12pt; font-weight: 700; color: #020303; border-bottom: 1px solid #E0E0E0; margin: 18pt 0 6pt; padding-bottom: 3pt; page-break-after: avoid; }
-  h3 { font-size: 10.5pt; font-weight: 700; color: #3A3E45; margin: 12pt 0 4pt; page-break-after: avoid; }
-  h4 { font-size: 10pt; font-weight: 600; color: #556170; margin: 10pt 0 3pt; }
-  p  { margin: 0 0 8pt; orphans: 3; widows: 3; }
-  ul, ol { margin: 0 0 8pt; padding-left: 20pt; }
-  li { margin-bottom: 3pt; page-break-inside: avoid; orphans: 2; widows: 2; }
+  h1 { font-size: 16pt; font-weight: 700; border-bottom: 2.5px solid #FFDB00; padding-bottom: 6pt; margin: 0 0 12pt; page-break-after: avoid; page-break-inside: avoid; }
+  h2 { font-size: 12pt; font-weight: 700; color: #020303; border-bottom: 1px solid #E0E0E0; margin: 14pt 0 5pt; padding-bottom: 3pt; page-break-after: avoid; page-break-inside: avoid; }
+  h3 { font-size: 10.5pt; font-weight: 700; color: #3A3E45; margin: 10pt 0 3pt; page-break-after: avoid; page-break-inside: avoid; }
+  h4 { font-size: 10pt; font-weight: 600; color: #556170; margin: 8pt 0 2pt; page-break-after: avoid; }
+  p  { margin: 0 0 7pt; orphans: 2; widows: 2; }
+  ul, ol { margin: 0 0 7pt; padding-left: 20pt; }
+  li { margin-bottom: 2pt; page-break-inside: avoid; orphans: 2; widows: 2; }
   hr { border: none; border-top: 2px solid #FFDB00; margin: 16pt 0; }
   table { width: 100%; border-collapse: collapse; font-size: 9.5pt; margin: 8pt 0 12pt; }
   thead { display: table-header-group; }
@@ -517,72 +517,68 @@ body { background: #fff; margin: 0; padding: 0; }
 // ─────────────────────────────────────────────────────────────────────────────
 function buildHeaderSvg(refBadge) {
   // Dimensions in px (96 dpi basis — Puppeteer HF template viewport)
-  // Total height = 32mm = 121px @ 96dpi  (Puppeteer uses 96dpi for HF)
-  // Width  = A4 width = 794px
-  const W     = 794;
-  const H     = 121;   // 32mm @ 96dpi
-  const LKH   = 42;    // lockup row height (11mm)
-  const BAND  = 74;    // band bottom y  (LKH + band_height 32px = 74... adjusted below)
-  const BNDH  = 74;    // band height px (row from y=42 to y=116)
-  const ACCY  = 116;   // accent strip top y
-  const PAD   = 60;    // horizontal padding px (≈16mm)
+  // Total height = 32mm = 121px @ 96dpi
+  // Width = A4 width = 794px
+  //
+  // Layout (v12 — fixed):
+  //   Row 1 (0–48px):    white lockup — wordmark LEFT, RFP badge RIGHT (no duplicate logo)
+  //   Row 2 (48–116px):  yellow band — TOPO LINES ONLY (no wordmark, no badge text)
+  //   Row 3 (116–121px): white accent strip with top border
+  const W   = 794;
+  const H   = 121;   // 32mm @ 96dpi
+  const LKH = 48;    // lockup row height (slightly taller for breathing room)
+  const PAD = 60;    // horizontal padding (≈16mm)
 
-  // Wordmark glyph: black square with two yellow slots (scaled to fit lockup)
-  // Glyph box: 14×14px, text next to it
+  // Wordmark glyph centred in lockup row
   const glyphX = PAD;
-  const glyphY = (LKH - 16) / 2;  // vertically centred in lockup row
+  const glyphY = Math.round((LKH - 16) / 2);  // centre vertically
 
-  // Topo contour paths inside yellow band (y coords relative to band start y=42)
-  // Three gentle curves across the full width
-  const topoY = 42; // band starts here
-  const topo1 = `M-10,${topoY+14} Q100,${topoY+4} 220,${topoY+20} T460,${topoY+24} Q580,${topoY+30} 810,${topoY+12}`;
-  const topo2 = `M-10,${topoY+28} Q120,${topoY+14} 240,${topoY+34} T480,${topoY+38} Q620,${topoY+44} 810,${topoY+26}`;
-  const topo3 = `M-10,${topoY+42} Q140,${topoY+26} 260,${topoY+46} T500,${topoY+50} Q640,${topoY+58} 810,${topoY+38}`;
+  // Topo paths — all y-coords inside the yellow band (y=LKH to y=H-5)
+  const bY = LKH;  // band top y
+  const topo1 = `M-10,${bY+14} Q130,${bY+2} 280,${bY+18} T520,${bY+22} Q650,${bY+28} 810,${bY+10}`;
+  const topo2 = `M-10,${bY+30} Q150,${bY+12} 300,${bY+32} T540,${bY+38} Q660,${bY+46} 810,${bY+24}`;
+  const topo3 = `M-10,${bY+46} Q160,${bY+28} 320,${bY+50} T560,${bY+54} Q680,${bY+60} 810,${bY+40}`;
 
-  // ref badge text — truncate to reasonable length for SVG text element
-  const badge = String(refBadge || 'Andersen · Est. 2007').slice(0, 40);
+  // RFP badge — shown in WHITE row right-aligned (not in yellow band)
+  const badge = String(refBadge || '').slice(0, 50);
 
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">
-  <!-- Row 1: White lockup row -->
+
+  <!-- ── Row 1: White lockup ── -->
   <rect x="0" y="0" width="${W}" height="${LKH}" fill="#ffffff"/>
   <line x1="0" y1="${LKH}" x2="${W}" y2="${LKH}" stroke="#E8E8E8" stroke-width="1"/>
 
-  <!-- Wordmark glyph (14×14 black square with yellow slots) -->
-  <rect x="${glyphX}" y="${glyphY+1}" width="14" height="14" rx="1.5" fill="#020303"/>
-  <rect x="${glyphX+2}" y="${glyphY+3}" width="4" height="8" fill="#FFDB00"/>
-  <rect x="${glyphX+8}" y="${glyphY+3}" width="4" height="8" fill="#FFDB00"/>
-  <!-- ANDERSEN wordmark text -->
-  <text x="${glyphX+18}" y="${glyphY+11}" font-family="Arial,Helvetica,sans-serif" font-weight="700" font-size="11" letter-spacing="1.2" fill="#020303">ANDERSEN</text>
-  <!-- Divider line -->
-  <line x1="${glyphX+110}" y1="${glyphY+2}" x2="${glyphX+110}" y2="${glyphY+13}" stroke="#D0D0D0" stroke-width="1"/>
-  <!-- Tag text: two lines -->
-  <text x="${glyphX+116}" y="${glyphY+7}" font-family="Courier New,monospace" font-weight="600" font-size="6" letter-spacing="1" fill="#020303" text-transform="uppercase">SOFTWARE ENGINEERING</text>
-  <text x="${glyphX+116}" y="${glyphY+14}" font-family="Courier New,monospace" font-size="6" letter-spacing="1" fill="#556170">GROUP · GLOBAL</text>
+  <!-- Wordmark glyph: black square + two yellow vertical slots -->
+  <rect x="${glyphX}" y="${glyphY}" width="16" height="16" rx="2" fill="#020303"/>
+  <rect x="${glyphX+3}" y="${glyphY+3}" width="4" height="10" fill="#FFDB00"/>
+  <rect x="${glyphX+9}" y="${glyphY+3}" width="4" height="10" fill="#FFDB00"/>
+  <!-- ANDERSEN wordmark (one instance, in white row only) -->
+  <text x="${glyphX+22}" y="${glyphY+12}" font-family="Arial,Helvetica,sans-serif" font-weight="700" font-size="12" letter-spacing="1.5" fill="#020303">ANDERSEN</text>
+  <!-- Vertical divider -->
+  <line x1="${glyphX+122}" y1="${glyphY+2}" x2="${glyphX+122}" y2="${glyphY+14}" stroke="#D0D0D0" stroke-width="1"/>
+  <!-- Tag lines: Software Engineering Group · Global -->
+  <text x="${glyphX+130}" y="${glyphY+8}" font-family="Courier New,monospace" font-weight="600" font-size="6.5" letter-spacing="0.8" fill="#020303">SOFTWARE ENGINEERING</text>
+  <text x="${glyphX+130}" y="${glyphY+16}" font-family="Courier New,monospace" font-size="6.5" letter-spacing="0.8" fill="#556170">GROUP · GLOBAL</text>
 
-  <!-- Row 2: Yellow band -->
+  <!-- RFP reference number — RIGHT side of white row -->
+  ${badge ? `<text x="${W - PAD}" y="${glyphY+8}" font-family="Courier New,monospace" font-size="7" letter-spacing="1.8" fill="#556170" text-anchor="end">REF</text>
+  <text x="${W - PAD}" y="${glyphY+17}" font-family="Courier New,monospace" font-weight="600" font-size="7.5" letter-spacing="1.2" fill="#020303" text-anchor="end">${badge}</text>` : ''}
+
+  <!-- ── Row 2: Yellow band (topo lines only, no logo) ── -->
   <rect x="0" y="${LKH}" width="${W}" height="${H - LKH - 5}" fill="#FFDB00"/>
 
-  <!-- Topo contour lines (subtle dark strokes over yellow) -->
-  <path d="${topo1}" stroke="#020303" stroke-width="0.8" stroke-opacity="0.28" fill="none"/>
-  <path d="${topo2}" stroke="#020303" stroke-width="0.8" stroke-opacity="0.20" fill="none"/>
-  <path d="${topo3}" stroke="#020303" stroke-width="0.8" stroke-opacity="0.14" fill="none"/>
+  <!-- Topo contour lines sweeping across yellow band -->
+  <path d="${topo1}" stroke="#020303" stroke-width="0.9" stroke-opacity="0.25" fill="none"/>
+  <path d="${topo2}" stroke="#020303" stroke-width="0.9" stroke-opacity="0.18" fill="none"/>
+  <path d="${topo3}" stroke="#020303" stroke-width="0.9" stroke-opacity="0.12" fill="none"/>
   <!-- Topo accent dots -->
-  <circle cx="120" cy="${topoY+16}" r="2.2" fill="#020303" opacity="0.28"/>
-  <circle cx="300" cy="${topoY+30}" r="1.8" fill="#020303" opacity="0.22"/>
-  <circle cx="460" cy="${topoY+22}" r="2.5" fill="#020303" opacity="0.22"/>
-  <circle cx="620" cy="${topoY+40}" r="1.8" fill="#020303" opacity="0.18"/>
-  <circle cx="740" cy="${topoY+18}" r="2.2" fill="#020303" opacity="0.22"/>
+  <circle cx="140" cy="${bY+16}" r="2.5" fill="#020303" opacity="0.25"/>
+  <circle cx="320" cy="${bY+32}" r="2"   fill="#020303" opacity="0.20"/>
+  <circle cx="490" cy="${bY+20}" r="2.8" fill="#020303" opacity="0.20"/>
+  <circle cx="640" cy="${bY+44}" r="2"   fill="#020303" opacity="0.16"/>
+  <circle cx="750" cy="${bY+18}" r="2.5" fill="#020303" opacity="0.20"/>
 
-  <!-- Small wordmark in yellow band (left) — glyph only, smaller -->
-  <rect x="${PAD}" y="${LKH+10}" width="10" height="10" rx="1" fill="#020303"/>
-  <rect x="${PAD+2}" y="${LKH+12}" width="2.5" height="6" fill="#FFDB00"/>
-  <rect x="${PAD+5.5}" y="${LKH+12}" width="2.5" height="6" fill="#FFDB00"/>
-  <text x="${PAD+13}" y="${LKH+19}" font-family="Arial,Helvetica,sans-serif" font-weight="700" font-size="8" letter-spacing="1" fill="#020303">ANDERSEN</text>
-
-  <!-- Ref badge text (right side of yellow band) -->
-  <text x="${W - PAD}" y="${LKH+22}" font-family="Courier New,monospace" font-size="7" letter-spacing="1.5" fill="#020303" opacity="0.65" text-anchor="end">${badge}</text>
-
-  <!-- Row 3: White accent strip with top border -->
+  <!-- ── Row 3: White accent strip ── -->
   <rect x="0" y="${H-5}" width="${W}" height="5" fill="#ffffff"/>
   <line x1="0" y1="${H-5}" x2="${W}" y2="${H-5}" stroke="#E0E0E0" stroke-width="1"/>
 </svg>`;
@@ -607,42 +603,47 @@ body { margin: 0; padding: 0; }
 </style>
 <img src="${svgDataUri}" width="794" height="121" style="display:block;width:794px;height:121px;"/>`;
 
-  // Footer: a single flat SVG image — same technique, no CSS backgrounds on divs.
-  // Footer height = 22mm = 83px @ 96dpi
-  const FW = 794, FH = 83;
-  const footerSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${FW} ${FH}" width="${FW}" height="${FH}">
-  <rect x="0" y="0" width="${FW}" height="${FH}" fill="#020D1C"/>
-  <!-- Contact label + value -->
-  <text x="60" y="30" font-family="Courier New,monospace" font-size="6" letter-spacing="1.5" fill="#FFDB00">CONTACT</text>
-  <text x="60" y="42" font-family="Arial,sans-serif" font-size="7.5" fill="#D8DEE8">${email}</text>
-  <!-- Separator line -->
-  <line x1="230" y1="22" x2="230" y2="58" stroke="rgba(255,255,255,0.15)" stroke-width="1"/>
-  <!-- Offices label + value -->
-  <text x="242" y="30" font-family="Courier New,monospace" font-size="6" letter-spacing="1.5" fill="#FFDB00">OFFICES</text>
-  <text x="242" y="42" font-family="Arial,sans-serif" font-size="7.5" fill="#D8DEE8">Warsaw · Berlin · London · NY</text>
-  <!-- Copyright (right) -->
-  <text x="${FW-60}" y="30" font-family="Courier New,monospace" font-size="6" letter-spacing="1.2" fill="#FFDB00" text-anchor="end">© ANDERSEN ${year}</text>
-  <!-- Page number — Puppeteer replaces these class spans; use foreignObject trick -->
-</svg>`;
-  const footerSvgUri = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(footerSvg);
-
-  // For the footer we still need the dynamic page numbers from Puppeteer.
-  // Puppeteer replaces <span class="pageNumber"> and <span class="totalPages"> in HF HTML.
-  // We render the navy background as an SVG image, then overlay page numbers as HTML text
-  // positioned absolutely on top. This is the ONE case where we use position:absolute —
-  // only on the outermost wrapper, not inside a child div.
+  // Footer template: use a TABLE layout (most reliable in Puppeteer HF frames).
+  // Tables render predictably — no flex, no position:absolute, no SVG overlay needed.
+  // The outermost element gets background-color via -webkit-print-color-adjust.
+  // Height = 22mm = 83px @ 96dpi — matches margin.bottom in page.pdf().
+  //
+  // Layout: one row, three cells:
+  //   [LEFT cell]  Contact + Offices info
+  //   [MID cell]   spacer (flex:1)
+  //   [RIGHT cell] © Andersen year + Page N of M
   const footerTemplate = `<style>
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body { margin: 0; padding: 0; }
-.ft-wrap { position: relative; width: 794px; height: 83px; display: block; }
-.ft-pg { position: absolute; right: 60px; bottom: 18px;
-         font-family: 'Courier New', monospace; font-size: 7px; letter-spacing: 1px;
-         color: #9ca3af; -webkit-print-color-adjust: exact !important; }
+* { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important;
+    margin: 0; padding: 0; box-sizing: border-box; }
+body { margin: 0; padding: 0; background: #020D1C; }
+table.ftr { width: 794px; height: 83px; background: #020D1C;
+            border-collapse: collapse; table-layout: fixed; }
+td.fl { width: 440px; padding: 0 0 0 60px; vertical-align: middle; }
+td.fr { width: 294px; padding: 0 60px 0 0; vertical-align: middle; text-align: right; }
+.fk { font-family: 'Courier New', monospace; font-size: 6px; letter-spacing: 1.5px;
+      text-transform: uppercase; color: #FFDB00; display: block; margin-bottom: 2px; }
+.fv { font-family: Arial, sans-serif; font-size: 7.5px; color: #D8DEE8; display: block; }
+.fsep { display: inline-block; width: 1px; height: 22px; background: rgba(255,255,255,0.15);
+        margin: 0 16px; vertical-align: middle; }
+.fcopy { font-family: 'Courier New', monospace; font-size: 6px; letter-spacing: 1.2px;
+         text-transform: uppercase; color: #FFDB00; display: block; margin-bottom: 3px; }
+.fpg { font-family: 'Courier New', monospace; font-size: 7px; letter-spacing: 0.8px;
+       color: #9ca3af; display: block; }
 </style>
-<div class="ft-wrap">
-  <img src="${footerSvgUri}" width="794" height="83" style="display:block;position:absolute;top:0;left:0;width:794px;height:83px;"/>
-  <div class="ft-pg">Page <span class="pageNumber"></span> of <span class="totalPages"></span></div>
-</div>`;
+<table class="ftr">
+  <tr>
+    <td class="fl">
+      <span class="fk">Contact</span><span class="fv">${email}</span>
+      <span class="fsep"></span>
+      <span class="fk" style="display:inline-block;margin-bottom:0">Offices</span>
+      <span class="fv" style="display:inline-block">Warsaw · Berlin · London · NY</span>
+    </td>
+    <td class="fr">
+      <span class="fcopy">© Andersen ${year}</span>
+      <span class="fpg">Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>
+    </td>
+  </tr>
+</table>`;
 
   return { headerTemplate, footerTemplate };
 }
