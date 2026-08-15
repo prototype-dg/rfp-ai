@@ -7356,27 +7356,47 @@ function _buildEvalTabBodies(p, evalData) {
   if (!bm && appState.currentRfp && appState.currentRfp.market_benchmark_json) {
     try { bm = JSON.parse(appState.currentRfp.market_benchmark_json); } catch(_) {}
   }
+  var bmCur = (bm && bm.currency) ? bm.currency : 'USD';
   if (bm && bm.total_mid) {
-    var bmMin = bm.total_min ? formatBudget(bm.total_min, bm.currency || 'USD') : null;
-    var bmMax = bm.total_max ? formatBudget(bm.total_max, bm.currency || 'USD') : null;
-    var bmMid = formatBudget(bm.total_mid, bm.currency || 'USD');
+    var bmMin = bm.total_min ? formatBudget(bm.total_min, bmCur) : null;
+    var bmMax = bm.total_max ? formatBudget(bm.total_max, bmCur) : null;
+    var bmMid = formatBudget(bm.total_mid, bmCur);
     var confColor = bm.confidence === 'high' ? '#059669' : bm.confidence === 'low' ? '#dc2626' : '#d97706';
     var confBg    = bm.confidence === 'high' ? '#f0fdf4' : bm.confidence === 'low' ? '#fef2f2' : '#fffbeb';
 
+    // WBS rows
     var wbsRows = '';
     if (bm.wbs && bm.wbs.length) {
       wbsRows = bm.wbs.map(function(w) {
-        var sub = w.subtotal ? formatBudget(w.subtotal, bm.currency || 'USD') : '—';
+        var sub = w.subtotal ? formatBudget(w.subtotal, bmCur) : '—';
+        var rate = w.day_rate ? bmCur + ' ' + w.day_rate.toLocaleString() + '/day' : '—';
         return '<tr style="border-bottom:1px solid #f3f4f6">'
-          + '<td style="padding:5px 8px;font-size:0.77rem;color:#374151;font-weight:600">' + escHtml(w.phase || '') + '</td>'
+          + '<td style="padding:5px 8px;font-size:0.77rem;color:#374151;font-weight:600;white-space:nowrap">' + escHtml(w.phase || '') + '</td>'
           + '<td style="padding:5px 8px;font-size:0.75rem;color:#6b7280">' + escHtml(w.description || '') + '</td>'
           + '<td style="padding:5px 8px;font-size:0.75rem;color:#374151;text-align:right;white-space:nowrap">' + (w.effort_person_days || '—') + ' p-d</td>'
-          + '<td style="padding:5px 8px;font-size:0.75rem;color:#374151;text-align:right;white-space:nowrap">' + sub + '</td>'
+          + '<td style="padding:5px 8px;font-size:0.72rem;color:#6b7280;text-align:right;white-space:nowrap">' + rate + '</td>'
+          + '<td style="padding:5px 8px;font-size:0.75rem;color:#374151;text-align:right;white-space:nowrap;font-weight:600">' + sub + '</td>'
+          + '</tr>';
+      }).join('');
+    }
+
+    // Team composition rows
+    var teamRows = '';
+    if (bm.team_composition && bm.team_composition.length) {
+      teamRows = bm.team_composition.map(function(tm) {
+        var hrRate = tm.hourly_rate ? bmCur + ' ' + tm.hourly_rate.toLocaleString() + '/hr' : '—';
+        return '<tr style="border-bottom:1px solid #f3f4f6">'
+          + '<td style="padding:5px 8px;font-size:0.77rem;color:#374151;font-weight:600">' + escHtml(tm.role || '') + '</td>'
+          + '<td style="padding:5px 8px;font-size:0.75rem;color:#6b7280;text-align:center">' + (tm.headcount || 1) + '</td>'
+          + '<td style="padding:5px 8px;font-size:0.75rem;color:#6b7280">' + escHtml(tm.seniority || '') + '</td>'
+          + '<td style="padding:5px 8px;font-size:0.75rem;color:#374151;text-align:right;white-space:nowrap;font-weight:600">' + hrRate + '</td>'
+          + (tm.notes ? '<td style="padding:5px 8px;font-size:0.7rem;color:#9ca3af;max-width:160px">' + escHtml(tm.notes) + '</td>' : '<td></td>')
           + '</tr>';
       }).join('');
     }
 
     benchmarkHtml = '<div style="margin-bottom:1rem;border:1px solid #e0d9f7;border-radius:10px;overflow:hidden">'
+      // Header bar
       + '<div style="background:linear-gradient(135deg,#4c1d95,#6d28d9);padding:10px 14px;display:flex;align-items:center;justify-content:space-between">'
       + '<div style="display:flex;align-items:center;gap:8px">'
       + '<i class="fas fa-globe" style="color:#c4b5fd;font-size:0.9rem"></i>'
@@ -7385,6 +7405,7 @@ function _buildEvalTabBodies(p, evalData) {
       + '</div>'
       + '<span style="font-size:0.68rem;font-weight:700;padding:2px 8px;border-radius:12px;background:' + confBg + ';color:' + confColor + '">' + (bm.confidence || 'medium') + ' confidence</span>'
       + '</div>'
+      // Min / Mid / Max grid
       + '<div style="padding:12px 14px">'
       + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px">'
       + '<div style="background:#f5f3ff;border-radius:6px;padding:8px 10px;text-align:center">'
@@ -7397,28 +7418,48 @@ function _buildEvalTabBodies(p, evalData) {
       + '<div style="font-size:0.63rem;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#7c3aed;margin-bottom:2px">Max Estimate</div>'
       + '<div style="font-size:0.88rem;font-weight:700;color:#4c1d95">' + (bmMax || '—') + '</div></div>'
       + '</div>'
+      // Confidence rationale
       + (bm.confidence_rationale ? '<div style="font-size:0.75rem;color:#6b7280;margin-bottom:8px;line-height:1.5"><i class="fas fa-info-circle" style="margin-right:4px;color:#8b5cf6"></i>' + escHtml(bm.confidence_rationale) + '</div>' : '')
-      + (wbsRows ? '<details style="margin-top:2px">'
+      // WBS collapsible
+      + (wbsRows ? '<details style="margin-bottom:6px">'
         + '<summary style="font-size:0.78rem;font-weight:600;color:#5b21b6;cursor:pointer;padding:4px 0;list-style:none;display:flex;align-items:center;gap:6px"><i class="fas fa-sitemap" style="font-size:0.72rem"></i>Work Breakdown Structure (' + bm.wbs.length + ' phases)</summary>'
         + '<div style="overflow-x:auto;margin-top:6px;border:1px solid #ede9fe;border-radius:6px">'
-        + '<table style="width:100%;border-collapse:collapse;min-width:380px">'
+        + '<table style="width:100%;border-collapse:collapse;min-width:420px">'
         + '<thead><tr style="background:#f5f3ff">'
         + '<th style="padding:5px 8px;text-align:left;font-size:0.68rem;font-weight:700;color:#7c3aed;text-transform:uppercase">Phase</th>'
         + '<th style="padding:5px 8px;text-align:left;font-size:0.68rem;font-weight:700;color:#7c3aed;text-transform:uppercase">Description</th>'
         + '<th style="padding:5px 8px;text-align:right;font-size:0.68rem;font-weight:700;color:#7c3aed;text-transform:uppercase">Effort</th>'
-        + '<th style="padding:5px 8px;text-align:right;font-size:0.68rem;font-weight:700;color:#7c3aed;text-transform:uppercase">Cost</th>'
+        + '<th style="padding:5px 8px;text-align:right;font-size:0.68rem;font-weight:700;color:#7c3aed;text-transform:uppercase">Day Rate</th>'
+        + '<th style="padding:5px 8px;text-align:right;font-size:0.68rem;font-weight:700;color:#7c3aed;text-transform:uppercase">Subtotal</th>'
         + '</tr></thead><tbody>' + wbsRows + '</tbody></table></div>'
         + '</details>' : '')
-      + (bm.region ? '<div style="font-size:0.7rem;color:#9ca3af;margin-top:8px"><i class="fas fa-map-marker-alt" style="margin-right:3px"></i>Region: ' + escHtml(bm.region) + '</div>' : '')
+      // Team composition collapsible
+      + (teamRows ? '<details style="margin-bottom:4px">'
+        + '<summary style="font-size:0.78rem;font-weight:600;color:#5b21b6;cursor:pointer;padding:4px 0;list-style:none;display:flex;align-items:center;gap:6px"><i class="fas fa-users" style="font-size:0.72rem"></i>Team Composition &amp; Market Rates (' + bm.team_composition.length + ' roles)</summary>'
+        + '<div style="overflow-x:auto;margin-top:6px;border:1px solid #ede9fe;border-radius:6px">'
+        + '<table style="width:100%;border-collapse:collapse;min-width:380px">'
+        + '<thead><tr style="background:#f5f3ff">'
+        + '<th style="padding:5px 8px;text-align:left;font-size:0.68rem;font-weight:700;color:#7c3aed;text-transform:uppercase">Role</th>'
+        + '<th style="padding:5px 8px;text-align:center;font-size:0.68rem;font-weight:700;color:#7c3aed;text-transform:uppercase">#</th>'
+        + '<th style="padding:5px 8px;text-align:left;font-size:0.68rem;font-weight:700;color:#7c3aed;text-transform:uppercase">Seniority</th>'
+        + '<th style="padding:5px 8px;text-align:right;font-size:0.68rem;font-weight:700;color:#7c3aed;text-transform:uppercase">Mkt Rate/hr</th>'
+        + '<th style="padding:5px 8px;text-align:left;font-size:0.68rem;font-weight:700;color:#7c3aed;text-transform:uppercase">Notes</th>'
+        + '</tr></thead><tbody>' + teamRows + '</tbody></table></div>'
+        + '</details>' : '')
+      // Region footer
+      + (bm.region ? '<div style="font-size:0.7rem;color:#9ca3af;margin-top:6px"><i class="fas fa-map-marker-alt" style="margin-right:3px"></i>Region: ' + escHtml(bm.region) + ' · Currency: ' + escHtml(bmCur) + '</div>' : '')
       + '</div></div>';
+
   } else if (evalData) {
-    // Benchmark not yet generated — show a trigger button
-    benchmarkHtml = '<div style="margin-bottom:1rem;border:1px solid #e0d9f7;border-radius:10px;padding:14px;background:#f5f3ff;display:flex;align-items:center;justify-content:space-between;gap:12px">'
+    // Benchmark not yet generated — show trigger card with id for spinner replacement
+    benchmarkHtml = '<div style="margin-bottom:1rem;border:1px solid #e0d9f7;border-radius:10px;padding:14px;background:#f5f3ff">'
+      + '<div id="benchmarkRunCard_' + rfpId + '" style="display:flex;align-items:center;justify-content:space-between;gap:12px">'
       + '<div>'
       + '<div style="font-size:0.82rem;font-weight:700;color:#4c1d95;margin-bottom:3px"><i class="fas fa-globe" style="margin-right:6px"></i>Market Benchmark</div>'
-      + '<div style="font-size:0.75rem;color:#6b7280">Generate a WBS-based market-average cost estimate for this project. Informational only — does not affect scores.</div>'
+      + '<div style="font-size:0.75rem;color:#6b7280">Generate a WBS-based market-average cost estimate with team composition. Informational only — does not affect scores.</div>'
       + '</div>'
-      + '<button onclick="_fireMarketBenchmark(' + rfpId + ',' + p.id + ')" style="flex-shrink:0;padding:8px 16px;background:#6d28d9;color:white;border:none;border-radius:7px;font-size:0.8rem;font-weight:600;cursor:pointer;white-space:nowrap"><i class="fas fa-chart-line" style="margin-right:5px"></i>Run Benchmark</button>'
+      + '<button onclick="this.disabled=true;this.innerHTML=\'<i class=\\\"fas fa-spinner fa-spin\\\"></i>\';_fireMarketBenchmark(' + rfpId + ',' + p.id + ')" style="flex-shrink:0;padding:8px 16px;background:#6d28d9;color:white;border:none;border-radius:7px;font-size:0.8rem;font-weight:600;cursor:pointer;white-space:nowrap"><i class="fas fa-chart-line" style="margin-right:5px"></i>Run Benchmark</button>'
+      + '</div>'
       + '</div>';
   }
 
@@ -7427,7 +7468,10 @@ function _buildEvalTabBodies(p, evalData) {
     + '<div style="background:#faf9f7;border:1px solid #e5e7eb;border-radius:8px;padding:0.75rem">'
     + '<div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#9a8c78;margin-bottom:4px">Vendor Budget</div>'
     + '<div style="font-size:0.97rem;font-weight:700;color:#020D1C">' + (evalBudget || escHtml(fin)) + '</div>'
-    + (evalData && evalData.rfp_budget_currency ? '<div style="font-size:0.7rem;color:#6b7280;margin-top:2px"><i class="fas fa-exchange-alt" style="margin-right:3px"></i>RFP ceiling in ' + escHtml(evalData.rfp_budget_currency) + '</div>' : '')
+    + (evalData && evalData.rfp_budget_currency && evalData.rfp_budget_currency !== (evalData.budget_currency || 'USD')
+        ? '<div style="font-size:0.7rem;color:#6b7280;margin-top:2px"><i class="fas fa-exchange-alt" style="margin-right:3px"></i>RFP ceiling currency: <strong>' + escHtml(evalData.rfp_budget_currency) + '</strong> — FX-converted for scoring</div>'
+        : (evalData && evalData.rfp_budget_currency ? '<div style="font-size:0.7rem;color:#6b7280;margin-top:2px"><i class="fas fa-coins" style="margin-right:3px"></i>RFP ceiling currency: <strong>' + escHtml(evalData.rfp_budget_currency) + '</strong></div>' : '')
+      )
     + (evalData && evalData.budget_confidence != null && evalData.budget_confidence < 0.8 ? '<div style="font-size:0.7rem;color:#d97706;margin-top:3px"><i class="fas fa-exclamation-circle" style="margin-right:0.25rem"></i>Low confidence — verify manually</div>' : '')
     + '</div>'
     + '<div style="background:#faf9f7;border:1px solid #e5e7eb;border-radius:8px;padding:0.75rem">'
@@ -8024,9 +8068,22 @@ function _fireBudgetExtraction(rfpId, proposalId) {
 
 // ── Fire market benchmark (async, RFP-level — runs once per evaluation) ───────
 function _fireMarketBenchmark(rfpId, proposalId) {
+  // Show spinner on the Run Benchmark button if visible, and replace the card text
+  var bmCard = document.getElementById('benchmarkRunCard_' + rfpId);
+  if (bmCard) {
+    bmCard.innerHTML = '<div style="display:flex;align-items:center;gap:10px;padding:4px 0">'
+      + '<i class="fas fa-spinner fa-spin" style="font-size:1.1rem;color:#6d28d9"></i>'
+      + '<div>'
+      + '<div style="font-size:0.82rem;font-weight:700;color:#4c1d95">Running Market Benchmark…</div>'
+      + '<div style="font-size:0.75rem;color:#6b7280;margin-top:2px">Generating WBS and estimating costs — this takes ~15 seconds</div>'
+      + '</div></div>';
+  }
   apiCall('POST', '/rfps/' + rfpId + '/market-benchmark', {})
     .then(function(bmResult) {
-      if (!bmResult || !bmResult.benchmark) return;
+      if (!bmResult || !bmResult.benchmark) {
+        if (bmCard) bmCard.innerHTML = '<div style="font-size:0.8rem;color:#dc2626"><i class="fas fa-exclamation-triangle" style="margin-right:6px"></i>Benchmark failed — try again.</div>';
+        return;
+      }
       var bm = bmResult.benchmark;
       var midFmt = bm.total_mid
         ? (bm.currency || '') + ' ' + Math.round(bm.total_mid).toLocaleString()
@@ -8038,8 +8095,8 @@ function _fireMarketBenchmark(rfpId, proposalId) {
       // Re-render the proposal panel if we have a specific proposal context
       if (proposalId) _refreshPanelFromDB(rfpId, proposalId);
     })
-    .catch(function() {
-      // non-fatal — benchmark is informational only
+    .catch(function(e) {
+      if (bmCard) bmCard.innerHTML = '<div style="font-size:0.8rem;color:#dc2626"><i class="fas fa-exclamation-triangle" style="margin-right:6px"></i>Benchmark error: ' + escHtml((e && e.message) || 'unknown') + '</div>';
     });
 }
 
@@ -8698,7 +8755,15 @@ async function getSettingsCategories() {
 pages.settings = async function() {
   var cats = await getSettingsCategories();
   var procEmail = '';
-  try { var s = await apiCall('GET', '/settings'); procEmail = s.procurement_email || ''; } catch(e) {}
+  try {
+    var s = await apiCall('GET', '/settings');
+    procEmail = s.procurement_email || '';
+    // If DB has an issuer_currency that differs from localStorage, sync localStorage → DB
+    // (localStorage is the authoritative source for display currency)
+    if (_settingsCurrency && _settingsCurrency !== 'USD' && s.issuer_currency !== _settingsCurrency) {
+      apiCall('PUT', '/settings', { issuer_currency: _settingsCurrency }).catch(function(){});
+    }
+  } catch(e) {}
 
   // Build currency dropdown options grouped by region
   var currencyGroups = [
@@ -8795,6 +8860,9 @@ function saveDisplayCurrency() {
   if (!FX_RATES[code]) { showToast('Unknown currency code', 'error'); return; }
   _settingsCurrency = code;
   localStorage.setItem('andersen_currency', code);
+  // Also persist to the settings DB so the backend can use it as the
+  // issuer_currency default for RFP budget currency detection.
+  apiCall('PUT', '/settings', { issuer_currency: code }).catch(function(){});
   showToast(t('settings_currency_saved') + '  (' + code + ' — ' + FX_RATES[code].label + ')', 'success', 4000);
   // Re-render settings to update FX table
   pages.settings();

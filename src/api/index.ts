@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 import { andersenEmailHtml, andersenPageHtml } from '../brand/letterhead'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-08-15-v67'  // v67: bulk eval progress modal with per-proposal rows, stage simulation, live polling sync
+const WORKER_VERSION = '2026-08-15-v68'  // v68: currency detection fix (issuer_currency setting + contextual text scan), benchmark spinner, team composition + rates table
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.andersenlab.com.
@@ -2568,25 +2568,71 @@ Now evaluate the proposal and return only the JSON object. Do not include any ad
   }
 
   // ── Extract RFP budget currency from text or field ────────────────────────────
-  // Order of precedence: explicit currency symbol/code in rfp.budget field →
-  // currency code found in rfp_full_text near budget number → 'USD' default.
-  function detectRfpCurrency(budgetField: string | null, text: string): string {
-    const currencyPatterns: Array<[RegExp, string]> = [
-      [/\bAED\b/i, 'AED'], [/\bSAR\b/i, 'SAR'], [/\bQAR\b/i, 'QAR'],
-      [/\bKWD\b/i, 'KWD'], [/\bBHD\b/i, 'BHD'], [/\bEUR\b/i, 'EUR'],
-      [/\bGBP\b/i, 'GBP'], [/\bUSD\b/i, 'USD'], [/\bCHF\b/i, 'CHF'],
-      [/\bPLN\b/i, 'PLN'], [/\bSGD\b/i, 'SGD'], [/\bCAD\b/i, 'CAD'],
-      [/\bAUD\b/i, 'AUD'], [/\bJPY\b/i, 'JPY'], [/\bCNY\b/i, 'CNY'],
-      [/\bINR\b/i, 'INR'], [/\bKRW\b/i, 'KRW'], [/د\.إ/,   'AED'],
-      [/ر\.س/,     'SAR'], [/ر\.ق/,     'QAR'], [/د\.ك/,   'KWD'],
-      [/€/,        'EUR'], [/£/,        'GBP'], [/\$/,      'USD'],
-    ]
-    const combined = ((budgetField || '') + ' ' + (text || '')).slice(0, 5000)
-    for (const [re, code] of currencyPatterns) {
-      if (re.test(combined)) return code
+  // Priority order:
+  //   1. Currency code/symbol explicitly in the rfp.budget field (e.g. "AED 5000000")
+  //   2. Currency code found NEAR a budget/ceiling figure in rfp_full_text
+  //      (e.g. "Total Budget: AED 5,000,000")
+  //   3. issuer_currency from the settings DB (the user's chosen display currency)
+  //   4. 'USD' hard default
+  function detectRfpCurrency(budgetField: string | null, text: string, issuerCurrency: string): string {
+    const ALL_CODES = ['AED','SAR','QAR','KWD','BHD','EUR','GBP','CHF','PLN','SGD',
+                       'CAD','AUD','NZD','JPY','CNY','INR','KRW','HKD','SEK','NOK',
+                       'DKK','CZK','HUF','RON','TRY','BRL','MXN','ZAR','NGN','EGP',
+                       'UAH','RUB','USD']
+
+    // Step 1: scan budget field alone (most reliable — it's the RFP ceiling input)
+    const bfStr = (budgetField || '').trim()
+    if (bfStr) {
+      for (const code of ALL_CODES) {
+        if (new RegExp(`\\b${code}\\b`, 'i').test(bfStr)) return code
+      }
+      // Symbol scan on budget field
+      if (/د\.إ|AED/i.test(bfStr))  return 'AED'
+      if (/ر\.س|SAR/i.test(bfStr))  return 'SAR'
+      if (/ر\.ق|QAR/i.test(bfStr))  return 'QAR'
+      if (/€/.test(bfStr))           return 'EUR'
+      if (/£/.test(bfStr))           return 'GBP'
     }
+
+    // Step 2: look for currency code NEAR a budget/amount figure in the RFP text
+    // Pattern: currency code within 20 chars before or after a large number
+    const budgetZone = (text || '').slice(0, 20000)
+    const nearBudgetRe = /(?:budget|ceiling|maximum|total\s+cost|contract\s+value|estimated\s+value)[^.]{0,120}/gi
+    let match: RegExpExecArray | null
+    const zones: string[] = []
+    while ((match = nearBudgetRe.exec(budgetZone)) !== null) zones.push(match[0])
+    const zoneText = zones.join(' ')
+    if (zoneText) {
+      for (const code of ALL_CODES) {
+        if (new RegExp(`\\b${code}\\b`, 'i').test(zoneText)) return code
+      }
+      if (/د\.إ/.test(zoneText)) return 'AED'
+      if (/€/.test(zoneText))    return 'EUR'
+      if (/£/.test(zoneText))    return 'GBP'
+    }
+
+    // Step 3: issuer_currency from settings (user's chosen display currency)
+    if (issuerCurrency && issuerCurrency !== 'USD') return issuerCurrency
+
+    // Step 4: broad text scan (but avoid matching "USD" in boilerplate)
+    // Only match if the code appears adjacent to a number (e.g. "AED 5,000,000")
+    const adjacentRe = /(?:\b([A-Z]{3})\s[\d,]+|[\d,]+\s([A-Z]{3})\b)/g
+    const codeSet = new Set(ALL_CODES)
+    while ((match = adjacentRe.exec(budgetZone)) !== null) {
+      const found = (match[1] || match[2]).toUpperCase()
+      if (codeSet.has(found)) return found
+    }
+
+    // Step 5: hard default
     return 'USD'
   }
+
+  // Read issuer_currency from settings (best-effort — don't block on failure)
+  let issuerCurrency = 'USD'
+  try {
+    const currRow = await env.DB.prepare(`SELECT value FROM settings WHERE key='issuer_currency'`).first<any>()
+    if (currRow?.value) issuerCurrency = currRow.value
+  } catch (_) {}
 
   // ── Commercial / Cost Competitiveness scoring ────────────────────────────────
   // Now with full FX conversion: proposal budget and RFP ceiling are both
@@ -2601,8 +2647,8 @@ Now evaluate the proposal and return only the JSON object. Do not include any ad
   let commercialJustification = ''
   let commercialScoreActual: number | null = null
 
-  // Detect RFP budget currency
-  const rfpBudgetCurrency = detectRfpCurrency(rfp.budget || null, rfpFullText)
+  // Detect RFP budget currency — uses issuerCurrency as fallback
+  const rfpBudgetCurrency = detectRfpCurrency(rfp.budget || null, rfpFullText, issuerCurrency)
 
   if (budget.amount && commercialWeight > 0) {
     // Parse RFP budget ceiling (numeric value from rfp.budget field or rfp_full_text)
@@ -3265,7 +3311,7 @@ apiRouter.post('/rfps/:rfpId/market-benchmark', async (c) => {
       return c.json({ error: 'RFP content not yet generated — please generate the RFP document first.' }, 400)
     }
 
-    const systemPrompt = `You are a senior IT project estimator with deep knowledge of software delivery costs across global markets. You produce structured WBS and market-rate estimates in JSON.`
+    const systemPrompt = `You are a senior IT project estimator with deep knowledge of software delivery costs across global markets. You produce structured WBS, team composition, and market-rate estimates in JSON.`
 
     const userPrompt = `You are estimating the market-average implementation cost for the following RFP issued by ${issuerName} (${issuerLoc}).
 
@@ -3280,9 +3326,10 @@ ${brdText  ? `\nBusiness Requirements (BRD):\n${brdText}`  : ''}
 Tasks:
 1. Generate a Work Breakdown Structure (WBS) with 6–12 phases/workstreams appropriate for this type of project.
 2. For each phase, estimate the effort in person-days and the market-average day rate for ${issuerLoc} (in the local currency of that region).
-3. Sum all phases to produce a total market-average cost estimate.
-4. Include a confidence rating (high / medium / low) and brief rationale.
-5. Identify the currency used for the estimate.
+3. Sum all phases to produce a total market-average cost estimate (min/mid/max range).
+4. Define the typical team composition needed to deliver this project: list each role, the number of people for that role, the typical seniority, and the market-average hourly rate for ${issuerLoc}.
+5. Include a confidence rating (high / medium / low) and brief rationale.
+6. Identify the currency used for the estimate.
 
 Return ONLY valid JSON — no markdown, no commentary:
 {
@@ -3300,6 +3347,22 @@ Return ONLY valid JSON — no markdown, no commentary:
       "effort_person_days": 45,
       "day_rate": 800,
       "subtotal": 36000
+    }
+  ],
+  "team_composition": [
+    {
+      "role": "Project Manager",
+      "headcount": 1,
+      "seniority": "Senior",
+      "hourly_rate": 120,
+      "notes": "Responsible for delivery governance and stakeholder reporting"
+    },
+    {
+      "role": "Solution Architect",
+      "headcount": 1,
+      "seniority": "Principal",
+      "hourly_rate": 160,
+      "notes": "Defines technical architecture and integration patterns"
     }
   ],
   "assumptions": ["Rates reflect mid-market senior consultant rates for ${issuerLoc}", "Excludes hardware, licences, and hyperscaler cloud costs"]
