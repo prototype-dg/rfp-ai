@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 import { andersenEmailHtml, andersenPageHtml } from '../brand/letterhead'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-08-15-v64'  // v64: PDF margin.top 23mm→29mm (breathing gap after header); HTML paginator heading lookahead prevents white-space gaps
+const WORKER_VERSION = '2026-08-15-v65'  // v65: vendor portal submit button unblocked — removed early document-type categorization gate
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.andersenlab.com.

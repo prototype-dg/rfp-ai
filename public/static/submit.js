@@ -189,43 +189,14 @@
         showAlert('error', file.name + ' exceeds 50 MB limit and was skipped.');
         continue;
       }
-      var entry = { file: file, label: 'other', summary: '', confidence: 'medium', status: 'pending' };
+      var entry = { file: file, label: 'other', summary: '', confidence: 'medium', status: 'done' };
       uploadedFiles.push(entry);
       renderFileList();
-      categorizeFile(entry);
+      updateSubmitBtn();
     }
     // Reset input so same file can be re-selected if removed
     var fi = document.getElementById('fileInput');
     if (fi) fi.value = '';
-  }
-
-  function categorizeFile(entry) {
-    entry.status = 'categorizing';
-    renderFileList();
-
-    var fd = new FormData();
-    fd.append('file', entry.file);
-
-    fetch('/api/submit/' + RFP_ID + '/categorize', { method: 'POST', body: fd })
-      .then(function (res) { return res.json(); })
-      .then(function (data) {
-        entry.label      = data.label      || 'other';
-        entry.summary    = data.summary    || '';
-        entry.confidence = data.confidence || 'medium';
-        entry.unreadable = !!data.unreadable;
-        // unreadable PDFs are still valid to submit — use 'ready' so submit button enables
-        entry.status = entry.unreadable ? 'ready' : 'done';
-        renderFileList();
-        updateSubmitBtn();
-      })
-      .catch(function () {
-        entry.label      = 'other';
-        entry.summary    = 'Categorization failed \u2014 please set the document type manually.';
-        entry.status     = 'error';
-        entry.unreadable = false;
-        renderFileList();
-        updateSubmitBtn();
-      });
   }
 
   function removeFile(idx) {
@@ -253,10 +224,8 @@
     container.innerHTML = uploadedFiles.map(function (entry, idx) {
       var lm            = LABEL_META[entry.label] || LABEL_META.other;
       var sizeMb        = (entry.file.size / 1024 / 1024).toFixed(1);
-      var isCategorizing = entry.status === 'categorizing' || entry.status === 'pending';
       var confClass     = entry.confidence === 'high' ? 'high' : entry.confidence === 'low' ? 'low' : '';
-      // unreadable = complex font PDF; 'ready' status = still submittable
-      var displayStatus = isCategorizing ? 'categorizing' : (entry.status === 'ready' ? 'done' : entry.status);
+      var displayStatus = entry.status === 'ready' ? 'done' : entry.status;
 
       var labelOptions = Object.keys(LABEL_META).map(function (k) {
         var v = LABEL_META[k];
@@ -269,21 +238,11 @@
       html += '<div class="file-name" title="' + esc(entry.file.name) + '">' + esc(entry.file.name) + '</div>';
       html += '<div class="file-size">' + sizeMb + ' MB</div>';
 
-      if (isCategorizing) {
-        html += '<div class="cat-spinner"><i class="fas fa-spinner fa-spin"></i> Analysing document\u2026</div>';
-      } else if (entry.unreadable) {
-        // Complex-font PDF — show a clear amber notice instead of error styling
-        html += '<div style="font-size:0.78rem;color:#92400e;background:#fef3c7;border:1px solid #fde68a;border-radius:6px;padding:6px 10px;margin-top:4px;line-height:1.5">';
-        html += '<i class="fas fa-exclamation-triangle" style="margin-right:5px"></i>';
-        html += esc(entry.summary);
-        html += '</div>';
-      } else {
-        html += '<div class="file-summary">' + esc(entry.summary);
-        if (entry.confidence) {
-          html += ' <span class="conf-badge ' + confClass + '">' + entry.confidence + ' confidence</span>';
-        }
-        html += '</div>';
+      html += '<div class="file-summary">' + esc(entry.summary);
+      if (entry.confidence && entry.summary) {
+        html += ' <span class="conf-badge ' + confClass + '">' + entry.confidence + ' confidence</span>';
       }
+      html += '</div>';
 
       html += '<div class="file-label-row">';
       html += '<span style="font-size:0.72rem;color:#6b7280;font-weight:600">Type:</span>';
@@ -301,11 +260,7 @@
   /* ── Submit ───────────────────────────────────────────────── */
   function updateSubmitBtn() {
     var code     = getCode();
-    // 'categorizing' and 'pending' are in-progress states — block submit
-    // 'done', 'ready' (unreadable PDF), 'error' (network fail) are all terminal — allow submit
-    var hasFiles = uploadedFiles.length > 0 && uploadedFiles.every(function (f) {
-      return f.status !== 'categorizing' && f.status !== 'pending';
-    });
+    var hasFiles = uploadedFiles.length > 0;
     var hasCode  = /^RFP-\d+-V\d+$/i.test(code);
     document.getElementById('submitBtn').disabled = !(hasCode && hasFiles);
   }
@@ -314,10 +269,7 @@
     var code = getCode();
     if (!code) { showAlert('error', 'Please enter your Participant Reference Code.'); return; }
     if (!uploadedFiles.length) { showAlert('error', 'Please upload at least one proposal document.'); return; }
-    if (uploadedFiles.some(function (f) { return f.status === 'categorizing' || f.status === 'pending'; })) {
-      showAlert('error', 'Please wait for all files to finish processing before submitting.');
-      return;
-    }
+    // (document-type categorization removed — no processing gate)
 
     showLoading('Submitting your proposal\u2026 please do not close this window.');
 
