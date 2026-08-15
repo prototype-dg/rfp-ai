@@ -1586,7 +1586,7 @@ Rules:
 - Each requirement should be a single actionable statement (not a section heading).
 - Number sequentially: req_1, req_2, req_3, ...`
 
-    // Use stream:false — single response body, no SSE, avoids proxy streaming drop issues
+    // Use stream:true with SSE reader — the proxy requires streaming; stream:false returns empty body.
     const res = await fetch(`${baseUrl}/chat/completions`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
@@ -1596,26 +1596,39 @@ Rules:
           { role: 'system', content: systemPrompt },
           { role: 'user', content: `Extract all vendor requirements from this RFP section:\n\n${requirementsFocusText}` },
         ],
-        max_tokens: 2500,
+        max_tokens: 1500,
         temperature: 0.3,
-        stream: false,
+        stream: true,
       }),
     })
 
     const httpStatus = res.status
-    const rawBody = await res.text().catch(() => '')
-    console.log(`[rerun-phase3] rfp=${rfpId} http=${httpStatus} body_len=${rawBody.length} body_preview=${rawBody.slice(0,200)}`)
+    console.log(`[rerun-phase3] rfp=${rfpId} http=${httpStatus} ok=${res.ok}`)
 
     if (!res.ok) {
-      return c.json({ ok: false, error: `LLM error ${httpStatus}: ${rawBody.slice(0, 200)}` }, 500)
+      const errText = await res.text().catch(() => 'unknown')
+      return c.json({ ok: false, error: `LLM error ${httpStatus}: ${errText.slice(0, 200)}` }, 500)
+    }
+    if (!res.body) {
+      return c.json({ ok: false, error: 'LLM returned no response body' }, 500)
     }
 
-    let llmBody: any = {}
-    try { llmBody = JSON.parse(rawBody) } catch(e: any) {
-      return c.json({ ok: false, error: `LLM JSON parse error: ${e.message}`, raw: rawBody.slice(0,300) }, 500)
+    // Read SSE stream
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let raw = '', buf = ''
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buf += decoder.decode(value, { stream: true })
+      const lines = buf.split('\n'); buf = lines.pop() ?? ''
+      for (const line of lines) {
+        const t = line.trim()
+        if (!t || t === 'data: [DONE]' || !t.startsWith('data: ')) continue
+        try { const j = JSON.parse(t.slice(6)); const d = j.choices?.[0]?.delta?.content; if (d) raw += d } catch { /* skip */ }
+      }
     }
-    const raw = llmBody?.choices?.[0]?.message?.content || ''
-    console.log(`[rerun-phase3] rfp=${rfpId} raw_len=${raw.length}`)
+    console.log(`[rerun-phase3] rfp=${rfpId} raw_len=${raw.length} preview=${raw.slice(0,100)}`)
 
     const arr = parseJsonArray(raw)
     if (!arr) {
