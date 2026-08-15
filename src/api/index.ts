@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 import { andersenEmailHtml, andersenPageHtml } from '../brand/letterhead'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-08-15-v86b' // v86b: single-phase extraction — chunk timeout raised to 60s for large docs; input capped at 80k chars to keep streaming time within limits
+const WORKER_VERSION = '2026-08-15-v86c' // v86c: single-phase extraction — input capped at 30k chars, maxTokens capped at 4000 to keep total stream time <60s inside Worker wall-clock
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.andersenlab.com.
@@ -1303,13 +1303,16 @@ async function extractRfpFieldsFromOcr(ocrText: string, env: any, rfpIdLog: stri
   const phaseErrors: string[] = []
 
   // ── Dynamic token budget ──────────────────────────────────────────────────
-  // Rule of thumb: ~0.75 tokens per char of input, output JSON is ~15% of input.
-  // We target output_tokens = max(4000, ceil(inputChars * 0.15)) capped at 12000
-  // (proxy limit for gpt-5-mini). This ensures a 57k-char doc gets ~8500 output
-  // tokens — enough for full scalar fields + 5 scoring criteria + 40 requirements.
-  const inputChars = ocrText.length
-  const maxTokens = Math.min(12000, Math.max(4000, Math.ceil(inputChars * 0.15)))
-  console.log(`[rfp-ai-extract] ${rfpIdLog} single-phase — inputChars=${inputChars} maxTokens=${maxTokens}`)
+  // Cloudflare Worker hard wall-clock: 120s per HTTP request.
+  // Proxy streaming rate: ~50-80 tokens/sec for gpt-5-mini.
+  // With 30k chars of input (~22k tokens), the model can produce ~4000 output
+  // tokens in ~50-80s, comfortably within the 120s limit.
+  // Input is capped at 30k chars — enough to cover background, objectives, scope,
+  // evaluation criteria, and requirements sections of any standard RFP.
+  // maxTokens proportional to input: 1 output token per ~7.5 input chars, min 3000.
+  const inputChars = Math.min(ocrText.length, 30000)
+  const maxTokens = Math.min(4000, Math.max(3000, Math.ceil(inputChars / 7.5)))
+  console.log(`[rfp-ai-extract] ${rfpIdLog} single-phase — inputChars=${inputChars} (of ${ocrText.length} total) maxTokens=${maxTokens}`)
 
   const SYSTEM_PROMPT = `You are an expert procurement analyst specializing in processing complex, often imperfect, OCR-scanned documents (like RFPs). Your task is to analyze the provided RFP text and extract a comprehensive, structured JSON object containing all key information.
 
@@ -1363,9 +1366,7 @@ async function extractRfpFieldsFromOcr(ocrText: string, env: any, rfpIdLog: stri
     *   **Coverage:** Ensure the extracted requirements cover a wide range of areas including technical capabilities, security, commercial obligations (e.g., pricing format), submission rules (e.g., format, deadlines), and compliance (e.g., confidentiality, conflict of interest).
     *   **ID:** Number them sequentially starting from \`req_1\`.`
 
-  // Cap input at 80k chars — the model processes ~60k tokens of input comfortably;
-  // beyond 80k chars the streaming response time grows without quality improvement.
-  const inputText = ocrText.slice(0, 80000)
+  const inputText = ocrText.slice(0, inputChars)
   const USER_PROMPT = `Extract all structured fields from this RFP document and return a single JSON object as specified:\n\n${inputText}`
 
   let extracted: any = {}
