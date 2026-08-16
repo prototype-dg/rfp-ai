@@ -7210,8 +7210,11 @@ function _showBulkEvalProgress(proposals) {
 }
 
 function _bulkSimulateProgress(proposalIds) {
-  var perProposalMs = 26000;
-  var perStageMs    = Math.round(perProposalMs / _EVAL_STAGES.length);
+  var perProposalMs  = 26000;
+  var perStageMs     = Math.round(perProposalMs / _EVAL_STAGES.length);
+  // Stop simulation one stage before the final "verdict" step — the verdict stage is only
+  // shown complete when the real API response arrives, not via a cosmetic timer.
+  var LAST_AUTO_STAGE = _EVAL_STAGES.length - 2;
 
   proposalIds.forEach(function(id, propIdx) {
     var propDelay = propIdx * perProposalMs;
@@ -7225,7 +7228,7 @@ function _bulkSimulateProgress(proposalIds) {
       }
     }, propDelay));
 
-    for (var si = 1; si < _EVAL_STAGES.length; si++) {
+    for (var si = 1; si <= LAST_AUTO_STAGE; si++) {
       (function(stageIdx) {
         _bulkEvalTimers.push(setTimeout(function() {
           var s = _bulkEvalState[id];
@@ -7242,6 +7245,10 @@ function _bulkSimulateProgress(proposalIds) {
 }
 
 function _bulkStartPolling(rfpId) {
+  // Capture start time once — used to ignore stale ai_evaluated_at from prior evaluation runs.
+  // Without this guard, a proposal that was already evaluated (status='evaluated') from a previous
+  // session would be marked "Complete" at the very first poll tick, before the current run finishes.
+  var sessionStart = _bulkEvalStartTime;
   _bulkEvalPollId = setInterval(async function() {
     try {
       var fresh = await apiCall('GET', '/rfps/' + rfpId + '/proposals');
@@ -7249,8 +7256,13 @@ function _bulkStartPolling(rfpId) {
       var changed = false;
       fresh.forEach(function(p) {
         var s = _bulkEvalState[p.id];
-        if (!s) return;
-        if ((p.ai_evaluated_at || p.status === 'evaluated' || p.status === 'awarded') && s.state !== 'done') {
+        if (!s || s.state === 'done' || s.state === 'skipped') return;
+        // Only mark done if ai_evaluated_at is NEWER than when this eval session started.
+        // This prevents proposals with a stale status='evaluated' (from a prior run) from
+        // being prematurely marked complete in the progress window.
+        var evalTime = p.ai_evaluated_at ? new Date(p.ai_evaluated_at).getTime() : 0;
+        var freshlyEvaluated = evalTime > sessionStart;
+        if (freshlyEvaluated && s.state !== 'done') {
           s.state = 'done'; s.stage = _EVAL_STAGES.length - 1; changed = true;
         }
       });
@@ -7304,10 +7316,14 @@ function _showSingleEvalProgress(vendorName) {
   var area = document.getElementById('pTabBody_summary');
   if (area) area.innerHTML = _renderEvalProgressPanel(0, _singleEvalVendor, _singleEvalStartTime, null, null);
 
-  // Auto-advance through stages
+  // Auto-advance through stages up to (but NOT including) the final "verdict" stage.
+  // The last stage is only shown as active/complete when the API actually returns —
+  // this prevents the progress bar from showing "Generating Recommendation" (or worse,
+  // "Complete") while the LLM call is still running inside the Worker.
+  var LAST_AUTO_STAGE = _EVAL_STAGES.length - 2; // stop one before verdict
   var stageDurations = [2000, 2000, 3000, 8000, 3000, 5000, 2000];
   var cumDelay = 0;
-  for (var si = 1; si < _EVAL_STAGES.length; si++) {
+  for (var si = 1; si <= LAST_AUTO_STAGE; si++) {
     cumDelay += stageDurations[si - 1];
     (function(idx, delay) {
       _singleEvalTimers.push(setTimeout(function() {
