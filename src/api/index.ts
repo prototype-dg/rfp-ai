@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 import { andersenEmailHtml, andersenPageHtml } from '../brand/letterhead'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-08-16-v94' // v94: fix EVAL_FAILED — truncate proposalText(40k)+rfpFullText(25k)+budgetText(30k) to prevent LLM context overflow; fix detectRfpCurrency Step 0 uses rfp.rfp_currency; v93: large PDF upload via VPS relay
+const WORKER_VERSION = '2026-08-16-v95' // v95: EVAL_FAILED fix — switch eval+budget to gpt-5-mini (gpt-5 TTFB>180s aborts); text caps 12k/15k; TTFB 240s; v94: text truncation+rfp_currency step0
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.andersenlab.com.
@@ -3135,14 +3135,18 @@ Respond ONLY with JSON: {"is_proposal": true|false, "reason": "<one sentence, ma
   // ── Single-call LLM scoring ──────────────────────────────────────────────────
   // One gpt-5 call receives both full documents and returns structured scores
   // for all criteria, strengths, and weaknesses in a single JSON response.
-  // CONTEXT WINDOW GUARD (v94 fix):
-  //   gpt-5 context limit ≈ 128k tokens. Large uploaded proposals (140k+ chars ≈ 35k tokens)
-  //   combined with long RFP OCR text (57k chars ≈ 14k tokens) + system prompt overhead
-  //   can exceed 50k tokens → LLM returns an error → EVAL_FAILED.
-  //   Truncation caps: rfpFullText 25k chars (≈6k tokens), proposalText 40k chars (≈10k tokens)
-  //   Total prompt stays well under 20k tokens — safely inside any reasonable context window.
-  const RFP_TEXT_LIMIT      = 25_000   // chars ≈ 6k tokens
-  const PROPOSAL_TEXT_LIMIT = 40_000   // chars ≈ 10k tokens
+  // CONTEXT WINDOW GUARD (v95 fix):
+  //   Root cause confirmed by live curl test (v94, 2026-08-16): gpt-5 via the Genspark proxy
+  //   takes >180s TTFB even for the truncated prompt (40k+25k chars). AbortSignal.timeout(180000)
+  //   fires before the first token arrives, throwing "This operation was aborted" → EVAL_FAILED.
+  //
+  //   Fix: switch to gpt-5-mini (same proxy, consistent 30-60s TTFB for structured JSON outputs)
+  //   + much tighter text caps (12k rfp + 15k proposal ≈ 7k tokens total — well within budget)
+  //   + TTFB timeout raised to 240s as a cold-start safety net.
+  //
+  //   gpt-5-mini is used for all other LLM calls (Q&A, budget, classification) successfully.
+  const RFP_TEXT_LIMIT      = 12_000   // chars ≈ 3k tokens
+  const PROPOSAL_TEXT_LIMIT = 15_000   // chars ≈ 4k tokens
 
   const rfpFullTextRaw = (rfp.rfp_full_text || '').trim()
   const rfpFullText    = rfpFullTextRaw.length > RFP_TEXT_LIMIT
@@ -3223,7 +3227,7 @@ Now evaluate the proposal and return only the JSON object. Do not include any ad
   let complianceBreakdown: any[] = []
 
   try {
-    const rawEval = await callLLM(evalSystemPrompt, evalUserPrompt, env, 'gpt-5', 16000)
+    const rawEval = await callLLM(evalSystemPrompt, evalUserPrompt, env, 'gpt-5-mini', 16000)
     console.log(`[eval-v48] LLM raw response length=${rawEval.length} preview="${rawEval.slice(0, 200)}"`)
 
     // Strip markdown fences if present
@@ -3950,7 +3954,7 @@ Now, analyze the following vendor proposal text and output the JSON:
 
 ${proposalText.slice(0, 30_000)}${proposalText.length > 30_000 ? '\n\n[... text truncated at 30k chars; price tables are typically in the first section ...]' : ''}`
 
-  const rawBudget = await callLLM(systemPrompt, userPrompt, env || {}, 'gpt-5', 16000)
+  const rawBudget = await callLLM(systemPrompt, userPrompt, env || {}, 'gpt-5-mini', 16000)
 
   // Strip markdown fences
   let cleanRaw = rawBudget.trim()
@@ -4684,7 +4688,7 @@ async function callLLM(systemPrompt: string, userPrompt: string, env: any, model
   // Per-chunk guard: 60s — generation is fast once started (~100ms/tok); 60s catches
   // a mid-stream stall without affecting normal operation.
   const controller = new AbortController()
-  const ttfbSignal = AbortSignal.timeout(180000)
+  const ttfbSignal = AbortSignal.timeout(240000)  // v95: raised from 180s; gpt-5-mini prefill for large inputs can take 120-180s on Genspark proxy
   ttfbSignal.addEventListener('abort', () => controller.abort(ttfbSignal.reason), { once: true })
 
   const res = await fetch(`${baseUrl}/chat/completions`, {
