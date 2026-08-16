@@ -348,7 +348,7 @@ var I18N = {
     // Form labels (generate tab)
     form_project_title: 'Project Title',
     form_category:      'Category',
-    form_budget_aed:    'Budget Cap — USD',
+    form_budget_aed:    'Budget Cap',
     form_deadline:      'Submission Deadline',
     form_background:    'Project Background',
     form_objectives:    'Objectives',
@@ -930,7 +930,7 @@ var I18N = {
     btn_create_rfp:     'Neue Ausschreibung erstellen',
     form_project_title: 'Projekttitel',
     form_category:      'Kategorie',
-    form_budget_aed:    'Budgetgrenze — USD',
+    form_budget_aed:    'Budgetgrenze',
     form_deadline:      'Einreichungsfrist',
     form_background:    'Projekthintergrund',
     form_objectives:    'Ziele',
@@ -1474,7 +1474,7 @@ var I18N = {
     btn_create_rfp:     'Créer un appel d\'offres',
     form_project_title: 'Titre du projet',
     form_category:      'Catégorie',
-    form_budget_aed:    'Plafond budgétaire — USD',
+    form_budget_aed:    'Plafond budgétaire',
     form_deadline:      'Date limite de soumission',
     form_background:    'Contexte du projet',
     form_objectives:    'Objectifs',
@@ -2018,7 +2018,7 @@ var I18N = {
     btn_create_rfp:     'Utwórz przetarg',
     form_project_title: 'Tytuł projektu',
     form_category:      'Kategoria',
-    form_budget_aed:    'Limit budżetu — USD',
+    form_budget_aed:    'Limit budżetu',
     form_deadline:      'Termin składania ofert',
     form_background:    'Tło projektu',
     form_objectives:    'Cele',
@@ -2589,7 +2589,7 @@ var I18N = {
     // Form labels (generate tab)
     form_project_title: 'عنوان المشروع',
     form_category:      'الفئة',
-    form_budget_aed:    'سقف الميزانية — USD',
+    form_budget_aed:    'سقف الميزانية',
     form_deadline:      'الموعد النهائي للتقديم',
     form_background:    'خلفية المشروع',
     form_objectives:    'الأهداف',
@@ -4722,7 +4722,7 @@ function scheduleFieldSave(rfpId, fieldId) {
       // Live-update the budget cap label when currency changes
       if (fieldId === 'rfpCurrencySelect') {
         var budgetLbl = document.getElementById('lbl-rfpBudget');
-        if (budgetLbl) budgetLbl.textContent = t('form_budget_aed').replace(/USD|AED|EUR|\w+/, el.value);
+        if (budgetLbl) budgetLbl.textContent = t('form_budget_aed');
       }
     }).catch(function() {
       var ind2 = document.getElementById('fsi-' + fieldId);
@@ -4809,11 +4809,16 @@ rfpTabs.generate = function(rfpId, rfp) {
   // Stage-action bar — shown at top when stage requires an action in this tab
   var genStageBar = '';
   if (rfp && rfp.stage === 'draft') {
+    // Uploaded RFPs are publishable as-is (PDF already exists); generated RFPs need content first.
+    var canPublishNow = hasContent || (isUploaded && !!uploadedR2Key);
+    var publishSubtitle = canPublishNow
+      ? (isUploaded && !hasContent ? 'Review the pre-filled fields below, then publish to invite vendors.' : t('banner_gen_first'))
+      : t('banner_gen_first');
     genStageBar = '<div style="background:linear-gradient(90deg,#fffbeb,#fef3c7);border:1.5px solid var(--cpc-gold);border-radius:10px;padding:0.65rem 1rem;display:flex;align-items:center;gap:0.75rem;margin-bottom:1rem">'
       + '<i class="fas fa-rocket" style="color:var(--cpc-gold-deep);font-size:1rem;flex-shrink:0"></i>'
       + '<div style="flex:1"><span style="font-weight:700;color:var(--cpc-ink);font-size:0.88rem">' + t('banner_ready_publish') + '</span>'
-      + '<span style="color:#92400e;font-size:0.82rem;margin-left:0.5rem">' + t('banner_gen_first') + '</span></div>'
-      + '<button class="btn-primary" style="flex-shrink:0;white-space:nowrap;display:flex;align-items:center;gap:6px;padding:0.4rem 1rem;font-size:0.82rem' + (hasContent ? '' : ';opacity:0.45;pointer-events:none') + '" onclick="advanceRfpStage(' + rfpId + ',\x27published\x27)" title="' + (hasContent ? t('banner_publish_btn') : t('banner_gen_first_title')) + '"><i class="fas fa-paper-plane" style="font-size:0.78rem"></i>' + t('banner_publish_btn') + '</button>'
+      + '<span style="color:#92400e;font-size:0.82rem;margin-left:0.5rem">' + publishSubtitle + '</span></div>'
+      + '<button class="btn-primary" style="flex-shrink:0;white-space:nowrap;display:flex;align-items:center;gap:6px;padding:0.4rem 1rem;font-size:0.82rem' + (canPublishNow ? '' : ';opacity:0.45;pointer-events:none') + '" onclick="advanceRfpStage(' + rfpId + ',\x27published\x27)" title="' + (canPublishNow ? t('banner_publish_btn') : t('banner_gen_first_title')) + '"><i class="fas fa-paper-plane" style="font-size:0.78rem"></i>' + t('banner_publish_btn') + '</button>'
       + '</div>';
   }
 
@@ -4862,7 +4867,7 @@ rfpTabs.generate = function(rfpId, rfp) {
     + (_settingsCategories || DEFAULT_CATEGORIES).map(function(c){ return '<option value="' + c + '"' + (catVal===c?' selected':'') + '>' + c + '</option>'; }).join('')
     + '</select></div>'
     + '<div class="form-group" style="margin:0">'
-    + fgLabel('<span id="lbl-rfpBudget">' + t('form_budget_aed').replace(/USD|AED|EUR|\w+/, rfpCurrencyVal) + '</span>', 'rfpBudget', false)
+    + fgLabel('<span id="lbl-rfpBudget">' + t('form_budget_aed') + '</span>', 'rfpBudget', false)
     + '<input id="rfpBudget" placeholder="' + t('ph_budget') + '" value="' + escHtml(budgetVal) + '" oninput="' + asc + '" onchange="' + asc + '" title="Internal evaluation cap only — used to score vendor proposals commercially. This value is never published in the RFP document sent to vendors.">'
     + '<div style="font-size:0.7rem;color:#6b7280;margin-top:3px;line-height:1.35"><i class="fas fa-lock" style="font-size:0.65rem;margin-right:3px;color:#9ca3af"></i>' + t('gen_internal_only') + '</div>'
     + '</div></div>'

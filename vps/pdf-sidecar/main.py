@@ -1,4 +1,5 @@
 import os
+import re
 import io
 import logging
 import asyncio
@@ -295,3 +296,165 @@ async def extract_pdf(req: ExtractRequest, background_tasks: BackgroundTasks):
         raise HTTPException(status_code=422, detail=f"OCR failed: {str(e)}")
 
     return ExtractResponse(filename=fname, method=method, async_mode=False, **result)
+
+
+# ---------------------------------------------------------------------------
+# LLM extraction — runs llama-server locally, callbacks results to Worker
+# ---------------------------------------------------------------------------
+import json as _json
+
+LLM_API_KEY = os.environ.get("LLM_API_KEY", "23eb310d5c8764c8ec84a4a119d4257a17fa5c93e98e77d0")
+LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "http://127.0.0.1:11434/v1")
+
+EXTRACTION_SYSTEM_PROMPT = """You are an expert procurement analyst. Extract structured fields from the provided RFP text and return a single valid JSON object with these keys only:
+{
+  "title": "<string, max 120 chars>",
+  "category": "<one of: IT & Digital Transformation | ERP & Business Applications | Data & Analytics | Cloud & Infrastructure | Cybersecurity | AI & Machine Learning | Digital Marketing | Consulting | Construction | Professional Services>",
+  "background": "<string, max 500 chars>",
+  "objectives": "<string, max 500 chars>",
+  "scope": "<string, max 800 chars>",
+  "tech_requirements": "<string, max 600 chars>",
+  "budget": "<digits only or empty string>",
+  "deadline": "<YYYY-MM-DD or empty string>",
+  "scoring_criteria": [{"criterion": "<string>", "weight": <integer 0-100>, "description": "<1-2 sentences>"}],
+  "vendor_requirements": [{"id": "req_<n>", "text": "<actionable requirement>", "mandatory": <true|false>}]
+}
+Scoring rules:
+- Copy criterion names and weights EXACTLY as they appear in the RFP evaluation/scoring table.
+- If the document states weights (e.g. "Technical 40%, Commercial 30%, Experience 20%, Presentation 10%"), use those exact numbers.
+- Weights must sum to exactly 100. If the document weights do not sum to 100, scale them proportionally.
+- Do NOT invent criteria or weights that are not in the document.
+Other rules: Extract 10-25 vendor_requirements. Return ONLY the JSON object, no markdown, no explanation."""
+
+class LlmExtractRequest(BaseModel):
+    rfp_id: int
+    ocr_text: str
+    callback_url: str
+    callback_secret: Optional[str] = None
+    max_input_chars: Optional[int] = 20000
+    max_tokens: Optional[int] = 2000
+
+async def llm_extract_and_callback(
+    rfp_id: int,
+    ocr_text: str,
+    callback_url: str,
+    callback_secret: Optional[str],
+    max_input_chars: int,
+    max_tokens: int,
+):
+    logger.info(f"[llm-extract] rfp={rfp_id} ocr_chars={len(ocr_text)} max_input={max_input_chars} max_tokens={max_tokens}")
+    try:
+        input_text = ocr_text[:max_input_chars]
+        user_prompt = f"Extract all structured fields from this RFP:\n\n{input_text}"
+
+        async with httpx.AsyncClient(timeout=300.0) as client:
+            resp = await client.post(
+                f"{LLM_BASE_URL}/chat/completions",
+                headers={"Authorization": f"Bearer {LLM_API_KEY}", "Content-Type": "application/json"},
+                json={
+                    "model": "qwen2.5-3b-instruct",
+                    "messages": [
+                        {"role": "system", "content": EXTRACTION_SYSTEM_PROMPT},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    "max_tokens": max_tokens,
+                    "temperature": 0.3,
+                    "stream": False,
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+        usage = data.get("usage", {})
+        timings = data.get("timings", {})
+        logger.info(
+            f"[llm-extract] rfp={rfp_id} prompt_tok={usage.get('prompt_tokens')} "
+            f"completion_tok={usage.get('completion_tokens')} "
+            f"prefill_ms={timings.get('prompt_ms',0):.0f} gen_ms={timings.get('predicted_ms',0):.0f}"
+        )
+
+        raw = data["choices"][0]["message"]["content"]
+        # Strip markdown fences if present
+        raw = re.sub(r"^```json\s*", "", raw.strip(), flags=re.IGNORECASE)
+        raw = re.sub(r"^```\s*", "", raw, flags=re.IGNORECASE)
+        raw = re.sub(r"\s*```\s*$", "", raw)
+        raw = raw.strip()
+
+        # Extract JSON object
+        s = raw.find("{")
+        e = raw.rfind("}")
+        if s == -1 or e == -1 or e <= s:
+            raise ValueError(f"No JSON object in LLM output (chars={len(raw)}): {raw[:200]}")
+
+        parsed = _json.loads(raw[s:e+1])
+
+        # ── Normalize scoring_criteria weights to exactly 100 ──────────────────
+        criteria = parsed.get("scoring_criteria") or []
+        if criteria and isinstance(criteria, list):
+            # Use 'weight' key; fall back to 'score' if model used wrong key name
+            for c in criteria:
+                if "score" in c and "weight" not in c:
+                    c["weight"] = c.pop("score")
+                if "weight" not in c:
+                    c["weight"] = 0
+                # Coerce to int
+                try:
+                    c["weight"] = int(round(float(c["weight"])))
+                except (ValueError, TypeError):
+                    c["weight"] = 0
+            total = sum(c.get("weight", 0) for c in criteria)
+            if total > 0 and total != 100:
+                # Scale weights proportionally so they sum to exactly 100
+                scaled = [round(c["weight"] * 100 / total) for c in criteria]
+                # Fix rounding error on the largest criterion to hit exactly 100
+                diff = 100 - sum(scaled)
+                if diff != 0:
+                    max_idx = scaled.index(max(scaled))
+                    scaled[max_idx] += diff
+                for i, c in enumerate(criteria):
+                    c["weight"] = scaled[i]
+                logger.info(f"[llm-extract] rfp={rfp_id} normalized weights: {total}→100 ({[c['weight'] for c in criteria]})")
+            parsed["scoring_criteria"] = criteria
+        # ───────────────────────────────────────────────────────────────────────
+
+        payload = {
+            "ok": True,
+            "rfp_id": rfp_id,
+            "extracted": parsed,
+            "callback_secret": callback_secret,
+            "prompt_tokens": usage.get("prompt_tokens"),
+            "completion_tokens": usage.get("completion_tokens"),
+        }
+
+    except Exception as ex:
+        logger.error(f"[llm-extract] rfp={rfp_id} failed: {ex}")
+        payload = {
+            "ok": False,
+            "rfp_id": rfp_id,
+            "error": str(ex),
+            "callback_secret": callback_secret,
+        }
+
+    logger.info(f"[llm-extract] rfp={rfp_id} posting callback to {callback_url[:80]}")
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            cb_resp = await client.post(callback_url, json=payload)
+            logger.info(f"[llm-extract] rfp={rfp_id} callback status={cb_resp.status_code}")
+    except Exception as ex:
+        logger.error(f"[llm-extract] rfp={rfp_id} callback failed: {ex}")
+
+
+@app.post("/llm-extract", dependencies=[Depends(verify_token)])
+async def llm_extract(req: LlmExtractRequest, background_tasks: BackgroundTasks):
+    """Fire-and-forget LLM extraction. Runs llama-server locally, POSTs results to callback_url."""
+    background_tasks.add_task(
+        llm_extract_and_callback,
+        req.rfp_id,
+        req.ocr_text,
+        req.callback_url,
+        req.callback_secret,
+        req.max_input_chars or 20000,
+        req.max_tokens or 2000,
+    )
+    logger.info(f"[llm-extract] rfp={req.rfp_id} queued for background extraction")
+    return {"ok": True, "rfp_id": req.rfp_id, "status": "queued"}
