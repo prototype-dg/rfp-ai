@@ -1,14 +1,21 @@
 import os
 import re
 import io
+import hmac
+import time
+import shutil
+import hashlib
 import logging
 import asyncio
+import pathlib
+import secrets
 from typing import Optional
 
 import httpx
 import pdfplumber
-from fastapi import FastAPI, HTTPException, Security, Depends, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Security, Depends, BackgroundTasks, Request, Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
 from pdf2image import convert_from_bytes
 from google.cloud import vision
@@ -24,10 +31,16 @@ OCR_DPI = int(os.environ.get("OCR_DPI", "150"))
 OCR_THREADS = int(os.environ.get("OCR_THREADS", "4"))
 GOOGLE_VISION_API_KEY = os.environ.get("GOOGLE_VISION_API_KEY", "")
 
+# Proposal relay storage — temp files live here until the Worker fetches & streams to R2
+PROPOSAL_TMP_DIR = pathlib.Path(os.environ.get("PROPOSAL_TMP_DIR", "/tmp/proposal-uploads"))
+PROPOSAL_TMP_DIR.mkdir(parents=True, exist_ok=True)
+PROPOSAL_TOKEN_TTL = int(os.environ.get("PROPOSAL_TOKEN_TTL", str(2 * 3600)))  # 2 hours
+PROPOSAL_MAX_FILE_BYTES = int(os.environ.get("PROPOSAL_MAX_FILE_BYTES", str(500 * 1024 * 1024)))  # 500 MB per file
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("pdf-sidecar")
 
-app = FastAPI(title="PDF Sidecar", version="6.0.0")
+app = FastAPI(title="PDF Sidecar", version="7.0.0")
 bearer = HTTPBearer()
 
 # ---------------------------------------------------------------------------
@@ -458,3 +471,219 @@ async def llm_extract(req: LlmExtractRequest, background_tasks: BackgroundTasks)
     )
     logger.info(f"[llm-extract] rfp={req.rfp_id} queued for background extraction")
     return {"ok": True, "rfp_id": req.rfp_id, "status": "queued"}
+
+
+# ---------------------------------------------------------------------------
+# Proposal Upload Relay — browser uploads here, Worker fetches to stream → R2
+#
+# Why: CF Workers has a 128MB memory limit and ~150s wall-clock limit.
+#      Buffering large PDFs with arrayBuffer() + R2.put() exceeds both limits.
+#      The VPS has no such constraints — nginx handles large bodies natively,
+#      and uvicorn streams the bytes directly to disk without buffering.
+#
+# Flow:
+#   1. Worker POST /proposal-upload/init   — creates signed token, returns upload URLs
+#   2. Browser PUT /proposal-upload/<tok>/<filename>  — streams file to VPS disk
+#   3. Worker POST /submit/:id/finalize    — Worker GETs /proposal-temp/<tok>/<filename>,
+#                                           streams bytes into R2, deletes temp file
+#
+# Token format: <rfp_id>:<vendor_id>:<slot_index>:<expiry_ts>:<hmac_hex>
+# HMAC key: PDF_SIDECAR_SECRET — Worker already knows this secret.
+# ---------------------------------------------------------------------------
+
+def _make_upload_token(rfp_id: int, vendor_id: int, slot_idx: int) -> str:
+    """Generate a short-lived signed token for one upload slot."""
+    expiry = int(time.time()) + PROPOSAL_TOKEN_TTL
+    payload = f"{rfp_id}:{vendor_id}:{slot_idx}:{expiry}"
+    sig = hmac.new(SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()[:16]
+    return f"{payload}:{sig}"
+
+def _verify_upload_token(token: str) -> tuple[int, int, int]:
+    """Verify token and return (rfp_id, vendor_id, slot_idx). Raises ValueError on failure."""
+    if not SECRET:
+        raise ValueError("Server secret not configured")
+    parts = token.split(":")
+    if len(parts) != 5:
+        raise ValueError("Malformed token")
+    rfp_id, vendor_id, slot_idx, expiry_str, sig = parts
+    payload = f"{rfp_id}:{vendor_id}:{slot_idx}:{expiry_str}"
+    expected_sig = hmac.new(SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()[:16]
+    if not hmac.compare_digest(sig, expected_sig):
+        raise ValueError("Invalid token signature")
+    if int(time.time()) > int(expiry_str):
+        raise ValueError("Token expired")
+    return int(rfp_id), int(vendor_id), int(slot_idx)
+
+
+class ProposalUploadInitRequest(BaseModel):
+    rfp_id: int
+    vendor_id: int
+    files: list[dict]  # [{ filename, content_type, size_bytes, label }]
+    sidecar_base_url: Optional[str] = None  # e.g. "https://api.cpc-rfp.website"
+
+
+@app.post("/proposal-upload/init", dependencies=[Depends(verify_token)])
+async def proposal_upload_init(req: ProposalUploadInitRequest):
+    """
+    Called by the Worker (not the browser) to generate upload slots.
+    Returns per-file upload URLs pointing back to this VPS.
+    The Worker passes sidecar_base_url so URLs are correctly self-referential.
+    """
+    if not req.files:
+        raise HTTPException(status_code=400, detail="No files specified")
+    if len(req.files) > 10:
+        raise HTTPException(status_code=400, detail="Maximum 10 files per submission")
+
+    base_url = (req.sidecar_base_url or "").rstrip("/")
+    if not base_url:
+        raise HTTPException(status_code=400, detail="sidecar_base_url required")
+
+    slots = []
+    for i, f in enumerate(req.files):
+        token = _make_upload_token(req.rfp_id, req.vendor_id, i)
+        safe_name = re.sub(r"[^a-zA-Z0-9._-]", "_", f.get("filename") or f"document_{i+1}.pdf")
+        upload_url = f"{base_url}/proposal-upload/{token}/{safe_name}"
+        fetch_url  = f"{base_url}/proposal-temp/{token}/{safe_name}"
+        slots.append({
+            "slot_idx":     i,
+            "token":        token,
+            "filename":     f.get("filename") or f"document_{i+1}.pdf",
+            "safe_name":    safe_name,
+            "label":        f.get("label", "other"),
+            "content_type": f.get("content_type", "application/pdf"),
+            "size_bytes":   f.get("size_bytes", 0),
+            "upload_url":   upload_url,
+            "fetch_url":    fetch_url,
+        })
+    logger.info(f"[proposal-relay] init rfp={req.rfp_id} vendor={req.vendor_id} files={len(slots)}")
+    return {"ok": True, "slots": slots}
+
+
+@app.put("/proposal-upload/{token}/{filename}")
+async def proposal_upload_receive(token: str, filename: str, request: Request):
+    """
+    Browser streams raw file bytes here via XHR PUT (no Auth header needed —
+    the signed token IS the auth). Stores to PROPOSAL_TMP_DIR/<token>/<filename>.
+    nginx must be configured with client_max_body_size 500m; proxy_read_timeout 1800s.
+    """
+    try:
+        rfp_id, vendor_id, slot_idx = _verify_upload_token(token)
+    except ValueError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+
+    safe_name = re.sub(r"[^a-zA-Z0-9._-]", "_", filename)
+    slot_dir  = PROPOSAL_TMP_DIR / token
+    slot_dir.mkdir(parents=True, exist_ok=True)
+    dest_path = slot_dir / safe_name
+
+    content_length = request.headers.get("content-length")
+    max_bytes = PROPOSAL_MAX_FILE_BYTES
+    if content_length and int(content_length) > max_bytes:
+        raise HTTPException(status_code=413, detail=f"File too large (max {max_bytes // 1024 // 1024} MB)")
+
+    bytes_written = 0
+    try:
+        with open(dest_path, "wb") as f:
+            async for chunk in request.stream():
+                bytes_written += len(chunk)
+                if bytes_written > max_bytes:
+                    f.close()
+                    dest_path.unlink(missing_ok=True)
+                    raise HTTPException(status_code=413, detail="File too large (exceeded during stream)")
+                f.write(chunk)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[proposal-relay] upload error rfp={rfp_id} vendor={vendor_id}: {e}")
+        raise HTTPException(status_code=500, detail="Upload failed")
+
+    size_mb = bytes_written / 1024 / 1024
+    logger.info(f"[proposal-relay] stored rfp={rfp_id} vendor={vendor_id} slot={slot_idx} file={safe_name} size={size_mb:.1f}MB path={dest_path}")
+    return {"ok": True, "filename": safe_name, "bytes": bytes_written}
+
+
+@app.get("/proposal-temp/{token}/{filename}")
+async def proposal_temp_fetch(token: str, filename: str, request: Request):
+    """
+    Called by the Worker (with Bearer auth) to stream the temp file into R2.
+    After the Worker confirms R2 write, it calls DELETE on this endpoint to clean up.
+    We also check Bearer token so random internet can't fetch temp files.
+    """
+    # Auth: require Bearer with the shared secret
+    auth_header = request.headers.get("authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing auth")
+    provided = auth_header[7:]
+    if not SECRET or not hmac.compare_digest(provided, SECRET):
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    try:
+        _verify_upload_token(token)
+    except ValueError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+
+    safe_name = re.sub(r"[^a-zA-Z0-9._-]", "_", filename)
+    dest_path = PROPOSAL_TMP_DIR / token / safe_name
+
+    if not dest_path.exists():
+        raise HTTPException(status_code=404, detail="Temp file not found or already fetched")
+
+    file_size = dest_path.stat().st_size
+
+    def iterfile():
+        with open(dest_path, "rb") as f:
+            while chunk := f.read(64 * 1024):  # 64 KB chunks
+                yield chunk
+
+    return StreamingResponse(
+        iterfile(),
+        media_type="application/octet-stream",
+        headers={
+            "Content-Length": str(file_size),
+            "X-Filename": safe_name,
+        },
+    )
+
+
+@app.delete("/proposal-temp/{token}/{filename}", dependencies=[Depends(verify_token)])
+async def proposal_temp_delete(token: str, filename: str):
+    """Worker calls this after successfully streaming the file into R2."""
+    try:
+        _verify_upload_token(token)
+    except ValueError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+
+    safe_name = re.sub(r"[^a-zA-Z0-9._-]", "_", filename)
+    slot_dir  = PROPOSAL_TMP_DIR / token
+    dest_path = slot_dir / safe_name
+
+    if dest_path.exists():
+        dest_path.unlink()
+        logger.info(f"[proposal-relay] deleted temp file: {dest_path}")
+    # Clean up directory if empty
+    try:
+        slot_dir.rmdir()
+    except OSError:
+        pass
+
+    return {"ok": True, "deleted": safe_name}
+
+
+@app.on_event("startup")
+async def cleanup_old_temp_files():
+    """Remove temp files older than TTL on startup (best-effort)."""
+    cutoff = time.time() - PROPOSAL_TOKEN_TTL - 3600  # extra hour grace
+    removed = 0
+    try:
+        for slot_dir in PROPOSAL_TMP_DIR.iterdir():
+            if slot_dir.is_dir():
+                try:
+                    if slot_dir.stat().st_mtime < cutoff:
+                        shutil.rmtree(slot_dir, ignore_errors=True)
+                        removed += 1
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    if removed:
+        logger.info(f"[proposal-relay] startup cleanup: removed {removed} expired upload dirs")

@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 import { andersenEmailHtml, andersenPageHtml } from '../brand/letterhead'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-08-15-v91' // v89: drop vendor_requirements from VPS extraction (Qwen2.5-3B too slow: 30 req×25tok=750tok=85s gen, pushes total past wall-clock); scalar+scoring only, 500tok=98s total
+const WORKER_VERSION = '2026-08-16-v93' // v93: large PDF upload via VPS relay (presign→VPS PUT→finalize streams VPS→R2); v92: Budget Cap label, Publish button for uploaded RFPs, scoring weight normalization
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.andersenlab.com.
@@ -4235,6 +4235,217 @@ apiRouter.get('/submit/:rfpId', async (c) => {
   }
 
   return c.json(rfp)
+})
+
+// ── Shared vendor-validation helper for the presign/finalize flow ────────────
+async function resolveVendorForSubmit(
+  db: D1Database,
+  rfpId: string,
+  vendorCode: string,
+): Promise<{ vendorId: number; vendorName: string } | { error: string; status: number }> {
+  const rfp = await db.prepare('SELECT id, stage FROM rfps WHERE id=?').bind(rfpId).first<any>()
+  if (!rfp) return { error: 'RFP not found', status: 404 }
+  if (['awarded', 'archived'].includes(rfp.stage)) return { error: 'This RFP is no longer accepting submissions.', status: 403 }
+
+  const codeMatch = vendorCode.trim().toUpperCase().match(/^RFP-(\d+)-V(\d+)$/)
+  if (!codeMatch || Number(codeMatch[1]) !== Number(rfpId)) {
+    return { error: 'Invalid participant code. Please use the code from your invitation email.', status: 400 }
+  }
+  const vendorId = Number(codeMatch[2])
+  const v = await db.prepare('SELECT id, name FROM vendors WHERE id=?').bind(vendorId).first<any>()
+  if (!v) return { error: 'Invalid participant code.', status: 400 }
+
+  const rv = await db.prepare('SELECT status FROM rfp_vendors WHERE rfp_id=? AND vendor_id=?').bind(rfpId, vendorId).first<any>()
+  if (rv?.status === 'declined') return { error: 'declined', status: 403 }
+
+  return { vendorId: v.id, vendorName: v.name }
+}
+
+// POST /submit/:rfpId/presign — Step 1 of 3 for large-file uploads.
+// Validates vendor code, then asks the VPS sidecar to create signed upload slots.
+// The browser uploads each file DIRECTLY to the VPS relay endpoint (not via this Worker),
+// bypassing CF Worker body limits (128MB RAM / ~150s wall-clock).
+// Body: { vendor_code, files: [{ filename, content_type, size_bytes, label }] }
+apiRouter.post('/submit/:rfpId/presign', async (c) => {
+  const rfpId = c.req.param('rfpId')
+  let body: any
+  try { body = await c.req.json() } catch { return c.json({ error: 'Invalid JSON' }, 400) }
+
+  const vendor = await resolveVendorForSubmit(c.env.DB, rfpId, body.vendor_code || '')
+  if ('error' in vendor) return c.json({ error: vendor.error, ...(vendor.error === 'declined' && { declined: true }) }, vendor.status as any)
+  const { vendorId, vendorName } = vendor
+
+  const files: Array<{ filename: string; content_type: string; size_bytes: number; label: string }> = body.files || []
+  if (!files.length) return c.json({ error: 'No files specified.' }, 400)
+  if (files.length > 10) return c.json({ error: 'Maximum 10 files per submission.' }, 400)
+
+  // Ask VPS sidecar to mint signed upload slots.
+  // VPS has no memory/time limits for receiving large files from browsers.
+  const sidecarUrl = c.env.PDF_SIDECAR_URL || (globalThis as any).PDF_SIDECAR_URL || ''
+  const sidecarSecret = c.env.PDF_SIDECAR_SECRET || (globalThis as any).PDF_SIDECAR_SECRET || ''
+  if (!sidecarUrl || !sidecarSecret) return c.json({ error: 'Upload service not configured.' }, 500)
+
+  let initResult: any
+  try {
+    const initResp = await fetch(`${sidecarUrl}/proposal-upload/init`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${sidecarSecret}` },
+      body: JSON.stringify({
+        rfp_id: Number(rfpId),
+        vendor_id: vendorId,
+        files: files.map(f => ({ filename: f.filename, content_type: f.content_type || 'application/pdf', size_bytes: f.size_bytes || 0, label: f.label || 'other' })),
+        sidecar_base_url: sidecarUrl,
+      }),
+    })
+    if (!initResp.ok) {
+      const errText = await initResp.text().catch(() => '')
+      console.error(`[presign] sidecar init failed: ${initResp.status} ${errText.slice(0, 200)}`)
+      return c.json({ error: 'Upload service unavailable. Please try again.' }, 502)
+    }
+    initResult = await initResp.json() as any
+  } catch (e: any) {
+    console.error('[presign] sidecar init error:', e.message)
+    return c.json({ error: 'Upload service unreachable. Please try again.' }, 502)
+  }
+
+  if (!initResult.ok || !initResult.slots) return c.json({ error: 'Upload service error.' }, 500)
+
+  // Return slots to browser. upload_url = VPS relay endpoint (browser PUTs directly there).
+  // fetch_url = VPS endpoint the Worker GETs from in /finalize to stream into R2.
+  const slots = initResult.slots.map((s: any) => ({
+    token:        s.token,
+    filename:     s.filename,
+    safe_name:    s.safe_name,
+    label:        s.label,
+    content_type: s.content_type,
+    size_bytes:   s.size_bytes,
+    upload_url:   s.upload_url,   // browser → VPS
+    fetch_url:    s.fetch_url,    // Worker → VPS → R2 (used in /finalize)
+  }))
+
+  return c.json({ ok: true, vendor_id: vendorId, vendor_name: vendorName, slots })
+})
+
+// POST /submit/:rfpId/finalize — Step 3 of 3.
+// Called after all files have been uploaded to the VPS relay.
+// For each file: Worker fetches from VPS relay → streams into R2 → deletes VPS temp file.
+// Then creates the proposal DB record and fires async OCR.
+// Body: { vendor_code, cover_letter, attachments: [{ token, fetch_url, filename, safe_name, content_type, label, size_bytes }] }
+apiRouter.post('/submit/:rfpId/finalize', async (c) => {
+  const rfpId = c.req.param('rfpId')
+  let body: any
+  try { body = await c.req.json() } catch { return c.json({ error: 'Invalid JSON' }, 400) }
+
+  const vendor = await resolveVendorForSubmit(c.env.DB, rfpId, body.vendor_code || '')
+  if ('error' in vendor) return c.json({ error: vendor.error, ...(vendor.error === 'declined' && { declined: true }) }, vendor.status as any)
+  const { vendorId, vendorName } = vendor
+
+  const pendingAttachments: Array<{ token: string; fetch_url: string; filename: string; safe_name: string; content_type: string; label: string; size_bytes: number }> = body.attachments || []
+  if (!pendingAttachments.length) return c.json({ error: 'No attachments provided.' }, 400)
+
+  const sidecarUrl = c.env.PDF_SIDECAR_URL || (globalThis as any).PDF_SIDECAR_URL || ''
+  const sidecarSecret = c.env.PDF_SIDECAR_SECRET || (globalThis as any).PDF_SIDECAR_SECRET || ''
+  const bucket: R2Bucket | undefined = (c.env as any).PROPOSALS_BUCKET
+  if (!bucket) return c.json({ error: 'Storage not configured.' }, 500)
+
+  // ── Fetch each file from VPS relay and stream into R2 ──────────────────────
+  const safeVendorName = vendorName.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 20)
+  const storedAttachments: Array<{ r2_key: string; filename: string; content_type: string; label: string; size_bytes: number }> = []
+
+  for (let i = 0; i < pendingAttachments.length; i++) {
+    const att = pendingAttachments[i]
+    const safeName = att.safe_name || att.filename.replace(/[^a-zA-Z0-9._-]/g, '_')
+    const r2Key = `proposals/${rfpId}/${vendorId}_${safeVendorName}_${Date.now() + i}_${safeName}`
+
+    try {
+      // Fetch from VPS relay (streaming — never buffers entire file in Worker memory)
+      const fetchResp = await fetch(att.fetch_url, {
+        headers: { 'Authorization': `Bearer ${sidecarSecret}` },
+      })
+      if (!fetchResp.ok || !fetchResp.body) {
+        console.error(`[finalize] VPS fetch failed for slot ${i}: HTTP ${fetchResp.status}`)
+        return c.json({ error: `Failed to retrieve file ${att.filename} from upload relay.` }, 502)
+      }
+
+      // Stream body directly into R2 — no arrayBuffer(), no memory accumulation
+      await bucket.put(r2Key, fetchResp.body, {
+        httpMetadata: { contentType: att.content_type || 'application/pdf' },
+      })
+      console.log(`[finalize] R2 stored: ${r2Key}`)
+
+      storedAttachments.push({
+        r2_key:       r2Key,
+        filename:     att.filename,
+        content_type: att.content_type || 'application/pdf',
+        label:        att.label || 'other',
+        size_bytes:   att.size_bytes || 0,
+      })
+
+      // Best-effort cleanup of VPS temp file after successful R2 write
+      if (sidecarUrl && att.fetch_url) {
+        const deleteUrl = att.fetch_url.replace('/proposal-temp/', '/proposal-temp/').replace(/^(.+\/proposal-temp\/)/, `${sidecarUrl}/proposal-temp/`)
+        // Reconstruct delete URL: same path, DELETE method
+        fetch(att.fetch_url, {
+          method: 'DELETE',
+          headers: { 'Authorization': `Bearer ${sidecarSecret}` },
+        }).catch(() => {})  // fire-and-forget
+      }
+    } catch (e: any) {
+      console.error(`[finalize] R2 stream error slot ${i}: ${e.message}`)
+      return c.json({ error: `Storage error for file ${att.filename}. Please try again.` }, 500)
+    }
+  }
+
+  if (!storedAttachments.length) return c.json({ error: 'No files stored successfully.' }, 500)
+
+  // ── Create/update proposal DB record ────────────────────────────────────────
+  const coverLetter = (body.cover_letter || '').trim()
+  const pdfUrl = `r2://${storedAttachments[0].r2_key}`
+  const pdfFilename = storedAttachments[0].filename
+  const proposalAttachmentsJson = JSON.stringify(storedAttachments.map(a => ({
+    r2_key: a.r2_key, filename: a.filename, content_type: a.content_type, label: a.label, size_bytes: a.size_bytes,
+  })))
+
+  const existing = await c.env.DB.prepare(
+    'SELECT id FROM proposals WHERE rfp_id=? AND vendor_id=? ORDER BY id DESC LIMIT 1'
+  ).bind(rfpId, vendorId).first<any>()
+
+  let proposalId: number
+  if (existing) {
+    await c.env.DB.prepare(`
+      UPDATE proposals SET technical_proposal=?, proposal_attachments=?,
+        pdf_attachment_url=?, pdf_filename=?, status='submitted', is_real_submission=1,
+        updated_at=datetime('now') WHERE id=?
+    `).bind(coverLetter || null, proposalAttachmentsJson, pdfUrl, pdfFilename, existing.id).run()
+    proposalId = existing.id
+  } else {
+    const ins = await c.env.DB.prepare(`
+      INSERT INTO proposals (rfp_id, vendor_id, technical_proposal, proposal_attachments,
+        pdf_attachment_url, pdf_filename, status, is_real_submission, created_at, updated_at)
+      VALUES (?,?,?,?,?,?,'submitted',1,datetime('now'),datetime('now'))
+    `).bind(rfpId, vendorId, coverLetter || null, proposalAttachmentsJson, pdfUrl, pdfFilename).run()
+    proposalId = ins.meta.last_row_id as number
+  }
+
+  console.log(`[finalize] Proposal ${proposalId} from ${vendorName} — ${storedAttachments.length} file(s) stored in R2`)
+
+  // ── Fire async OCR for each stored file ────────────────────────────────────
+  const workerBase = `https://a7b32759-e743-4139-9bb0-4bae44886667.vip.gensparksite.com/api`
+  const callbackSecret = sidecarSecret
+  let ocrFired = 0
+  for (const att of storedAttachments) {
+    const filePdfUrl = `${workerBase}/proposals/pdf/${encodeURIComponent(att.r2_key)}`
+    const cbUrl = `${workerBase}/callback/proposals/${proposalId}/file-ocr-complete?label=${encodeURIComponent(att.label || 'other')}&filename=${encodeURIComponent(att.filename || 'document.pdf')}`
+    try { await callSidecarAsync(filePdfUrl, c.env, 100, cbUrl, callbackSecret); ocrFired++ } catch (_) {}
+  }
+
+  if (ocrFired > 0) {
+    await c.env.DB.prepare(`UPDATE proposals SET ocr_pending_files=?, updated_at=datetime('now') WHERE id=?`).bind(ocrFired, proposalId).run()
+  } else {
+    await c.env.DB.prepare(`UPDATE proposals SET ocr_pending_files=0, status='ready_for_evaluation', updated_at=datetime('now') WHERE id=?`).bind(proposalId).run()
+  }
+
+  return c.json({ ok: true, proposal_id: proposalId, vendor_name: vendorName, files_stored: storedAttachments.length, ocr_started: ocrFired, message: 'Proposal submitted successfully.' })
 })
 
 // POST /submit/:rfpId — submit a full vendor proposal (multipart form)
