@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 import { andersenEmailHtml, andersenPageHtml } from '../brand/letterhead'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-08-16-v93' // v93: large PDF upload via VPS relay (presign→VPS PUT→finalize streams VPS→R2); v92: Budget Cap label, Publish button for uploaded RFPs, scoring weight normalization
+const WORKER_VERSION = '2026-08-16-v94' // v94: fix EVAL_FAILED — truncate proposalText(40k)+rfpFullText(25k)+budgetText(30k) to prevent LLM context overflow; fix detectRfpCurrency Step 0 uses rfp.rfp_currency; v93: large PDF upload via VPS relay
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.andersenlab.com.
@@ -3135,10 +3135,27 @@ Respond ONLY with JSON: {"is_proposal": true|false, "reason": "<one sentence, ma
   // ── Single-call LLM scoring ──────────────────────────────────────────────────
   // One gpt-5 call receives both full documents and returns structured scores
   // for all criteria, strengths, and weaknesses in a single JSON response.
-  const rfpFullText   = (rfp.rfp_full_text || '').trim()
+  // CONTEXT WINDOW GUARD (v94 fix):
+  //   gpt-5 context limit ≈ 128k tokens. Large uploaded proposals (140k+ chars ≈ 35k tokens)
+  //   combined with long RFP OCR text (57k chars ≈ 14k tokens) + system prompt overhead
+  //   can exceed 50k tokens → LLM returns an error → EVAL_FAILED.
+  //   Truncation caps: rfpFullText 25k chars (≈6k tokens), proposalText 40k chars (≈10k tokens)
+  //   Total prompt stays well under 20k tokens — safely inside any reasonable context window.
+  const RFP_TEXT_LIMIT      = 25_000   // chars ≈ 6k tokens
+  const PROPOSAL_TEXT_LIMIT = 40_000   // chars ≈ 10k tokens
+
+  const rfpFullTextRaw = (rfp.rfp_full_text || '').trim()
+  const rfpFullText    = rfpFullTextRaw.length > RFP_TEXT_LIMIT
+    ? rfpFullTextRaw.slice(0, RFP_TEXT_LIMIT) + `\n\n[... RFP text truncated at ${RFP_TEXT_LIMIT} chars for context window; full text stored in DB ...]`
+    : rfpFullTextRaw
+
+  const proposalTextForLLM = proposalText.length > PROPOSAL_TEXT_LIMIT
+    ? proposalText.slice(0, PROPOSAL_TEXT_LIMIT) + `\n\n[... Proposal text truncated at ${PROPOSAL_TEXT_LIMIT} chars for context window; full text stored in DB ...]`
+    : proposalText
+
   const scoringMatrix = (rfp.scoring_matrix || '').trim() || '(not configured — use standard procurement scoring criteria as defined in the RFP)'
 
-  console.log(`[eval-v48] proposalId=${proposal.id} rfp_full_text=${rfpFullText.length} proposal_full_text=${proposalText.length}`)
+  console.log(`[eval-v49] proposalId=${proposal.id} rfp_full_text=${rfpFullTextRaw.length}->${rfpFullText.length} proposal_text=${proposalText.length}->${proposalTextForLLM.length}`)
 
   const evalSystemPrompt = `You are a procurement evaluation expert. You will be given two documents:
 
@@ -3186,7 +3203,7 @@ RFP Document:
 ${rfpFullText}
 
 Vendor Response:
-${proposalText}
+${proposalTextForLLM}
 
 Scoring Matrix:
 ${scoringMatrix}
@@ -3268,7 +3285,7 @@ Now evaluate the proposal and return only the JSON object. Do not include any ad
     console.log(`[eval-v48] technical DONE total_score=${totalScore} criteria=${scores.length}`)
 
   } catch (evalErr: any) {
-    console.log(`[eval-v48] LLM EXCEPTION: ${evalErr?.message || evalErr}`)
+    console.log(`[eval-v49] LLM EXCEPTION: ${evalErr?.message || evalErr}`)
     validationStatus = 'EVAL_FAILED'
     reasoning = `Evaluation failed: ${evalErr?.message || evalErr}`
   }
@@ -3296,11 +3313,19 @@ Now evaluate the proposal and return only the JSON object. Do not include any ad
   //      (e.g. "Total Budget: AED 5,000,000")
   //   3. issuer_currency from the settings DB (the user's chosen display currency)
   //   4. 'USD' hard default
-  function detectRfpCurrency(budgetField: string | null, text: string, issuerCurrency: string): string {
+  function detectRfpCurrency(budgetField: string | null, text: string, issuerCurrency: string, rfpStoredCurrency?: string): string {
     const ALL_CODES = ['AED','SAR','QAR','KWD','BHD','EUR','GBP','CHF','PLN','SGD',
                        'CAD','AUD','NZD','JPY','CNY','INR','KRW','HKD','SEK','NOK',
                        'DKK','CZK','HUF','RON','TRY','BRL','MXN','ZAR','NGN','EGP',
                        'UAH','RUB','USD']
+
+    // Step 0: rfp.rfp_currency column — highest priority, set by the user when creating/uploading RFP
+    // This is the most authoritative source; skip only if it's the generic default 'USD'
+    // (which may mean "not set" rather than "truly USD")
+    const storedCode = (rfpStoredCurrency || '').trim().toUpperCase()
+    if (storedCode && storedCode !== 'USD' && ALL_CODES.includes(storedCode)) {
+      return storedCode
+    }
 
     // Step 1: scan budget field alone (most reliable — it's the RFP ceiling input)
     const bfStr = (budgetField || '').trim()
@@ -3370,7 +3395,7 @@ Now evaluate the proposal and return only the JSON object. Do not include any ad
   let commercialScoreActual: number | null = null
 
   // Detect RFP budget currency — uses issuerCurrency as fallback
-  const rfpBudgetCurrency = detectRfpCurrency(rfp.budget || null, rfpFullText, issuerCurrency)
+  const rfpBudgetCurrency = detectRfpCurrency(rfp.budget || null, rfpFullText, issuerCurrency, rfp.rfp_currency || '')
 
   if (budget.amount && commercialWeight > 0) {
     // Parse RFP budget ceiling (numeric value from rfp.budget field or rfp_full_text)
@@ -3923,7 +3948,7 @@ Example Output:
 
 Now, analyze the following vendor proposal text and output the JSON:
 
-${proposalText}`
+${proposalText.slice(0, 30_000)}${proposalText.length > 30_000 ? '\n\n[... text truncated at 30k chars; price tables are typically in the first section ...]' : ''}`
 
   const rawBudget = await callLLM(systemPrompt, userPrompt, env || {}, 'gpt-5', 16000)
 
