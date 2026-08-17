@@ -7,7 +7,7 @@ import { andersenEmailHtml, andersenPageHtml } from '../brand/letterhead'
 const WORKER_VERSION = '2026-08-17-v96' // v96: OpenAI direct API (gpt-5.4-mini + gpt-5.5); hardcoded key fallback
 
 // ── OpenAI configuration ───────────────────────────────────────────────────────
-const OPENAI_API_KEY_FALLBACK = 'sk-nv4FQYLCsgamP3QjUEWZqg'
+const OPENAI_API_KEY_FALLBACK = 'OPENAI_KEY_REMOVED'
 const OPENAI_BASE_URL = 'https://api.openai.com/v1'
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
