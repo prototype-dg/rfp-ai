@@ -7506,11 +7506,29 @@ function viewProposalDetail(id) {
   if (!p) return;
   // Open panel immediately (no eval data yet — Summary tab active)
   _renderProposalPanel(p, null);
-  // If already evaluated, fetch eval data and update tabs in-place (no re-render)
-  if (p.ai_evaluated_at) {
-    apiCall('GET', '/rfps/' + p.rfp_id + '/proposals/' + p.id + '/evaluation').then(function(ev) {
-      _updateProposalPanelEval(p, ev.evaluation_data);
+
+  // Fetch RFP (for market_benchmark_json) and eval data in parallel,
+  // then render once both are ready so benchmark is always shown.
+  var rfpPromise = apiCall('GET', '/rfps/' + p.rfp_id, undefined, { silent: true })
+    .then(function(rfpFresh) {
+      if (rfpFresh && rfpFresh.market_benchmark_json) {
+        try {
+          var bm = JSON.parse(rfpFresh.market_benchmark_json);
+          if (!appState._marketBenchmarks) appState._marketBenchmarks = {};
+          appState._marketBenchmarks[p.rfp_id] = bm;
+        } catch(_) {}
+      }
+      if (rfpFresh) appState.currentRfp = rfpFresh;
     }).catch(function(){});
+
+  // If already evaluated, wait for rfp fetch then update tabs with both benchmark + eval data
+  if (p.ai_evaluated_at) {
+    var evalPromise = apiCall('GET', '/rfps/' + p.rfp_id + '/proposals/' + p.id + '/evaluation')
+      .catch(function(){ return null; });
+    Promise.all([rfpPromise, evalPromise]).then(function(results) {
+      var ev = results[1];
+      if (ev && ev.evaluation_data) _updateProposalPanelEval(p, ev.evaluation_data);
+    });
   }
 }
 
