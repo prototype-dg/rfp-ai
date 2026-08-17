@@ -3941,7 +3941,7 @@ Rules:
 - EXCLUDE: Optional add-ons, post-launch support/maintenance fees, VAT, infrastructure/hosting (unless explicitly bundled into a phase total).
 - If the proposal states a grand total that matches the sum of included phases, use that total.
 - Use the currency explicitly stated in the proposal (AED, USD, EUR, etc.).
-- For duration: use the stated total if given, otherwise sum sequential phases.
+- For duration: sum ALL sequential phases (e.g. MVP1 3.5 months + MVP2 3.5 months = 7 months). If the document only shows one phase, state only that phase's duration — do NOT assume it is the total.
 
 Return ONLY valid JSON with exactly these keys (no markdown, no explanation):
 {"total_cost": "<AMOUNT> <CURRENCY>", "duration": "<N> months", "line_items": [{"name": "<phase>", "amount": <number>, "currency": "<code>", "included": true/false, "reason": "<why included or excluded>"}]}
@@ -3992,9 +3992,25 @@ ${proposalText.slice(0, 30_000)}${proposalText.length > 30_000 ? '\n\n[... text 
     }
   }
 
-  const duration: string | null = (parsed.duration && typeof parsed.duration === 'string')
-    ? parsed.duration
-    : (proposal.proposed_duration || null)
+  // Pick the LARGER of the LLM-extracted duration vs the existing DB value.
+  // The budget LLM only sees the commercial section (which may show one phase only),
+  // while the technical proposal (read earlier) has the full sequential total.
+  // Keeping the larger value prevents a single-phase commercial doc from overwriting
+  // the correct multi-phase total already stored from the technical document.
+  const extractMonths = (s: string | null | undefined): number => {
+    if (!s) return 0
+    const m = String(s).match(/([\d.]+)\s*month/i)
+    if (m) return parseFloat(m[1])
+    const w = String(s).match(/([\d.]+)\s*week/i)
+    if (w) return parseFloat(w[1]) / 4.33
+    return 0
+  }
+  const llmDuration = (parsed.duration && typeof parsed.duration === 'string') ? parsed.duration : null
+  const dbDuration  = proposal.proposed_duration || null
+  const llmMonths   = extractMonths(llmDuration)
+  const dbMonths    = extractMonths(dbDuration)
+  const duration: string | null = (llmMonths >= dbMonths) ? (llmDuration || dbDuration) : (dbDuration || llmDuration)
+  console.log(`[budget-llm] duration: llm="${llmDuration}" (${llmMonths}mo) db="${dbDuration}" (${dbMonths}mo) → kept="${duration}"`)
 
   if (budgetAmount) {
     await db.prepare(`
