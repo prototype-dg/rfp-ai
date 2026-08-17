@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 import { andersenEmailHtml, andersenPageHtml } from '../brand/letterhead'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-08-17-v97' // v97: remove temperature param (unsupported by gpt-5.x); improve budget prompt with line_items breakdown
+const WORKER_VERSION = '2026-08-17-v98' // v98: bypass sidecar LLM (Qwen2.5-3B VPS) — run OpenAI directly for RFP field extraction; sidecar still used for PDF OCR only
 
 // ── OpenAI configuration ───────────────────────────────────────────────────────
 const OPENAI_API_KEY_FALLBACK = 'OPENAI_KEY_REMOVED'
@@ -1349,27 +1349,16 @@ async function extractRfpFieldsFromOcr(ocrText: string, env: any, rfpIdLog: stri
 }> {
   const phaseErrors: string[] = []
 
-  // ── Dynamic token budget ──────────────────────────────────────────────────
-  // VPS Qwen2.5-3B-Instruct Q4_K_M measured rates (4-core Xeon, no GPU):
-  //   prefill:    ~34 ms/token  →  1200 tok (6k chars) = 41s prefill
-  //   generation: ~126 ms/token →  400 tok output      = 50s generation
-  // Total budget must stay under ~100s to leave headroom inside the CF Worker
-  // wall-clock (Genspark hosted appears to allow ~180s per request).
-  //
-  // At 30k chars input (~6000 tokens): prefill alone = 204s — blows the budget.
-  // At  6k chars input (~1200 tokens): prefill = 41s, 400 tok output = 50s → ~91s ✓
-  //
-  // Trade-off: smaller input means we only see the first ~6k chars of the RFP.
-  // For most RFPs this covers the cover page, objectives, scope intro, and early
-  // evaluation criteria — enough for title, category, deadline, budget, objectives,
-  // and top-level scoring criteria. Deep vendor_requirements lists may be partial.
-  const inputChars = Math.min(ocrText.length, 6000)
-  // 800 output tokens: ~8 scalar fields + 5 scoring criteria + ~10 vendor_requirements.
-  // 500 output tokens: ~8 scalar fields + 5 scoring criteria. No vendor_requirements.
-  // At ~114ms/tok (observed) = 57s generation. Total: 41s prefill + 57s gen = 98s.
-  // vendor_requirements requires 750+ extra tokens (85s) — too slow for this model.
-  const maxTokens = 500
-  console.log(`[rfp-ai-extract] ${rfpIdLog} single-phase — inputChars=${inputChars} (of ${ocrText.length} total) maxTokens=${maxTokens}`)
+  // ── Token budget — v98: OpenAI gpt-5.4-mini, no VPS constraints ─────────────
+  // Previous limits (6k chars input, 500 output tokens) were forced by the VPS
+  // Qwen2.5-3B model running at ~8.8 tok/s with a 100s wall-clock limit.
+  // OpenAI gpt-5.4-mini handles 30k chars input in ~3-5s total — no constraint.
+  // Raise input to 30k chars so budget, deadline, and scoring criteria buried deep
+  // in the RFP body are reliably found. Raise output to 1500 tokens to allow
+  // full scoring_criteria arrays (typically 5-8 criteria × ~50 tok each).
+  const inputChars = Math.min(ocrText.length, 30000)
+  const maxTokens = 1500
+  console.log(`[rfp-ai-extract] ${rfpIdLog} OpenAI single-phase — inputChars=${inputChars} (of ${ocrText.length} total) maxTokens=${maxTokens}`)
 
   const SYSTEM_PROMPT = `You are an expert procurement analyst specializing in processing complex, often imperfect, OCR-scanned documents (like RFPs). Your task is to analyze the provided RFP text and extract a comprehensive, structured JSON object containing all key information.
 
@@ -1564,27 +1553,10 @@ apiRouter.post('/callback/rfps/:rfpId/rfp-upload-ocr-complete', async (c) => {
     `UPDATE rfps SET uploaded_rfp_text=?, rfp_full_text=?, ai_extraction_status='extracting', updated_at=datetime('now') WHERE id=?`
   ).bind(extractedText, extractedText.slice(0, 100000), rfpId).run()
 
-  // ── v85: Run extraction SYNCHRONOUSLY before returning 200 ────────────────
-  // Root cause of v81-v84 failures: waitUntil() + stream:true SSE read loop hangs
-  // forever when the proxy stalls mid-stream (no reliable per-chunk timeout in
-  // waitUntil context). rerun-ai-extraction always works because it runs inside
-  // a live HTTP request. This callback now does the same: block here, let the
-  // sidecar wait ~25-30s for our 200. The sidecar HTTP client tolerates this.
-  // No waitUntil(), no extractionTask, no stream:false workaround needed.
-  // ── v90: Queue async LLM extraction via sidecar ─────────────────────────────
-  // Instead of calling the LLM synchronously (which times out at >100s for large RFPs
-  // on Qwen2.5-3B), we ask the sidecar to run llama-server locally and POST results
-  // back to /api/callback/rfps/:rfpId/llm-extract-complete. The sidecar has a 300s
-  // timeout budget with no CF Worker wall-clock constraint.
-  const workerBaseUrl = new URL(c.req.url).origin
-  const llmCallbackUrl = `${workerBaseUrl}/api/callback/rfps/${rfpId}/llm-extract-complete`
-  const queued = await callSidecarLlmExtract(rfpId, extractedText, llmCallbackUrl, c.env)
-  if (queued) {
-    console.log(`[rfp-upload-ocr-cb] rfp=${rfpId} LLM extraction queued via sidecar`)
-    return c.json({ ok: true, rfpId, status: 'extracting' })
-  }
-  // Sidecar unavailable — fall back to synchronous in-Worker extraction (v85 behavior)
-  console.warn(`[rfp-upload-ocr-cb] rfp=${rfpId} sidecar unavailable — falling back to sync extraction`)
+  // ── v98: Run OpenAI extraction DIRECTLY — bypass sidecar LLM ────────────────
+  // The sidecar /llm-extract ran Qwen2.5-3B on the VPS at ~8.8 tok/s — 85–200s for
+  // a typical RFP. Switching to OpenAI gpt-5.4-mini cuts this to ~3–5s.
+  // The sidecar is still used for PDF OCR (step above); only the LLM step changes.
   const db = c.env.DB
   try {
     const { extracted, scoringMatrixJson, requirementGlossaryJson, phaseErrors } =
@@ -1592,7 +1564,7 @@ apiRouter.post('/callback/rfps/:rfpId/rfp-upload-ocr-complete', async (c) => {
     const { newTitle } = await writeExtractedRfpFields(
       db, rfpId, extractedText, extracted, scoringMatrixJson, requirementGlossaryJson)
     await db.prepare(`UPDATE rfps SET ai_extraction_status='done', updated_at=datetime('now') WHERE id=?`).bind(rfpId).run()
-    console.log(`[rfp-upload-ocr-cb] rfp=${rfpId} sync extraction done — title="${newTitle}"`)
+    console.log(`[rfp-upload-ocr-cb] rfp=${rfpId} OpenAI extraction done — title="${newTitle}" errors=${phaseErrors.length}`)
     return c.json({ ok: true, rfpId, status: 'done' })
   } catch (e: any) {
     await db.prepare(`UPDATE rfps SET ai_extraction_status='error', updated_at=datetime('now') WHERE id=?`).bind(rfpId).run().catch(() => {})
@@ -1621,17 +1593,8 @@ apiRouter.post('/rfps/:id/rerun-ai-extraction', async (c) => {
 
     await c.env.DB.prepare(`UPDATE rfps SET ai_extraction_status='extracting', updated_at=datetime('now') WHERE id=?`).bind(rfpId).run()
 
-    const workerBaseUrl = new URL(c.req.url).origin
-    const llmCallbackUrl = `${workerBaseUrl}/api/callback/rfps/${rfpId}/llm-extract-complete`
-    const queued = await callSidecarLlmExtract(rfpId, ocrText, llmCallbackUrl, c.env)
-
-    if (queued) {
-      console.log(`[rerun-ai-extraction] rfp=${rfpId} queued via sidecar LLM — callback=${llmCallbackUrl}`)
-      return c.json({ ok: true, rfpId, status: 'extracting', message: 'LLM extraction queued. Poll ai_extraction_status for completion.' })
-    }
-
-    // Sidecar not available — fall back to synchronous extraction
-    console.warn(`[rerun-ai-extraction] rfp=${rfpId} sidecar unavailable — falling back to sync`)
+    // v98: Always use OpenAI directly — sidecar Qwen2.5-3B was 85-200s; OpenAI is ~3-5s
+    console.log(`[rerun-ai-extraction] rfp=${rfpId} running OpenAI extraction directly`)
     const { extracted, scoringMatrixJson, requirementGlossaryJson, phaseErrors } =
       await extractRfpFieldsFromOcr(ocrText, c.env, `rfp=${rfpId}`)
     if (!extracted || Object.keys(extracted).length === 0) {
@@ -1641,7 +1604,7 @@ apiRouter.post('/rfps/:id/rerun-ai-extraction', async (c) => {
     const { newTitle } = await writeExtractedRfpFields(
       c.env.DB, rfpId, ocrText, extracted, scoringMatrixJson, requirementGlossaryJson)
     await c.env.DB.prepare(`UPDATE rfps SET ai_extraction_status='done', updated_at=datetime('now') WHERE id=?`).bind(rfpId).run()
-    console.log(`[rerun-ai-extraction] rfp=${rfpId} sync done — title="${newTitle}"`)
+    console.log(`[rerun-ai-extraction] rfp=${rfpId} OpenAI done — title="${newTitle}" errors=${phaseErrors.length}`)
     return c.json({ ok: true, rfpId, status: 'done', title: newTitle, phase_errors: phaseErrors })
   } catch (e: any) {
     console.error(`[rerun-ai-extraction] rfp=${rfpId} error: ${e.message}`)
