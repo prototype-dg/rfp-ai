@@ -4,7 +4,11 @@ import type { Bindings } from '../types'
 import { andersenEmailHtml, andersenPageHtml } from '../brand/letterhead'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-08-16-v95' // v95: EVAL_FAILED fix — switch eval+budget to gpt-5-mini (gpt-5 TTFB>180s aborts); text caps 12k/15k; TTFB 240s; v94: text truncation+rfp_currency step0
+const WORKER_VERSION = '2026-08-17-v96' // v96: OpenAI direct API (gpt-5.4-mini + gpt-5.5); hardcoded key fallback
+
+// ── OpenAI configuration ───────────────────────────────────────────────────────
+const OPENAI_API_KEY_FALLBACK = 'sk-nv4FQYLCsgamP3QjUEWZqg'
+const OPENAI_BASE_URL = 'https://api.openai.com/v1'
 
 // ── PDF Sidecar ────────────────────────────────────────────────────────────────
 // Calls the Python/pdfplumber sidecar running at api.andersenlab.com.
@@ -574,8 +578,8 @@ apiRouter.post('/rfps/:id/generate', async (c) => {
   // Build the prompts (same as generateRFPWithLLM but without calling callLLM yet)
   const { systemPrompt, userPrompt } = buildRFPPrompt(body, archDocText, brdDocText, existingScoringMatrix, settings)
 
-  const apiKey = c.env?.OPENAI_API_KEY || (globalThis as any).OPENAI_API_KEY || ''
-  const baseUrl = 'https://api.openai.com/v1'
+  const apiKey = c.env?.OPENAI_API_KEY || (globalThis as any).OPENAI_API_KEY || OPENAI_API_KEY_FALLBACK
+  const baseUrl = OPENAI_BASE_URL
 
   if (!apiKey) {
     return c.json({ error: 'OPENAI_API_KEY not configured' }, 500)
@@ -1709,8 +1713,8 @@ apiRouter.post('/rfps/:id/rerun-phase3', async (c) => {
     )
     console.log(`[rerun-phase3] rfp=${rfpId} focus_len=${requirementsFocusText.length} — non-streaming single call`)
 
-    const apiKey = c.env.OPENAI_API_KEY || (globalThis as any).OPENAI_API_KEY || ''
-    const baseUrl = 'https://api.openai.com/v1'
+    const apiKey = c.env.OPENAI_API_KEY || (globalThis as any).OPENAI_API_KEY || OPENAI_API_KEY_FALLBACK
+    const baseUrl = OPENAI_BASE_URL
 
     const systemPrompt = `You are an expert procurement analyst. Extract vendor requirements from an RFP document.
 Return ONLY a valid JSON array — no markdown fences, no explanation, no extra text before or after.
@@ -2437,8 +2441,8 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
 
     // LLM intent classification — runs for ALL emails with body text.
     let llmVerdict = 'NEUTRAL'
-    const openAiKey = (c.env as any).OPENAI_API_KEY || (globalThis as any).OPENAI_API_KEY || ''
-    const openAiBase = 'https://api.openai.com/v1'
+    const openAiKey = (c.env as any).OPENAI_API_KEY || (globalThis as any).OPENAI_API_KEY || OPENAI_API_KEY_FALLBACK
+    const openAiBase = OPENAI_BASE_URL
     if (openAiKey && cleanBody.length > 0) {
       try {
         const intentRes = await fetch(`${openAiBase}/chat/completions`, {
@@ -4663,8 +4667,8 @@ apiRouter.post('/submit/:rfpId', async (c) => {
 // ============================================================
 
 async function callLLM(systemPrompt: string, userPrompt: string, env: any, model = 'gpt-5.4-mini', maxTokens = 2000): Promise<string> {
-  const apiKey = env?.OPENAI_API_KEY || (globalThis as any).OPENAI_API_KEY || ''
-  const baseUrl = 'https://api.openai.com/v1'
+  const apiKey = env?.OPENAI_API_KEY || (globalThis as any).OPENAI_API_KEY || OPENAI_API_KEY_FALLBACK
+  const baseUrl = OPENAI_BASE_URL
   if (!apiKey) throw new Error('OPENAI_API_KEY not configured')
 
   // v85: stream:true SSE reader — the proxy REQUIRES streaming to return content.
