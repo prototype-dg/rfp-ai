@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 import { andersenEmailHtml, andersenPageHtml } from '../brand/letterhead'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-08-17-v96' // v96: OpenAI direct API (gpt-5.4-mini + gpt-5.5); hardcoded key fallback
+const WORKER_VERSION = '2026-08-17-v97' // v97: remove temperature param (unsupported by gpt-5.x); improve budget prompt with line_items breakdown
 
 // ── OpenAI configuration ───────────────────────────────────────────────────────
 const OPENAI_API_KEY_FALLBACK = 'OPENAI_KEY_REMOVED'
@@ -614,7 +614,6 @@ apiRouter.post('/rfps/:id/generate', async (c) => {
         model,
         messages: [{ role: 'system', content: sp }, { role: 'user', content: up }],
         max_completion_tokens: maxTok,
-        temperature: 0.3,
         stream: true,
       }),
     })
@@ -1737,7 +1736,6 @@ Rules:
           { role: 'user', content: `Extract all vendor requirements from this RFP section:\n\n${requirementsFocusText}` },
         ],
         max_completion_tokens: 1500,
-        temperature: 0.3,
         stream: true,
       }),
     })
@@ -2451,7 +2449,6 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
           body: JSON.stringify({
             model: 'gpt-5.4-mini',
             max_completion_tokens: 10,
-            temperature: 0,
             messages: [
               {
                 role: 'system',
@@ -3932,30 +3929,27 @@ apiRouter.post('/callback/proposals/:proposalId/budget-complete', async (c) => {
 async function runBudgetLLM(proposalText: string, proposal: any, db: D1Database, env?: any): Promise<any> {
   const systemPrompt = `You are a procurement expert AI. Your task is to analyze the provided vendor proposal text and extract the TOTAL PROJECT COST and TOTAL PROJECT DURATION.`
 
-  const userPrompt = `Follow these rules strictly:
+  const userPrompt = `Analyze the vendor proposal below and extract the total project cost and duration.
 
-1.  **Total Cost Calculation**:
-    *   Identify all core project development phases (e.g., MVP1, MVP2, Phase 1, Phase 2, etc.) and sum their fixed-price costs.
-    *   Identify all mandatory third-party software licenses explicitly stated in the proposal as required for the base solution, and add their first-year cost to the sum.
-    *   **STRICTLY EXCLUDE** the following from the total: Optional add-on services (e.g., separate training workshops), post-launch ongoing support/maintenance fees, Value Added Tax (VAT), and infrastructure/hosting costs (unless explicitly bundled into the mandatory phase totals).
+STEP 1 — List every cost line item you find in the proposal (phase name, amount, currency).
+STEP 2 — Identify which items are CORE delivery costs (include) vs optional/VAT/support (exclude).
+STEP 3 — Sum ONLY the included items to get the total.
+STEP 4 — Return the result as JSON.
 
-2.  **Duration Calculation**:
-    *   Identify the timeline. Sum the durations of all sequential phases (e.g., MVP1 + MVP2).
-    *   If the proposal states a total duration directly (e.g., "7 months"), use that.
-    *   Express the duration in months (e.g., "7 months") or weeks if months are not specified.
+Rules:
+- INCLUDE: All mandatory delivery phases (MVP1, MVP2, Phase 1, Phase 2, etc.), mandatory third-party licenses required for the base solution.
+- EXCLUDE: Optional add-ons, post-launch support/maintenance fees, VAT, infrastructure/hosting (unless explicitly bundled into a phase total).
+- If the proposal states a grand total that matches the sum of included phases, use that total.
+- Use the currency explicitly stated in the proposal (AED, USD, EUR, etc.).
+- For duration: use the stated total if given, otherwise sum sequential phases.
 
-3.  **Output Format**:
-    *   Return **ONLY** a valid JSON object.
-    *   Do not include any other text, explanations, or markdown formatting (like \`\`\`json) in your response.
-    *   The JSON must have exactly these two keys:
-        *   "total_cost": A string, including the currency code and the formatted number (e.g., "1,000,000 USD").
-        *   "duration": A string, specifying the total time (e.g., "7 months").
+Return ONLY valid JSON with exactly these keys (no markdown, no explanation):
+{"total_cost": "<AMOUNT> <CURRENCY>", "duration": "<N> months", "line_items": [{"name": "<phase>", "amount": <number>, "currency": "<code>", "included": true/false, "reason": "<why included or excluded>"}]}
 
-Example Output:
-{"total_cost": "1,000,000 USD", "duration": "7 months"}
+Example:
+{"total_cost": "1,832,436 AED", "duration": "7 months", "line_items": [{"name": "MVP1 Development", "amount": 950000, "currency": "AED", "included": true, "reason": "Core delivery phase"}, {"name": "Annual Support", "amount": 120000, "currency": "AED", "included": false, "reason": "Post-launch maintenance excluded"}]}
 
-Now, analyze the following vendor proposal text and output the JSON:
-
+Vendor proposal text:
 ${proposalText.slice(0, 30_000)}${proposalText.length > 30_000 ? '\n\n[... text truncated at 30k chars; price tables are typically in the first section ...]' : ''}`
 
   const rawBudget = await callLLM(systemPrompt, userPrompt, env || {}, 'gpt-5.4-mini', 16000)
@@ -4009,14 +4003,26 @@ ${proposalText.slice(0, 30_000)}${proposalText.length > 30_000 ? '\n\n[... text 
     } catch (_) {}
   }
 
+  // Log line items for debugging wrong sums
+  const lineItems = parsed.line_items || []
+  if (lineItems.length) {
+    const included = lineItems.filter((l: any) => l.included)
+    const excluded = lineItems.filter((l: any) => !l.included)
+    console.log(`[budget-llm] line_items: ${included.length} included, ${excluded.length} excluded`)
+    included.forEach((l: any) => console.log(`  [+] ${l.name}: ${l.currency} ${l.amount} — ${l.reason}`))
+    excluded.forEach((l: any) => console.log(`  [-] ${l.name}: ${l.currency} ${l.amount} — ${l.reason}`))
+    console.log(`[budget-llm] computed total: ${budgetCurrency} ${budgetAmount}, stated total_cost: "${totalCostStr}"`)
+  }
+
   return {
     budget_amount:     budgetAmount,
     budget_currency:   budgetCurrency,
     budget_confidence: budgetAmount ? 0.9 : 0,
     duration,
     raw_total_cost: totalCostStr,
-    missing_info:  budgetAmount ? [] : ['Could not parse monetary value from LLM response'],
-    text_chars:    proposalText.length,
+    line_items:     lineItems,
+    missing_info:   budgetAmount ? [] : ['Could not parse monetary value from LLM response'],
+    text_chars:     proposalText.length,
   }
 }
 
@@ -4709,7 +4715,6 @@ async function callLLM(systemPrompt: string, userPrompt: string, env: any, model
         { role: 'user', content: userPrompt },
       ],
       max_completion_tokens: maxTokens,
-      temperature: 0.3,
       stream: true,
     }),
   })
