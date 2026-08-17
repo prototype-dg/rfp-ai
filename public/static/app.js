@@ -3146,6 +3146,17 @@ document.addEventListener('click', function(e) {
   if (wrap && !wrap.contains(e.target)) closeLangDropdown();
 });
 
+// Event delegation for Run Benchmark button (avoids inline onclick escaping issues)
+document.addEventListener('click', function(e) {
+  var btn = e.target.closest('[id^="btnRunBenchmark_"]');
+  if (!btn) return;
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Running…';
+  var rfpId = parseInt(btn.getAttribute('data-rfp-id'), 10);
+  var proposalId = parseInt(btn.getAttribute('data-proposal-id'), 10);
+  _fireMarketBenchmark(rfpId, proposalId);
+});
+
 // Legacy toggle (kept for any old references)
 function switchLang() {
   setLang(_currentLang === 'en' ? 'ar' : 'en');
@@ -7780,7 +7791,7 @@ function _buildEvalTabBodies(p, evalData) {
       + '<div style="font-size:0.82rem;font-weight:700;color:#4c1d95;margin-bottom:3px"><i class="fas fa-globe" style="margin-right:6px"></i>Market Benchmark</div>'
       + '<div style="font-size:0.75rem;color:#6b7280">Generate a WBS-based market-average cost estimate with team composition. Informational only — does not affect scores.</div>'
       + '</div>'
-      + '<button onclick="this.disabled=true;this.innerHTML=\'<i class=\\\"fas fa-spinner fa-spin\\\"></i>\';_fireMarketBenchmark(' + rfpId + ',' + p.id + ')" style="flex-shrink:0;padding:8px 16px;background:#6d28d9;color:white;border:none;border-radius:7px;font-size:0.8rem;font-weight:600;cursor:pointer;white-space:nowrap"><i class="fas fa-chart-line" style="margin-right:5px"></i>Run Benchmark</button>'
+      + '<button id="btnRunBenchmark_' + rfpId + '" data-rfp-id="' + rfpId + '" data-proposal-id="' + p.id + '" style="flex-shrink:0;padding:8px 16px;background:#6d28d9;color:white;border:none;border-radius:7px;font-size:0.8rem;font-weight:600;cursor:pointer;white-space:nowrap"><i class="fas fa-chart-line" style="margin-right:5px"></i>Run Benchmark</button>'
       + '</div>'
       + '</div>';
   }
