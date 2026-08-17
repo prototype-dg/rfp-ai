@@ -9257,7 +9257,7 @@ function showCreateRfpForm() {
     + '<div class="form-group" style="margin:0"><label>' + t('create_rfp_category') + '</label><select id="newRfpCat">'
     + (_settingsCategories || DEFAULT_CATEGORIES).map(function(c){ return '<option>' + c + '</option>'; }).join('')
     + '</select></div>'
-    + '<div class="form-group" style="margin:0"><label>' + t('create_rfp_budget').replace(/USD|AED|EUR/, defCurrency) + '</label><input id="newRfpBudget" placeholder="5,000,000"></div>'
+    + '<div class="form-group" style="margin:0"><label>Budget Cap</label><input id="newRfpBudget" placeholder="5,000,000"></div>'
     + '<div class="form-group" style="margin:0"><label>' + t('create_rfp_deadline') + '</label><input type="date" id="newRfpDeadline" value="' + getDateOffset(30) + '"></div>'
     + '</div>'
 
