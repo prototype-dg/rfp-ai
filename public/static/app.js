@@ -6838,6 +6838,7 @@ rfpTabs.proposals = async function(rfpId) {
     var vs = p.ai_validation_status || '';
     if (vs === 'PENDING_MANUAL_REVIEW') return '<span style="background:#fef3c7;color:#92400e;border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:600" title="Budget not auto-extracted — manual review needed"><i class="fas fa-clock" style="margin-right:0.25rem"></i>' + score + '/' + maxScore + ' · ' + t('prop_review_badge') + '</span>';
     if (vs === 'WRONG_DOCUMENT') return '<span style="background:#fee2e2;color:#991b1b;border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:600" title="This file does not appear to be a vendor proposal"><i class="fas fa-ban" style="margin-right:0.25rem"></i>Wrong document</span>';
+    if (vs === 'OUT_OF_SCOPE') return '<span style="background:#fdf4ff;color:#7e22ce;border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:600" title="This proposal does not cover the scope of the given RFP"><i class="fas fa-ban" style="margin-right:0.25rem"></i>Out of scope</span>';
     var rec = p.ai_recommendation;
     if (rec === 'RECOMMENDED') return '<span style="background:#d1fae5;color:#065f46;border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:700"><i class="fas fa-check-circle" style="margin-right:0.25rem"></i>' + score + '/' + maxScore + '</span>';
     if (rec === 'CONDITIONAL') return '<span style="background:#fef3c7;color:#92400e;border-radius:20px;padding:2px 8px;font-size:0.72rem;font-weight:700"><i class="fas fa-exclamation-circle" style="margin-right:0.25rem"></i>' + score + '/' + maxScore + '</span>';
@@ -7621,6 +7622,15 @@ function _buildEvalTabBodies(p, evalData) {
       + '</div>';
   }
 
+  var outOfScopeBanner = '';
+  if (evalData && evalData.validation_status === 'OUT_OF_SCOPE') {
+    outOfScopeBanner = '<div style="background:#fdf4ff;border:1.5px solid #d8b4fe;border-radius:8px;padding:0.75rem 1rem;margin-bottom:1rem;display:flex;flex-direction:column;gap:0.5rem">'
+      + '<div style="display:flex;align-items:center;gap:0.5rem;font-weight:700;font-size:0.85rem;color:#7e22ce"><i class="fas fa-ban"></i>Proposal Out of Scope</div>'
+      + '<div style="font-size:0.78rem;color:#6b21a8">This proposal does not cover the scope of the given RFP. The AI determined that the submitted document addresses a different service or domain than what was requested. Score has been set to 0.</div>'
+      + '<div style="font-size:0.75rem;color:#9ca3af;margin-top:0.15rem">Please ask the vendor to resubmit a proposal that addresses the correct RFP requirements.</div>'
+      + '</div>';
+  }
+
   var manualBudgetBanner = '';
   if (evalData && evalData.validation_status === 'PENDING_MANUAL_REVIEW') {
     manualBudgetBanner = '<div style="background:#fffbeb;border:1.5px solid #fcd34d;border-radius:8px;padding:0.75rem 1rem;margin-bottom:1rem;display:flex;flex-direction:column;gap:0.5rem">'
@@ -7783,7 +7793,7 @@ function _buildEvalTabBodies(p, evalData) {
       + '</div>';
   }
 
-  var tabSummaryHtml = wrongDocBanner + manualBudgetBanner
+  var tabSummaryHtml = wrongDocBanner + outOfScopeBanner + manualBudgetBanner
     + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem;margin-bottom:1rem">'
     + '<div style="background:#faf9f7;border:1px solid #e5e7eb;border-radius:8px;padding:0.75rem">'
     + '<div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#9a8c78;margin-bottom:4px">Vendor Budget</div>'

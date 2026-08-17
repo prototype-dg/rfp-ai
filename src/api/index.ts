@@ -3303,6 +3303,7 @@ Rules:
 
 Return ONLY valid JSON — no markdown, no commentary:
 {
+  "scope_alignment_pct": 85,
   "scores": [
     {
       "criterion": "Technical Compliance and Architecture",
@@ -3315,6 +3316,11 @@ Return ONLY valid JSON — no markdown, no commentary:
   "strengths": ["strength 1", "strength 2"],
   "weaknesses": ["weakness 1", "weakness 2"]
 }
+
+scope_alignment_pct: integer 0–100 — how well the proposal addresses the core scope of this RFP.
+  100 = proposal is fully scoped to the RFP's requirements.
+  0   = proposal is entirely unrelated to the RFP's subject matter.
+  Use ≤ 59 ONLY when the proposal clearly addresses a different service, product, or domain than what the RFP requests.
 
 Strengths = max 5. Weaknesses = max 5 (focus on substantive technical gaps, not missing optional documents).
 
@@ -3401,6 +3407,28 @@ Now return the JSON evaluation object.`
 
     validationStatus = 'EVALUATED'
     console.log(`[eval-v48] technical DONE total_score=${totalScore} criteria=${scores.length}`)
+
+    // ── Scope alignment check (v103) ───────────────────────────────────────────
+    // If the LLM reports the proposal covers < 60% of the RFP's scope, the
+    // submission is out-of-scope.  Override every score to 0 immediately so the
+    // commercial merge that follows has no effect on the final total.
+    const scopePct: number = typeof parsed.scope_alignment_pct === 'number'
+      ? Math.max(0, Math.min(100, Math.round(parsed.scope_alignment_pct)))
+      : 100   // default: assume in-scope when the field is missing
+    console.log(`[eval-v103] scope_alignment_pct=${scopePct}`)
+
+    if (scopePct < 60) {
+      console.log(`[eval-v103] OUT_OF_SCOPE — zeroing all scores (scope_alignment_pct=${scopePct})`)
+      totalScore = 0
+      scoringBreakdown = scoringBreakdown.map((row: any) => ({ ...row, score_achieved: 0, achieved_pct: 0 }))
+      complianceBreakdown = complianceBreakdown.map((row: any) => ({ ...row, compliance_met: false, ai_score: 0 }))
+      strengths = []
+      weaknesses = ['This proposal does not cover the scope of the given RFP.']
+      mandatoryFailed = []
+      recommendation = 'NOT RECOMMENDED'
+      reasoning = 'This proposal does not cover the scope of the given RFP.'
+      validationStatus = 'OUT_OF_SCOPE'
+    }
 
   } catch (evalErr: any) {
     console.log(`[eval-v49] LLM EXCEPTION: ${evalErr?.message || evalErr}`)
@@ -3565,7 +3593,8 @@ Now return the JSON evaluation object.`
 
   // ── Merge commercial into total score ─────────────────────────────────────────
   const technicalScore = totalScore  // the /90 (or /technicalTotal) score from LLM
-  if (commercialScoreActual !== null) {
+  // OUT_OF_SCOPE proposals stay at 0 — skip commercial merge entirely
+  if (commercialScoreActual !== null && validationStatus !== 'OUT_OF_SCOPE') {
     totalScore = Math.round((technicalScore + commercialScoreActual) * 10) / 10
     // Add commercial row to scoring breakdown
     scoringBreakdown.push({
@@ -3589,9 +3618,12 @@ Now return the JSON evaluation object.`
   const maxScore = technicalTotal + commercialWeight  // e.g. 90 + 10 = 100
 
   // ── Recommendation (now out of maxScore) ─────────────────────────────────────
+  // OUT_OF_SCOPE: recommendation, reasoning and validationStatus already set — skip.
   const threshold80 = maxScore * 0.80
   const threshold60 = maxScore * 0.60
-  if (mandatoryFailed.length > 0) {
+  if (validationStatus === 'OUT_OF_SCOPE') {
+    // already set above — leave recommendation / reasoning untouched
+  } else if (mandatoryFailed.length > 0) {
     recommendation = 'NOT RECOMMENDED'
     reasoning = `Critical criteria scored below 34%: ${mandatoryFailed.slice(0, 2).join('; ')}.`
   } else if (totalScore >= threshold80) {
