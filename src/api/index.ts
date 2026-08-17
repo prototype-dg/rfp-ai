@@ -646,7 +646,11 @@ apiRouter.post('/rfps/:id/generate', async (c) => {
 
       const procEmail  = settings?.procurement_email || 'procurement@andersenlab.com'
       const issuerName = settings?.issuer_name       || 'Andersen'
-      const issuerLoc  = settings?.issuer_location   || 'Warsaw, Poland'
+      // Location: RFP's country_of_issue > rfp_currency map > settings > no hardcoded fallback
+      const _bodyLoc = (body.country_of_issue || '').trim()
+      const _bodyCur = (body.rfp_currency || '').toUpperCase().trim()
+      const _LOC_MAP: Record<string,string> = { AED:'Dubai / Abu Dhabi, UAE', BHD:'Manama, Bahrain', SAR:'Riyadh, Saudi Arabia', QAR:'Doha, Qatar', KWD:'Kuwait City, Kuwait', OMR:'Muscat, Oman', EGP:'Cairo, Egypt', EUR:'Western Europe', GBP:'London, United Kingdom', INR:'Bangalore, India' }
+      const issuerLoc = _bodyLoc || (_bodyCur && _LOC_MAP[_bodyCur]) || 'Dubai / Abu Dhabi, UAE'
 
       // Build deadline-relative milestone dates (duplicated from buildRFPPrompt for Phase 1 context)
       const deadlineDate = body.deadline ? new Date(body.deadline) : new Date(Date.now() + 30*24*60*60*1000)
@@ -2093,7 +2097,7 @@ For any further queries, please reply to this email referencing your Participant
 
 Best regards,
 Procurement & Contracting Department
-Andersen, Warsaw
+Andersen${rfp?.country_of_issue ? ', ' + rfp.country_of_issue : ''}
 procurement@cpc-rfp.website
 
 ──────────────────────────────────────────────
@@ -2510,7 +2514,7 @@ We appreciate your interest in participating in this procurement and look forwar
 
 Best regards,
 Procurement & Contracting Department
-Andersen, Warsaw
+Andersen${rfp?.country_of_issue ? ', ' + rfp.country_of_issue : ''}
 procurement@cpc-rfp.website`
 
           try {
@@ -3472,8 +3476,7 @@ Now return the JSON evaluation object.`
       if (/£/.test(zoneText))    return 'GBP'
     }
 
-    // Step 3: issuer_currency from settings (user's chosen display currency)
-    if (issuerCurrency && issuerCurrency !== 'USD') return issuerCurrency
+    // Step 3: (issuer_currency from settings removed — currency is always per-RFP)
 
     // Step 4: broad text scan (but avoid matching "USD" in boilerplate)
     // Only match if the code appears adjacent to a number (e.g. "AED 5,000,000")
@@ -3488,13 +3491,6 @@ Now return the JSON evaluation object.`
     return 'USD'
   }
 
-  // Read issuer_currency from settings (best-effort — don't block on failure)
-  let issuerCurrency = 'USD'
-  try {
-    const currRow = await env.DB.prepare(`SELECT value FROM settings WHERE key='issuer_currency'`).first<any>()
-    if (currRow?.value) issuerCurrency = currRow.value
-  } catch (_) {}
-
   // ── Commercial / Cost Competitiveness scoring ────────────────────────────────
   // Now with full FX conversion: proposal budget and RFP ceiling are both
   // converted to USD before comparison, so cross-currency bids score correctly.
@@ -3508,8 +3504,9 @@ Now return the JSON evaluation object.`
   let commercialJustification = ''
   let commercialScoreActual: number | null = null
 
-  // Detect RFP budget currency — uses issuerCurrency as fallback
-  const rfpBudgetCurrency = detectRfpCurrency(rfp.budget || null, rfpFullText, issuerCurrency, rfp.rfp_currency || '')
+  // Detect RFP budget currency — rfp.rfp_currency is the authoritative source (Step 0).
+  // No longer reads issuer_currency from settings; currency is always per-RFP.
+  const rfpBudgetCurrency = detectRfpCurrency(rfp.budget || null, rfpFullText, 'USD', rfp.rfp_currency || '')
 
   if (budget.amount && commercialWeight > 0) {
     // Parse RFP budget ceiling (numeric value from rfp.budget field or rfp_full_text)
@@ -4213,13 +4210,13 @@ apiRouter.post('/rfps/:rfpId/market-benchmark', async (c) => {
     }
     const rfpCurrency    = (rfp.rfp_currency || '').toUpperCase().trim()
     const countryOfIssue = (rfp.country_of_issue || '').trim()
-    // Determine benchmark region: country_of_issue > currency map > settings > fallback
+    // Determine benchmark region: country_of_issue → rfp_currency map → fallback
+    // issuer_location from settings is no longer used — location is always per-RFP
     const issuerLoc = countryOfIssue
       || (rfpCurrency && CURRENCY_REGION_MAP[rfpCurrency])
-      || settings?.issuer_location
-      || 'Dubai / Abu Dhabi, UAE'   // sensible default for this deployment
+      || 'Dubai / Abu Dhabi, UAE'   // sensible default when RFP has no location/currency set
     // Benchmark currency: use the RFP's own currency when available
-    const benchmarkCurrency = rfpCurrency || (settings?.issuer_location?.includes('Europe') ? 'EUR' : 'USD')
+    const benchmarkCurrency = rfpCurrency || 'USD'
 
     console.log(`[market-benchmark] rfp=${rfpId} rfp_currency=${rfpCurrency} country_of_issue=${countryOfIssue} → region="${issuerLoc}" currency="${benchmarkCurrency}"`)
 
@@ -4941,11 +4938,15 @@ async function callLLM(systemPrompt: string, userPrompt: string, env: any, model
 
 // buildRFPPrompt — pure function, returns {systemPrompt, userPrompt} without calling the LLM.
 // Used by the streaming generate route. generateRFPWithLLM wraps it for batch/test usage.
-// settings: optional key→value map from the settings table (procurement_email, issuer_name, issuer_location)
+// settings: optional key→value map from the settings table (procurement_email, issuer_name)
 function buildRFPPrompt(data: any, archDocText: string, brdDocText: string, scoringMatrixJson?: string | null, settings?: Record<string,string>): { systemPrompt: string; userPrompt: string } {
   const procEmail    = settings?.procurement_email   || 'procurement@andersenlab.com'
   const issuerName   = settings?.issuer_name         || 'Andersen'
-  const issuerLoc    = settings?.issuer_location     || 'Warsaw, Poland'
+  // Location: RFP's country_of_issue > rfp_currency map > settings > sensible default (no hardcoded city)
+  const _dataLoc = (data.country_of_issue || '').trim()
+  const _dataCur = (data.rfp_currency || '').toUpperCase().trim()
+  const _BRP_LOC_MAP: Record<string,string> = { AED:'Dubai / Abu Dhabi, UAE', BHD:'Manama, Bahrain', SAR:'Riyadh, Saudi Arabia', QAR:'Doha, Qatar', KWD:'Kuwait City, Kuwait', OMR:'Muscat, Oman', EGP:'Cairo, Egypt', EUR:'Western Europe', GBP:'London, United Kingdom', INR:'Bangalore, India' }
+  const issuerLoc = _dataLoc || (_dataCur && _BRP_LOC_MAP[_dataCur]) || 'Dubai / Abu Dhabi, UAE'
   const systemPrompt = `You are a senior government procurement specialist at the Andersen. You are producing a formal, comprehensive, publication-ready Request for Proposal (RFP) document issued to external vendors on official Andersen letterhead.
 
 IDENTITY AND TONE
@@ -5177,7 +5178,8 @@ async function draftAnswerLLM(question: string, rfp: any, env: any): Promise<{ a
       : '',
   ].filter(Boolean).join('\n\n---\n\n')
 
-  const systemPrompt = `You are ${rfp?.contact_name || 'the procurement manager'} at the Andersen, Warsaw, Poland. You are personally answering vendor clarification questions about this RFP. Write as a real, senior government procurement professional who knows this project inside out — not as a generic system or AI assistant.
+  const _qaIssuerLoc = (rfp?.country_of_issue || '').trim() || (rfp?.rfp_currency && ({ AED:'UAE', BHD:'Bahrain', SAR:'Saudi Arabia', QAR:'Qatar', KWD:'Kuwait', OMR:'Oman', EGP:'Egypt', EUR:'Europe', GBP:'United Kingdom', INR:'India' } as Record<string,string>)[rfp.rfp_currency.toUpperCase()]) || ''
+  const systemPrompt = `You are ${rfp?.contact_name || 'the procurement manager'} at Andersen${_qaIssuerLoc ? ', ' + _qaIssuerLoc : ''}. You are personally answering vendor clarification questions about this RFP. Write as a real, senior government procurement professional who knows this project inside out — not as a generic system or AI assistant.
 
 TONE RULES (critical):
 - Write in first person where natural: "We require...", "Our team will...", "From our side..."
@@ -5978,7 +5980,7 @@ We are pleased to invite ${v.name} to participate in the competitive tendering p
 INVITATION TO TENDER
 RFP Title:        ${rfp?.title || 'Andersen RFP'}
 Reference Number: ${rfp?.ref_number || 'N/A'}
-Issuing Entity:   Andersen, Warsaw
+Issuing Entity:   Andersen${rfp?.country_of_issue ? ', ' + rfp.country_of_issue : ''}
 
 IMPORTANT DATES:
 - Questions Submission Deadline: ${qDeadline}

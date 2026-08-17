@@ -61,21 +61,25 @@ var FX_RATES = {
 // FX_RATES base date — shown in the settings UI
 var FX_RATES_DATE = '2026-08-13';
 
-// Active display currency — loaded from localStorage, defaults to USD
-var _settingsCurrency = localStorage.getItem('andersen_currency') || 'USD';
-
 /**
- * Convert amount from sourceCurrency to _settingsCurrency and return
- * a formatted string like "€ 4,231,000" or "USD 4,231,000".
+ * Convert amount from sourceCurrency to displayCurrency and return
+ * a formatted string like "BHD 4,231" or "USD 4,231,000".
  *
- * @param {number|null} amount       Raw numeric amount
+ * Display currency is always driven by the RFP's rfp_currency field —
+ * never by a global setting or localStorage. Call sites pass
+ * (appState.currentRfp || {}).rfp_currency as the third argument.
+ *
+ * @param {number|null} amount          Raw numeric amount
  * @param {string}      sourceCurrency  ISO code of the stored value (e.g. 'USD')
+ * @param {string}      [displayCurrency] Target ISO code for display.
+ *                                      Defaults to sourceCurrency (no conversion).
  * @returns {string}  Formatted string in display currency, or '-' if invalid
  */
-function formatBudget(amount, sourceCurrency) {
+function formatBudget(amount, sourceCurrency, displayCurrency) {
   if (!amount || isNaN(amount) || amount <= 0) return '-';
   var src = (sourceCurrency || 'USD').toUpperCase();
-  var dst = (_settingsCurrency || 'USD').toUpperCase();
+  // If no explicit display currency given, show in source currency (no conversion)
+  var dst = ((displayCurrency && displayCurrency.trim()) ? displayCurrency.trim() : src).toUpperCase();
   var srcFx = (FX_RATES[src] || FX_RATES.USD).rate;
   var dstFx = (FX_RATES[dst] || FX_RATES.USD).rate;
   // Convert: amount (in src) → USD → dst
@@ -86,7 +90,6 @@ function formatBudget(amount, sourceCurrency) {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals
   });
-  // Show symbol if unambiguous, else code
   return dst + ' ' + formatted;
 }
 
@@ -694,10 +697,6 @@ var I18N = {
     settings_email_title:    'Procurement Team Email',
     settings_email_desc:     'Shown on the vendor portal\'s declined message as a contact address.',
     settings_email_save_btn: 'Save',
-    settings_currency_title:  'Display Currency',
-    settings_currency_desc:   'All budget amounts are converted and displayed in this currency using today\'s FX rates.',
-    settings_currency_save_btn: 'Save Currency',
-    settings_currency_saved:  'Display currency updated.',
     submit_confirm_email_sent: 'A confirmation email has been sent to your registered address.',
   },
   de: {
@@ -1238,10 +1237,6 @@ var I18N = {
     settings_email_title:    'Beschaffungsteam-E-Mail',
     settings_email_desc:     'Wird im Lieferantenportal als Kontaktadresse angezeigt.',
     settings_email_save_btn: 'Speichern',
-    settings_currency_title:  'Anzeigewährung',
-    settings_currency_desc:   'Alle Budgetbeträge werden anhand der heutigen Wechselkurse in diese Währung umgerechnet.',
-    settings_currency_save_btn: 'Währung speichern',
-    settings_currency_saved:  'Anzeigewährung aktualisiert.',
     submit_confirm_email_sent: 'Eine Bestätigungs-E-Mail wurde an Ihre registrierte Adresse gesendet.',
   },
   fr: {
@@ -1782,10 +1777,6 @@ var I18N = {
     settings_email_title:    'E-mail de l\'équipe achats',
     settings_email_desc:     'Affiché comme adresse de contact dans le portail fournisseur.',
     settings_email_save_btn: 'Enregistrer',
-    settings_currency_title:  'Devise d\'affichage',
-    settings_currency_desc:   'Tous les montants budgétaires sont convertis et affichés dans cette devise selon les taux de change du jour.',
-    settings_currency_save_btn: 'Enregistrer la devise',
-    settings_currency_saved:  'Devise d\'affichage mise à jour.',
     submit_confirm_email_sent: 'Un e-mail de confirmation a été envoyé à votre adresse enregistrée.',
   },
   pl: {
@@ -2326,10 +2317,6 @@ var I18N = {
     settings_email_title:    'E-mail zespołu zamówień',
     settings_email_desc:     'Wyświetlany jako adres kontaktowy w portalu dostawcy.',
     settings_email_save_btn: 'Zapisz',
-    settings_currency_title:  'Waluta wyświetlania',
-    settings_currency_desc:   'Wszystkie kwoty budżetowe są przeliczane i wyświetlane w tej walucie według dzisiejszych kursów wymiany.',
-    settings_currency_save_btn: 'Zapisz walutę',
-    settings_currency_saved:  'Waluta wyświetlania zaktualizowana.',
     submit_confirm_email_sent: 'E-mail potwierdzający został wysłany na zarejestrowany adres.',
   },
   ar: {
@@ -2912,10 +2899,6 @@ var I18N = {
     settings_email_title:    'بريد فريق المشتريات',
     settings_email_desc:     'يُعرض كعنوان اتصال في بوابة الموردين.',
     settings_email_save_btn: 'حفظ',
-    settings_currency_title:  'عملة العرض',
-    settings_currency_desc:   'يتم تحويل جميع مبالغ الميزانية وعرضها بهذه العملة باستخدام أسعار الصرف اليومية.',
-    settings_currency_save_btn: 'حفظ العملة',
-    settings_currency_saved:  'تم تحديث عملة العرض.',
     submit_confirm_email_sent: 'تم إرسال بريد تأكيد إلى عنوانك المسجل.',
   }
 };
@@ -4766,8 +4749,8 @@ rfpTabs.generate = function(rfpId, rfp) {
   // a short ~1k executive summary to `content`, which incorrectly triggered the letterhead
   // view on uploaded RFPs. Guard: require at least 5000 chars to treat it as a real document.
   const hasContent  = rfp && rfp.content && rfp.content.length >= 5000;
-  // Currency + country — stored on rfp; fallback to display currency
-  const rfpCurrencyVal    = (rfp && rfp.rfp_currency)    || _settingsCurrency || 'USD';
+  // Currency + country — stored on rfp; fallback to USD
+  const rfpCurrencyVal    = (rfp && rfp.rfp_currency)    || 'USD';
   const countryOfIssueVal = (rfp && rfp.country_of_issue) || '';
   // Uploaded RFP fields
   const isUploaded    = rfp && rfp.upload_source === 'uploaded';
@@ -5043,7 +5026,7 @@ async function generateRfpDoc(rfpId) {
     category:          (document.getElementById('rfpCategory')      || {}).value || '',
     budget:            (document.getElementById('rfpBudget')        || {}).value || '',
     deadline:          (document.getElementById('rfpDeadline')      || {}).value || '',
-    rfp_currency:      (document.getElementById('rfpCurrencySelect')|| {}).value || (_settingsCurrency || 'USD'),
+    rfp_currency:      (document.getElementById('rfpCurrencySelect')|| {}).value || 'USD',
     country_of_issue:  ((document.getElementById('rfpCountryInput') || {}).value || '').trim(),
     background:        background,
     objectives:        objectives,
@@ -6870,10 +6853,11 @@ rfpTabs.proposals = async function(rfpId) {
     let fin = '-';
     var _budgetAmt = (_ed && _ed.budget_extracted) || p.budget_amount;
     var _budgetCur = (_ed && _ed.budget_currency) || p.budget_currency || 'USD';
+    var _rfpDisp = (appState.currentRfp && appState.currentRfp.rfp_currency) || '';
     if (_budgetAmt && _budgetAmt > 0) {
-      fin = formatBudget(_budgetAmt, _budgetCur);
+      fin = formatBudget(_budgetAmt, _budgetCur, _rfpDisp);
     } else if (p.financial_proposal) {
-      fin = formatBudget(p.financial_proposal, 'USD');
+      fin = formatBudget(p.financial_proposal, 'USD', _rfpDisp);
     }
     // Resolve duration from evaluation_data.duration_extracted first
     let dur = '-';
@@ -7588,11 +7572,14 @@ function _proposalAttachmentRow(a) {
 function _buildEvalTabBodies(p, evalData) {
   // ── Scalar metadata ──────────────────────────────────────────────────────
   var rfpId = p.rfp_id;
+  // Display currency = RFP's own currency (drives FX conversion for vendor budget).
+  // Falls back to vendor's proposed currency (no conversion) if rfp_currency absent.
+  var _rfpCur = (appState.currentRfp && appState.currentRfp.rfp_currency) || '';
   var fin = '-';
   if (p.budget_amount && p.budget_amount > 0) {
-    fin = formatBudget(p.budget_amount, p.budget_currency || 'USD');
+    fin = formatBudget(p.budget_amount, p.budget_currency || 'USD', _rfpCur);
   } else if (p.financial_proposal) {
-    fin = formatBudget(p.financial_proposal, 'USD');
+    fin = formatBudget(p.financial_proposal, 'USD', _rfpCur);
   }
   var dur = '-';
   if (p.timeline_months && p.timeline_months > 0) {
@@ -7621,7 +7608,7 @@ function _buildEvalTabBodies(p, evalData) {
   var budgetMissing = (!p.budget_amount || p.budget_amount <= 0) && (!p.financial_proposal);
   var budgetExtracted = evalData && evalData.budget_extracted;
   var evalBudget = budgetExtracted
-    ? formatBudget(evalData.budget_extracted, evalData.budget_currency || 'USD')
+    ? formatBudget(evalData.budget_extracted, evalData.budget_currency || 'USD', _rfpCur)
       + (evalData.budget_confidence != null ? ' <span style="font-size:0.7rem;color:#9ca3af">(confidence: ' + Math.round(evalData.budget_confidence * 100) + '%)</span>' : '')
     : null;
 
@@ -7641,7 +7628,7 @@ function _buildEvalTabBodies(p, evalData) {
       + '<div style="font-size:0.78rem;color:#78350f">' + t('prop_budget_body') + '</div>'
       + '<div style="display:flex;gap:0.5rem;align-items:center;margin-top:0.25rem">'
       + '<input id="manualBudgetInput_' + p.id + '" type="number" min="0" placeholder="' + t('prop_budget_ph') + '" style="flex:1;padding:6px 10px;border:1.5px solid #fcd34d;border-radius:6px;font-size:0.82rem">'
-      + '<select id="manualBudgetCur_' + p.id + '" style="padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:0.82rem">' + ['USD','EUR','GBP','CHF','PLN','AED','SAR','QAR','KWD','BHD','JPY','CNY','INR','CAD','AUD','SGD','HKD','NZD','SEK','NOK','DKK','MXN','BRL','ZAR','TRY','RUB','KRW','THB','MYR','IDR','NGN','EGP','PKR','BDT','VND'].map(function(c){ var r = FX_RATES[c]; if (!r) return ''; return '<option value="' + c + '"' + (c === _settingsCurrency ? ' selected' : '') + '>' + c + ' — ' + r.label + '</option>'; }).join('') + '</select>'
+      + '<select id="manualBudgetCur_' + p.id + '" style="padding:6px 8px;border:1px solid #e5e7eb;border-radius:6px;font-size:0.82rem">' + ['USD','EUR','GBP','CHF','PLN','AED','SAR','QAR','KWD','BHD','JPY','CNY','INR','CAD','AUD','SGD','HKD','NZD','SEK','NOK','DKK','MXN','BRL','ZAR','TRY','RUB','KRW','THB','MYR','IDR','NGN','EGP','PKR','BDT','VND'].map(function(c){ var r = FX_RATES[c]; if (!r) return ''; return '<option value="' + c + '"' + (c === _rfpCur ? ' selected' : '') + '>' + c + ' — ' + r.label + '</option>'; }).join('') + '</select>'
       + '<button onclick="saveManualBudget(' + rfpId + ',' + p.id + ')" style="background:var(--cpc-gold-deep);color:white;border:none;border-radius:6px;padding:6px 14px;font-size:0.82rem;font-weight:600;cursor:pointer;white-space:nowrap"><i class="fas fa-save" style="margin-right:4px"></i>' + t('prop_budget_save_btn') + '</button>'
       + '</div>'
       + '</div>';
@@ -8296,7 +8283,8 @@ function _pollBudgetResult(rfpId, proposalId) {
         clearInterval(interval);
         var currency = (ev.evaluation_data && ev.evaluation_data.budget_currency) || 'USD';
         var conf = (ev.evaluation_data && ev.evaluation_data.budget_confidence) || 0;
-        showToast('💰 Budget extracted: ' + formatBudget(budget, currency) + ' (confidence ' + Math.round(conf * 100) + '%)', 'success', 8000);
+        var _rfpCurToast = (appState.currentRfp && appState.currentRfp.rfp_currency) || '';
+        showToast('💰 Budget extracted: ' + formatBudget(budget, currency, _rfpCurToast) + ' (confidence ' + Math.round(conf * 100) + '%)', 'success', 8000);
         _refreshPanelFromDB(rfpId, proposalId);
       } else if (attempts >= maxAttempts) {
         clearInterval(interval);
@@ -8978,20 +8966,7 @@ pages.settings = async function() {
   );
 };
 
-function saveDisplayCurrency() {
-  var sel = document.getElementById('settingsCurrencySelect');
-  if (!sel || !sel.value) return;
-  var code = sel.value;
-  if (!FX_RATES[code]) { showToast('Unknown currency code', 'error'); return; }
-  _settingsCurrency = code;
-  localStorage.setItem('andersen_currency', code);
-  // Also persist to the settings DB so the backend can use it as the
-  // issuer_currency default for RFP budget currency detection.
-  apiCall('PUT', '/settings', { issuer_currency: code }).catch(function(){});
-  showToast(t('settings_currency_saved') + '  (' + code + ' — ' + FX_RATES[code].label + ')', 'success', 4000);
-  // Re-render settings to update FX table
-  pages.settings();
-}
+
 
 var _settingsCatsEditing = null;
 function removeSettingsCategory(i) {
@@ -9267,8 +9242,8 @@ function showCreateRfpModal() {
 // ── Step 1a: Create new RFP form ──────────────────────────────────────────────
 function showCreateRfpForm() {
   _createRfpDocFiles = [];
-  // Detect a sensible default currency
-  var defCurrency = _settingsCurrency || 'USD';
+  // Default currency for new RFP — always USD; user selects the correct one in the form
+  var defCurrency = 'USD';
   showModal(
     // Header
     '<div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:1rem">'
@@ -9321,7 +9296,7 @@ function showCreateRfpForm() {
 // ── Step 1b: Upload existing RFP PDF form ──────────────────────────────────────
 function showUploadRfpForm() {
   _uploadRfpFile = null;
-  var defCurrency = _settingsCurrency || 'USD';
+  var defCurrency = 'USD'; // user selects the RFP's currency in the form
   showModal(
     // Header
     '<div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:1rem">'
@@ -9394,7 +9369,7 @@ async function uploadRfpPdf() {
   var btn = document.getElementById('uploadRfpBtn');
   setLoading(btn, true, t('upload_rfp_parsing'));
   try {
-    var currency   = (document.getElementById('uploadRfpCurrency') || {}).value || _settingsCurrency || 'USD';
+    var currency   = (document.getElementById('uploadRfpCurrency') || {}).value || 'USD';
     var country    = ((document.getElementById('uploadRfpCountry') || {}).value || '').trim();
     var fd = new FormData();
     fd.append('file', _uploadRfpFile);
@@ -9495,7 +9470,7 @@ async function createRfp() {
       category: document.getElementById('newRfpCat') ? document.getElementById('newRfpCat').value : 'IT & Digital Transformation',
       budget: document.getElementById('newRfpBudget') ? document.getElementById('newRfpBudget').value : '',
       deadline: document.getElementById('newRfpDeadline') ? document.getElementById('newRfpDeadline').value : '',
-      rfp_currency: document.getElementById('newRfpCurrency') ? document.getElementById('newRfpCurrency').value : (_settingsCurrency || 'USD'),
+      rfp_currency: document.getElementById('newRfpCurrency') ? document.getElementById('newRfpCurrency').value : 'USD',
       country_of_issue: document.getElementById('newRfpCountry') ? document.getElementById('newRfpCountry').value.trim() : '',
       scope: '', background: '', objectives: '', tech_requirements: '',
     };
