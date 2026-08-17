@@ -3960,12 +3960,20 @@ ${proposalText.slice(0, 30_000)}${proposalText.length > 30_000 ? '\n\n[... text 
     cleanRaw = cleanRaw.split('\n').slice(1).join('\n').replace(/```\s*$/, '').trim()
   }
 
-  const jsonMatch = cleanRaw.match(/\{[\s\S]*?\}/)
+  // Use greedy match to capture full nested JSON (including arrays in line_items)
+  const jsonMatch = cleanRaw.match(/\{[\s\S]*\}/)
   if (!jsonMatch) return { budget_amount: null, budget_currency: 'USD', budget_confidence: 0, duration: null, missing_info: ['LLM returned no JSON'] }
 
   let parsed: any
   try { parsed = JSON.parse(jsonMatch[0]) } catch (_) {
-    return { budget_amount: null, budget_currency: 'USD', budget_confidence: 0, duration: null, missing_info: ['JSON parse failed'] }
+    // Fallback: try to extract just the scalar fields if full parse fails
+    const totalMatch = cleanRaw.match(/"total_cost"\s*:\s*"([^"]+)"/)
+    const durMatch   = cleanRaw.match(/"duration"\s*:\s*"([^"]+)"/)
+    if (totalMatch) {
+      parsed = { total_cost: totalMatch[1], duration: durMatch ? durMatch[1] : null, line_items: [] }
+    } else {
+      return { budget_amount: null, budget_currency: 'USD', budget_confidence: 0, duration: null, missing_info: ['JSON parse failed'] }
+    }
   }
 
   // Parse "total_cost" string like "1,832,436 AED" or "AED 1,832,436"
