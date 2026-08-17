@@ -578,7 +578,7 @@ apiRouter.post('/rfps/:id/generate', async (c) => {
   // Build the prompts (same as generateRFPWithLLM but without calling callLLM yet)
   const { systemPrompt, userPrompt } = buildRFPPrompt(body, archDocText, brdDocText, existingScoringMatrix, settings)
 
-  const apiKey = c.env?.OPENAI_API_KEY || (globalThis as any).OPENAI_API_KEY || OPENAI_API_KEY_FALLBACK
+  const apiKey = OPENAI_API_KEY_FALLBACK || c.env?.OPENAI_API_KEY || (globalThis as any).OPENAI_API_KEY
   const baseUrl = OPENAI_BASE_URL
 
   if (!apiKey) {
@@ -1713,7 +1713,7 @@ apiRouter.post('/rfps/:id/rerun-phase3', async (c) => {
     )
     console.log(`[rerun-phase3] rfp=${rfpId} focus_len=${requirementsFocusText.length} — non-streaming single call`)
 
-    const apiKey = c.env.OPENAI_API_KEY || (globalThis as any).OPENAI_API_KEY || OPENAI_API_KEY_FALLBACK
+    const apiKey = OPENAI_API_KEY_FALLBACK || c.env.OPENAI_API_KEY || (globalThis as any).OPENAI_API_KEY
     const baseUrl = OPENAI_BASE_URL
 
     const systemPrompt = `You are an expert procurement analyst. Extract vendor requirements from an RFP document.
@@ -2441,7 +2441,7 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
 
     // LLM intent classification — runs for ALL emails with body text.
     let llmVerdict = 'NEUTRAL'
-    const openAiKey = (c.env as any).OPENAI_API_KEY || (globalThis as any).OPENAI_API_KEY || OPENAI_API_KEY_FALLBACK
+    const openAiKey = OPENAI_API_KEY_FALLBACK || (c.env as any).OPENAI_API_KEY || (globalThis as any).OPENAI_API_KEY
     const openAiBase = OPENAI_BASE_URL
     if (openAiKey && cleanBody.length > 0) {
       try {
@@ -4667,7 +4667,7 @@ apiRouter.post('/submit/:rfpId', async (c) => {
 // ============================================================
 
 async function callLLM(systemPrompt: string, userPrompt: string, env: any, model = 'gpt-5.4-mini', maxTokens = 2000): Promise<string> {
-  const apiKey = env?.OPENAI_API_KEY || (globalThis as any).OPENAI_API_KEY || OPENAI_API_KEY_FALLBACK
+  const apiKey = OPENAI_API_KEY_FALLBACK || env?.OPENAI_API_KEY || (globalThis as any).OPENAI_API_KEY
   const baseUrl = OPENAI_BASE_URL
   if (!apiKey) throw new Error('OPENAI_API_KEY not configured')
 
