@@ -3461,7 +3461,9 @@ function setLoading(el, loading, text) {
   }
 }
 
-async function apiCall(method, path, data) {
+async function apiCall(method, path, data, opts_) {
+  // opts_: { silent: true } — suppress auto error toast (caller handles .catch)
+  var silent = (opts_ && opts_.silent) || false;
   // Retry only safe read-only methods on transient network failures (cold starts, timeouts)
   var isIdempotent = (method === 'GET' || method === 'HEAD');
   var maxAttempts = isIdempotent ? 3 : 1;
@@ -3491,7 +3493,7 @@ async function apiCall(method, path, data) {
       if (_attempt < maxAttempts - 1) continue;
     }
   }
-  showToast(lastErr.message, 'error');
+  if (!silent) showToast(lastErr.message, 'error');
   throw lastErr;
 }
 
@@ -8188,7 +8190,7 @@ function _pollEvaluationResult(rfpId, proposalId, phase) {
 
 // ── Fire budget extraction (async, then poll for result) ──────────────────────
 function _fireBudgetExtraction(rfpId, proposalId) {
-  apiCall('POST', '/rfps/' + rfpId + '/proposals/' + proposalId + '/evaluate-budget', {})
+  apiCall('POST', '/rfps/' + rfpId + '/proposals/' + proposalId + '/evaluate-budget', {}, { silent: true })
     .then(function(budgetResult) {
       if (!budgetResult) return;
 
@@ -8229,7 +8231,7 @@ function _fireMarketBenchmark(rfpId, proposalId) {
       + '<div style="font-size:0.75rem;color:#6b7280;margin-top:2px">Generating WBS and estimating costs — this takes ~15 seconds</div>'
       + '</div></div>';
   }
-  apiCall('POST', '/rfps/' + rfpId + '/market-benchmark', {})
+  apiCall('POST', '/rfps/' + rfpId + '/market-benchmark', {}, { silent: true })
     .then(function(bmResult) {
       if (!bmResult || !bmResult.benchmark) {
         if (bmCard) bmCard.innerHTML = '<div style="font-size:0.8rem;color:#dc2626"><i class="fas fa-exclamation-triangle" style="margin-right:6px"></i>Benchmark failed — try again.</div>';
