@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 import { andersenEmailHtml, andersenPageHtml } from '../brand/letterhead'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-08-17-v98' // v98: bypass sidecar LLM (Qwen2.5-3B VPS) — run OpenAI directly for RFP field extraction; sidecar still used for PDF OCR only
+const WORKER_VERSION = '2026-08-17-v99' // v99: label-aware proposal classifier; reorder file sections (technical first); supporting docs (CVs etc.) no longer cause WRONG_DOCUMENT
 
 // ── OpenAI configuration ───────────────────────────────────────────────────────
 const OPENAI_API_KEY_FALLBACK = 'OPENAI_KEY_REMOVED'
@@ -2954,11 +2954,55 @@ function parseLLMScore(raw: string): { score: number; justification: string } {
   return { score: numMatch ? Math.min(100, parseInt(numMatch[1])) : 0, justification: raw.slice(0, 120) }
 }
 
+// ── Reorder proposal_full_text sections by label priority ────────────────────
+// proposal_full_text is built by async OCR callbacks arriving in random order.
+// For evaluation quality and correct document classification, we want sections
+// in this order: technical → commercial → supporting/other.
+// Sections without a recognised label header pass through unchanged at the top.
+function reorderProposalSections(text: string): string {
+  if (!text) return text
+  // Split on "=== FILE:" boundaries (the header written by the OCR callback).
+  // We keep the header as part of each section.
+  const sectionRe = /(?=={3} FILE:)/g
+  const parts = text.split(sectionRe)
+  if (parts.length <= 1) return text // single file or legacy text — nothing to reorder
+
+  const labelPriority = (section: string): number => {
+    const m = section.match(/\[label:\s*([^\]]+)\]/i)
+    const lbl = (m ? m[1] : '').trim().toLowerCase()
+    if (lbl === 'technical')  return 0
+    if (lbl === 'commercial') return 1
+    if (lbl === 'supporting') return 2
+    return 3 // 'other' or unlabelled
+  }
+
+  // Stable sort — preserve relative order within the same priority tier
+  const sorted = [...parts].sort((a, b) => labelPriority(a) - labelPriority(b))
+  return sorted.join('\n\n').trim()
+}
+
+// ── Extract file labels present in proposal_full_text ────────────────────────
+// Returns a Set of lowercase label values e.g. {'technical','commercial','supporting'}
+function extractFileLabels(text: string): Set<string> {
+  const labels = new Set<string>()
+  const re = /\[label:\s*([^\]]+)\]/gi
+  let m: RegExpExecArray | null
+  while ((m = re.exec(text)) !== null) {
+    labels.add(m[1].trim().toLowerCase())
+  }
+  return labels
+}
+
 // ── Core evaluation function ──────────────────────────────────────────────────
 
 async function evaluateProposal(proposal: any, rfp: any, env: any): Promise<any> {
   // Step 1: Try to get text from DB fields (fast path — already extracted at upload time)
   let proposalText = extractProposalText(proposal)
+
+  // Step 1b: Reorder file sections so technical/commercial always appear first.
+  // Async OCR callbacks arrive in random order; a CV arriving first used to
+  // make the classifier reject the entire submission as "not a proposal".
+  proposalText = reorderProposalSections(proposalText)
 
   // Step 2: v28 — text comes from DB only (pre-extracted at upload time).
   // No sidecar calls here. If proposal_full_text is empty it means OCR hasn't finished yet
@@ -2994,16 +3038,39 @@ async function evaluateProposal(proposal: any, rfp: any, env: any): Promise<any>
   // ── Step 3: Sanity check — is this actually a vendor proposal? ───────────────
   // Cheap single call (max 80 tokens) before spending budget on scoring.
   // Skip if text is too short to classify (OCR failure / empty upload).
+  //
+  // v99 label-aware logic:
+  //  • If ANY file is explicitly labelled 'technical' or 'commercial' → skip check
+  //    entirely (vendor deliberately tagged it as a proposal document).
+  //  • If files are labelled 'supporting' or 'other' ONLY → still run classifier
+  //    but expand the sample and tell the LLM it may be a supporting document
+  //    (CV, company profile, certification) that accompanies a full proposal.
+  //  • Only hard-reject if NONE of the above labels exist AND the text clearly
+  //    looks like the wrong document type (RFP itself, unrelated report, etc.)
   if (proposalText.length >= 200) {
-    try {
-      const sample = proposalText.slice(0, 3000) // first 3 KB is enough to classify
-      const raw = await callLLM(
-        'You are a document classifier for a procurement system. Answer only with valid JSON.',
-        `Classify the following document. Is it a vendor proposal (i.e. a response to an RFP / tender / request for proposal)?
+    const fileLabels = extractFileLabels(proposalText)
+    const hasTechnical  = fileLabels.has('technical')
+    const hasCommercial = fileLabels.has('commercial')
+    const hasSupporting = fileLabels.has('supporting')
 
-A vendor proposal typically contains: company introduction, proposed solution or methodology, pricing or commercial offer, team / CV section, compliance statements, or a covering letter to a procurement team.
+    // Fast-pass: at least one file explicitly tagged as a proposal document
+    if (!hasTechnical && !hasCommercial) {
+      try {
+        // Use the first 4000 chars after reordering — technical section is now first
+        const sample = proposalText.slice(0, 4000)
 
-A document is NOT a vendor proposal if it is: the RFP/tender document itself, a contract, a policy, a report, a recipe, a poem, a presentation unrelated to a bid, or any other non-bid document.
+        // Build a context note if the submission contains supporting documents only
+        const contextNote = hasSupporting
+          ? `\nNOTE: This submission may contain a mix of file types — technical/commercial proposals, CVs of team members, company profiles, certifications, and other supporting documents requested by the RFP. A package that includes ONLY supporting materials (CVs, company profiles, compliance certificates) is still a valid proposal submission if it was submitted in response to an RFP.`
+          : ''
+
+        const raw = await callLLM(
+          'You are a document classifier for a procurement system. Answer only with valid JSON.',
+          `Classify the following document excerpt. Is this content part of a vendor's proposal submission in response to an RFP / tender?
+
+A valid proposal submission includes any of: a company introduction, proposed solution or methodology, pricing or commercial offer, team CV / personnel profiles, compliance statements, certifications, company profile, covering letter to a procurement team, or supporting documents explicitly requested by an RFP.
+
+A document is NOT a valid proposal submission if it is: the RFP/tender document itself (i.e. issued BY the buyer, not the vendor), a general contract template unrelated to a bid, a recipe, a poem, or a completely unrelated document.${contextNote}
 
 Document excerpt:
 """
@@ -3011,41 +3078,45 @@ ${sample}
 """
 
 Respond ONLY with JSON: {"is_proposal": true|false, "reason": "<one sentence, max 15 words>"}`,
-        env, 'gpt-5.4-mini', 80
-      )
-      // Parse — accept any JSON blob in the response
-      const jsonMatch = raw.match(/\{[\s\S]*?\}/)
-      if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0])
-        if (parsed.is_proposal === false) {
-          return {
-            evaluated_at: new Date().toISOString(),
-            proposal_id: proposal.id,
-            vendor_name: proposal.vendor_name || '',
-            total_score: 0,
-            recommendation: 'INVALID',
-            validation_status: 'WRONG_DOCUMENT',
-            wrong_document_reason: parsed.reason || 'Document does not appear to be a vendor proposal.',
-            compliance_score: 0,
-            quality_score: 0,
-            commercial_score: null,
-            budget_extracted: null,
-            budget_currency: null,
-            budget_confidence: 0,
-            duration_extracted: null,
-            strengths: [],
-            weaknesses: [],
-            recommendation_reasoning: parsed.reason || 'Document does not appear to be a vendor proposal.',
-            mandatory_failed: [],
-            compliance_breakdown: [],
-            scoring_breakdown: [],
-            glossary_used: 0,
-            text_chars_analyzed: proposalText.length,
+          env, 'gpt-5.4-mini', 80
+        )
+        // Parse — accept any JSON blob in the response
+        const jsonMatch = raw.match(/\{[\s\S]*?\}/)
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0])
+          if (parsed.is_proposal === false) {
+            console.warn(`[evaluateProposal] proposalId=${proposal.id} classified as WRONG_DOCUMENT: ${parsed.reason}`)
+            return {
+              evaluated_at: new Date().toISOString(),
+              proposal_id: proposal.id,
+              vendor_name: proposal.vendor_name || '',
+              total_score: 0,
+              recommendation: 'INVALID',
+              validation_status: 'WRONG_DOCUMENT',
+              wrong_document_reason: parsed.reason || 'Document does not appear to be a vendor proposal.',
+              compliance_score: 0,
+              quality_score: 0,
+              commercial_score: null,
+              budget_extracted: null,
+              budget_currency: null,
+              budget_confidence: 0,
+              duration_extracted: null,
+              strengths: [],
+              weaknesses: [],
+              recommendation_reasoning: parsed.reason || 'Document does not appear to be a vendor proposal.',
+              mandatory_failed: [],
+              compliance_breakdown: [],
+              scoring_breakdown: [],
+              glossary_used: 0,
+              text_chars_analyzed: proposalText.length,
+            }
           }
         }
+      } catch (_) {
+        // Classification failed — proceed with evaluation anyway (fail open)
       }
-    } catch (_) {
-      // Classification failed — proceed with evaluation anyway (fail open)
+    } else {
+      console.log(`[evaluateProposal] proposalId=${proposal.id} — skipping WRONG_DOCUMENT check (labels: ${[...fileLabels].join(',')})`)
     }
   }
 
