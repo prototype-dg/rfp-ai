@@ -575,7 +575,7 @@ apiRouter.post('/rfps/:id/generate', async (c) => {
   const { systemPrompt, userPrompt } = buildRFPPrompt(body, archDocText, brdDocText, existingScoringMatrix, settings)
 
   const apiKey = c.env?.OPENAI_API_KEY || (globalThis as any).OPENAI_API_KEY || ''
-  const baseUrl = c.env?.OPENAI_BASE_URL || 'https://www.genspark.ai/api/llm_proxy/v1'
+  const baseUrl = 'https://api.openai.com/v1'
 
   if (!apiKey) {
     return c.json({ error: 'OPENAI_API_KEY not configured' }, 500)
@@ -786,7 +786,7 @@ ${brdDocText && brdDocText.length > 500 ? `BRD (extract all module names, report
 
 Return ONLY the JSON object. No markdown. No explanation.`
 
-      const outlineRaw = await llmCall(outlineSysPrompt, outlineUserPrompt, 'gpt-5-mini', 8000)
+      const outlineRaw = await llmCall(outlineSysPrompt, outlineUserPrompt, 'gpt-5.4-mini', 8000)
 
       // Parse outline — strip any accidental markdown fences
       let outlineClean = outlineRaw.trim()
@@ -798,7 +798,7 @@ Return ONLY the JSON object. No markdown. No explanation.`
         // Outline parse failed — fall back to single-call sequential generation
         await sendProgress('fallback', 'Outline parse failed — falling back to sequential generation…')
         const { systemPrompt: sp, userPrompt: up } = buildRFPPrompt(body, archDocText, brdDocText, existingScoringMatrix, settings)
-        const llmContent = await llmCall(sp, up, 'gpt-5-mini', 64000)
+        const llmContent = await llmCall(sp, up, 'gpt-5.4-mini', 64000)
         // Fallback path still gets HTML from buildRFPPrompt — strip tags to plain text
         const content = llmContent.length > 400
           ? llmContent.replace(/<[^>]+>/g, ' ').replace(/&amp;/g,'&').replace(/&mdash;/g,'—').replace(/&nbsp;/g,' ').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/[ \t]+/g,' ').replace(/\n{3,}/g,'\n\n').trim()
@@ -870,7 +870,7 @@ ${extraInstruction}
 
 Write the complete Markdown for section "${sectionSpec?.heading || sectionKey}" now. Minimum word count: ${sectionSpec?.min_words || 150}. Output Markdown only — no HTML, no code fences.`
 
-        return llmCall(sp, up, 'gpt-5-mini', 10000).catch(err => `## Section Error\n\nGeneration error: ${err.message}`)
+        return llmCall(sp, up, 'gpt-5.4-mini', 10000).catch(err => `## Section Error\n\nGeneration error: ${err.message}`)
       }
 
       const s = outline.sections || {}
@@ -1419,7 +1419,7 @@ Do NOT output a \`vendor_requirements\` key. Return only the keys listed above.`
   let requirementGlossaryJson: string | null = null
 
   try {
-    const raw = await callLLM(SYSTEM_PROMPT, USER_PROMPT, env, 'gpt-5-mini', maxTokens)
+    const raw = await callLLM(SYSTEM_PROMPT, USER_PROMPT, env, 'gpt-5.4-mini', maxTokens)
 
     // ── Parse the single returned JSON object ─────────────────────────────
     const cleaned = raw
@@ -1710,7 +1710,7 @@ apiRouter.post('/rfps/:id/rerun-phase3', async (c) => {
     console.log(`[rerun-phase3] rfp=${rfpId} focus_len=${requirementsFocusText.length} — non-streaming single call`)
 
     const apiKey = c.env.OPENAI_API_KEY || (globalThis as any).OPENAI_API_KEY || ''
-    const baseUrl = c.env.OPENAI_BASE_URL || (globalThis as any).OPENAI_BASE_URL || 'https://www.genspark.ai/api/llm_proxy/v1'
+    const baseUrl = 'https://api.openai.com/v1'
 
     const systemPrompt = `You are an expert procurement analyst. Extract vendor requirements from an RFP document.
 Return ONLY a valid JSON array — no markdown fences, no explanation, no extra text before or after.
@@ -1727,7 +1727,7 @@ Rules:
       method: 'POST',
       headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'gpt-5-mini',
+        model: 'gpt-5.4-mini',
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: `Extract all vendor requirements from this RFP section:\n\n${requirementsFocusText}` },
@@ -2438,14 +2438,14 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
     // LLM intent classification — runs for ALL emails with body text.
     let llmVerdict = 'NEUTRAL'
     const openAiKey = (c.env as any).OPENAI_API_KEY || (globalThis as any).OPENAI_API_KEY || ''
-    const openAiBase = (c.env as any).OPENAI_BASE_URL || 'https://www.genspark.ai/api/llm_proxy/v1'
+    const openAiBase = 'https://api.openai.com/v1'
     if (openAiKey && cleanBody.length > 0) {
       try {
         const intentRes = await fetch(`${openAiBase}/chat/completions`, {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${openAiKey}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            model: 'gpt-5-mini',
+            model: 'gpt-5.4-mini',
             max_tokens: 10,
             temperature: 0,
             messages: [
@@ -3047,7 +3047,7 @@ ${sample}
 """
 
 Respond ONLY with JSON: {"is_proposal": true|false, "reason": "<one sentence, max 15 words>"}`,
-        env, 'gpt-5-mini', 80
+        env, 'gpt-5.4-mini', 80
       )
       // Parse — accept any JSON blob in the response
       const jsonMatch = raw.match(/\{[\s\S]*?\}/)
@@ -3227,7 +3227,7 @@ Now evaluate the proposal and return only the JSON object. Do not include any ad
   let complianceBreakdown: any[] = []
 
   try {
-    const rawEval = await callLLM(evalSystemPrompt, evalUserPrompt, env, 'gpt-5-mini', 16000)
+    const rawEval = await callLLM(evalSystemPrompt, evalUserPrompt, env, 'gpt-5.4-mini', 16000)
     console.log(`[eval-v48] LLM raw response length=${rawEval.length} preview="${rawEval.slice(0, 200)}"`)
 
     // Strip markdown fences if present
@@ -3954,7 +3954,7 @@ Now, analyze the following vendor proposal text and output the JSON:
 
 ${proposalText.slice(0, 30_000)}${proposalText.length > 30_000 ? '\n\n[... text truncated at 30k chars; price tables are typically in the first section ...]' : ''}`
 
-  const rawBudget = await callLLM(systemPrompt, userPrompt, env || {}, 'gpt-5-mini', 16000)
+  const rawBudget = await callLLM(systemPrompt, userPrompt, env || {}, 'gpt-5.4-mini', 16000)
 
   // Strip markdown fences
   let cleanRaw = rawBudget.trim()
@@ -4119,7 +4119,7 @@ Return ONLY valid JSON — no markdown, no commentary:
   "assumptions": ["Rates reflect mid-market senior consultant rates for ${issuerLoc}", "Excludes hardware, licences, and hyperscaler cloud costs"]
 }`
 
-    const rawResult = await callLLM(systemPrompt, userPrompt, c.env, 'gpt-5', 4000)
+    const rawResult = await callLLM(systemPrompt, userPrompt, c.env, 'gpt-5.5', 4000)
 
     // Strip markdown fences
     let clean = rawResult.trim()
@@ -4204,7 +4204,7 @@ apiRouter.post('/rfps/:id/ingest', async (c) => {
     const raw = await callLLM(
       'You are a procurement analyst. Extract structured requirements from an RFP document.',
       `Extract all vendor requirements from this RFP text. For each requirement, determine if it is mandatory (contains "must", "shall", "required", "mandatory"). Return a JSON array of objects: [{"id":"req_1","text":"...","mandatory":true/false},...]. Extract up to 20 requirements. Return ONLY the JSON array.\n\nRFP TEXT:\n${rfpText}`,
-      c.env, 'gpt-5-mini', 2000
+      c.env, 'gpt-5.4-mini', 2000
     )
     let glossary: any[] = []
     try {
@@ -4662,9 +4662,9 @@ apiRouter.post('/submit/:rfpId', async (c) => {
 // LLM INTEGRATION — used for RFP generation and Q&A drafting
 // ============================================================
 
-async function callLLM(systemPrompt: string, userPrompt: string, env: any, model = 'gpt-5-mini', maxTokens = 2000): Promise<string> {
+async function callLLM(systemPrompt: string, userPrompt: string, env: any, model = 'gpt-5.4-mini', maxTokens = 2000): Promise<string> {
   const apiKey = env?.OPENAI_API_KEY || (globalThis as any).OPENAI_API_KEY || ''
-  const baseUrl = env?.OPENAI_BASE_URL || 'https://www.genspark.ai/api/llm_proxy/v1'
+  const baseUrl = 'https://api.openai.com/v1'
   if (!apiKey) throw new Error('OPENAI_API_KEY not configured')
 
   // v85: stream:true SSE reader — the proxy REQUIRES streaming to return content.
@@ -4951,7 +4951,7 @@ REMINDER: Do NOT reference any document filename, BRD name, or attached file any
 
 async function generateRFPWithLLM(data: any, archDocText: string, brdDocText: string, env: any, scoringMatrixJson?: string | null, settings?: Record<string,string>): Promise<string> {
   const { systemPrompt, userPrompt } = buildRFPPrompt(data, archDocText, brdDocText, scoringMatrixJson, settings)
-  const llmContent = await callLLM(systemPrompt, userPrompt, env, 'gpt-5-mini', 64000)
+  const llmContent = await callLLM(systemPrompt, userPrompt, env, 'gpt-5.4-mini', 64000)
   if (llmContent && llmContent.length > 400) {
     return llmContent.trim().replace(/\n{3,}/g, '\n\n')
   }
@@ -5007,7 +5007,7 @@ Never say "I don't know". Never say "Based on standard enterprise/industry pract
   const userPrompt = `${context ? `CONTEXT DOCUMENTS:\n${context}\n\n---\n\n` : ''}VENDOR QUESTION:\n${question}`
 
   try {
-    const answer = await callLLM(systemPrompt, userPrompt, env, 'gpt-5-mini', 1500)
+    const answer = await callLLM(systemPrompt, userPrompt, env, 'gpt-5.4-mini', 1500)
     const trimmed = answer.trim()
     if (trimmed.startsWith('NEEDS_MANUAL_REVIEW')) {
       const explanation = trimmed.replace(/^NEEDS_MANUAL_REVIEW[:\s]*/i, '').trim()
