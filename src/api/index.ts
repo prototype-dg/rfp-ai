@@ -4,7 +4,7 @@ import type { Bindings } from '../types'
 import { andersenEmailHtml, andersenPageHtml } from '../brand/letterhead'
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
-const WORKER_VERSION = '2026-08-17-v99' // v99: label-aware proposal classifier; reorder file sections (technical first); supporting docs (CVs etc.) no longer cause WRONG_DOCUMENT
+const WORKER_VERSION = '2026-08-17-v100' // v100: smart multi-section eval (technical 12k+commercial 6k+supporting 1.5k/file); commercial section isolation for budget; benchmark uses RFP currency+country
 
 // ── OpenAI configuration ───────────────────────────────────────────────────────
 const OPENAI_API_KEY_FALLBACK = 'OPENAI_KEY_REMOVED'
@@ -3121,23 +3121,37 @@ Respond ONLY with JSON: {"is_proposal": true|false, "reason": "<one sentence, ma
   }
 
   // ── Budget & Duration — run inline extraction ────────────────────────────────
-  // Always run runBudgetLLM here so budget + duration are always fresh from
-  // the full proposal text. Results are saved to DB as a side-effect.
+  // v100: Always isolate the commercial section first (same logic as /evaluate-budget).
+  // The full proposalText may be 60k+ chars for a 6-file submission; passing it all
+  // to runBudgetLLM is fine (30k limit inside), but for multi-file submissions the
+  // commercial section may start after 20k chars and get cut. Isolate it first.
   let budget = { amount: null as number | null, currency: 'USD', confidence: 0.0 }
   let duration: string | null = proposal.proposed_duration || null
 
   try {
-    const budgetResult = await runBudgetLLM(proposalText, proposal, env.DB, env)
+    // Try to isolate the labelled commercial section
+    let budgetInputText = proposalText
+    const commercialSectionMatch = proposalText.match(
+      /={3} FILE:[^\n]*\[label:\s*commercial[^\]]*\][^\n]*\n([\s\S]*?)(?:={3} FILE:|$)/i
+    )
+    if (commercialSectionMatch && commercialSectionMatch[1].trim().length > 100) {
+      budgetInputText = commercialSectionMatch[1].trim()
+      console.log(`[eval-budget-inline] using commercial section: ${budgetInputText.length} chars`)
+    } else {
+      console.log(`[eval-budget-inline] no commercial section label found — using full text: ${proposalText.length} chars`)
+    }
+
+    const budgetResult = await runBudgetLLM(budgetInputText, proposal, env.DB, env)
     if (budgetResult.budget_amount) {
       budget.amount     = budgetResult.budget_amount
       budget.currency   = budgetResult.budget_currency || 'USD'
       budget.confidence = budgetResult.budget_confidence || 0.9
     }
     if (budgetResult.duration) duration = budgetResult.duration
-    console.log(`[eval-v48] budget extracted: ${budget.currency} ${budget.amount} duration=${duration}`)
+    console.log(`[eval-v100] budget extracted: ${budget.currency} ${budget.amount} duration=${duration}`)
   } catch (budgetErr: any) {
     // Budget extraction failure is non-fatal — proceed with technical evaluation
-    console.error(`[eval-v48] budget extraction error: ${budgetErr?.message}`)
+    console.error(`[eval-v100] budget extraction error: ${budgetErr?.message}`)
     // Fall back to any stored values
     if (proposal.budget_amount) {
       budget.amount     = proposal.budget_amount
@@ -3168,40 +3182,98 @@ Respond ONLY with JSON: {"is_proposal": true|false, "reason": "<one sentence, ma
   console.log(`[eval-v48] commercialWeight=${commercialWeight} technicalTotal=${technicalTotal}`)
 
   // ── Single-call LLM scoring ──────────────────────────────────────────────────
-  // One gpt-5 call receives both full documents and returns structured scores
-  // for all criteria, strengths, and weaknesses in a single JSON response.
-  // CONTEXT WINDOW GUARD (v95 fix):
-  //   Root cause confirmed by live curl test (v94, 2026-08-16): gpt-5 via the Genspark proxy
-  //   takes >180s TTFB even for the truncated prompt (40k+25k chars). AbortSignal.timeout(180000)
-  //   fires before the first token arrives, throwing "This operation was aborted" → EVAL_FAILED.
+  // v100: Smart multi-section assembly for multi-file submissions.
   //
-  //   Fix: switch to gpt-5-mini (same proxy, consistent 30-60s TTFB for structured JSON outputs)
-  //   + much tighter text caps (12k rfp + 15k proposal ≈ 7k tokens total — well within budget)
-  //   + TTFB timeout raised to 240s as a cold-start safety net.
+  // Problem v95-v99: PROPOSAL_TEXT_LIMIT=15k chars cut off commercial + supporting files
+  // entirely for a 6-file submission (technical alone is often 15k+ chars). The LLM
+  // truthfully reported "no CVs", "no pricing" because it never saw those sections.
   //
-  //   gpt-5-mini is used for all other LLM calls (Q&A, budget, classification) successfully.
-  const RFP_TEXT_LIMIT      = 12_000   // chars ≈ 3k tokens
-  const PROPOSAL_TEXT_LIMIT = 15_000   // chars ≈ 4k tokens
+  // Fix: parse file sections from proposal_full_text and build a smart excerpt:
+  //   • technical : up to 12k chars (methodology, solution, architecture)
+  //   • commercial: up to 6k  chars (pricing tables, cost breakdown, timeline)
+  //   • supporting: up to 1.5k chars PER FILE, max 4 files (CVs, certs, profiles)
+  // Total budget ≈ 24k chars ≈ 6k tokens — safe for gpt-5.4-mini.
+  // Each section is clearly labelled so the LLM knows what it is reading.
+  const RFP_TEXT_LIMIT = 12_000   // chars
 
   const rfpFullTextRaw = (rfp.rfp_full_text || '').trim()
   const rfpFullText    = rfpFullTextRaw.length > RFP_TEXT_LIMIT
-    ? rfpFullTextRaw.slice(0, RFP_TEXT_LIMIT) + `\n\n[... RFP text truncated at ${RFP_TEXT_LIMIT} chars for context window; full text stored in DB ...]`
+    ? rfpFullTextRaw.slice(0, RFP_TEXT_LIMIT) + `\n\n[... RFP text truncated at ${RFP_TEXT_LIMIT} chars ...]`
     : rfpFullTextRaw
 
-  const proposalTextForLLM = proposalText.length > PROPOSAL_TEXT_LIMIT
-    ? proposalText.slice(0, PROPOSAL_TEXT_LIMIT) + `\n\n[... Proposal text truncated at ${PROPOSAL_TEXT_LIMIT} chars for context window; full text stored in DB ...]`
-    : proposalText
+  // ── Build smart proposal excerpt from labelled sections ─────────────────────
+  const proposalTextForLLM = (() => {
+    // Split on === FILE: boundaries (set by OCR callback). Fall back to raw text.
+    const sectionRe = /(?=={3} FILE:)/g
+    const rawSections = proposalText.split(sectionRe).filter(s => s.trim().length > 50)
+
+    if (rawSections.length <= 1) {
+      // Single file or legacy text — just truncate
+      return proposalText.length > 20_000
+        ? proposalText.slice(0, 20_000) + '\n\n[... truncated ...]'
+        : proposalText
+    }
+
+    // Classify each section by its [label: ...] tag
+    const getLabelType = (s: string): 'technical' | 'commercial' | 'supporting' | 'other' => {
+      const m = s.match(/\[label:\s*([^\]]+)\]/i)
+      const lbl = (m ? m[1] : '').trim().toLowerCase()
+      if (lbl === 'technical')  return 'technical'
+      if (lbl === 'commercial') return 'commercial'
+      if (lbl === 'supporting') return 'supporting'
+      return 'other'
+    }
+
+    const byType: Record<string, string[]> = { technical: [], commercial: [], supporting: [], other: [] }
+    for (const sec of rawSections) byType[getLabelType(sec)].push(sec)
+
+    const parts: string[] = []
+
+    // Technical: up to 12k chars — most important for scoring
+    for (const sec of byType.technical) {
+      const excerpt = sec.length > 12_000 ? sec.slice(0, 12_000) + '\n[... technical section truncated ...]' : sec
+      parts.push(excerpt)
+    }
+
+    // Commercial: up to 6k chars — pricing, timeline
+    for (const sec of byType.commercial) {
+      const excerpt = sec.length > 6_000 ? sec.slice(0, 6_000) + '\n[... commercial section truncated ...]' : sec
+      parts.push(excerpt)
+    }
+
+    // Supporting (CVs, certs, company profiles): 1500 chars each, max 5 files
+    const supportingSections = [...byType.supporting, ...byType.other].slice(0, 5)
+    for (const sec of supportingSections) {
+      // Extract filename for context
+      const fnMatch = sec.match(/=== FILE:\s*([^\[]+)/)
+      const fname = fnMatch ? fnMatch[1].trim() : 'supporting document'
+      const textBody = sec.replace(/^={3} FILE:[^\n]+\n/, '').trim()
+      const excerpt  = textBody.length > 1_500 ? textBody.slice(0, 1_500) + '\n[... truncated ...]' : textBody
+      parts.push(`=== SUPPORTING DOCUMENT: ${fname} ===\n${excerpt}`)
+    }
+
+    const assembled = parts.join('\n\n')
+    console.log(`[eval-v100] assembled proposalTextForLLM: ${assembled.length} chars from ${rawSections.length} sections (tech=${byType.technical.length} comm=${byType.commercial.length} supp=${byType.supporting.length} other=${byType.other.length})`)
+    return assembled
+  })()
 
   const scoringMatrix = (rfp.scoring_matrix || '').trim() || '(not configured — use standard procurement scoring criteria as defined in the RFP)'
 
-  console.log(`[eval-v49] proposalId=${proposal.id} rfp_full_text=${rfpFullTextRaw.length}->${rfpFullText.length} proposal_text=${proposalText.length}->${proposalTextForLLM.length}`)
+  console.log(`[eval-v100] proposalId=${proposal.id} rfp_full_text=${rfpFullTextRaw.length}->${rfpFullText.length} proposalTextForLLM=${proposalTextForLLM.length}`)
 
-  const evalSystemPrompt = `You are a procurement evaluation expert. You will be given two documents:
+  const evalSystemPrompt = `You are a procurement evaluation expert. You will be given:
+1. An RFP document with project requirements and evaluation criteria
+2. A vendor's proposal submission — which may contain multiple files labelled as: TECHNICAL PROPOSAL, COMMERCIAL PROPOSAL, and SUPPORTING DOCUMENTS (CVs of team members, company profiles, certifications, etc.)
 
-RFP Document: Contains project requirements, mandatory technical specifications
-Vendor Response: The submitted proposal.`
+All sections labelled "SUPPORTING DOCUMENT" are part of the vendor's submission package. CVs, certifications, and company profiles found in supporting document sections count as evidence of team qualifications and compliance.`
 
   const evalUserPrompt = `Your task is to evaluate the vendor's proposal strictly against the RFP's evaluation criteria, excluding Commercial Proposal and Cost Competitiveness and project duration (which falls under Implementation Approach, but we exclude schedule/timeline assessment and focus only on methodology, risk management, and workstream quality).
+
+IMPORTANT — Multi-file Submission Reading Guide:
+- Sections marked "=== FILE: ... [label: technical]" → Technical proposal content
+- Sections marked "=== FILE: ... [label: commercial]" → Commercial/pricing content  
+- Sections marked "=== SUPPORTING DOCUMENT: ..." → CVs, certifications, company profiles, references — these COUNT as evidence for team qualifications, mandatory CV requirements, and vendor credentials. Do NOT say CVs are missing if they appear in supporting document sections.
+
 Scoring Instructions
 
 For each criterion, assign a score out of the criterion's weight (e.g., for Technical Compliance, score out of 30). Then calculate the total weighted score as the sum of all individual scores.
@@ -3212,7 +3284,7 @@ Scoring scale per criterion (out of its weight):
 70-89% = Good - meets core requirements with minor gaps.
 50-69% = Partial - meets some but lacks important mandatory elements.
 Below 50% = Poor - fails to address the criterion or critical non-compliance.
-Mandatory Requirements Check: If the proposal fails to provide mandatory evidence (e.g., project references, personnel CVs as explicitly required in RFP Section 7), reflect that in the score with a severe penalty (<=33% of the criterion weight).
+Mandatory Requirements Check: If the proposal fails to provide mandatory evidence (e.g., project references, personnel CVs as explicitly required in RFP), reflect that in the score with a severe penalty (<=33% of the criterion weight). But first check ALL sections including supporting documents before concluding something is missing.
 
 Output Format:
 Return a structured JSON object with the following fields:
@@ -3232,7 +3304,7 @@ Return a structured JSON object with the following fields:
 
 Evaluation Guidelines:
 Be factual - base all assessments solely on content present in the provided documents. Do not assume unstated capabilities.
-Check mandatory requirements - highlight missing mandatory deliverables (e.g., references, CVs, on-premise statement) in the justification and weakness list.
+Check mandatory requirements across ALL provided sections (technical, commercial, and supporting documents).
 Justification must be concise but substantive - tie each score to specific evidence (or lack thereof) from the vendor's response.
 Total score = sum of all score_achieved values (since weights sum to 90 after excluding cost).
 Strengths = max 5 items. Weaknesses = max 5 items, prioritizing mandatory omissions.
@@ -3241,7 +3313,7 @@ Input Data:
 RFP Document:
 ${rfpFullText}
 
-Vendor Response:
+Vendor Submission (multi-file — all sections below are part of the same submission):
 ${proposalTextForLLM}
 
 Scoring Matrix:
@@ -4118,7 +4190,35 @@ apiRouter.post('/rfps/:rfpId/market-benchmark', async (c) => {
     const settings: Record<string, string> = {}
     for (const r of (settingsRows.results || [])) { settings[(r as any).key] = (r as any).value }
     const issuerName = settings?.issuer_name     || 'Andersen'
-    const issuerLoc  = settings?.issuer_location || 'Warsaw, Poland'
+
+    // ── Determine region and currency from the RFP itself (v100) ─────────────────
+    // Priority: rfp.country_of_issue → rfp.rfp_currency → settings.issuer_location → fallback
+    // This ensures an Abu Dhabi/AED RFP gets UAE market rates, not Warsaw/EUR rates.
+    const CURRENCY_REGION_MAP: Record<string, string> = {
+      AED: 'Dubai / Abu Dhabi, UAE',
+      SAR: 'Riyadh, Saudi Arabia',
+      QAR: 'Doha, Qatar',
+      KWD: 'Kuwait City, Kuwait',
+      BHD: 'Manama, Bahrain',
+      OMR: 'Muscat, Oman',
+      EGP: 'Cairo, Egypt',
+      USD: 'United States',
+      EUR: 'Western Europe',
+      GBP: 'London, United Kingdom',
+      INR: 'Bangalore, India',
+      PKR: 'Karachi, Pakistan',
+    }
+    const rfpCurrency    = (rfp.rfp_currency || '').toUpperCase().trim()
+    const countryOfIssue = (rfp.country_of_issue || '').trim()
+    // Determine benchmark region: country_of_issue > currency map > settings > fallback
+    const issuerLoc = countryOfIssue
+      || (rfpCurrency && CURRENCY_REGION_MAP[rfpCurrency])
+      || settings?.issuer_location
+      || 'Dubai / Abu Dhabi, UAE'   // sensible default for this deployment
+    // Benchmark currency: use the RFP's own currency when available
+    const benchmarkCurrency = rfpCurrency || (settings?.issuer_location?.includes('Europe') ? 'EUR' : 'USD')
+
+    console.log(`[market-benchmark] rfp=${rfpId} rfp_currency=${rfpCurrency} country_of_issue=${countryOfIssue} → region="${issuerLoc}" currency="${benchmarkCurrency}"`)
 
     const rfpText    = (rfp.rfp_full_text || rfp.content || '').slice(0, 30000)
     const archText   = (rfp.arch_doc_text || '').slice(0, 10000)
@@ -4132,10 +4232,13 @@ apiRouter.post('/rfps/:rfpId/market-benchmark', async (c) => {
 
     const systemPrompt = `You are a senior IT project estimator with deep knowledge of software delivery costs across global markets. You produce structured WBS, team composition, and market-rate estimates in JSON.`
 
-    const userPrompt = `You are estimating the market-average implementation cost for the following RFP issued by ${issuerName} (${issuerLoc}).
+    const userPrompt = `You are estimating the market-average implementation cost for the following RFP issued by ${issuerName} in ${issuerLoc}.
+Use ${issuerLoc} market rates and ${benchmarkCurrency} currency throughout. All monetary values must be in ${benchmarkCurrency}.
 
 RFP Title: ${title}
 Category: ${category}
+Region: ${issuerLoc}
+Currency: ${benchmarkCurrency}
 
 RFP Summary:
 ${rfpText.slice(0, 15000)}
@@ -4144,28 +4247,27 @@ ${brdText  ? `\nBusiness Requirements (BRD):\n${brdText}`  : ''}
 
 Tasks:
 1. Generate a Work Breakdown Structure (WBS) with 6–12 phases/workstreams appropriate for this type of project.
-2. For each phase, estimate the effort in person-days and the market-average day rate for ${issuerLoc} (in the local currency of that region).
-3. Sum all phases to produce a total market-average cost estimate (min/mid/max range).
-4. Define the typical team composition needed to deliver this project: list each role, the number of people for that role, the typical seniority, and the market-average hourly rate for ${issuerLoc}.
+2. For each phase, estimate the effort in person-days and the market-average day rate for ${issuerLoc} (in ${benchmarkCurrency}).
+3. Sum all phases to produce a total market-average cost estimate (min/mid/max range) in ${benchmarkCurrency}.
+4. Define the typical team composition needed to deliver this project: list each role, the number of people, typical seniority, and market-average day rate for ${issuerLoc} in ${benchmarkCurrency}.
 5. Include a confidence rating (high / medium / low) and brief rationale.
-6. Identify the currency used for the estimate.
 
 Return ONLY valid JSON — no markdown, no commentary:
 {
   "region": "${issuerLoc}",
-  "currency": "USD",
+  "currency": "${benchmarkCurrency}",
   "total_min": 1500000,
   "total_max": 2200000,
   "total_mid": 1850000,
   "confidence": "medium",
-  "confidence_rationale": "Estimate based on regional day rates; actual cost depends on vendor location and team seniority.",
+  "confidence_rationale": "Estimate based on ${issuerLoc} day rates for senior consultants.",
   "wbs": [
     {
       "phase": "Discovery & Requirements",
       "description": "Stakeholder workshops, requirement validation, gap analysis",
       "effort_person_days": 45,
-      "day_rate": 800,
-      "subtotal": 36000
+      "day_rate": 3000,
+      "subtotal": 135000
     }
   ],
   "team_composition": [
@@ -4173,18 +4275,18 @@ Return ONLY valid JSON — no markdown, no commentary:
       "role": "Project Manager",
       "headcount": 1,
       "seniority": "Senior",
-      "hourly_rate": 120,
+      "hourly_rate": 400,
       "notes": "Responsible for delivery governance and stakeholder reporting"
     },
     {
       "role": "Solution Architect",
       "headcount": 1,
       "seniority": "Principal",
-      "hourly_rate": 160,
+      "hourly_rate": 550,
       "notes": "Defines technical architecture and integration patterns"
     }
   ],
-  "assumptions": ["Rates reflect mid-market senior consultant rates for ${issuerLoc}", "Excludes hardware, licences, and hyperscaler cloud costs"]
+  "assumptions": ["Rates reflect mid-market senior consultant day rates for ${issuerLoc} in ${benchmarkCurrency}", "Excludes hardware, licences, and hyperscaler cloud costs"]
 }`
 
     const rawResult = await callLLM(systemPrompt, userPrompt, c.env, 'gpt-5.5', 4000)
