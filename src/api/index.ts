@@ -613,7 +613,7 @@ apiRouter.post('/rfps/:id/generate', async (c) => {
       body: JSON.stringify({
         model,
         messages: [{ role: 'system', content: sp }, { role: 'user', content: up }],
-        max_tokens: maxTok,
+        max_completion_tokens: maxTok,
         temperature: 0.3,
         stream: true,
       }),
@@ -1318,7 +1318,7 @@ async function callSidecarLlmExtract(
         callback_url: callbackUrl,
         callback_secret: sidecarSecret,
         max_input_chars: 20000,
-        max_tokens: 2000,
+        max_completion_tokens: 2000,
       }),
       signal: AbortSignal.timeout(15000),
     })
@@ -1736,7 +1736,7 @@ Rules:
           { role: 'system', content: systemPrompt },
           { role: 'user', content: `Extract all vendor requirements from this RFP section:\n\n${requirementsFocusText}` },
         ],
-        max_tokens: 1500,
+        max_completion_tokens: 1500,
         temperature: 0.3,
         stream: true,
       }),
@@ -2450,7 +2450,7 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
           headers: { 'Authorization': `Bearer ${openAiKey}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({
             model: 'gpt-5.4-mini',
-            max_tokens: 10,
+            max_completion_tokens: 10,
             temperature: 0,
             messages: [
               {
@@ -4708,7 +4708,7 @@ async function callLLM(systemPrompt: string, userPrompt: string, env: any, model
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
       ],
-      max_tokens: maxTokens,
+      max_completion_tokens: maxTokens,
       temperature: 0.3,
       stream: true,
     }),
