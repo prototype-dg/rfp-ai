@@ -1,8 +1,7 @@
 /* submit.js — Vendor Proposal Submission Portal
- * Upload flow (v93 — VPS relay):
- *   1. POST /api/submit/:rfpId/presign  — validate vendor code, get signed VPS upload URLs
- *   2. PUT  <vps-relay-url>             — upload each file DIRECTLY to VPS relay (no CF Worker body/time limits)
- *   3. POST /api/submit/:rfpId/finalize — Worker fetches from VPS → streams to R2, creates DB record, fires OCR
+ * Upload flow (v96 — direct multipart):
+ *   POST /api/submit/:rfpId — multipart form with vendor_code, cover_letter, file_0..file_N
+ *   Worker receives files directly, stores to R2, creates DB record, fires OCR.
  *
  * RFP_ID and PRESET_CODE are injected as window globals by the inline <script> in submit-page.ts
  * Using single quotes throughout — no TypeScript template literal, no escaping conflicts.
@@ -254,93 +253,77 @@
     if (!code)                { showAlert('error', 'Please enter your Participant Reference Code.'); return; }
     if (!uploadedFiles.length){ showAlert('error', 'Please upload at least one proposal document.'); return; }
 
-    // Disable submit button immediately to prevent double-submit
     var submitBtn = document.getElementById('submitBtn');
     submitBtn.disabled = true;
+    showLoading('Uploading proposal\u2026');
 
-    // Show loading overlay
-    showLoading('Preparing upload\u2026');
+    // Build multipart form — no presign, no VPS relay, direct to Worker
+    var formData = new FormData();
+    formData.append('vendor_code',   code);
+    formData.append('cover_letter',  document.getElementById('coverLetter').value.trim());
 
-    // ── Step 1: Presign ───────────────────────────────────────
-    var filesPayload = uploadedFiles.map(function (entry) {
-      return {
-        filename:     entry.file.name,
-        content_type: entry.file.type || 'application/pdf',
-        size_bytes:   entry.file.size,
-        label:        entry.label,
-      };
+    var labelsMap = {};
+    uploadedFiles.forEach(function (entry, idx) {
+      formData.append('file_' + idx, entry.file, entry.file.name);
+      labelsMap[entry.file.name] = entry.label;
+      labelsMap[String(idx)]     = entry.label;
     });
+    formData.append('file_labels', JSON.stringify(labelsMap));
 
-    fetch('/api/submit/' + RFP_ID + '/presign', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ vendor_code: code, files: filesPayload }),
-    })
-      .then(function (res) {
-        return res.json().then(function (data) { return { ok: res.ok, data: data }; });
-      })
-      .then(function (result) {
-        if (!result.ok || result.data.error) {
-          hideLoading();
-          submitBtn.disabled = false;
-          if (result.data && result.data.declined) { showDeclinedMessage(); document.getElementById('formCard').style.display = 'none'; return; }
-          showAlert('error', (result.data && result.data.error) || 'Could not prepare upload. Please try again.');
-          return;
-        }
-        var slots = result.data.slots; // [{ r2_key, upload_url, filename, label, content_type, size_bytes }]
-        // ── Step 2: Upload each file directly to R2 ──────────
-        updateLoading('Uploading files directly to secure storage\u2026');
-        uploadAllToR2(slots)
-          .then(function (attachments) {
-            // ── Step 3: Finalize ────────────────────────────
-            updateLoading('Finalising submission\u2026');
-            return fetch('/api/submit/' + RFP_ID + '/finalize', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                vendor_code:  code,
-                cover_letter: document.getElementById('coverLetter').value.trim(),
-                attachments:  attachments,
-              }),
-            }).then(function (res) {
-              return res.json().then(function (data) { return { ok: res.ok, data: data }; });
-            });
-          })
-          .then(function (result) {
-            hideLoading();
-            if (!result.ok || result.data.error) {
-              submitBtn.disabled = false;
-              showAlert('error', (result.data && result.data.error) || 'Submission failed. Please try again.');
-              return;
-            }
-            // Success
-            document.getElementById('formCard').style.display = 'none';
-            var ss = document.getElementById('successScreen');
-            ss.style.display = 'block';
-            document.getElementById('successRef').textContent = code;
-            var n = result.data.files_stored || uploadedFiles.length;
-            document.getElementById('successFiles').textContent =
-              n + ' document' + (n === 1 ? '' : 's') + ' received';
-            // Confirmation email (best-effort)
-            var vendorEmail = (rfpData && rfpData.vendor_email) || '';
-            var vendorName  = (rfpData && rfpData.vendor_name)  || 'Vendor';
-            fetch('/api/submit/' + RFP_ID + '/confirmation', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ vendor_email: vendorEmail, vendor_name: vendorName, vendor_code: code }),
-            }).catch(function () {});
-          })
-          .catch(function (err) {
-            hideLoading();
-            submitBtn.disabled = false;
-            showAlert('error', err.message || 'Upload failed. Please check your connection and try again.');
-          });
-      })
-      .catch(function () {
-        hideLoading();
+    // XHR so we get upload progress
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/submit/' + RFP_ID, true);
+
+    xhr.upload.onprogress = function (e) {
+      if (e.lengthComputable) {
+        var pct = Math.round(e.loaded * 100 / e.total);
+        updateLoading('Uploading\u2026 ' + pct + '%');
+      }
+    };
+
+    xhr.onload = function () {
+      hideLoading();
+      var data;
+      try { data = JSON.parse(xhr.responseText); } catch (_) { data = {}; }
+
+      if (xhr.status >= 200 && xhr.status < 300 && !data.error) {
+        // Success
+        document.getElementById('formCard').style.display = 'none';
+        var ss = document.getElementById('successScreen');
+        ss.style.display = 'block';
+        document.getElementById('successRef').textContent = code;
+        var n = data.files_stored || uploadedFiles.length;
+        document.getElementById('successFiles').textContent =
+          n + ' document' + (n === 1 ? '' : 's') + ' received';
+        // Confirmation email (best-effort)
+        var vendorEmail = (rfpData && rfpData.vendor_email) || '';
+        var vendorName  = (rfpData && rfpData.vendor_name)  || 'Vendor';
+        fetch('/api/submit/' + RFP_ID + '/confirmation', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ vendor_email: vendorEmail, vendor_name: vendorName, vendor_code: code }),
+        }).catch(function () {});
+      } else {
         submitBtn.disabled = false;
-        showAlert('error', 'Network error during preparation. Please try again.');
-      });
+        if (data.declined) { showDeclinedMessage(); document.getElementById('formCard').style.display = 'none'; return; }
+        showAlert('error', data.error || 'Submission failed. Please try again.');
+      }
+    };
+
+    xhr.onerror = function () {
+      hideLoading();
+      submitBtn.disabled = false;
+      showAlert('error', 'Network error. Please check your connection and try again.');
+    };
+
+    xhr.ontimeout = function () {
+      hideLoading();
+      submitBtn.disabled = false;
+      showAlert('error', 'Upload timed out. Please try again with a smaller file.');
+    };
+
+    xhr.timeout = 10 * 60 * 1000; // 10 minutes
+    xhr.send(formData);
   }
 
   /* ── Upload all files to VPS relay, then return attachment descriptors for /finalize ──
