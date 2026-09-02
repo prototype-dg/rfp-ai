@@ -1,4 +1,0 @@
-[config]
-; Tell Oryx/Kudu to run a custom deployment script
-; We ship pre-built dist-azure/ — only need npm install (production deps)
-command = bash deploy.sh
