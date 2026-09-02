@@ -2,6 +2,7 @@
   "name": "webapp",
   "type": "module",
   "scripts": {
+    "start": "node dist-azure/server-azure.js",
     "dev": "vite",
     "build": "vite build",
     "build:azure": "tsc --project tsconfig.azure.json",
