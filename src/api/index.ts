@@ -423,7 +423,7 @@ apiRouter.post('/rfps/:id/generate', async (c) => {
     try {
       const listed = await bucket.list({ prefix: `arch-docs/${id}/` })
       for (const obj of listed.objects) {
-        const docType = (obj.customHttpMetadata as any)?.docType
+        const docType = (obj as any).customHttpMetadata?.docType || (obj as any).customMetadata?.docType
           || obj.key.toLowerCase().includes('brd') ? 'brd' : 'arch'
         if (docType === 'brd' && !isPlaceholder(brdDocText)) continue
         if (docType !== 'brd' && !isPlaceholder(archDocText)) continue
@@ -1093,7 +1093,7 @@ apiRouter.post('/rfps/upload-rfp-pdf', async (c) => {
           // Run OpenAI extraction inline (same as the old callback handler)
           const { extracted, scoringMatrixJson, requirementGlossaryJson } =
             await extractRfpFieldsFromOcr(extractedText, c.env, `rfp=${rfpId}`)
-          await writeExtractedRfpFields(c.env.DB, rfpId, extractedText, extracted, scoringMatrixJson, requirementGlossaryJson)
+          await writeExtractedRfpFields(c.env.DB, String(rfpId), extractedText, extracted, scoringMatrixJson, requirementGlossaryJson)
           await c.env.DB.prepare(`UPDATE rfps SET ai_extraction_status='done', updated_at=datetime('now') WHERE id=?`).bind(rfpId).run()
           console.log(`[upload-rfp-pdf] OCR+extraction done rfp=${rfpId} chars=${result.chars}`)
         } catch (e: any) {
@@ -6050,7 +6050,7 @@ async function inflateAsync(compressed: Uint8Array): Promise<Uint8Array> {
   const ds = new DecompressionStream('deflate-raw')
   const writer = ds.writable.getWriter()
   const reader = ds.readable.getReader()
-  await writer.write(compressed)
+  await writer.write(compressed as Uint8Array<ArrayBuffer>)
   await writer.close()
   const chunks: Uint8Array[] = []
   let totalLen = 0

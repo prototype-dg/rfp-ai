@@ -8,68 +8,59 @@
  *
  * Phase 1 of the Azure sidecar inline migration.
  */
-
-import puppeteer, { type Browser } from 'puppeteer'
-import { marked } from 'marked'
-
+import puppeteer from 'puppeteer';
+import { marked } from 'marked';
 // ── Browser pool ──────────────────────────────────────────────────────────────
 // One Chromium instance is kept alive for the lifetime of the Node.js process.
 // Per-render: a new Page is created, used, then closed (no page reuse — avoids
 // state leakage between requests). Browser restarts automatically on disconnect.
-
-let _browser: Browser | null = null
-let _browserLaunching: Promise<Browser> | null = null
-
-export async function getBrowser(): Promise<Browser> {
-  if (_browser && _browser.connected) return _browser
-  if (_browserLaunching) return _browserLaunching
-
-  _browserLaunching = puppeteer
-    .launch({
-      headless: true,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-        '--font-render-hinting=none',
-      ],
+let _browser = null;
+let _browserLaunching = null;
+export async function getBrowser() {
+    if (_browser && _browser.connected)
+        return _browser;
+    if (_browserLaunching)
+        return _browserLaunching;
+    _browserLaunching = puppeteer
+        .launch({
+        headless: true,
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-gpu',
+            '--font-render-hinting=none',
+        ],
     })
-    .then((b) => {
-      _browser = b
-      _browserLaunching = null
-      b.on('disconnected', () => {
-        _browser = null
-        console.warn('[pdf-render] browser disconnected — will relaunch on next request')
-      })
-      return b
-    })
-
-  return _browserLaunching
+        .then((b) => {
+        _browser = b;
+        _browserLaunching = null;
+        b.on('disconnected', () => {
+            _browser = null;
+            console.warn('[pdf-render] browser disconnected — will relaunch on next request');
+        });
+        return b;
+    });
+    return _browserLaunching;
 }
-
 /** Call once at app startup to pay the cold-start cost before any real request. */
-export async function warmupBrowser(): Promise<void> {
-  console.log('[pdf-render] warming up Chromium...')
-  const browser = await getBrowser()
-  const page = await browser.newPage()
-  await page.setContent('<html><body>warmup</body></html>')
-  await page.close()
-  console.log('[pdf-render] Chromium ready')
+export async function warmupBrowser() {
+    console.log('[pdf-render] warming up Chromium...');
+    const browser = await getBrowser();
+    const page = await browser.newPage();
+    await page.setContent('<html><body>warmup</body></html>');
+    await page.close();
+    console.log('[pdf-render] Chromium ready');
 }
-
 // ── Helpers (ported 1-to-1 from server.js) ────────────────────────────────────
-
-function escHtml(str: string): string {
-  return String(str || '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
+function escHtml(str) {
+    return String(str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
 }
-
-const MONO = "'Courier New', monospace"
-
+const MONO = "'Courier New', monospace";
 // Typography CSS — identical to server.js (FIX 3: table has no page-break-inside:avoid)
 const TYPOGRAPHY_CSS = `
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -95,38 +86,30 @@ const TYPOGRAPHY_CSS = `
   strong { color: #111827; }
   a { color: #1d4ed8; }
   * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-`
-
-function wordmarkSvg(width: number, height: number, textColor?: string): string {
-  const tc = textColor || '#020303'
-  return `<svg viewBox="0 0 180 38" width="${width}" height="${height}" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="0" y="3" width="24" height="24" rx="2" fill="${tc}"/><rect x="4" y="7" width="6" height="14" fill="#FFDB00"/><rect x="14" y="7" width="6" height="14" fill="#FFDB00"/><text x="30" y="23" font-family="Arial,Helvetica,sans-serif" font-weight="700" font-size="15" letter-spacing="1.5" fill="${tc}">ANDERSEN</text></svg>`
+`;
+function wordmarkSvg(width, height, textColor) {
+    const tc = textColor || '#020303';
+    return `<svg viewBox="0 0 180 38" width="${width}" height="${height}" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="0" y="3" width="24" height="24" rx="2" fill="${tc}"/><rect x="4" y="7" width="6" height="14" fill="#FFDB00"/><rect x="14" y="7" width="6" height="14" fill="#FFDB00"/><text x="30" y="23" font-family="Arial,Helvetica,sans-serif" font-weight="700" font-size="15" letter-spacing="1.5" fill="${tc}">ANDERSEN</text></svg>`;
 }
-
 // ── buildHeaderSvg ────────────────────────────────────────────────────────────
 // v13 layout: Row1 48px lockup | Row2 34px yellow band | Row3 5px accent = 87px total
-function buildHeaderSvg(refBadge?: string): string {
-  const W    = 794
-  const LKH  = 48
-  const BAND = 34
-  const ACC  = 5
-  const H    = LKH + BAND + ACC   // 87px
-  const PAD  = 60
-
-  const glyphX = PAD
-  const glyphY = Math.round((LKH - 16) / 2)
-
-  const bY = LKH
-  const bH = BAND
-
-  const topo1 = `M-10,${bY+7}  Q130,${bY+1}  280,${bY+9}  T520,${bY+11} Q650,${bY+14} 810,${bY+5}`
-  const topo2 = `M-10,${bY+15} Q150,${bY+6}  300,${bY+16} T540,${bY+19} Q660,${bY+23} 810,${bY+12}`
-  const topo3 = `M-10,${bY+23} Q160,${bY+14} 320,${bY+25} T560,${bY+27} Q680,${bY+30} 810,${bY+20}`
-
-  const d1y = bY + 8, d2y = bY + 17, d3y = bY + 10, d4y = bY + 22, d5y = bY + 9
-
-  const badge = String(refBadge || '').slice(0, 50)
-
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">
+function buildHeaderSvg(refBadge) {
+    const W = 794;
+    const LKH = 48;
+    const BAND = 34;
+    const ACC = 5;
+    const H = LKH + BAND + ACC; // 87px
+    const PAD = 60;
+    const glyphX = PAD;
+    const glyphY = Math.round((LKH - 16) / 2);
+    const bY = LKH;
+    const bH = BAND;
+    const topo1 = `M-10,${bY + 7}  Q130,${bY + 1}  280,${bY + 9}  T520,${bY + 11} Q650,${bY + 14} 810,${bY + 5}`;
+    const topo2 = `M-10,${bY + 15} Q150,${bY + 6}  300,${bY + 16} T540,${bY + 19} Q660,${bY + 23} 810,${bY + 12}`;
+    const topo3 = `M-10,${bY + 23} Q160,${bY + 14} 320,${bY + 25} T560,${bY + 27} Q680,${bY + 30} 810,${bY + 20}`;
+    const d1y = bY + 8, d2y = bY + 17, d3y = bY + 10, d4y = bY + 22, d5y = bY + 9;
+    const badge = String(refBadge || '').slice(0, 50);
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">
 
   <!-- Row 1: White lockup (48px) -->
   <rect x="0" y="0" width="${W}" height="${LKH}" fill="#ffffff"/>
@@ -134,16 +117,16 @@ function buildHeaderSvg(refBadge?: string): string {
 
   <!-- Wordmark glyph -->
   <rect x="${glyphX}" y="${glyphY}" width="16" height="16" rx="2" fill="#020303"/>
-  <rect x="${glyphX+3}" y="${glyphY+3}" width="4" height="10" fill="#FFDB00"/>
-  <rect x="${glyphX+9}" y="${glyphY+3}" width="4" height="10" fill="#FFDB00"/>
-  <text x="${glyphX+22}" y="${glyphY+12}" font-family="Arial,Helvetica,sans-serif" font-weight="700" font-size="12" letter-spacing="1.5" fill="#020303">ANDERSEN</text>
-  <line x1="${glyphX+122}" y1="${glyphY+2}" x2="${glyphX+122}" y2="${glyphY+14}" stroke="#D0D0D0" stroke-width="1"/>
-  <text x="${glyphX+130}" y="${glyphY+8}" font-family="Courier New,monospace" font-weight="600" font-size="6.5" letter-spacing="0.8" fill="#020303">SOFTWARE ENGINEERING</text>
-  <text x="${glyphX+130}" y="${glyphY+16}" font-family="Courier New,monospace" font-size="6.5" letter-spacing="0.8" fill="#556170">GROUP · GLOBAL</text>
+  <rect x="${glyphX + 3}" y="${glyphY + 3}" width="4" height="10" fill="#FFDB00"/>
+  <rect x="${glyphX + 9}" y="${glyphY + 3}" width="4" height="10" fill="#FFDB00"/>
+  <text x="${glyphX + 22}" y="${glyphY + 12}" font-family="Arial,Helvetica,sans-serif" font-weight="700" font-size="12" letter-spacing="1.5" fill="#020303">ANDERSEN</text>
+  <line x1="${glyphX + 122}" y1="${glyphY + 2}" x2="${glyphX + 122}" y2="${glyphY + 14}" stroke="#D0D0D0" stroke-width="1"/>
+  <text x="${glyphX + 130}" y="${glyphY + 8}" font-family="Courier New,monospace" font-weight="600" font-size="6.5" letter-spacing="0.8" fill="#020303">SOFTWARE ENGINEERING</text>
+  <text x="${glyphX + 130}" y="${glyphY + 16}" font-family="Courier New,monospace" font-size="6.5" letter-spacing="0.8" fill="#556170">GROUP · GLOBAL</text>
 
   <!-- RFP ref badge -->
-  ${badge ? `<text x="${W - PAD}" y="${glyphY+8}" font-family="Courier New,monospace" font-size="7" letter-spacing="1.8" fill="#556170" text-anchor="end">REF</text>
-  <text x="${W - PAD}" y="${glyphY+17}" font-family="Courier New,monospace" font-weight="600" font-size="7.5" letter-spacing="1.2" fill="#020303" text-anchor="end">${badge}</text>` : ''}
+  ${badge ? `<text x="${W - PAD}" y="${glyphY + 8}" font-family="Courier New,monospace" font-size="7" letter-spacing="1.8" fill="#556170" text-anchor="end">REF</text>
+  <text x="${W - PAD}" y="${glyphY + 17}" font-family="Courier New,monospace" font-weight="600" font-size="7.5" letter-spacing="1.2" fill="#020303" text-anchor="end">${badge}</text>` : ''}
 
   <!-- Row 2: Yellow band (34px) -->
   <rect x="0" y="${bY}" width="${W}" height="${BAND}" fill="#FFDB00"/>
@@ -161,27 +144,20 @@ function buildHeaderSvg(refBadge?: string): string {
   <!-- Row 3: White accent strip (5px) -->
   <rect x="0" y="${bY + BAND}" width="${W}" height="${ACC}" fill="#ffffff"/>
   <line x1="0" y1="${bY + BAND}" x2="${W}" y2="${bY + BAND}" stroke="#E0E0E0" stroke-width="1"/>
-</svg>`
+</svg>`;
 }
-
-function buildPuppeteerTemplates(opts: { ref_number?: string }): {
-  headerTemplate: string
-  footerTemplate: string
-} {
-  const refBadge = opts.ref_number ? String(opts.ref_number) : 'Andersen · Est. 2007'
-  const email = 'procurement@cpc-rfp.website'
-  const year  = new Date().getFullYear()
-
-  const svgContent = buildHeaderSvg(refBadge)
-  const svgDataUri = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgContent)
-
-  const headerTemplate = `<style>
+function buildPuppeteerTemplates(opts) {
+    const refBadge = opts.ref_number ? String(opts.ref_number) : 'Andersen · Est. 2007';
+    const email = 'procurement@cpc-rfp.website';
+    const year = new Date().getFullYear();
+    const svgContent = buildHeaderSvg(refBadge);
+    const svgDataUri = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgContent);
+    const headerTemplate = `<style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { margin: 0; padding: 0; }
 </style>
-<img src="${svgDataUri}" width="794" height="87" style="display:block;width:794px;height:87px;"/>`
-
-  const footerTemplate = `<style>
+<img src="${svgDataUri}" width="794" height="87" style="display:block;width:794px;height:87px;"/>`;
+    const footerTemplate = `<style>
 * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important;
     margin: 0; padding: 0; box-sizing: border-box; }
 body { margin: 0; padding: 0; background: #020D1C; }
@@ -212,18 +188,15 @@ td.fr { width: 294px; padding: 0 60px 0 0; vertical-align: middle; text-align: r
       <span class="fpg">Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>
     </td>
   </tr>
-</table>`
-
-  return { headerTemplate, footerTemplate }
+</table>`;
+    return { headerTemplate, footerTemplate };
 }
-
 // ── buildPdfBodyHtml ──────────────────────────────────────────────────────────
-function buildPdfBodyHtml(markdown: string, opts: { ref_number?: string; rfp_title?: string }): string {
-  const rfpTitle = opts.rfp_title ? escHtml(opts.rfp_title) : 'Request for Proposal'
-  marked.setOptions({ gfm: true, breaks: false } as any)
-  const bodyHtml = marked.parse(markdown || '') as string
-
-  return `<!DOCTYPE html>
+function buildPdfBodyHtml(markdown, opts) {
+    const rfpTitle = opts.rfp_title ? escHtml(opts.rfp_title) : 'Request for Proposal';
+    marked.setOptions({ gfm: true, breaks: false });
+    const bodyHtml = marked.parse(markdown || '');
+    return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
@@ -237,29 +210,22 @@ body { background: #fff; margin: 0; padding: 0; }
 </style>
 </head>
 <body><div class="a-body">${bodyHtml}</div></body>
-</html>`
+</html>`;
 }
-
 // ── buildPreviewHtml ──────────────────────────────────────────────────────────
 // Paginated letterhead HTML preview — JS paginator distributes content across
 // simulated A4 page cards, each with the full Andersen letterhead.
 // (Ported 1-to-1 from server.js buildPreviewHtml, ~240 lines of inline JS)
-export function buildPreviewHtml(
-  markdown: string,
-  opts: { ref_number?: string; rfp_title?: string }
-): string {
-  const rfpTitle  = opts.rfp_title  ? escHtml(opts.rfp_title)  : 'Request for Proposal'
-  const refNumber = opts.ref_number ? escHtml(opts.ref_number) : ''
-
-  marked.setOptions({ gfm: true, breaks: false } as any)
-  const bodyHtml = marked.parse(markdown || '') as string
-
-  // Letterhead header HTML (injected into every A4 page card)
-  const svgContent = buildHeaderSvg(refNumber || undefined)
-  const svgDataUri = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgContent)
-  const pageHeaderHtml = `<div class="a-pg-hd"><img src="${svgDataUri}" width="794" height="87" style="display:block;width:100%;height:auto;"/></div>`
-
-  return `<!DOCTYPE html>
+export function buildPreviewHtml(markdown, opts) {
+    const rfpTitle = opts.rfp_title ? escHtml(opts.rfp_title) : 'Request for Proposal';
+    const refNumber = opts.ref_number ? escHtml(opts.ref_number) : '';
+    marked.setOptions({ gfm: true, breaks: false });
+    const bodyHtml = marked.parse(markdown || '');
+    // Letterhead header HTML (injected into every A4 page card)
+    const svgContent = buildHeaderSvg(refNumber || undefined);
+    const svgDataUri = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgContent);
+    const pageHeaderHtml = `<div class="a-pg-hd"><img src="${svgDataUri}" width="794" height="87" style="display:block;width:100%;height:auto;"/></div>`;
+    return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
@@ -443,36 +409,32 @@ html, body { background: #e5e7eb; margin: 0; padding: 0; }
 })();
 </script>
 </body>
-</html>`
+</html>`;
 }
-
 // ── Public API ────────────────────────────────────────────────────────────────
-
 /**
  * Render markdown → Andersen-branded A4 PDF bytes.
  * Uses the long-lived browser pool — warm calls take ~2–5s.
  */
-export async function renderMarkdownToPdf(
-  markdown: string,
-  opts: { ref_number?: string; rfp_title?: string }
-): Promise<Buffer> {
-  const bodyHtml = buildPdfBodyHtml(markdown, opts)
-  const { headerTemplate, footerTemplate } = buildPuppeteerTemplates({ ref_number: opts.ref_number })
-
-  const browser = await getBrowser()
-  const page    = await browser.newPage()
-  try {
-    await page.setContent(bodyHtml, { waitUntil: 'domcontentloaded' })
-    const pdfBuffer = await page.pdf({
-      format: 'A4',
-      printBackground: true,
-      displayHeaderFooter: true,
-      headerTemplate,
-      footerTemplate,
-      margin: { top: '29mm', bottom: '22mm', left: '16mm', right: '16mm' },
-    })
-    return Buffer.from(pdfBuffer)
-  } finally {
-    await page.close()
-  }
+export async function renderMarkdownToPdf(markdown, opts) {
+    const bodyHtml = buildPdfBodyHtml(markdown, opts);
+    const { headerTemplate, footerTemplate } = buildPuppeteerTemplates({ ref_number: opts.ref_number });
+    const browser = await getBrowser();
+    const page = await browser.newPage();
+    try {
+        await page.setContent(bodyHtml, { waitUntil: 'domcontentloaded' });
+        const pdfBuffer = await page.pdf({
+            format: 'A4',
+            printBackground: true,
+            displayHeaderFooter: true,
+            headerTemplate,
+            footerTemplate,
+            margin: { top: '29mm', bottom: '22mm', left: '16mm', right: '16mm' },
+        });
+        return Buffer.from(pdfBuffer);
+    }
+    finally {
+        await page.close();
+    }
 }
+//# sourceMappingURL=pdf-render.js.map

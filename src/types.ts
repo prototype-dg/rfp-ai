@@ -1,5 +1,7 @@
 export type Bindings = {
+  // DB accepts Cloudflare D1Database in Workers runtime, or our better-sqlite3 shim on Azure
   DB: D1Database
+  // PROPOSALS_BUCKET accepts Cloudflare R2Bucket in Workers runtime, or our AzureBlobBucket shim on Azure
   PROPOSALS_BUCKET?: R2Bucket
   RESEND_API_KEY?: string
   OPENAI_API_KEY?: string

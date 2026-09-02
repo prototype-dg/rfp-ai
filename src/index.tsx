@@ -4,6 +4,8 @@ import { apiRouter } from './api/index'
 import { getLayout } from './layout'
 import { getSubmitPage } from './submit-page'
 import type { Bindings } from './types'
+import { sqliteDb } from './services/db'
+import { azureBlobBucket } from './services/blob-bucket'
 // Import static assets as raw strings at build time (Vite ?raw)
 import appJs from '../public/static/app.js?raw'
 import styleCss from '../public/static/style.css?raw'
@@ -14,6 +16,25 @@ import { emblemPngBase64 } from './emblem-data'
 const app = new Hono<{ Bindings: Bindings }>()
 
 app.use('*', cors())
+
+// ── Azure adapter injection ────────────────────────────────────────────────
+// On Azure App Service, Cloudflare bindings (D1, R2) are not available.
+// This middleware injects our local adapters so every downstream route sees
+// c.env.DB (better-sqlite3 shim) and c.env.PROPOSALS_BUCKET (Azure Blob shim)
+// with the exact same interface as D1Database and R2Bucket.
+app.use('*', async (c, next) => {
+  if (!c.env) (c as any).env = {}
+  if (!c.env.DB) (c.env as any).DB = sqliteDb
+  if (!(c.env as any).PROPOSALS_BUCKET) (c.env as any).PROPOSALS_BUCKET = azureBlobBucket
+  // Inject env vars from process.env as fallbacks for secrets not passed via Cloudflare
+  if (!c.env.OPENAI_API_KEY) (c.env as any).OPENAI_API_KEY = process.env.OPENAI_API_KEY
+  if (!c.env.RESEND_API_KEY) (c.env as any).RESEND_API_KEY = process.env.RESEND_API_KEY
+  if (!c.env.GSK_API_KEY) (c.env as any).GSK_API_KEY = process.env.GSK_API_KEY
+  if (!c.env.GSK_PROJECT_ID) (c.env as any).GSK_PROJECT_ID = process.env.GSK_PROJECT_ID
+  if (!(c.env as any).GOOGLE_VISION_API_KEY) (c.env as any).GOOGLE_VISION_API_KEY = process.env.GOOGLE_VISION_API_KEY
+  if (!(c.env as any).AZURE_STORAGE_CONNECTION_STRING) (c.env as any).AZURE_STORAGE_CONNECTION_STRING = process.env.AZURE_STORAGE_CONNECTION_STRING
+  await next()
+})
 
 // Global error handler to surface actual error messages
 app.onError((err, c) => {

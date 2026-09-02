@@ -37,10 +37,8 @@ function getBlobServiceClient(connectionString: string): BlobServiceClient {
 }
 
 // Upload options — 4 MB blocks, 4 parallel workers; handles files of any size
-const UPLOAD_OPTIONS: BlockBlobUploadStreamOptions = {
-  blockSize:      4 * 1024 * 1024,   // 4 MB per block
-  concurrency:    4,                  // 4 parallel block uploads
-}
+const BLOCK_SIZE = 4 * 1024 * 1024   // 4 MB per block
+const UPLOAD_CONCURRENCY = 4         // 4 parallel block uploads
 
 export interface BlobUploadResult {
   containerName: string
@@ -73,7 +71,7 @@ export async function uploadStreamToBlob(
   const containerClient = client.getContainerClient(containerName)
 
   // Ensure container exists (idempotent)
-  await containerClient.createIfNotExists({ access: 'private' })
+  await containerClient.createIfNotExists()
 
   const blockBlobClient = containerClient.getBlockBlobClient(blobName)
 
@@ -97,7 +95,7 @@ export async function uploadStreamToBlob(
   ;(nodeStream as NodeJS.ReadableStream).on('end', () => countingStream.push(null))
   ;(nodeStream as NodeJS.ReadableStream).on('error', (err) => countingStream.destroy(err))
 
-  await blockBlobClient.uploadStream(countingStream, UPLOAD_OPTIONS.blockSize, UPLOAD_OPTIONS.concurrency, {
+  await blockBlobClient.uploadStream(countingStream, BLOCK_SIZE, UPLOAD_CONCURRENCY, {
     blobHTTPHeaders: { blobContentType: contentType },
   })
 
