@@ -6,8 +6,19 @@ export type Bindings = {
   OPENAI_BASE_URL?: string
   GSK_API_KEY?: string
   GSK_PROJECT_ID?: string
-  PDF_RENDER_URL?: string    // e.g. https://api.api.andersenlab.com/pdf
+
+  // ── Legacy VPS sidecar (kept for rollback; unused after inline migration) ──
+  PDF_RENDER_URL?: string    // e.g. https://api.andersenlab.com/pdf
   PDF_RENDER_SECRET?: string // shared secret for the Puppeteer render service
+  PDF_SIDECAR_URL?: string
+  PDF_SIDECAR_SECRET?: string
+
+  // ── Inline OCR (Phase 2 — replaces pdf-sidecar) ───────────────────────────
+  GOOGLE_VISION_API_KEY?: string
+
+  // ── Azure Blob Storage (Phase 3 — replaces VPS upload relay) ─────────────
+  AZURE_STORAGE_CONNECTION_STRING?: string
+  AZURE_BLOB_CONTAINER?: string          // default: 'proposal-uploads'
 }
 
 // Payload for async large-file processing jobs (passed to ctx.waitUntil / internal endpoint)

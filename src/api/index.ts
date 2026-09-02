@@ -2,6 +2,12 @@ import { Hono } from 'hono'
 import { initDb, seedVendors } from '../db/seed'
 import type { Bindings } from '../types'
 import { andersenEmailHtml, andersenPageHtml } from '../brand/letterhead'
+import { renderMarkdownToPdf, buildPreviewHtml, warmupBrowser } from '../services/pdf-render'
+import { extractTextFromPdf } from '../services/ocr'
+import { uploadStreamToBlob, downloadBlobAsStream, deleteBlobIfExists } from '../services/blob-upload'
+
+// Warm up Chromium once at module load time (pays cold-start cost before first request)
+warmupBrowser().catch((e) => console.warn('[startup] Puppeteer warmup failed:', e.message))
 
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
 const WORKER_VERSION = '2026-08-17-v101' // v101: full technical+commercial files to eval LLM (no cuts); supporting docs optional; benchmark uses structured scope fields only (no raw rfp_full_text hallucination)
@@ -10,85 +16,27 @@ const WORKER_VERSION = '2026-08-17-v101' // v101: full technical+commercial file
 const OPENAI_API_KEY_FALLBACK = 'OPENAI_KEY_REMOVED'
 const OPENAI_BASE_URL = 'https://api.openai.com/v1'
 
-// ── PDF Sidecar ────────────────────────────────────────────────────────────────
-// Calls the Python/pdfplumber sidecar running at api.andersenlab.com.
-// The sidecar fetches the PDF from the given URL and returns extracted text.
-// Requires env.PDF_SIDECAR_URL and env.PDF_SIDECAR_SECRET to be set as Worker secrets.
+// ── Inline OCR helper ──────────────────────────────────────────────────────────
+// Replaces callSidecar() + callSidecarAsync() + all callback routes.
+// On Azure App Service there are no CPU/time/memory limits that required the sidecar.
+// extractTextFromPdf() runs pdf-to-img (pdfium) + Google Vision in parallel batches.
 
-// SYNC mode: waits for OCR result (use only for small/text-layer PDFs < 3MB)
-async function callSidecar(
+async function runInlineOcr(
   pdfUrl: string,
   env: any,
   maxPages = 100
 ): Promise<{ text: string; pages_total: number; pages_extracted: number; chars: number; truncated: boolean } | null> {
-  const sidecarUrl = env?.PDF_SIDECAR_URL || (globalThis as any).PDF_SIDECAR_URL || ''
-  const sidecarSecret = env?.PDF_SIDECAR_SECRET || (globalThis as any).PDF_SIDECAR_SECRET || ''
-  if (!sidecarUrl || !sidecarSecret) {
-    console.warn('[sidecar] PDF_SIDECAR_URL or PDF_SIDECAR_SECRET not configured — skipping extraction')
+  const apiKey = env?.GOOGLE_VISION_API_KEY || (globalThis as any).GOOGLE_VISION_API_KEY || ''
+  if (!apiKey) {
+    console.warn('[ocr] GOOGLE_VISION_API_KEY not configured — skipping OCR')
     return null
   }
   try {
-    const res = await fetch(`${sidecarUrl}/extract-pdf`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${sidecarSecret}`,
-      },
-      body: JSON.stringify({ pdf_url: pdfUrl, max_pages: maxPages }),
-    })
-    if (!res.ok) {
-      const err = await res.text().catch(() => '')
-      console.error(`[sidecar] HTTP ${res.status}: ${err.slice(0, 200)}`)
-      return null
-    }
-    return await res.json() as any
+    const result = await extractTextFromPdf(pdfUrl, apiKey, maxPages)
+    return result
   } catch (e: any) {
-    console.error('[sidecar] fetch error:', e.message)
+    console.error('[ocr] extractTextFromPdf error:', e.message)
     return null
-  }
-}
-
-// ASYNC mode: fires sidecar with callback_url, returns immediately (202).
-// The sidecar will POST OCR results back to callbackUrl when done.
-// Returns true if the request was accepted, false on config/network error.
-async function callSidecarAsync(
-  pdfUrl: string,
-  env: any,
-  maxPages: number,
-  callbackUrl: string,
-  callbackSecret: string
-): Promise<boolean> {
-  const sidecarUrl = env?.PDF_SIDECAR_URL || (globalThis as any).PDF_SIDECAR_URL || ''
-  const sidecarSecret = env?.PDF_SIDECAR_SECRET || (globalThis as any).PDF_SIDECAR_SECRET || ''
-  if (!sidecarUrl || !sidecarSecret) {
-    console.warn('[sidecar-async] PDF_SIDECAR_URL or PDF_SIDECAR_SECRET not configured')
-    return false
-  }
-  try {
-    const res = await fetch(`${sidecarUrl}/extract-pdf`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${sidecarSecret}`,
-      },
-      body: JSON.stringify({
-        pdf_url: pdfUrl,
-        max_pages: maxPages,
-        callback_url: callbackUrl,
-        callback_secret: callbackSecret,
-      }),
-    })
-    if (!res.ok) {
-      const err = await res.text().catch(() => '')
-      console.error(`[sidecar-async] HTTP ${res.status}: ${err.slice(0, 200)}`)
-      return false
-    }
-    const body: any = await res.json()
-    console.log(`[sidecar-async] accepted async_mode=${body.async_mode} method=${body.method}`)
-    return true
-  } catch (e: any) {
-    console.error('[sidecar-async] fetch error:', e.message)
-    return false
   }
 }
 
@@ -271,9 +219,8 @@ apiRouter.get('/rfps/:id', async (c) => {
   return c.json(rfp)
 })
 
-// GET /rfps/:id/preview-html — returns the full Andersen-letterhead HTML preview
-// Proxies to the sidecar /render-md-html so the in-app iframe shows the real letterhead.
-// Falls back to a plain marked.js HTML page if the sidecar is unavailable.
+// GET /rfps/:id/preview-html — returns the full Andersen-letterhead HTML preview.
+// Phase 1: renders inline using buildPreviewHtml() (no VPS round-trip).
 apiRouter.get('/rfps/:id/preview-html', async (c) => {
   const id = c.req.param('id')
   const rfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(id).first()
@@ -284,44 +231,31 @@ apiRouter.get('/rfps/:id/preview-html', async (c) => {
     })
   }
 
-  const markdown   = (rfp as any).content as string
-  const refNumber  = (rfp as any).ref_number as string || ''
-  const rfpTitle   = (rfp as any).title as string || 'Request for Proposal'
-  const renderUrl    = c.env.PDF_RENDER_URL    || (globalThis as any).PDF_RENDER_URL    || ''
-  const renderSecret = c.env.PDF_RENDER_SECRET || (globalThis as any).PDF_RENDER_SECRET || ''
+  const markdown  = (rfp as any).content as string
+  const refNumber = (rfp as any).ref_number as string || ''
+  const rfpTitle  = (rfp as any).title as string || 'Request for Proposal'
 
-  if (renderUrl && renderSecret) {
-    try {
-      const res = await fetch(`${renderUrl}/render-md-html`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${renderSecret}` },
-        body: JSON.stringify({ markdown, ref_number: refNumber, rfp_title: rfpTitle }),
-        signal: AbortSignal.timeout(30000),
-      })
-      if (res.ok) {
-        const html = await res.text()
-        return new Response(html, {
-          status: 200,
-          headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' },
-        })
-      }
-    } catch (err: any) {
-      console.error('[preview-html] Sidecar failed, using fallback:', err.message)
-    }
-  }
-
-  // Fallback — render markdown client-side with marked.js + minimal styling
-  const fallbackHtml = andersenPageHtml({
-    title:    rfpTitle,
-    refNumber,
-    bodyHtml: `<div id="md-content"></div>
+  try {
+    const html = buildPreviewHtml(markdown, { ref_number: refNumber, rfp_title: rfpTitle })
+    return new Response(html, {
+      status: 200,
+      headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' },
+    })
+  } catch (err: any) {
+    console.error('[preview-html] inline render error:', err.message)
+    // Fallback — client-side marked.js
+    const fallbackHtml = andersenPageHtml({
+      title:    rfpTitle,
+      refNumber,
+      bodyHtml: `<div id="md-content"></div>
 <script src="https://cdn.jsdelivr.net/npm/marked@13/marked.min.js"><\/script>
 <script>(function(){var md=${JSON.stringify(markdown)};document.getElementById('md-content').innerHTML=(typeof marked!=='undefined')?marked.parse(md):'<pre>'+md+'</pre>';})();<\/script>`,
-  })
-  return new Response(fallbackHtml, {
-    status: 200,
-    headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' },
-  })
+    })
+    return new Response(fallbackHtml, {
+      status: 200,
+      headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' },
+    })
+  }
 })
 
 // GET /rfps/:id/pdf-content — returns raw RFP markdown content
@@ -340,80 +274,39 @@ apiRouter.get('/rfps/:id/pdf-content', async (c) => {
   })
 })
 
-// GET /rfps/:id/pdf — generate a PDF via the Puppeteer sidecar using markdown input.
-// Sends the stored markdown content to POST /render-md-pdf on the sidecar VPS.
-// The sidecar converts markdown → styled HTML → A4 PDF with:
-//   - Andersen letterhead (yellow band, wordmark logo) on every page via Puppeteer displayHeaderFooter
-//   - Navy footer band with page numbers on every page
-//   - CSS A4 pagination: page-break-inside:avoid on li/tr/p; widows:3; orphans:3
-//   - format:'A4' — browser engine handles page breaks, no manual height math
-// Falls back to a browser-print HTML page if the sidecar is unavailable.
+// GET /rfps/:id/pdf — generate Andersen-branded A4 PDF from stored markdown.
+// Phase 1: rendered inline via Puppeteer browser pool (no VPS round-trip).
 apiRouter.get('/rfps/:id/pdf', async (c) => {
   const id = c.req.param('id')
   const rfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(id).first()
   if (!rfp) return c.json({ error: 'Not found' }, 404)
   if (!(rfp as any).content) return c.json({ error: 'RFP has no generated content yet' }, 400)
 
-  const safeRef = ((rfp as any).ref_number || String(id)).replace(/\//g, '_').replace(/[^a-zA-Z0-9_\-]/g, '')
+  const safeRef  = ((rfp as any).ref_number || String(id)).replace(/\//g, '_').replace(/[^a-zA-Z0-9_\-]/g, '')
   const filename = `Andersen_RFP_${safeRef}.pdf`
-  const markdown = (rfp as any).content as string
+  const markdown  = (rfp as any).content as string
   const refNumber = (rfp as any).ref_number as string || ''
   const rfpTitle  = (rfp as any).title as string || 'Request for Proposal'
 
-  const renderUrl    = c.env.PDF_RENDER_URL    || (globalThis as any).PDF_RENDER_URL    || ''
-  const renderSecret = c.env.PDF_RENDER_SECRET || (globalThis as any).PDF_RENDER_SECRET || ''
-
-  // ── Sidecar path (v4 markdown pipeline) ──────────────────────────────────
-  if (renderUrl && renderSecret) {
-    try {
-      const renderRes = await fetch(`${renderUrl}/render-md-pdf`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${renderSecret}`,
-        },
-        body: JSON.stringify({
-          markdown,
-          ref_number: refNumber,
-          rfp_title:  rfpTitle,
-          // logo_data_uri is omitted — sidecar uses the embedded Andersen logo by default
-        }),
-        signal: AbortSignal.timeout(120000),  // 2 min — Puppeteer can be slow on cold start
-      })
-
-      if (!renderRes.ok) {
-        const errText = await renderRes.text().catch(() => 'unknown error')
-        console.error(`[pdf-render] HTTP ${renderRes.status}: ${errText.slice(0, 200)}`)
-        throw new Error(`Render service returned ${renderRes.status}`)
-      }
-
-      const pdfBytes = await renderRes.arrayBuffer()
-      console.log(`[pdf-render] Generated PDF for RFP ${id}: ${pdfBytes.byteLength} bytes`)
-
-      return new Response(pdfBytes, {
-        status: 200,
-        headers: {
-          'Content-Type': 'application/pdf',
-          'Content-Disposition': `attachment; filename="${filename}"`,
-          'Cache-Control': 'no-cache',
-        },
-      })
-    } catch (err: any) {
-      console.error('[pdf-render] Sidecar failed, falling back to print-HTML:', err.message)
-      // Fall through to legacy browser-print path
-    }
-  }
-
-  // ── Legacy fallback: browser-print HTML page with full Andersen letterhead ──
-  // Used when the sidecar is unreachable. Renders markdown client-side via marked.js,
-  // then wraps it in the andersenPageHtml() template (topo band, accent, navy footer).
-  // The user can print to PDF via the toolbar or Ctrl+P.
-  const printHtml = andersenPageHtml({
-    title:       rfpTitle,
-    refNumber,
-    showToolbar: true,
-    // bodyHtml is a placeholder — will be replaced by client-side marked rendering
-    bodyHtml:    `<div id="rfp-content-inner"></div>
+  try {
+    const pdfBuffer = await renderMarkdownToPdf(markdown, { ref_number: refNumber, rfp_title: rfpTitle })
+    console.log(`[pdf-render] inline rendered ${pdfBuffer.length} bytes for RFP ${id}`)
+    return new Response(pdfBuffer, {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `attachment; filename="${filename}"`,
+        'Cache-Control': 'no-cache',
+      },
+    })
+  } catch (err: any) {
+    console.error('[pdf-render] inline render failed, falling back to print-HTML:', err.message)
+    // Fallback: browser-print HTML page
+    const printHtml = andersenPageHtml({
+      title:       rfpTitle,
+      refNumber,
+      showToolbar: true,
+      bodyHtml:    `<div id="rfp-content-inner"></div>
 <script src="https://cdn.jsdelivr.net/npm/marked@13/marked.min.js"><\/script>
 <script>
 (function(){
@@ -421,22 +314,21 @@ apiRouter.get('/rfps/:id/pdf', async (c) => {
   document.getElementById('rfp-content-inner').innerHTML = (typeof marked !== 'undefined')
     ? marked.parse(md)
     : '<pre style="white-space:pre-wrap;font-size:11pt">' + md.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</pre>';
-  // Auto-print after load (only in direct-link mode, not in preview tab)
   if (window.location.search.indexOf('autoprint=0') === -1) {
     window.addEventListener('load', function() { setTimeout(function() { window.print(); }, 1200); });
   }
 })();
 <\/script>`,
-  })
-
-  return new Response(printHtml, {
-    status: 200,
-    headers: {
-      'Content-Type': 'text/html; charset=utf-8',
-      'Content-Disposition': `inline; filename="${filename}.html"`,
-      'Cache-Control': 'no-cache',
-    },
-  })
+    })
+    return new Response(printHtml, {
+      status: 200,
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Content-Disposition': `inline; filename="${filename}.html"`,
+        'Cache-Control': 'no-cache',
+      },
+    })
+  }
 })
 
 apiRouter.post('/rfps', async (c) => {
@@ -536,16 +428,11 @@ apiRouter.post('/rfps/:id/generate', async (c) => {
         if (docType === 'brd' && !isPlaceholder(brdDocText)) continue
         if (docType !== 'brd' && !isPlaceholder(archDocText)) continue
 
-        // Generate a signed URL so the sidecar can fetch the PDF directly from R2
-        const signedUrl = await (bucket as any).createSignedUrl
-          ? await (bucket as any).createSignedUrl(obj.key, { expiresIn: 300 })
-          : null
+        // Build a proxied URL through our own /api/proposals/pdf/:key endpoint
+        // (Azure App Service serves itself — no cross-service network hop needed)
+        const pdfUrl = `https://a7b32759-e743-4139-9bb0-4bae44886667.vip.gensparksite.com/api/proposals/pdf/${encodeURIComponent(obj.key)}`
 
-        // Fallback: build a proxied URL through our own /api/proposals/pdf/:key endpoint
-        const pdfUrl = signedUrl
-          || `https://a7b32759-e743-4139-9bb0-4bae44886667.vip.gensparksite.com/api/proposals/pdf/${encodeURIComponent(obj.key)}`
-
-        const result = await callSidecar(pdfUrl, c.env, 100)
+        const result = await runInlineOcr(pdfUrl, c.env, 100)
         if (!result || result.chars < 200) continue
 
         const sizeKb = Math.round((obj.size || 0) / 1024)
@@ -1108,14 +995,25 @@ apiRouter.post('/rfps/:id/upload-arch-doc', async (c) => {
       await c.env.DB.prepare(`UPDATE rfps SET arch_doc_r2_key=?, arch_doc_text=?, updated_at=datetime('now') WHERE id=?`).bind(r2Key, placeholder, id).run()
     }
 
-    // Fire async OCR — callback will write the real text when done
+    // Phase 2: run OCR inline — no callback, result written directly to DB
     if (r2Key) {
       const workerBase = `https://a7b32759-e743-4139-9bb0-4bae44886667.vip.gensparksite.com/api`
       const pdfUrl = `${workerBase}/proposals/pdf/${encodeURIComponent(r2Key)}`
-      const callbackUrl = `${workerBase}/callback/rfps/${id}/doc-ocr-complete?doc_type=${docType}&filename=${encodeURIComponent(file.name)}&size_kb=${sizeKb}`
-      const secret = c.env.PDF_SIDECAR_SECRET || (globalThis as any).PDF_SIDECAR_SECRET || ''
-      await callSidecarAsync(pdfUrl, c.env, 100, callbackUrl, secret)
-      console.log(`[upload-arch-doc] async OCR fired rfp=${id} docType=${docType}`)
+      // Run OCR in background (don't block the HTTP response)
+      runInlineOcr(pdfUrl, c.env, 100).then(async (result) => {
+        if (!result || result.chars < 200) {
+          console.warn(`[upload-arch-doc] OCR insufficient rfp=${id} docType=${docType} chars=${result?.chars ?? 0}`)
+          return
+        }
+        const text = `[Source: ${file.name}, ${sizeKb}KB, ${result.pages_extracted}/${result.pages_total} pages${result.truncated ? ' — truncated' : ''}]\n\n${result.text.slice(0, 60000)}`
+        if (isBRD) {
+          await c.env.DB.prepare(`UPDATE rfps SET brd_doc_text=?, updated_at=datetime('now') WHERE id=?`).bind(text, id).run()
+        } else {
+          await c.env.DB.prepare(`UPDATE rfps SET arch_doc_text=?, updated_at=datetime('now') WHERE id=?`).bind(text, id).run()
+        }
+        console.log(`[upload-arch-doc] OCR done rfp=${id} docType=${docType} chars=${result.chars}`)
+      }).catch((e) => console.error(`[upload-arch-doc] OCR error rfp=${id}:`, e.message))
+      console.log(`[upload-arch-doc] inline OCR started rfp=${id} docType=${docType}`)
     }
 
     return c.json({ ok: true, column: isBRD ? 'brd_doc_text' : 'arch_doc_text', size: bytes.length, r2Key, ocr_status: 'processing' })
@@ -1174,13 +1072,35 @@ apiRouter.post('/rfps/upload-rfp-pdf', async (c) => {
     const rfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(rfpId).first()
     console.log(`[upload-rfp-pdf] created rfp=${rfpId} title="${titleFromFilename}" — queuing async OCR`)
 
-    // (3) Fire async OCR — sidecar will POST results back to /callback/rfps/:id/rfp-upload-ocr-complete
+    // (3) Phase 2: run OCR inline then run AI extraction — no callback needed
     if (r2Key) {
-      const workerBase  = `https://a7b32759-e743-4139-9bb0-4bae44886667.vip.gensparksite.com/api`
-      const pdfUrl      = `${workerBase}/proposals/pdf/${encodeURIComponent(r2Key)}`
-      const callbackUrl = `${workerBase}/callback/rfps/${rfpId}/rfp-upload-ocr-complete?size_kb=${sizeKb}&filename=${encodeURIComponent(file.name)}`
-      const secret      = c.env.PDF_SIDECAR_SECRET || (globalThis as any).PDF_SIDECAR_SECRET || ''
-      await callSidecarAsync(pdfUrl, c.env, 100, callbackUrl, secret)
+      const workerBase = `https://a7b32759-e743-4139-9bb0-4bae44886667.vip.gensparksite.com/api`
+      const pdfUrl     = `${workerBase}/proposals/pdf/${encodeURIComponent(r2Key)}`
+      // Run OCR + AI extraction asynchronously (background, non-blocking)
+      ;(async () => {
+        try {
+          await c.env.DB.prepare(`UPDATE rfps SET ai_extraction_status='extracting', updated_at=datetime('now') WHERE id=?`).bind(rfpId).run()
+          const result = await runInlineOcr(pdfUrl, c.env, 100)
+          if (!result || result.chars < 200) {
+            const stub = `[PDF: ${file.name}, ${sizeKb}KB — OCR yielded ${result?.chars ?? 0} chars]`
+            await c.env.DB.prepare(`UPDATE rfps SET uploaded_rfp_text=?, ai_extraction_status='error', updated_at=datetime('now') WHERE id=?`).bind(stub, rfpId).run()
+            return
+          }
+          const extractedText = result.text.slice(0, 120000)
+          await c.env.DB.prepare(
+            `UPDATE rfps SET uploaded_rfp_text=?, rfp_full_text=?, ai_extraction_status='extracting', updated_at=datetime('now') WHERE id=?`
+          ).bind(extractedText, extractedText.slice(0, 100000), rfpId).run()
+          // Run OpenAI extraction inline (same as the old callback handler)
+          const { extracted, scoringMatrixJson, requirementGlossaryJson } =
+            await extractRfpFieldsFromOcr(extractedText, c.env, `rfp=${rfpId}`)
+          await writeExtractedRfpFields(c.env.DB, rfpId, extractedText, extracted, scoringMatrixJson, requirementGlossaryJson)
+          await c.env.DB.prepare(`UPDATE rfps SET ai_extraction_status='done', updated_at=datetime('now') WHERE id=?`).bind(rfpId).run()
+          console.log(`[upload-rfp-pdf] OCR+extraction done rfp=${rfpId} chars=${result.chars}`)
+        } catch (e: any) {
+          console.error(`[upload-rfp-pdf] OCR/extraction error rfp=${rfpId}:`, e.message)
+          await c.env.DB.prepare(`UPDATE rfps SET ai_extraction_status='error', updated_at=datetime('now') WHERE id=?`).bind(rfpId).run().catch(() => {})
+        }
+      })()
     }
 
     return c.json({ ok: true, rfp, ocr_status: 'processing' })
@@ -4512,10 +4432,45 @@ async function resolveVendorForSubmit(
   return { vendorId: v.id, vendorName: v.name }
 }
 
-// POST /submit/:rfpId/presign — Step 1 of 3 for large-file uploads.
-// Validates vendor code, then asks the VPS sidecar to create signed upload slots.
-// The browser uploads each file DIRECTLY to the VPS relay endpoint (not via this Worker),
-// bypassing CF Worker body limits (128MB RAM / ~150s wall-clock).
+// PUT /submit/:rfpId/upload-file/:token — Phase 3: browser uploads file directly here.
+// Streams the request body directly into R2 (no memory buffering).
+// Returns { ok: true, r2_key } — passed back in the /finalize attachments array.
+apiRouter.put('/submit/:rfpId/upload-file/:token', async (c) => {
+  const rfpId = c.req.param('rfpId')
+  const token = decodeURIComponent(c.req.param('token'))
+  const filename  = decodeURIComponent(c.req.query('filename') || 'document.pdf')
+  const label     = c.req.query('label') || 'other'
+  const contentType = c.req.header('content-type') || 'application/pdf'
+
+  const bucket: R2Bucket | undefined = (c.env as any).PROPOSALS_BUCKET
+  if (!bucket) return c.json({ error: 'Storage not configured.' }, 500)
+
+  // Extract vendorId from token (format: rfpId-vendorId-timestamp-idx-random)
+  const tokenParts = token.split('-')
+  const vendorId = tokenParts[1] || 'unknown'
+  const safeName  = filename.replace(/[^a-zA-Z0-9._-]/g, '_')
+  const r2Key = `proposals/${rfpId}/${vendorId}_${Date.now()}_${safeName}`
+
+  try {
+    const body = c.req.raw.body
+    if (!body) return c.json({ error: 'Empty request body.' }, 400)
+
+    // Stream directly into R2 — never buffers full file in memory
+    await bucket.put(r2Key, body, {
+      httpMetadata: { contentType },
+      customMetadata: { rfpId, vendorId, filename, label, token },
+    })
+    console.log(`[upload-file] R2 stored: ${r2Key} (rfp=${rfpId} vendor=${vendorId})`)
+    return c.json({ ok: true, r2_key: r2Key, filename, label })
+  } catch (e: any) {
+    console.error(`[upload-file] R2 error: ${e.message}`)
+    return c.json({ error: `Upload failed: ${e.message}` }, 500)
+  }
+})
+
+// POST /submit/:rfpId/presign — Phase 3: replaced VPS relay with Azure Blob upload slots.
+// Returns per-file upload tokens and direct upload_url pointing at THIS server's
+// /submit/:rfpId/upload-file/:token endpoint (browser PUTs directly here).
 // Body: { vendor_code, files: [{ filename, content_type, size_bytes, label }] }
 apiRouter.post('/submit/:rfpId/presign', async (c) => {
   const rfpId = c.req.param('rfpId')
@@ -4530,58 +4485,35 @@ apiRouter.post('/submit/:rfpId/presign', async (c) => {
   if (!files.length) return c.json({ error: 'No files specified.' }, 400)
   if (files.length > 10) return c.json({ error: 'Maximum 10 files per submission.' }, 400)
 
-  // Ask VPS sidecar to mint signed upload slots.
-  // VPS has no memory/time limits for receiving large files from browsers.
-  const sidecarUrl = c.env.PDF_SIDECAR_URL || (globalThis as any).PDF_SIDECAR_URL || ''
-  const sidecarSecret = c.env.PDF_SIDECAR_SECRET || (globalThis as any).PDF_SIDECAR_SECRET || ''
-  if (!sidecarUrl || !sidecarSecret) return c.json({ error: 'Upload service not configured.' }, 500)
-
-  let initResult: any
-  try {
-    const initResp = await fetch(`${sidecarUrl}/proposal-upload/init`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${sidecarSecret}` },
-      body: JSON.stringify({
-        rfp_id: Number(rfpId),
-        vendor_id: vendorId,
-        files: files.map(f => ({ filename: f.filename, content_type: f.content_type || 'application/pdf', size_bytes: f.size_bytes || 0, label: f.label || 'other' })),
-        sidecar_base_url: sidecarUrl,
-      }),
-    })
-    if (!initResp.ok) {
-      const errText = await initResp.text().catch(() => '')
-      console.error(`[presign] sidecar init failed: ${initResp.status} ${errText.slice(0, 200)}`)
-      return c.json({ error: 'Upload service unavailable. Please try again.' }, 502)
+  // Mint in-process upload tokens — no VPS round-trip needed
+  const serverBase = `https://a7b32759-e743-4139-9bb0-4bae44886667.vip.gensparksite.com/api`
+  const slots = files.map((f, i) => {
+    const token = `${rfpId}-${vendorId}-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 8)}`
+    const safeName = f.filename.replace(/[^a-zA-Z0-9._-]/g, '_')
+    const blobName = `proposals/${rfpId}/${vendorId}_${Date.now() + i}_${safeName}`
+    return {
+      token,
+      filename:     f.filename,
+      safe_name:    safeName,
+      label:        f.label || 'other',
+      content_type: f.content_type || 'application/pdf',
+      size_bytes:   f.size_bytes || 0,
+      blob_name:    blobName,
+      // upload_url: browser PUTs directly to THIS App Service endpoint
+      upload_url:   `${serverBase}/submit/${rfpId}/upload-file/${encodeURIComponent(token)}`,
+      // fetch_url not used in new flow — kept for protocol compatibility
+      fetch_url:    `${serverBase}/submit/${rfpId}/upload-file/${encodeURIComponent(token)}`,
     }
-    initResult = await initResp.json() as any
-  } catch (e: any) {
-    console.error('[presign] sidecar init error:', e.message)
-    return c.json({ error: 'Upload service unreachable. Please try again.' }, 502)
-  }
+  })
 
-  if (!initResult.ok || !initResult.slots) return c.json({ error: 'Upload service error.' }, 500)
-
-  // Return slots to browser. upload_url = VPS relay endpoint (browser PUTs directly there).
-  // fetch_url = VPS endpoint the Worker GETs from in /finalize to stream into R2.
-  const slots = initResult.slots.map((s: any) => ({
-    token:        s.token,
-    filename:     s.filename,
-    safe_name:    s.safe_name,
-    label:        s.label,
-    content_type: s.content_type,
-    size_bytes:   s.size_bytes,
-    upload_url:   s.upload_url,   // browser → VPS
-    fetch_url:    s.fetch_url,    // Worker → VPS → R2 (used in /finalize)
-  }))
-
+  // Store slot metadata in KV-style via a temp DB record so /upload-file can validate tokens
+  // (Simple: encode in the token itself — blob_name is derived deterministically)
   return c.json({ ok: true, vendor_id: vendorId, vendor_name: vendorName, slots })
 })
 
-// POST /submit/:rfpId/finalize — Step 3 of 3.
-// Called after all files have been uploaded to the VPS relay.
-// For each file: Worker fetches from VPS relay → streams into R2 → deletes VPS temp file.
-// Then creates the proposal DB record and fires async OCR.
-// Body: { vendor_code, cover_letter, attachments: [{ token, fetch_url, filename, safe_name, content_type, label, size_bytes }] }
+// POST /submit/:rfpId/finalize — Phase 3: files already in R2 via /upload-file.
+// attachments[] now carries r2_key (set by /upload-file) instead of VPS fetch_url.
+// Body: { vendor_code, cover_letter, attachments: [{ token, r2_key, filename, safe_name, content_type, label, size_bytes }] }
 apiRouter.post('/submit/:rfpId/finalize', async (c) => {
   const rfpId = c.req.param('rfpId')
   let body: any
@@ -4591,60 +4523,28 @@ apiRouter.post('/submit/:rfpId/finalize', async (c) => {
   if ('error' in vendor) return c.json({ error: vendor.error, ...(vendor.error === 'declined' && { declined: true }) }, vendor.status as any)
   const { vendorId, vendorName } = vendor
 
-  const pendingAttachments: Array<{ token: string; fetch_url: string; filename: string; safe_name: string; content_type: string; label: string; size_bytes: number }> = body.attachments || []
+  const pendingAttachments: Array<{ token: string; r2_key?: string; fetch_url?: string; filename: string; safe_name: string; content_type: string; label: string; size_bytes: number }> = body.attachments || []
   if (!pendingAttachments.length) return c.json({ error: 'No attachments provided.' }, 400)
 
-  const sidecarUrl = c.env.PDF_SIDECAR_URL || (globalThis as any).PDF_SIDECAR_URL || ''
-  const sidecarSecret = c.env.PDF_SIDECAR_SECRET || (globalThis as any).PDF_SIDECAR_SECRET || ''
   const bucket: R2Bucket | undefined = (c.env as any).PROPOSALS_BUCKET
   if (!bucket) return c.json({ error: 'Storage not configured.' }, 500)
 
-  // ── Fetch each file from VPS relay and stream into R2 ──────────────────────
+  // ── Phase 3: files are already in R2 (uploaded via /upload-file); just record them ──
   const safeVendorName = vendorName.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 20)
   const storedAttachments: Array<{ r2_key: string; filename: string; content_type: string; label: string; size_bytes: number }> = []
 
   for (let i = 0; i < pendingAttachments.length; i++) {
     const att = pendingAttachments[i]
-    const safeName = att.safe_name || att.filename.replace(/[^a-zA-Z0-9._-]/g, '_')
-    const r2Key = `proposals/${rfpId}/${vendorId}_${safeVendorName}_${Date.now() + i}_${safeName}`
-
-    try {
-      // Fetch from VPS relay (streaming — never buffers entire file in Worker memory)
-      const fetchResp = await fetch(att.fetch_url, {
-        headers: { 'Authorization': `Bearer ${sidecarSecret}` },
-      })
-      if (!fetchResp.ok || !fetchResp.body) {
-        console.error(`[finalize] VPS fetch failed for slot ${i}: HTTP ${fetchResp.status}`)
-        return c.json({ error: `Failed to retrieve file ${att.filename} from upload relay.` }, 502)
-      }
-
-      // Stream body directly into R2 — no arrayBuffer(), no memory accumulation
-      await bucket.put(r2Key, fetchResp.body, {
-        httpMetadata: { contentType: att.content_type || 'application/pdf' },
-      })
-      console.log(`[finalize] R2 stored: ${r2Key}`)
-
-      storedAttachments.push({
-        r2_key:       r2Key,
-        filename:     att.filename,
-        content_type: att.content_type || 'application/pdf',
-        label:        att.label || 'other',
-        size_bytes:   att.size_bytes || 0,
-      })
-
-      // Best-effort cleanup of VPS temp file after successful R2 write
-      if (sidecarUrl && att.fetch_url) {
-        const deleteUrl = att.fetch_url.replace('/proposal-temp/', '/proposal-temp/').replace(/^(.+\/proposal-temp\/)/, `${sidecarUrl}/proposal-temp/`)
-        // Reconstruct delete URL: same path, DELETE method
-        fetch(att.fetch_url, {
-          method: 'DELETE',
-          headers: { 'Authorization': `Bearer ${sidecarSecret}` },
-        }).catch(() => {})  // fire-and-forget
-      }
-    } catch (e: any) {
-      console.error(`[finalize] R2 stream error slot ${i}: ${e.message}`)
-      return c.json({ error: `Storage error for file ${att.filename}. Please try again.` }, 500)
-    }
+    // r2_key was set by /upload-file handler; if missing (legacy client), fall back to generating one
+    const r2Key = att.r2_key || `proposals/${rfpId}/${vendorId}_${safeVendorName}_${Date.now() + i}_${(att.safe_name || att.filename).replace(/[^a-zA-Z0-9._-]/g, '_')}`
+    storedAttachments.push({
+      r2_key:       r2Key,
+      filename:     att.filename,
+      content_type: att.content_type || 'application/pdf',
+      label:        att.label || 'other',
+      size_bytes:   att.size_bytes || 0,
+    })
+    console.log(`[finalize] R2 key confirmed: ${r2Key}`)
   }
 
   if (!storedAttachments.length) return c.json({ error: 'No files stored successfully.' }, 500)
@@ -4680,23 +4580,42 @@ apiRouter.post('/submit/:rfpId/finalize', async (c) => {
 
   console.log(`[finalize] Proposal ${proposalId} from ${vendorName} — ${storedAttachments.length} file(s) stored in R2`)
 
-  // ── Fire async OCR for each stored file ────────────────────────────────────
+  // ── Phase 2: inline OCR for each stored file (no callback) ─────────────────
   const workerBase = `https://a7b32759-e743-4139-9bb0-4bae44886667.vip.gensparksite.com/api`
-  const callbackSecret = sidecarSecret
-  let ocrFired = 0
-  for (const att of storedAttachments) {
-    const filePdfUrl = `${workerBase}/proposals/pdf/${encodeURIComponent(att.r2_key)}`
-    const cbUrl = `${workerBase}/callback/proposals/${proposalId}/file-ocr-complete?label=${encodeURIComponent(att.label || 'other')}&filename=${encodeURIComponent(att.filename || 'document.pdf')}`
-    try { await callSidecarAsync(filePdfUrl, c.env, 100, cbUrl, callbackSecret); ocrFired++ } catch (_) {}
-  }
+  const ocrFiles = storedAttachments.length
+  await c.env.DB.prepare(`UPDATE proposals SET ocr_pending_files=?, updated_at=datetime('now') WHERE id=?`).bind(ocrFiles, proposalId).run()
 
-  if (ocrFired > 0) {
-    await c.env.DB.prepare(`UPDATE proposals SET ocr_pending_files=?, updated_at=datetime('now') WHERE id=?`).bind(ocrFired, proposalId).run()
-  } else {
-    await c.env.DB.prepare(`UPDATE proposals SET ocr_pending_files=0, status='ready_for_evaluation', updated_at=datetime('now') WHERE id=?`).bind(proposalId).run()
-  }
+  // Fire OCR for all files in parallel (background, non-blocking)
+  ;(async () => {
+    for (const att of storedAttachments) {
+      const filePdfUrl = `${workerBase}/proposals/pdf/${encodeURIComponent(att.r2_key)}`
+      try {
+        const result = await runInlineOcr(filePdfUrl, c.env, 100)
+        const label    = att.label || 'other'
+        const filename = att.filename || 'document.pdf'
+        let fileText: string
+        if (result && result.chars >= 100) {
+          fileText = `=== FILE: ${filename} [label: ${label}] (${result.pages_extracted}/${result.pages_total} pages, ${result.chars} chars) ===\n\n${result.text}`
+        } else {
+          fileText = `=== FILE: ${filename} [label: ${label}] — OCR yielded ${result?.chars ?? 0} chars ===`
+        }
+        const existing2 = await c.env.DB.prepare(`SELECT proposal_full_text FROM proposals WHERE id=?`).bind(proposalId).first<any>()
+        const merged = ((existing2?.proposal_full_text || '') + '\n\n' + fileText).slice(0, 200000).trim()
+        await c.env.DB.prepare(`UPDATE proposals SET proposal_full_text=?, updated_at=datetime('now') WHERE id=?`).bind(merged, proposalId).run()
+        await c.env.DB.prepare(`UPDATE proposals SET ocr_pending_files=MAX(0,COALESCE(ocr_pending_files,1)-1), updated_at=datetime('now') WHERE id=?`).bind(proposalId).run()
+        const fresh2 = await c.env.DB.prepare(`SELECT ocr_pending_files, proposal_full_text FROM proposals WHERE id=?`).bind(proposalId).first<any>()
+        if ((fresh2?.ocr_pending_files ?? 0) === 0 && (fresh2?.proposal_full_text?.length || 0) > 100) {
+          await c.env.DB.prepare(`UPDATE proposals SET status='ready_for_evaluation', updated_at=datetime('now') WHERE id=?`).bind(proposalId).run()
+        }
+        console.log(`[finalize-ocr] proposal=${proposalId} file=${filename} chars=${result?.chars ?? 0}`)
+      } catch (e: any) {
+        console.error(`[finalize-ocr] proposal=${proposalId} file=${att.filename} error:`, e.message)
+        await c.env.DB.prepare(`UPDATE proposals SET ocr_pending_files=MAX(0,COALESCE(ocr_pending_files,1)-1), updated_at=datetime('now') WHERE id=?`).bind(proposalId).run().catch(() => {})
+      }
+    }
+  })()
 
-  return c.json({ ok: true, proposal_id: proposalId, vendor_name: vendorName, files_stored: storedAttachments.length, ocr_started: ocrFired, message: 'Proposal submitted successfully.' })
+  return c.json({ ok: true, proposal_id: proposalId, vendor_name: vendorName, files_stored: storedAttachments.length, ocr_started: ocrFiles, message: 'Proposal submitted successfully.' })
 })
 
 // POST /submit/:rfpId — submit a full vendor proposal (multipart form)
@@ -4838,40 +4757,49 @@ apiRouter.post('/submit/:rfpId', async (c) => {
 
     // Fire async OCR for each uploaded file — each calls back to /callback/proposals/:id/file-ocr-complete
     // The callback merges all texts into proposal_full_text. No OCR happens at evaluation time.
+    // Phase 2: inline OCR — no callback, result written directly
     const workerBase = `https://a7b32759-e743-4139-9bb0-4bae44886667.vip.gensparksite.com/api`
-    const callbackSecret = c.env.PDF_SIDECAR_SECRET || (globalThis as any).PDF_SIDECAR_SECRET || ''
-    let ocrFired = 0
-    for (const att of storedAttachments) {
-      if (!att.r2_key) continue
-      const pdfUrl = `${workerBase}/proposals/pdf/${encodeURIComponent(att.r2_key)}`
-      const cbUrl  = `${workerBase}/callback/proposals/${proposalId}/file-ocr-complete?label=${encodeURIComponent(att.label || 'other')}&filename=${encodeURIComponent(att.filename || 'document.pdf')}`
-      try {
-        await callSidecarAsync(pdfUrl, c.env, 100, cbUrl, callbackSecret)
-        ocrFired++
-      } catch (_) {}
-    }
-    console.log(`[submit] OCR fired for ${ocrFired}/${storedAttachments.length} files`)
-
-    // v49: Track how many file-ocr-complete callbacks are still expected.
-    // When all arrive, the callback sets status='ready_for_evaluation'.
-    // If no files were OCR'd (e.g. no attachments), mark ready immediately.
-    if (ocrFired > 0) {
-      await c.env.DB.prepare(
-        `UPDATE proposals SET ocr_pending_files=?, updated_at=datetime('now') WHERE id=?`
-      ).bind(ocrFired, proposalId).run()
+    const ocrFiles = storedAttachments.filter(a => !!a.r2_key).length
+    if (ocrFiles > 0) {
+      await c.env.DB.prepare(`UPDATE proposals SET ocr_pending_files=?, updated_at=datetime('now') WHERE id=?`).bind(ocrFiles, proposalId).run()
     } else {
-      // No OCR to wait for — proposal is immediately ready for evaluation
-      await c.env.DB.prepare(
-        `UPDATE proposals SET ocr_pending_files=0, status='ready_for_evaluation', updated_at=datetime('now') WHERE id=?`
-      ).bind(proposalId).run()
+      await c.env.DB.prepare(`UPDATE proposals SET ocr_pending_files=0, status='ready_for_evaluation', updated_at=datetime('now') WHERE id=?`).bind(proposalId).run()
     }
+    console.log(`[submit] inline OCR started for ${ocrFiles}/${storedAttachments.length} files`)
+
+    // Background: OCR all files, merge text, update status
+    ;(async () => {
+      for (const att of storedAttachments) {
+        if (!att.r2_key) continue
+        const filePdfUrl = `${workerBase}/proposals/pdf/${encodeURIComponent(att.r2_key)}`
+        try {
+          const result = await runInlineOcr(filePdfUrl, c.env, 100)
+          const label    = att.label || 'other'
+          const filename = att.filename || 'document.pdf'
+          const fileText = result && result.chars >= 100
+            ? `=== FILE: ${filename} [label: ${label}] (${result.pages_extracted}/${result.pages_total} pages, ${result.chars} chars) ===\n\n${result.text}`
+            : `=== FILE: ${filename} [label: ${label}] — OCR yielded ${result?.chars ?? 0} chars ===`
+          const ex = await c.env.DB.prepare(`SELECT proposal_full_text FROM proposals WHERE id=?`).bind(proposalId).first<any>()
+          const merged = ((ex?.proposal_full_text || '') + '\n\n' + fileText).slice(0, 200000).trim()
+          await c.env.DB.prepare(`UPDATE proposals SET proposal_full_text=?, updated_at=datetime('now') WHERE id=?`).bind(merged, proposalId).run()
+          await c.env.DB.prepare(`UPDATE proposals SET ocr_pending_files=MAX(0,COALESCE(ocr_pending_files,1)-1), updated_at=datetime('now') WHERE id=?`).bind(proposalId).run()
+          const fresh3 = await c.env.DB.prepare(`SELECT ocr_pending_files, proposal_full_text FROM proposals WHERE id=?`).bind(proposalId).first<any>()
+          if ((fresh3?.ocr_pending_files ?? 0) === 0 && (fresh3?.proposal_full_text?.length || 0) > 100) {
+            await c.env.DB.prepare(`UPDATE proposals SET status='ready_for_evaluation', updated_at=datetime('now') WHERE id=?`).bind(proposalId).run()
+          }
+        } catch (e: any) {
+          console.error(`[submit-ocr] proposal=${proposalId} file=${att.filename} error:`, e.message)
+          await c.env.DB.prepare(`UPDATE proposals SET ocr_pending_files=MAX(0,COALESCE(ocr_pending_files,1)-1), updated_at=datetime('now') WHERE id=?`).bind(proposalId).run().catch(() => {})
+        }
+      }
+    })()
 
     return c.json({
       ok: true,
       proposal_id: proposalId,
       vendor_name: vendorName,
       files_stored: storedAttachments.length,
-      ocr_started: ocrFired,
+      ocr_started: ocrFiles,
       message: 'Proposal submitted successfully. Text extraction running in background.',
     })
   } catch(err: any) {

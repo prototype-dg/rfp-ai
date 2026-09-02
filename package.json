@@ -9,7 +9,12 @@
     "cf-typegen": "wrangler types --env-interface CloudflareBindings"
   },
   "dependencies": {
-    "hono": "^4.12.30"
+    "@azure/storage-blob": "^12.33.0",
+    "@google-cloud/vision": "^6.0.0",
+    "hono": "^4.12.30",
+    "marked": "^18.0.11",
+    "pdf-to-img": "^7.0.0",
+    "puppeteer": "^25.9.0"
   },
   "devDependencies": {
     "@hono/vite-build": "^1.11.1",
