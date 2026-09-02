@@ -1,3 +1,4 @@
+"use strict";
 /**
  * blob-upload.ts
  *
@@ -22,13 +23,17 @@
  *
  * Phase 3 of the Azure sidecar inline migration.
  */
-import { BlobServiceClient } from '@azure/storage-blob';
-import { Readable } from 'stream';
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.uploadStreamToBlob = uploadStreamToBlob;
+exports.downloadBlobAsStream = downloadBlobAsStream;
+exports.deleteBlobIfExists = deleteBlobIfExists;
+const storage_blob_1 = require("@azure/storage-blob");
+const stream_1 = require("stream");
 // ── Azure Blob client (lazy, singleton) ──────────────────────────────────────
 let _blobServiceClient = null;
 function getBlobServiceClient(connectionString) {
     if (!_blobServiceClient) {
-        _blobServiceClient = BlobServiceClient.fromConnectionString(connectionString);
+        _blobServiceClient = storage_blob_1.BlobServiceClient.fromConnectionString(connectionString);
     }
     return _blobServiceClient;
 }
@@ -47,7 +52,7 @@ const UPLOAD_CONCURRENCY = 4; // 4 parallel block uploads
  * @param connectionString AZURE_STORAGE_CONNECTION_STRING secret
  * @param containerName   Azure Blob container name (default: "proposal-uploads")
  */
-export async function uploadStreamToBlob(stream, blobName, contentType, connectionString, containerName = 'proposal-uploads') {
+async function uploadStreamToBlob(stream, blobName, contentType, connectionString, containerName = 'proposal-uploads') {
     const client = getBlobServiceClient(connectionString);
     const containerClient = client.getContainerClient(containerName);
     // Ensure container exists (idempotent)
@@ -56,14 +61,14 @@ export async function uploadStreamToBlob(stream, blobName, contentType, connecti
     // Normalise to Node.js Readable if given a Web ReadableStream
     let nodeStream;
     if (stream instanceof ReadableStream) {
-        nodeStream = Readable.fromWeb(stream);
+        nodeStream = stream_1.Readable.fromWeb(stream);
     }
     else {
         nodeStream = stream;
     }
     // Track bytes as they flow through
     let sizeBytes = 0;
-    const countingStream = new Readable({
+    const countingStream = new stream_1.Readable({
         read() { },
     });
     nodeStream.on('data', (chunk) => {
@@ -89,7 +94,7 @@ export async function uploadStreamToBlob(stream, blobName, contentType, connecti
  * Downloads a blob as a Node.js ReadableStream for piping to R2 or returning
  * to the client. Used during the finalize step (Azure Blob → R2).
  */
-export async function downloadBlobAsStream(blobName, connectionString, containerName = 'proposal-uploads') {
+async function downloadBlobAsStream(blobName, connectionString, containerName = 'proposal-uploads') {
     const client = getBlobServiceClient(connectionString);
     const containerClient = client.getContainerClient(containerName);
     const blockBlobClient = containerClient.getBlockBlobClient(blobName);
@@ -110,7 +115,7 @@ export async function downloadBlobAsStream(blobName, connectionString, container
  * Best-effort cleanup of a temporary blob after it has been streamed to R2.
  * Swallows errors (fire-and-forget safe).
  */
-export async function deleteBlobIfExists(blobName, connectionString, containerName = 'proposal-uploads') {
+async function deleteBlobIfExists(blobName, connectionString, containerName = 'proposal-uploads') {
     try {
         const client = getBlobServiceClient(connectionString);
         const containerClient = client.getContainerClient(containerName);

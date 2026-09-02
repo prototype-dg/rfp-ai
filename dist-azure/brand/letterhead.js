@@ -1,3 +1,4 @@
+"use strict";
 /**
  * src/brand/letterhead.ts
  * ─────────────────────────────────────────────────────────────────────────────
@@ -24,9 +25,19 @@
  *
  * ─────────────────────────────────────────────────────────────────────────────
  */
-import { logoFullDataUri } from '../brand-assets';
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.BRAND = void 0;
+exports.andersenCss = andersenCss;
+exports.andersenHeader = andersenHeader;
+exports.andersenFooter = andersenFooter;
+exports.andersenPageHtml = andersenPageHtml;
+exports.andersenPdfBodyHtml = andersenPdfBodyHtml;
+exports.andersenPdfHeaderTemplate = andersenPdfHeaderTemplate;
+exports.andersenPdfFooterTemplate = andersenPdfFooterTemplate;
+exports.andersenEmailHtml = andersenEmailHtml;
+const brand_assets_1 = require("../brand-assets");
 // ── Brand tokens ──────────────────────────────────────────────────────────────
-export const BRAND = {
+exports.BRAND = {
     yellow: '#FFDB00',
     yellowHov: '#FFE963',
     navy: '#020D1C',
@@ -76,7 +87,7 @@ const ACCENT_DOTS = `<span class="a-tick"></span>
       <span class="a-tick"></span>
       <span class="a-tick"></span>`;
 // ── CSS block shared by preview pages ─────────────────────────────────────────
-export function andersenCss(opts = {}) {
+function andersenCss(opts = {}) {
     return `
     :root {
       --a-yellow: #FFDB00; --a-navy: #020D1C; --a-ink: #020303;
@@ -208,7 +219,7 @@ export function andersenCss(opts = {}) {
   `;
 }
 // ── Header block: lockup + yellow band + accent rule ─────────────────────────
-export function andersenHeader(logo = logoFullDataUri) {
+function andersenHeader(logo = brand_assets_1.logoFullDataUri) {
     return `
   <!-- Andersen Letterhead: Wordmark Lockup -->
   <div class="a-lockup">
@@ -231,7 +242,7 @@ export function andersenHeader(logo = logoFullDataUri) {
   </div>`;
 }
 // ── Footer block: navy strip with columns ─────────────────────────────────────
-export function andersenFooter(logo = logoFullDataUri, opts = {}) {
+function andersenFooter(logo = brand_assets_1.logoFullDataUri, opts = {}) {
     const email = opts.email || 'procurement@cpc-rfp.website';
     const year = opts.year || new Date().getFullYear();
     return `
@@ -258,8 +269,8 @@ export function andersenFooter(logo = logoFullDataUri, opts = {}) {
   </div>`;
 }
 // ── Full A4 page HTML (for browser preview / print fallback) ──────────────────
-export function andersenPageHtml(opts) {
-    const logo = opts.logo || logoFullDataUri;
+function andersenPageHtml(opts) {
+    const logo = opts.logo || brand_assets_1.logoFullDataUri;
     const title = (opts.title || 'RFP').replace(/</g, '&lt;');
     const ref = (opts.refNumber || '').replace(/</g, '&lt;');
     return `<!DOCTYPE html>
@@ -306,8 +317,8 @@ ${opts.showToolbar ? `
 // No Google Fonts CDN — Puppeteer networkidle0 waits for external requests.
 // Instead we use system fonts that Puppeteer's bundled Chromium has.
 // The header/footer are injected by Puppeteer's displayHeaderFooter mechanism.
-export function andersenPdfBodyHtml(opts) {
-    const logo = opts.logo || logoFullDataUri;
+function andersenPdfBodyHtml(opts) {
+    const logo = opts.logo || brand_assets_1.logoFullDataUri;
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -331,8 +342,8 @@ ${andersenCss({ forPdf: true })}
 // ── Puppeteer header/footer templates ─────────────────────────────────────────
 // These are self-contained HTML snippets passed to page.pdf().
 // Rules: inline styles only, no external CSS, font-size must be explicit.
-export function andersenPdfHeaderTemplate(opts) {
-    const logo = opts.logo || logoFullDataUri;
+function andersenPdfHeaderTemplate(opts) {
+    const logo = opts.logo || brand_assets_1.logoFullDataUri;
     const ref = escHtml(opts.refNumber || '');
     // Topo SVG as inline background — slimmed down for header strip
     return `<div style="
@@ -355,7 +366,7 @@ export function andersenPdfHeaderTemplate(opts) {
     <span style="font-size:8pt;letter-spacing:.1em;text-transform:uppercase;color:#020303;opacity:.6;position:relative;z-index:1">${ref}</span>
   </div>`;
 }
-export function andersenPdfFooterTemplate(opts = {}) {
+function andersenPdfFooterTemplate(opts = {}) {
     const email = escHtml(opts.email || 'procurement@cpc-rfp.website');
     const year = new Date().getFullYear();
     return `<div style="
@@ -377,7 +388,7 @@ export function andersenPdfFooterTemplate(opts = {}) {
 // Email clients strip <style> blocks and most block-level CSS.
 // All styling must be inline. Uses table layout for maximum compatibility.
 // Matches the letterhead design: yellow top rule, navy header/footer, ink body.
-export function andersenEmailHtml(opts) {
+function andersenEmailHtml(opts) {
     const email = opts.email || 'procurement@cpc-rfp.website';
     const year = new Date().getFullYear();
     const safeBody = (opts.bodyText || '')

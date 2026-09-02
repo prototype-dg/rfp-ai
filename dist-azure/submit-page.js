@@ -1,5 +1,8 @@
-import { logoFullDataUri, bgDarkDataUri, bgLightDataUri } from './brand-assets';
-export function getSubmitPage(rfpId, participantCode) {
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.getSubmitPage = getSubmitPage;
+const brand_assets_1 = require("./brand-assets");
+function getSubmitPage(rfpId, participantCode) {
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -16,9 +19,9 @@ export function getSubmitPage(rfpId, participantCode) {
   <style>
     /* ── Brand asset data URIs — guaranteed rendering regardless of path routing ── */
     :root {
-      --brand-logo-full: url("${logoFullDataUri}");
-      --brand-bg-dark:   url("${bgDarkDataUri}");
-      --brand-bg-light:  url("${bgLightDataUri}");
+      --brand-logo-full: url("${brand_assets_1.logoFullDataUri}");
+      --brand-bg-dark:   url("${brand_assets_1.bgDarkDataUri}");
+      --brand-bg-light:  url("${brand_assets_1.bgLightDataUri}");
     }
   </style>
   <style>
@@ -718,7 +721,7 @@ export function getSubmitPage(rfpId, participantCode) {
 <header class="header">
   <div class="header-inner">
     <!-- Full brand logo: yellow glyph + ANDERSEN wordmark in one PNG -->
-    <img src="${logoFullDataUri}" alt="Andersen" class="header-logo-full"/>
+    <img src="${brand_assets_1.logoFullDataUri}" alt="Andersen" class="header-logo-full"/>
     <div class="header-divider"></div>
     <div class="header-text">
       <div class="sub">Procurement Portal &nbsp;·&nbsp; Proposal Submission</div>

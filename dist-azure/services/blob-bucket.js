@@ -1,3 +1,4 @@
+"use strict";
 /**
  * blob-bucket.ts — R2Bucket-compatible Azure Blob Storage adapter
  *
@@ -10,7 +11,9 @@
  * Drop-in replacement: no call-site changes needed in index.ts.
  * Connection string read from AZURE_STORAGE_CONNECTION_STRING env var.
  */
-import { BlobServiceClient, } from '@azure/storage-blob';
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.azureBlobBucket = exports.AzureBlobBucket = void 0;
+const storage_blob_1 = require("@azure/storage-blob");
 const CONTAINER_NAME = process.env.AZURE_BLOB_CONTAINER || 'proposal-uploads';
 let _containerClient = null;
 function getContainerClient() {
@@ -19,12 +22,12 @@ function getContainerClient() {
     const connStr = process.env.AZURE_STORAGE_CONNECTION_STRING;
     if (!connStr)
         throw new Error('[blob] AZURE_STORAGE_CONNECTION_STRING not set');
-    const serviceClient = BlobServiceClient.fromConnectionString(connStr);
+    const serviceClient = storage_blob_1.BlobServiceClient.fromConnectionString(connStr);
     _containerClient = serviceClient.getContainerClient(CONTAINER_NAME);
     return _containerClient;
 }
 // ── Adapter implementation ─────────────────────────────────────────────────
-export class AzureBlobBucket {
+class AzureBlobBucket {
     async put(key, body, options) {
         const client = getContainerClient();
         const blobClient = client.getBlockBlobClient(key);
@@ -122,5 +125,6 @@ export class AzureBlobBucket {
         };
     }
 }
-export const azureBlobBucket = new AzureBlobBucket();
+exports.AzureBlobBucket = AzureBlobBucket;
+exports.azureBlobBucket = new AzureBlobBucket();
 //# sourceMappingURL=blob-bucket.js.map

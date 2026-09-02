@@ -1,3 +1,4 @@
+"use strict";
 /**
  * pdf-render.ts
  *
@@ -8,20 +9,28 @@
  *
  * Phase 1 of the Azure sidecar inline migration.
  */
-import puppeteer from 'puppeteer';
-import { marked } from 'marked';
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.getBrowser = getBrowser;
+exports.warmupBrowser = warmupBrowser;
+exports.buildPreviewHtml = buildPreviewHtml;
+exports.renderMarkdownToPdf = renderMarkdownToPdf;
+const puppeteer_1 = __importDefault(require("puppeteer"));
+const marked_1 = require("marked");
 // ── Browser pool ──────────────────────────────────────────────────────────────
 // One Chromium instance is kept alive for the lifetime of the Node.js process.
 // Per-render: a new Page is created, used, then closed (no page reuse — avoids
 // state leakage between requests). Browser restarts automatically on disconnect.
 let _browser = null;
 let _browserLaunching = null;
-export async function getBrowser() {
+async function getBrowser() {
     if (_browser && _browser.connected)
         return _browser;
     if (_browserLaunching)
         return _browserLaunching;
-    _browserLaunching = puppeteer
+    _browserLaunching = puppeteer_1.default
         .launch({
         headless: true,
         args: [
@@ -44,7 +53,7 @@ export async function getBrowser() {
     return _browserLaunching;
 }
 /** Call once at app startup to pay the cold-start cost before any real request. */
-export async function warmupBrowser() {
+async function warmupBrowser() {
     console.log('[pdf-render] warming up Chromium...');
     const browser = await getBrowser();
     const page = await browser.newPage();
@@ -194,8 +203,8 @@ td.fr { width: 294px; padding: 0 60px 0 0; vertical-align: middle; text-align: r
 // ── buildPdfBodyHtml ──────────────────────────────────────────────────────────
 function buildPdfBodyHtml(markdown, opts) {
     const rfpTitle = opts.rfp_title ? escHtml(opts.rfp_title) : 'Request for Proposal';
-    marked.setOptions({ gfm: true, breaks: false });
-    const bodyHtml = marked.parse(markdown || '');
+    marked_1.marked.setOptions({ gfm: true, breaks: false });
+    const bodyHtml = marked_1.marked.parse(markdown || '');
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -216,11 +225,11 @@ body { background: #fff; margin: 0; padding: 0; }
 // Paginated letterhead HTML preview — JS paginator distributes content across
 // simulated A4 page cards, each with the full Andersen letterhead.
 // (Ported 1-to-1 from server.js buildPreviewHtml, ~240 lines of inline JS)
-export function buildPreviewHtml(markdown, opts) {
+function buildPreviewHtml(markdown, opts) {
     const rfpTitle = opts.rfp_title ? escHtml(opts.rfp_title) : 'Request for Proposal';
     const refNumber = opts.ref_number ? escHtml(opts.ref_number) : '';
-    marked.setOptions({ gfm: true, breaks: false });
-    const bodyHtml = marked.parse(markdown || '');
+    marked_1.marked.setOptions({ gfm: true, breaks: false });
+    const bodyHtml = marked_1.marked.parse(markdown || '');
     // Letterhead header HTML (injected into every A4 page card)
     const svgContent = buildHeaderSvg(refNumber || undefined);
     const svgDataUri = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgContent);
@@ -416,7 +425,7 @@ html, body { background: #e5e7eb; margin: 0; padding: 0; }
  * Render markdown → Andersen-branded A4 PDF bytes.
  * Uses the long-lived browser pool — warm calls take ~2–5s.
  */
-export async function renderMarkdownToPdf(markdown, opts) {
+async function renderMarkdownToPdf(markdown, opts) {
     const bodyHtml = buildPdfBodyHtml(markdown, opts);
     const { headerTemplate, footerTemplate } = buildPuppeteerTemplates({ ref_number: opts.ref_number });
     const browser = await getBrowser();

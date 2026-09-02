@@ -1,3 +1,4 @@
+"use strict";
 /**
  * index-azure.ts — Azure App Service entry point
  *
@@ -5,24 +6,25 @@
  * On Azure, static files are served directly from disk via serveStatic,
  * not bundled into the Worker at build time.
  */
-import { Hono } from 'hono';
-import { cors } from 'hono/cors';
-import { serveStatic } from '@hono/node-server/serve-static';
-import { apiRouter } from './api/index';
-import { getLayout } from './layout';
-import { getSubmitPage } from './submit-page';
-import { sqliteDb } from './services/db';
-import { azureBlobBucket } from './services/blob-bucket';
-const app = new Hono();
-app.use('*', cors());
+Object.defineProperty(exports, "__esModule", { value: true });
+const hono_1 = require("hono");
+const cors_1 = require("hono/cors");
+const serve_static_1 = require("@hono/node-server/serve-static");
+const index_1 = require("./api/index");
+const layout_1 = require("./layout");
+const submit_page_1 = require("./submit-page");
+const db_1 = require("./services/db");
+const blob_bucket_1 = require("./services/blob-bucket");
+const app = new hono_1.Hono();
+app.use('*', (0, cors_1.cors)());
 // ── Azure adapter injection ────────────────────────────────────────────────
 app.use('*', async (c, next) => {
     if (!c.env)
         c.env = {};
     if (!c.env.DB)
-        c.env.DB = sqliteDb;
+        c.env.DB = db_1.sqliteDb;
     if (!c.env.PROPOSALS_BUCKET)
-        c.env.PROPOSALS_BUCKET = azureBlobBucket;
+        c.env.PROPOSALS_BUCKET = blob_bucket_1.azureBlobBucket;
     if (!c.env.OPENAI_API_KEY)
         c.env.OPENAI_API_KEY = process.env.OPENAI_API_KEY;
     if (!c.env.RESEND_API_KEY)
@@ -44,18 +46,18 @@ app.onError((err, c) => {
 });
 // ── Static files served from disk (not Vite ?raw bundled) ─────────────────
 // Files live in public/static/ relative to the project root
-app.use('/static/*', serveStatic({ root: './public' }));
+app.use('/static/*', (0, serve_static_1.serveStatic)({ root: './public' }));
 // API routes
-app.route('/api', apiRouter);
+app.route('/api', index_1.apiRouter);
 // Public vendor proposal submission page
 app.get('/submit/:rfpId', (c) => {
     const rfpId = c.req.param('rfpId');
     const code = c.req.query('code') || '';
-    return c.html(getSubmitPage(rfpId, code));
+    return c.html((0, submit_page_1.getSubmitPage)(rfpId, code));
 });
 // SPA — serve for all non-API, non-static routes
 app.get('*', (c) => {
-    return c.html(getLayout());
+    return c.html((0, layout_1.getLayout)());
 });
-export default app;
+exports.default = app;
 //# sourceMappingURL=index-azure.js.map

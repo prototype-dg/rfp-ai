@@ -1,5 +1,8 @@
-import { logoFullDataUri, bgDarkDataUri, bgLightDataUri } from './brand-assets';
-export function getLayout() {
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.getLayout = getLayout;
+const brand_assets_1 = require("./brand-assets");
+function getLayout() {
     return `<!DOCTYPE html>
 <html lang="en" dir="ltr">
 <head>
@@ -21,9 +24,9 @@ export function getLayout() {
   <style>
     /* ── Brand asset data URIs injected at build time ── */
     :root {
-      --brand-logo-full:  url("${logoFullDataUri}");
-      --brand-bg-dark:    url("${bgDarkDataUri}");
-      --brand-bg-light:   url("${bgLightDataUri}");
+      --brand-logo-full:  url("${brand_assets_1.logoFullDataUri}");
+      --brand-bg-dark:    url("${brand_assets_1.bgDarkDataUri}");
+      --brand-bg-light:   url("${brand_assets_1.bgLightDataUri}");
     }
   </style>
   <style>
@@ -1391,7 +1394,7 @@ export function getLayout() {
     <!-- Brand -->
     <div class="sidebar-brand">
       <!-- Full brand logo: yellow glyph + ANDERSEN wordmark — data URI for guaranteed rendering -->
-      <img src="${logoFullDataUri}" alt="Andersen" class="sidebar-logo-full">
+      <img src="${brand_assets_1.logoFullDataUri}" alt="Andersen" class="sidebar-logo-full">
       <div class="sidebar-wordmark">
         <div class="wm-product" data-i18n="product_name">AI RFP Management</div>
       </div>

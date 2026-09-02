@@ -1,1 +1,1 @@
-{"version":3,"file":"brand-assets.js","sourceRoot":"","sources":["../src/brand-assets.ts"],"names":[],"mappings":"AAAA,8DAA8D;AAC9D,MAAM,CAAC,MAAM,eAAe,GAAG,osvCAAosvC,CAAC;AACpuvC,MAAM,CAAC,MAAM,aAAa,GAAG,g3vHAAg3vH,CAAC;AAC94vH,MAAM,CAAC,MAAM,cAAc,GAAG,wk9DAAwk9D,CAAC"}
+{"version":3,"file":"brand-assets.js","sourceRoot":"","sources":["../src/brand-assets.ts"],"names":[],"mappings":";;;AAAA,8DAA8D;AACjD,QAAA,eAAe,GAAG,osvCAAosvC,CAAC;AACvtvC,QAAA,aAAa,GAAG,g3vHAAg3vH,CAAC;AACj4vH,QAAA,cAAc,GAAG,wk9DAAwk9D,CAAC"}

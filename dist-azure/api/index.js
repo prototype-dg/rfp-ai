@@ -1,10 +1,13 @@
-import { Hono } from 'hono';
-import { initDb, seedVendors } from '../db/seed';
-import { andersenEmailHtml, andersenPageHtml } from '../brand/letterhead';
-import { renderMarkdownToPdf, buildPreviewHtml, warmupBrowser } from '../services/pdf-render';
-import { extractTextFromPdf } from '../services/ocr';
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.apiRouter = void 0;
+const hono_1 = require("hono");
+const seed_1 = require("../db/seed");
+const letterhead_1 = require("../brand/letterhead");
+const pdf_render_1 = require("../services/pdf-render");
+const ocr_1 = require("../services/ocr");
 // Warm up Chromium once at module load time (pays cold-start cost before first request)
-warmupBrowser().catch((e) => console.warn('[startup] Puppeteer warmup failed:', e.message));
+(0, pdf_render_1.warmupBrowser)().catch((e) => console.warn('[startup] Puppeteer warmup failed:', e.message));
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
 const WORKER_VERSION = '2026-08-17-v101'; // v101: full technical+commercial files to eval LLM (no cuts); supporting docs optional; benchmark uses structured scope fields only (no raw rfp_full_text hallucination)
 // ── OpenAI configuration ───────────────────────────────────────────────────────
@@ -21,7 +24,7 @@ async function runInlineOcr(pdfUrl, env, maxPages = 100) {
         return null;
     }
     try {
-        const result = await extractTextFromPdf(pdfUrl, apiKey, maxPages);
+        const result = await (0, ocr_1.extractTextFromPdf)(pdfUrl, apiKey, maxPages);
         return result;
     }
     catch (e) {
@@ -29,18 +32,18 @@ async function runInlineOcr(pdfUrl, env, maxPages = 100) {
         return null;
     }
 }
-export const apiRouter = new Hono();
+exports.apiRouter = new hono_1.Hono();
 // ============================================================
 // VERSION — canary endpoint to confirm which Worker code is live
 // ============================================================
-apiRouter.get('/version', (c) => c.json({ version: WORKER_VERSION, ok: true }));
+exports.apiRouter.get('/version', (c) => c.json({ version: WORKER_VERSION, ok: true }));
 // ============================================================
 // INIT
 // ============================================================
-apiRouter.post('/init', async (c) => {
+exports.apiRouter.post('/init', async (c) => {
     try {
-        await initDb(c.env.DB);
-        await seedVendors(c.env.DB);
+        await (0, seed_1.initDb)(c.env.DB);
+        await (0, seed_1.seedVendors)(c.env.DB);
         return c.json({ ok: true });
     }
     catch (e) {
@@ -51,7 +54,7 @@ apiRouter.post('/init', async (c) => {
 // ADMIN — wipe all RFPs and related data (clean slate)
 // POST /api/admin/reset-rfps
 // ============================================================
-apiRouter.post('/admin/reset-rfps', async (c) => {
+exports.apiRouter.post('/admin/reset-rfps', async (c) => {
     try {
         const db = c.env.DB;
         const bucket = c.env.PROPOSALS_BUCKET;
@@ -93,7 +96,7 @@ apiRouter.post('/admin/reset-rfps', async (c) => {
 // ============================================================
 // DASHBOARD STATS (cross-RFP)
 // ============================================================
-apiRouter.get('/stats', async (c) => {
+exports.apiRouter.get('/stats', async (c) => {
     try {
         const db = c.env.DB;
         const [totalRfps, activeRfps, awardedRfps, totalVendors, totalProposals, totalEmails] = await Promise.all([
@@ -139,7 +142,7 @@ apiRouter.get('/stats', async (c) => {
 // ============================================================
 // TOP VENDORS BY AWARDED CONTRACTS
 // ============================================================
-apiRouter.get('/stats/top-vendors', async (c) => {
+exports.apiRouter.get('/stats/top-vendors', async (c) => {
     try {
         const { results } = await c.env.DB.prepare(`
       SELECT v.name, COUNT(p.id) as wins
@@ -159,13 +162,13 @@ apiRouter.get('/stats/top-vendors', async (c) => {
 // ============================================================
 // RFP CRUD
 // ============================================================
-apiRouter.get('/rfps', async (c) => {
+exports.apiRouter.get('/rfps', async (c) => {
     const { results } = await c.env.DB.prepare('SELECT * FROM rfps ORDER BY id DESC').all();
     return c.json(results);
 });
 // GET /rfps/summary — per-RFP activity counts for dashboard cards
 // Returns { rfpId: { unanswered_questions, unread_emails, declined_vendors, unevaluated_proposals } }
-apiRouter.get('/rfps/summary', async (c) => {
+exports.apiRouter.get('/rfps/summary', async (c) => {
     try {
         const db = c.env.DB;
         const [qRows, eRows, vRows, pRows] = await Promise.all([
@@ -196,7 +199,7 @@ apiRouter.get('/rfps/summary', async (c) => {
         return c.json({}, 200); // non-fatal — cards just won't show counts
     }
 });
-apiRouter.get('/rfps/:id', async (c) => {
+exports.apiRouter.get('/rfps/:id', async (c) => {
     const id = c.req.param('id');
     const rfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(id).first();
     if (!rfp)
@@ -205,7 +208,7 @@ apiRouter.get('/rfps/:id', async (c) => {
 });
 // GET /rfps/:id/preview-html — returns the full Andersen-letterhead HTML preview.
 // Phase 1: renders inline using buildPreviewHtml() (no VPS round-trip).
-apiRouter.get('/rfps/:id/preview-html', async (c) => {
+exports.apiRouter.get('/rfps/:id/preview-html', async (c) => {
     const id = c.req.param('id');
     const rfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(id).first();
     if (!rfp)
@@ -219,7 +222,7 @@ apiRouter.get('/rfps/:id/preview-html', async (c) => {
     const refNumber = rfp.ref_number || '';
     const rfpTitle = rfp.title || 'Request for Proposal';
     try {
-        const html = buildPreviewHtml(markdown, { ref_number: refNumber, rfp_title: rfpTitle });
+        const html = (0, pdf_render_1.buildPreviewHtml)(markdown, { ref_number: refNumber, rfp_title: rfpTitle });
         return new Response(html, {
             status: 200,
             headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' },
@@ -228,7 +231,7 @@ apiRouter.get('/rfps/:id/preview-html', async (c) => {
     catch (err) {
         console.error('[preview-html] inline render error:', err.message);
         // Fallback — client-side marked.js
-        const fallbackHtml = andersenPageHtml({
+        const fallbackHtml = (0, letterhead_1.andersenPageHtml)({
             title: rfpTitle,
             refNumber,
             bodyHtml: `<div id="md-content"></div>
@@ -243,7 +246,7 @@ apiRouter.get('/rfps/:id/preview-html', async (c) => {
 });
 // GET /rfps/:id/pdf-content — returns raw RFP markdown content
 // Used by clients that need the raw markdown (e.g. debug, re-render).
-apiRouter.get('/rfps/:id/pdf-content', async (c) => {
+exports.apiRouter.get('/rfps/:id/pdf-content', async (c) => {
     const id = c.req.param('id');
     const rfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(id).first();
     if (!rfp)
@@ -260,7 +263,7 @@ apiRouter.get('/rfps/:id/pdf-content', async (c) => {
 });
 // GET /rfps/:id/pdf — generate Andersen-branded A4 PDF from stored markdown.
 // Phase 1: rendered inline via Puppeteer browser pool (no VPS round-trip).
-apiRouter.get('/rfps/:id/pdf', async (c) => {
+exports.apiRouter.get('/rfps/:id/pdf', async (c) => {
     const id = c.req.param('id');
     const rfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(id).first();
     if (!rfp)
@@ -273,7 +276,7 @@ apiRouter.get('/rfps/:id/pdf', async (c) => {
     const refNumber = rfp.ref_number || '';
     const rfpTitle = rfp.title || 'Request for Proposal';
     try {
-        const pdfBuffer = await renderMarkdownToPdf(markdown, { ref_number: refNumber, rfp_title: rfpTitle });
+        const pdfBuffer = await (0, pdf_render_1.renderMarkdownToPdf)(markdown, { ref_number: refNumber, rfp_title: rfpTitle });
         console.log(`[pdf-render] inline rendered ${pdfBuffer.length} bytes for RFP ${id}`);
         return new Response(pdfBuffer, {
             status: 200,
@@ -287,7 +290,7 @@ apiRouter.get('/rfps/:id/pdf', async (c) => {
     catch (err) {
         console.error('[pdf-render] inline render failed, falling back to print-HTML:', err.message);
         // Fallback: browser-print HTML page
-        const printHtml = andersenPageHtml({
+        const printHtml = (0, letterhead_1.andersenPageHtml)({
             title: rfpTitle,
             refNumber,
             showToolbar: true,
@@ -315,7 +318,7 @@ apiRouter.get('/rfps/:id/pdf', async (c) => {
         });
     }
 });
-apiRouter.post('/rfps', async (c) => {
+exports.apiRouter.post('/rfps', async (c) => {
     try {
         const body = await c.req.json();
         const refNum = 'AND/PROC/' + new Date().getFullYear() + '/' + String(Math.floor(Math.random() * 9000) + 1000);
@@ -330,7 +333,7 @@ apiRouter.post('/rfps', async (c) => {
         return c.json({ error: e.message }, 500);
     }
 });
-apiRouter.put('/rfps/:id', async (c) => {
+exports.apiRouter.put('/rfps/:id', async (c) => {
     try {
         const id = c.req.param('id');
         const body = await c.req.json();
@@ -374,7 +377,7 @@ apiRouter.put('/rfps/:id', async (c) => {
     }
 });
 // Save scoring matrix separately (lightweight, no full PUT needed)
-apiRouter.post('/rfps/:id/scoring-matrix', async (c) => {
+exports.apiRouter.post('/rfps/:id/scoring-matrix', async (c) => {
     try {
         const id = c.req.param('id');
         const body = await c.req.json();
@@ -389,7 +392,7 @@ apiRouter.post('/rfps/:id/scoring-matrix', async (c) => {
 // POST /rfps/:id/generate — streams LLM tokens as SSE to avoid Cloudflare CPU timeout.
 // The client reads the SSE stream and shows live progress; the Worker saves to DB after
 // the LLM finishes and sends a final event: data: {"done":true,"rfp":{...}}
-apiRouter.post('/rfps/:id/generate', async (c) => {
+exports.apiRouter.post('/rfps/:id/generate', async (c) => {
     const id = c.req.param('id');
     let body;
     try {
@@ -921,7 +924,7 @@ function unescapePdfString(s) {
 }
 // POST /rfps/:id/upload-arch-doc — upload BRD/arch doc, fire async OCR immediately
 // v28: returns immediately after R2 store + async sidecar fire. OCR result saved via callback.
-apiRouter.post('/rfps/:id/upload-arch-doc', async (c) => {
+exports.apiRouter.post('/rfps/:id/upload-arch-doc', async (c) => {
     try {
         const id = c.req.param('id');
         const formData = await c.req.formData();
@@ -984,7 +987,7 @@ apiRouter.post('/rfps/:id/upload-arch-doc', async (c) => {
 //       (3) fire ASYNC OCR → sidecar calls back /callback/rfps/:id/rfp-upload-ocr-complete
 //       (4) callback runs AI extraction and UPDATEs all rfp fields
 //       Returns immediately with rfp record and ocr_status='processing'.
-apiRouter.post('/rfps/upload-rfp-pdf', async (c) => {
+exports.apiRouter.post('/rfps/upload-rfp-pdf', async (c) => {
     try {
         const formData = await c.req.formData();
         const file = formData.get('file');
@@ -1348,7 +1351,7 @@ async function writeExtractedRfpFields(db, rfpId, ocrText, extracted, scoringMat
 // Populates: title, category, background, objectives, scope, tech_requirements, budget, deadline,
 //            content (formatted summary), rfp_full_text (full OCR for eval/Q&A),
 //            scoring_matrix (JSON eval criteria), requirement_glossary (JSON requirement list).
-apiRouter.post('/callback/rfps/:rfpId/rfp-upload-ocr-complete', async (c) => {
+exports.apiRouter.post('/callback/rfps/:rfpId/rfp-upload-ocr-complete', async (c) => {
     const rfpId = c.req.param('rfpId');
     const filename = decodeURIComponent(c.req.query('filename') || 'document.pdf');
     const sizeKb = c.req.query('size_kb') || '?';
@@ -1402,7 +1405,7 @@ apiRouter.post('/callback/rfps/:rfpId/rfp-upload-ocr-complete', async (c) => {
 // Body params (optional JSON):
 //   debug_phases: boolean — if true, include raw LLM output for phases 2+3 in response
 //   force_phases: boolean — if true, run all phases even if scalar fields already populated
-apiRouter.post('/rfps/:id/rerun-ai-extraction', async (c) => {
+exports.apiRouter.post('/rfps/:id/rerun-ai-extraction', async (c) => {
     // v90: async — queues extraction via sidecar /llm-extract, returns immediately.
     // Results arrive via /api/callback/rfps/:rfpId/llm-extract-complete callback.
     const rfpId = c.req.param('id');
@@ -1435,7 +1438,7 @@ apiRouter.post('/rfps/:id/rerun-ai-extraction', async (c) => {
 });
 // POST /callback/rfps/:rfpId/llm-extract-complete
 // Receives async LLM extraction results from the VPS sidecar /llm-extract task.
-apiRouter.post('/callback/rfps/:rfpId/llm-extract-complete', async (c) => {
+exports.apiRouter.post('/callback/rfps/:rfpId/llm-extract-complete', async (c) => {
     const rfpId = c.req.param('rfpId');
     const expectedSecret = c.env.PDF_SIDECAR_SECRET || globalThis.PDF_SIDECAR_SECRET || '';
     let body;
@@ -1480,7 +1483,7 @@ apiRouter.post('/callback/rfps/:rfpId/llm-extract-complete', async (c) => {
 // Runs ONLY Phase 3 (requirement_glossary) as a single isolated LLM call.
 // Uses stream:false (non-streaming) to avoid SSE empty-stream issues from the proxy.
 // This is reliable since Phase 3 runs as its own standalone request with no concurrency.
-apiRouter.post('/rfps/:id/rerun-phase3', async (c) => {
+exports.apiRouter.post('/rfps/:id/rerun-phase3', async (c) => {
     const rfpId = c.req.param('id');
     try {
         const rfp = await c.env.DB.prepare('SELECT id, uploaded_rfp_text, requirement_glossary FROM rfps WHERE id=?')
@@ -1572,7 +1575,7 @@ Rules:
 // Admin endpoint: directly write scoring_matrix and/or requirement_glossary (and other fields)
 // without re-running the LLM. Used when manual data entry is faster than AI extraction.
 // Body: { scoring_matrix?: [...], requirement_glossary?: [...], content?: string, rfp_full_text?: string }
-apiRouter.post('/rfps/:id/inject-fields', async (c) => {
+exports.apiRouter.post('/rfps/:id/inject-fields', async (c) => {
     const rfpId = c.req.param('id');
     try {
         const body = await c.req.json();
@@ -1648,7 +1651,7 @@ apiRouter.post('/rfps/:id/inject-fields', async (c) => {
     }
 });
 // POST /callback/rfps/:rfpId/doc-ocr-complete — sidecar calls this when arch/brd OCR finishes
-apiRouter.post('/callback/rfps/:rfpId/doc-ocr-complete', async (c) => {
+exports.apiRouter.post('/callback/rfps/:rfpId/doc-ocr-complete', async (c) => {
     const rfpId = c.req.param('rfpId');
     const docType = c.req.query('doc_type') || 'arch';
     const filename = decodeURIComponent(c.req.query('filename') || 'document.pdf');
@@ -1681,7 +1684,7 @@ apiRouter.post('/callback/rfps/:rfpId/doc-ocr-complete', async (c) => {
         return c.json({ ok: false, error: e?.message }, 500);
     }
 });
-apiRouter.post('/rfps/:id/stage', async (c) => {
+exports.apiRouter.post('/rfps/:id/stage', async (c) => {
     try {
         const id = c.req.param('id');
         const { stage } = await c.req.json();
@@ -1692,7 +1695,7 @@ apiRouter.post('/rfps/:id/stage', async (c) => {
         return c.json({ error: e.message }, 500);
     }
 });
-apiRouter.delete('/rfps/:id', async (c) => {
+exports.apiRouter.delete('/rfps/:id', async (c) => {
     const id = c.req.param('id');
     await c.env.DB.prepare('DELETE FROM rfps WHERE id=?').bind(id).run();
     return c.json({ ok: true });
@@ -1700,12 +1703,12 @@ apiRouter.delete('/rfps/:id', async (c) => {
 // ============================================================
 // VENDORS
 // ============================================================
-apiRouter.get('/vendors', async (c) => {
+exports.apiRouter.get('/vendors', async (c) => {
     const { results } = await c.env.DB.prepare('SELECT * FROM vendors ORDER BY name ASC').all();
     return c.json(results);
 });
 // PUT /vendors/:id — update vendor fields (email required; all other fields optional)
-apiRouter.put('/vendors/:id', async (c) => {
+exports.apiRouter.put('/vendors/:id', async (c) => {
     const id = c.req.param('id');
     try {
         const body = await c.req.json();
@@ -1735,7 +1738,7 @@ apiRouter.put('/vendors/:id', async (c) => {
         return c.json({ ok: false, error: e.message }, 500);
     }
 });
-apiRouter.get('/rfps/:id/vendors', async (c) => {
+exports.apiRouter.get('/rfps/:id/vendors', async (c) => {
     const rfpId = c.req.param('id');
     const { results } = await c.env.DB.prepare(`
     SELECT v.*, COALESCE(rv.shortlisted, 0) as shortlisted,
@@ -1747,7 +1750,7 @@ apiRouter.get('/rfps/:id/vendors', async (c) => {
   `).bind(rfpId).all();
     return c.json(results);
 });
-apiRouter.put('/rfps/:rfpId/vendors/:vendorId/shortlist', async (c) => {
+exports.apiRouter.put('/rfps/:rfpId/vendors/:vendorId/shortlist', async (c) => {
     const rfpId = c.req.param('rfpId');
     const vendorId = c.req.param('vendorId');
     const { shortlisted } = await c.req.json();
@@ -1757,7 +1760,7 @@ apiRouter.put('/rfps/:rfpId/vendors/:vendorId/shortlist', async (c) => {
   `).bind(rfpId, vendorId, shortlisted ? 1 : 0).run();
     return c.json({ ok: true });
 });
-apiRouter.post('/rfps/:id/vendors/ai-shortlist', async (c) => {
+exports.apiRouter.post('/rfps/:id/vendors/ai-shortlist', async (c) => {
     const rfpId = c.req.param('id');
     const rfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(rfpId).first();
     const { results: vendors } = await c.env.DB.prepare('SELECT * FROM vendors').all();
@@ -1775,7 +1778,7 @@ apiRouter.post('/rfps/:id/vendors/ai-shortlist', async (c) => {
 // ============================================================
 // QUESTIONS
 // ============================================================
-apiRouter.get('/rfps/:id/questions', async (c) => {
+exports.apiRouter.get('/rfps/:id/questions', async (c) => {
     const rfpId = c.req.param('id');
     const { results } = await c.env.DB.prepare(`
     SELECT q.*, v.name as vendor_name FROM questions q
@@ -1784,7 +1787,7 @@ apiRouter.get('/rfps/:id/questions', async (c) => {
   `).bind(rfpId).all();
     return c.json(results);
 });
-apiRouter.post('/rfps/:id/questions/load-samples', async (c) => {
+exports.apiRouter.post('/rfps/:id/questions/load-samples', async (c) => {
     const rfpId = c.req.param('id');
     const sampleQs = getSampleQuestions();
     const { results: vendors } = await c.env.DB.prepare('SELECT id FROM vendors LIMIT 5').all();
@@ -1798,7 +1801,7 @@ apiRouter.post('/rfps/:id/questions/load-samples', async (c) => {
     }
     return c.json({ ok: true });
 });
-apiRouter.post('/rfps/:rfpId/questions/:id/draft', async (c) => {
+exports.apiRouter.post('/rfps/:rfpId/questions/:id/draft', async (c) => {
     const id = c.req.param('id');
     const rfpId = c.req.param('rfpId');
     const q = await c.env.DB.prepare('SELECT * FROM questions WHERE id=?').bind(id).first();
@@ -1809,7 +1812,7 @@ apiRouter.post('/rfps/:rfpId/questions/:id/draft', async (c) => {
     await c.env.DB.prepare('UPDATE questions SET answer=?, needs_manual=? WHERE id=?').bind(answer, needsManual ? 1 : 0, id).run();
     return c.json({ ok: true, answer, needsManual });
 });
-apiRouter.post('/rfps/:id/questions/draft-all', async (c) => {
+exports.apiRouter.post('/rfps/:id/questions/draft-all', async (c) => {
     const rfpId = c.req.param('id');
     const rfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(rfpId).first();
     // Target ALL questions NOT yet emailed to vendors (emailed_at IS NULL).
@@ -1832,13 +1835,13 @@ apiRouter.post('/rfps/:id/questions/draft-all', async (c) => {
     }
     return c.json({ ok: true, total: qs.length, manualRequired: manualCount });
 });
-apiRouter.put('/rfps/:rfpId/questions/:id/approve', async (c) => {
+exports.apiRouter.put('/rfps/:rfpId/questions/:id/approve', async (c) => {
     const id = c.req.param('id');
     await c.env.DB.prepare('UPDATE questions SET published=1 WHERE id=?').bind(id).run();
     return c.json({ ok: true });
 });
 // POST /rfps/:id/questions/approve-all — mark all answered, non-manual, unpublished questions as approved
-apiRouter.post('/rfps/:id/questions/approve-all', async (c) => {
+exports.apiRouter.post('/rfps/:id/questions/approve-all', async (c) => {
     const rfpId = c.req.param('id');
     const result = await c.env.DB.prepare(`
     UPDATE questions SET published=1
@@ -1847,7 +1850,7 @@ apiRouter.post('/rfps/:id/questions/approve-all', async (c) => {
   `).bind(rfpId).run();
     return c.json({ ok: true, approved: result.meta.changes });
 });
-apiRouter.put('/rfps/:rfpId/questions/:id/answer', async (c) => {
+exports.apiRouter.put('/rfps/:rfpId/questions/:id/answer', async (c) => {
     const id = c.req.param('id');
     const { answer } = await c.req.json();
     // Save the edited answer and clear needs_manual flag.
@@ -1855,7 +1858,7 @@ apiRouter.put('/rfps/:rfpId/questions/:id/answer', async (c) => {
     await c.env.DB.prepare('UPDATE questions SET answer=?, needs_manual=0 WHERE id=?').bind(answer, id).run();
     return c.json({ ok: true });
 });
-apiRouter.post('/rfps/:id/questions/publish-all', async (c) => {
+exports.apiRouter.post('/rfps/:id/questions/publish-all', async (c) => {
     const rfpId = c.req.param('id');
     // NOTE: We do NOT bulk-set published=1 here — that is done by approve / approve-all.
     // This endpoint only sends emails and stamps emailed_at on success.
@@ -1966,7 +1969,7 @@ Please include this reference code in ALL correspondence regarding this RFP.
 // ============================================================
 // EMAILS — send invitations
 // ============================================================
-apiRouter.get('/rfps/:id/emails', async (c) => {
+exports.apiRouter.get('/rfps/:id/emails', async (c) => {
     const rfpId = c.req.param('id');
     const { results } = await c.env.DB.prepare(`
     SELECT e.*, v.name as vendor_name FROM email_log e
@@ -1975,7 +1978,7 @@ apiRouter.get('/rfps/:id/emails', async (c) => {
   `).bind(rfpId).all();
     return c.json(results);
 });
-apiRouter.post('/rfps/:id/emails/send-invitations', async (c) => {
+exports.apiRouter.post('/rfps/:id/emails/send-invitations', async (c) => {
     const rfpId = c.req.param('id');
     const body = await c.req.json().catch(() => ({}));
     const rfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(rfpId).first();
@@ -2027,7 +2030,7 @@ apiRouter.post('/rfps/:id/emails/send-invitations', async (c) => {
 // ============================================================
 // EMAILS — check inbox for vendor Q&A replies
 // ============================================================
-apiRouter.post('/rfps/:id/emails/check-inbox', async (c) => {
+exports.apiRouter.post('/rfps/:id/emails/check-inbox', async (c) => {
     const rfpId = c.req.param('id');
     const rfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(rfpId).first();
     let realQuestions = [];
@@ -2063,7 +2066,7 @@ apiRouter.post('/rfps/:id/emails/check-inbox', async (c) => {
 // Simplified: store attachments in R2, create proposal entity.
 // No AI evaluation, no PDF text extraction.
 // ============================================================
-apiRouter.post('/webhook/inbound-email', async (c) => {
+exports.apiRouter.post('/webhook/inbound-email', async (c) => {
     try {
         const payload = await c.req.json();
         if (payload.type !== 'email.received')
@@ -2344,7 +2347,7 @@ procurement@cpc-rfp.website`;
     }
 });
 // GET /rfps/:id/emails/received — fetch inbound emails with full body for display
-apiRouter.get('/rfps/:id/emails/received', async (c) => {
+exports.apiRouter.get('/rfps/:id/emails/received', async (c) => {
     const rfpId = c.req.param('id');
     const { results } = await c.env.DB.prepare(`
     SELECT e.*, v.name as vendor_name
@@ -2356,7 +2359,7 @@ apiRouter.get('/rfps/:id/emails/received', async (c) => {
     return c.json(results);
 });
 // GET /rfps/:id/vendors/:vendorId/emails — all emails for a specific vendor on this RFP
-apiRouter.get('/rfps/:id/vendors/:vendorId/emails', async (c) => {
+exports.apiRouter.get('/rfps/:id/vendors/:vendorId/emails', async (c) => {
     const rfpId = c.req.param('id');
     const vendorId = c.req.param('vendorId');
     const { results } = await c.env.DB.prepare(`
@@ -2369,7 +2372,7 @@ apiRouter.get('/rfps/:id/vendors/:vendorId/emails', async (c) => {
     return c.json(results);
 });
 // POST /rfps/:id/vendors/:vendorId/reply — send a reply email to a vendor
-apiRouter.post('/rfps/:id/vendors/:vendorId/reply', async (c) => {
+exports.apiRouter.post('/rfps/:id/vendors/:vendorId/reply', async (c) => {
     const rfpId = c.req.param('id');
     const vendorId = c.req.param('vendorId');
     try {
@@ -2402,18 +2405,18 @@ apiRouter.post('/rfps/:id/vendors/:vendorId/reply', async (c) => {
         return c.json({ ok: false, error: e.message }, 500);
     }
 });
-apiRouter.post('/rfps/:id/emails/reprocess-questions', async (c) => {
+exports.apiRouter.post('/rfps/:id/emails/reprocess-questions', async (c) => {
     const rfpId = c.req.param('id');
     // Just return ok — no-op for now
     return c.json({ ok: true, processed: 0 });
 });
-apiRouter.get('/inbound-status', async (c) => {
+exports.apiRouter.get('/inbound-status', async (c) => {
     return c.json({ ok: true, mode: 'webhook', endpoint: '/api/webhook/inbound-email' });
 });
 // ============================================================
 // DEBUG
 // ============================================================
-apiRouter.post('/debug/clear-simulated-invitations', async (c) => {
+exports.apiRouter.post('/debug/clear-simulated-invitations', async (c) => {
     try {
         const body = await c.req.json().catch(() => ({}));
         const rfpId = body.rfp_id;
@@ -2429,14 +2432,14 @@ apiRouter.post('/debug/clear-simulated-invitations', async (c) => {
         return c.json({ ok: false, error: e.message }, 500);
     }
 });
-apiRouter.get('/debug/email-log', async (c) => {
+exports.apiRouter.get('/debug/email-log', async (c) => {
     const { results } = await c.env.DB.prepare(`SELECT * FROM email_log ORDER BY id DESC LIMIT 50`).all();
     return c.json(results);
 });
 // ============================================================
 // PROPOSALS
 // ============================================================
-apiRouter.get('/rfps/:id/proposals', async (c) => {
+exports.apiRouter.get('/rfps/:id/proposals', async (c) => {
     const rfpId = c.req.param('id');
     const { results } = await c.env.DB.prepare(`
     SELECT p.*,
@@ -2451,7 +2454,7 @@ apiRouter.get('/rfps/:id/proposals', async (c) => {
 });
 // GET /proposals/pdf/:key — stream a PDF from R2 (inline or download)
 // Pass ?dl=1 to force Content-Disposition: attachment (triggers browser save)
-apiRouter.get('/proposals/pdf/:key{.+}', async (c) => {
+exports.apiRouter.get('/proposals/pdf/:key{.+}', async (c) => {
     const key = c.req.param('key');
     const bucket = c.env.PROPOSALS_BUCKET;
     if (!bucket)
@@ -2469,7 +2472,7 @@ apiRouter.get('/proposals/pdf/:key{.+}', async (c) => {
     return new Response(obj.body, { headers });
 });
 // PUT /rfps/:rfpId/proposals/:proposalId/upload-pdf — manual PDF upload
-apiRouter.put('/rfps/:rfpId/proposals/:proposalId/upload-pdf', async (c) => {
+exports.apiRouter.put('/rfps/:rfpId/proposals/:proposalId/upload-pdf', async (c) => {
     const rfpId = c.req.param('rfpId');
     const proposalId = c.req.param('proposalId');
     try {
@@ -2497,7 +2500,7 @@ apiRouter.put('/rfps/:rfpId/proposals/:proposalId/upload-pdf', async (c) => {
     }
 });
 // POST /rfps/:id/proposals/sample — generate sample proposals for testing
-apiRouter.post('/rfps/:id/proposals/sample', async (c) => {
+exports.apiRouter.post('/rfps/:id/proposals/sample', async (c) => {
     const rfpId = c.req.param('id');
     const { results: shortlisted } = await c.env.DB.prepare(`
     SELECT v.* FROM vendors v
@@ -2522,7 +2525,7 @@ apiRouter.post('/rfps/:id/proposals/sample', async (c) => {
 // AWARD PROPOSAL
 // POST /rfps/:rfpId/proposals/:proposalId/award
 // ============================================================
-apiRouter.post('/rfps/:rfpId/proposals/:proposalId/award', async (c) => {
+exports.apiRouter.post('/rfps/:rfpId/proposals/:proposalId/award', async (c) => {
     const rfpId = c.req.param('rfpId');
     const proposalId = c.req.param('proposalId');
     const db = c.env.DB;
@@ -3354,7 +3357,7 @@ Now return the JSON evaluation object.`;
 // ── POST /callback/proposals/:proposalId/file-ocr-complete ───────────────────
 // Called by sidecar once per uploaded file when OCR finishes at submission time.
 // Appends extracted text to proposal_full_text. Multiple files arrive as separate calls.
-apiRouter.post('/callback/proposals/:proposalId/file-ocr-complete', async (c) => {
+exports.apiRouter.post('/callback/proposals/:proposalId/file-ocr-complete', async (c) => {
     const proposalId = c.req.param('proposalId');
     const label = decodeURIComponent(c.req.query('label') || 'other');
     const filename = decodeURIComponent(c.req.query('filename') || 'document.pdf');
@@ -3403,7 +3406,7 @@ apiRouter.post('/callback/proposals/:proposalId/file-ocr-complete', async (c) =>
     }
 });
 // ── POST /api/rfps/:id/proposals/evaluate-all — batch AI evaluation ────────
-apiRouter.post('/rfps/:id/proposals/evaluate-all', async (c) => {
+exports.apiRouter.post('/rfps/:id/proposals/evaluate-all', async (c) => {
     const rfpId = c.req.param('id');
     const db = c.env.DB;
     try {
@@ -3474,7 +3477,7 @@ apiRouter.post('/rfps/:id/proposals/evaluate-all', async (c) => {
 //   1. If proposalText is available in DB → run scoring synchronously as before (fast path)
 //   2. If proposalText is empty → fire sidecar async with callback_url, return 202 immediately
 //      Sidecar will POST back to /api/callback/proposals/:id/ocr-complete when done
-apiRouter.post('/rfps/:rfpId/proposals/:proposalId/evaluate', async (c) => {
+exports.apiRouter.post('/rfps/:rfpId/proposals/:proposalId/evaluate', async (c) => {
     const rfpId = c.req.param('rfpId');
     const proposalId = c.req.param('proposalId');
     const db = c.env.DB;
@@ -3535,7 +3538,7 @@ apiRouter.post('/rfps/:rfpId/proposals/:proposalId/evaluate', async (c) => {
 // PIPELINE — (1) persist OCR text, (2) load proposal + RFP rows,
 //            (3) call evaluateProposal() — same single gpt-5 full-document
 //                scoring path used by the synchronous evaluate endpoint.
-apiRouter.post('/callback/proposals/:proposalId/ocr-complete', async (c) => {
+exports.apiRouter.post('/callback/proposals/:proposalId/ocr-complete', async (c) => {
     const proposalId = c.req.param('proposalId');
     const rfpId = c.req.query('rfp_id') || '';
     const db = c.env.DB;
@@ -3596,7 +3599,7 @@ apiRouter.post('/callback/proposals/:proposalId/ocr-complete', async (c) => {
 // Finds the commercial file section (=== FILE: ... [label: commercial] ===) and runs
 // runBudgetLLM() synchronously. Falls back to full proposal_full_text or legacy fields
 // if no commercial section is found. Returns 200 with budget data or 202 if text missing.
-apiRouter.post('/rfps/:rfpId/proposals/:proposalId/evaluate-budget', async (c) => {
+exports.apiRouter.post('/rfps/:rfpId/proposals/:proposalId/evaluate-budget', async (c) => {
     const rfpId = c.req.param('rfpId');
     const proposalId = c.req.param('proposalId');
     const db = c.env.DB;
@@ -3652,7 +3655,7 @@ apiRouter.post('/rfps/:rfpId/proposals/:proposalId/evaluate-budget', async (c) =
 // ── POST /api/callback/proposals/:proposalId/budget-complete ──────────────────
 // Called by sidecar when commercial PDF OCR finishes.
 // Runs the 6-step budget LLM prompt and saves result to DB.
-apiRouter.post('/callback/proposals/:proposalId/budget-complete', async (c) => {
+exports.apiRouter.post('/callback/proposals/:proposalId/budget-complete', async (c) => {
     const proposalId = c.req.param('proposalId');
     const db = c.env.DB;
     const expectedSecret = c.env.PDF_SIDECAR_SECRET || globalThis.PDF_SIDECAR_SECRET || '';
@@ -3819,7 +3822,7 @@ ${proposalText.slice(0, 30_000)}${proposalText.length > 30_000 ? '\n\n[... text 
     };
 }
 // ── GET /api/rfps/:rfpId/proposals/:proposalId/evaluation — fetch results ────
-apiRouter.get('/rfps/:rfpId/proposals/:proposalId/evaluation', async (c) => {
+exports.apiRouter.get('/rfps/:rfpId/proposals/:proposalId/evaluation', async (c) => {
     const proposalId = c.req.param('proposalId');
     const proposal = await c.env.DB.prepare('SELECT * FROM proposals WHERE id=?').bind(proposalId).first();
     if (!proposal)
@@ -3843,7 +3846,7 @@ apiRouter.get('/rfps/:rfpId/proposals/:proposalId/evaluation', async (c) => {
 // market-average implementation cost for the issuing organisation's region.
 // Result is stored in rfp.market_benchmark_json and returned.
 // Does NOT affect any proposal score — informational only.
-apiRouter.post('/rfps/:rfpId/market-benchmark', async (c) => {
+exports.apiRouter.post('/rfps/:rfpId/market-benchmark', async (c) => {
     const rfpId = c.req.param('rfpId');
     const db = c.env.DB;
     try {
@@ -4000,7 +4003,7 @@ Return ONLY valid JSON — no markdown, no commentary:
     }
 });
 // ── POST /api/rfps/:rfpId/proposals/:proposalId/manual-override ──────────────
-apiRouter.post('/rfps/:rfpId/proposals/:proposalId/manual-override', async (c) => {
+exports.apiRouter.post('/rfps/:rfpId/proposals/:proposalId/manual-override', async (c) => {
     const proposalId = c.req.param('proposalId');
     const db = c.env.DB;
     try {
@@ -4046,7 +4049,7 @@ apiRouter.post('/rfps/:rfpId/proposals/:proposalId/manual-override', async (c) =
     }
 });
 // ── POST /api/rfps/:id/ingest — extract requirement glossary from RFP text ───
-apiRouter.post('/rfps/:id/ingest', async (c) => {
+exports.apiRouter.post('/rfps/:id/ingest', async (c) => {
     const rfpId = c.req.param('id');
     const db = c.env.DB;
     try {
@@ -4089,7 +4092,7 @@ apiRouter.post('/rfps/:id/ingest', async (c) => {
 // PUBLIC VENDOR SUBMISSION PORTAL
 // ============================================================
 // GET /submit/:rfpId — public RFP summary for the submission page
-apiRouter.get('/submit/:rfpId', async (c) => {
+exports.apiRouter.get('/submit/:rfpId', async (c) => {
     const rfpId = c.req.param('rfpId');
     const rfp = await c.env.DB.prepare(`SELECT id, ref_number, title, category, deadline, scope, objectives, tech_requirements, background, stage FROM rfps WHERE id=?`).bind(rfpId).first();
     if (!rfp)
@@ -4134,7 +4137,7 @@ async function resolveVendorForSubmit(db, rfpId, vendorCode) {
 // PUT /submit/:rfpId/upload-file/:token — Phase 3: browser uploads file directly here.
 // Streams the request body directly into R2 (no memory buffering).
 // Returns { ok: true, r2_key } — passed back in the /finalize attachments array.
-apiRouter.put('/submit/:rfpId/upload-file/:token', async (c) => {
+exports.apiRouter.put('/submit/:rfpId/upload-file/:token', async (c) => {
     const rfpId = c.req.param('rfpId');
     const token = decodeURIComponent(c.req.param('token'));
     const filename = decodeURIComponent(c.req.query('filename') || 'document.pdf');
@@ -4169,7 +4172,7 @@ apiRouter.put('/submit/:rfpId/upload-file/:token', async (c) => {
 // Returns per-file upload tokens and direct upload_url pointing at THIS server's
 // /submit/:rfpId/upload-file/:token endpoint (browser PUTs directly here).
 // Body: { vendor_code, files: [{ filename, content_type, size_bytes, label }] }
-apiRouter.post('/submit/:rfpId/presign', async (c) => {
+exports.apiRouter.post('/submit/:rfpId/presign', async (c) => {
     const rfpId = c.req.param('rfpId');
     let body;
     try {
@@ -4214,7 +4217,7 @@ apiRouter.post('/submit/:rfpId/presign', async (c) => {
 // POST /submit/:rfpId/finalize — Phase 3: files already in R2 via /upload-file.
 // attachments[] now carries r2_key (set by /upload-file) instead of VPS fetch_url.
 // Body: { vendor_code, cover_letter, attachments: [{ token, r2_key, filename, safe_name, content_type, label, size_bytes }] }
-apiRouter.post('/submit/:rfpId/finalize', async (c) => {
+exports.apiRouter.post('/submit/:rfpId/finalize', async (c) => {
     const rfpId = c.req.param('rfpId');
     let body;
     try {
@@ -4316,7 +4319,7 @@ apiRouter.post('/submit/:rfpId/finalize', async (c) => {
 // POST /submit/:rfpId — submit a full vendor proposal (multipart form)
 // Fields: vendor_code (participant ref), cover_letter, files[] (PDFs)
 // Simplified: stores files in R2, creates proposal entity. No AI processing.
-apiRouter.post('/submit/:rfpId', async (c) => {
+exports.apiRouter.post('/submit/:rfpId', async (c) => {
     const rfpId = c.req.param('rfpId');
     const rfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(rfpId).first();
     if (!rfp)
@@ -4329,7 +4332,7 @@ apiRouter.post('/submit/:rfpId', async (c) => {
     // (This is checked again below after full vendor resolution)
     // Full check happens after vendorId is resolved below.
     try {
-        await initDb(c.env.DB);
+        await (0, seed_1.initDb)(c.env.DB);
     }
     catch (_) { }
     try {
@@ -5633,7 +5636,7 @@ SUBMISSION PORTAL:     ${submissionUrl}
  *  Delegates to src/brand/letterhead.ts andersenEmailHtml() — single source of truth
  *  for the Andersen letterhead design (topo band, accent rule, navy footer). */
 function buildAndersenEmailHtml(bodyText, opts = {}) {
-    return andersenEmailHtml({
+    return (0, letterhead_1.andersenEmailHtml)({
         bodyText,
         subject: opts.subject,
         refNumber: opts.refNumber,
@@ -5915,7 +5918,7 @@ function buildVendorProposal(v, isAndersen, isEPAM) {
 // ============================================================
 // SETTINGS — GET/PUT categories and procurement email
 // ============================================================
-apiRouter.get('/settings', async (c) => {
+exports.apiRouter.get('/settings', async (c) => {
     try {
         await c.env.DB.prepare(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)`).run();
         const rows = await c.env.DB.prepare(`SELECT key, value FROM settings`).all();
@@ -5929,7 +5932,7 @@ apiRouter.get('/settings', async (c) => {
         return c.json({}, 200);
     }
 });
-apiRouter.put('/settings', async (c) => {
+exports.apiRouter.put('/settings', async (c) => {
     try {
         await c.env.DB.prepare(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)`).run();
         const body = await c.req.json();
@@ -5942,7 +5945,7 @@ apiRouter.put('/settings', async (c) => {
         return c.json({ error: e.message }, 500);
     }
 });
-apiRouter.get('/settings/categories', async (c) => {
+exports.apiRouter.get('/settings/categories', async (c) => {
     try {
         await c.env.DB.prepare(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)`).run();
         const row = await c.env.DB.prepare(`SELECT value FROM settings WHERE key='categories'`).first();
@@ -5953,7 +5956,7 @@ apiRouter.get('/settings/categories', async (c) => {
         return c.json(['IT & Technology', 'Construction', 'Professional Services', 'Healthcare', 'Facilities', 'Legal', 'Finance', 'Other'], 200);
     }
 });
-apiRouter.put('/settings/categories', async (c) => {
+exports.apiRouter.put('/settings/categories', async (c) => {
     try {
         await c.env.DB.prepare(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)`).run();
         const cats = await c.req.json();
@@ -5967,7 +5970,7 @@ apiRouter.put('/settings/categories', async (c) => {
 // ============================================================
 // VENDOR PROCUREMENT HISTORY
 // ============================================================
-apiRouter.get('/vendors/:id/history', async (c) => {
+exports.apiRouter.get('/vendors/:id/history', async (c) => {
     try {
         const id = c.req.param('id');
         const rows = await c.env.DB.prepare(`SELECT r.id, r.title, r.ref_number, r.stage, rp.submitted_at, rp.awarded_at
@@ -5984,7 +5987,7 @@ apiRouter.get('/vendors/:id/history', async (c) => {
 // ============================================================
 // CONFIRMATION EMAIL ON SUBMISSION
 // ============================================================
-apiRouter.post('/submit/:rfpId/confirmation', async (c) => {
+exports.apiRouter.post('/submit/:rfpId/confirmation', async (c) => {
     try {
         const rfpId = c.req.param('rfpId');
         const { vendor_email, vendor_name } = await c.req.json();

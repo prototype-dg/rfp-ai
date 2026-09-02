@@ -1,4 +1,8 @@
-export async function initDb(db) {
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.initDb = initDb;
+exports.seedVendors = seedVendors;
+async function initDb(db) {
     const statements = [
         // RFPs - multi-RFP support, richer fields
         `CREATE TABLE IF NOT EXISTS rfps (
@@ -238,7 +242,7 @@ export async function initDb(db) {
         }
     }
 }
-export async function seedVendors(db) {
+async function seedVendors(db) {
     // Vendor seed version — bump this string to force a full reseed on next deploy
     const SEED_VERSION = 'v2-global-2025';
     // Check if we've already seeded this version via a meta table

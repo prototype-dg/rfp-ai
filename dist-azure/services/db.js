@@ -1,3 +1,4 @@
+"use strict";
 /**
  * db.ts — D1-compatible SQLite adapter for Azure App Service
  *
@@ -11,17 +12,24 @@
  * Drop-in replacement: no call-site changes needed in index.ts.
  * Database file lives at DB_PATH env var (default: /data/webapp.db).
  */
-import BetterSqlite3 from 'better-sqlite3';
-import path from 'path';
-import fs from 'fs';
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.sqliteDb = void 0;
+exports.getSqliteDb = getSqliteDb;
+exports.getDb = getDb;
+const better_sqlite3_1 = __importDefault(require("better-sqlite3"));
+const path_1 = __importDefault(require("path"));
+const fs_1 = __importDefault(require("fs"));
 // ── Path resolution ────────────────────────────────────────────────────────
 const DB_PATH = process.env.DB_PATH || '/data/webapp.db';
 // Ensure the directory exists (Azure Files mount or local fallback)
 function ensureDir(filePath) {
-    const dir = path.dirname(filePath);
+    const dir = path_1.default.dirname(filePath);
     try {
-        if (!fs.existsSync(dir)) {
-            fs.mkdirSync(dir, { recursive: true });
+        if (!fs_1.default.existsSync(dir)) {
+            fs_1.default.mkdirSync(dir, { recursive: true });
         }
     }
     catch {
@@ -30,11 +38,11 @@ function ensureDir(filePath) {
 }
 // ── Singleton connection ───────────────────────────────────────────────────
 let _db = null;
-export function getSqliteDb() {
+function getSqliteDb() {
     if (_db)
         return _db;
     ensureDir(DB_PATH);
-    _db = new BetterSqlite3(DB_PATH, { verbose: undefined });
+    _db = new better_sqlite3_1.default(DB_PATH, { verbose: undefined });
     // Enable WAL mode for better concurrent read performance
     _db.pragma('journal_mode = WAL');
     _db.pragma('foreign_keys = ON');
@@ -121,12 +129,12 @@ class SqliteD1Database {
     }
 }
 // ── Exported singleton ────────────────────────────────────────────────────
-export const sqliteDb = new SqliteD1Database();
+exports.sqliteDb = new SqliteD1Database();
 /**
  * Returns the D1-compatible database instance.
  * Use this anywhere c.env.DB was previously injected.
  */
-export function getDb() {
-    return sqliteDb;
+function getDb() {
+    return exports.sqliteDb;
 }
 //# sourceMappingURL=db.js.map

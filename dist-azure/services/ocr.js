@@ -1,3 +1,4 @@
+"use strict";
 /**
  * ocr.ts
  *
@@ -11,7 +12,42 @@
  *
  * Phase 2 of the Azure sidecar inline migration.
  */
-import { ImageAnnotatorClient } from '@google-cloud/vision';
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.extractTextFromPdf = extractTextFromPdf;
+const vision_1 = require("@google-cloud/vision");
 // Config — mirrors the Python sidecar's env vars
 const OCR_DPI = parseInt(process.env.OCR_DPI || '150', 10);
 const MAX_PAGES = parseInt(process.env.PDF_MAX_PAGES || '100', 10);
@@ -21,7 +57,7 @@ const VISION_CONCURRENCY = parseInt(process.env.VISION_CONCURRENCY || '20', 10);
 let _visionClient = null;
 function getVisionClient(apiKey) {
     if (!_visionClient) {
-        _visionClient = new ImageAnnotatorClient({
+        _visionClient = new vision_1.ImageAnnotatorClient({
             apiKey,
         });
     }
@@ -45,7 +81,7 @@ function chunkArray(arr, size) {
  * @param apiKey   Google Vision API key (from env.GOOGLE_VISION_API_KEY)
  * @param maxPages Override page cap (default MAX_PAGES = 100)
  */
-export async function extractTextFromPdf(pdfUrl, apiKey, maxPages) {
+async function extractTextFromPdf(pdfUrl, apiKey, maxPages) {
     if (!apiKey)
         throw new Error('GOOGLE_VISION_API_KEY not configured');
     const limit = maxPages ?? MAX_PAGES;
@@ -64,7 +100,7 @@ export async function extractTextFromPdf(pdfUrl, apiKey, maxPages) {
     // ── 2. Rasterise with pdf-to-img (PDFium WASM, 2-3× faster than poppler) ──
     console.log(`[ocr] rasterising at ${OCR_DPI} DPI (max ${limit} pages) with pdfium...`);
     // pdf-to-img is an ESM-only package; dynamic import handles the module boundary
-    const { pdf } = await import('pdf-to-img');
+    const { pdf } = await Promise.resolve().then(() => __importStar(require('pdf-to-img')));
     const document = await pdf(pdfBuffer, { scale: OCR_DPI / 72 });
     const pages_total = document.length;
     const pages_to_process = Math.min(limit, pages_total);

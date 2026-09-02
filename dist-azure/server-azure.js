@@ -1,3 +1,4 @@
+"use strict";
 /**
  * server-azure.ts — Node.js entry point for Azure App Service
  *
@@ -8,11 +9,15 @@
  * Build:  npx tsc --project tsconfig.azure.json
  * Start:  node dist-azure/server-azure.js
  */
-import { serve } from '@hono/node-server';
-import app from './index-azure';
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+const node_server_1 = require("@hono/node-server");
+const index_azure_1 = __importDefault(require("./index-azure"));
 const PORT = parseInt(process.env.PORT || process.env.WEBSITES_PORT || '8080', 10);
-serve({
-    fetch: app.fetch,
+(0, node_server_1.serve)({
+    fetch: index_azure_1.default.fetch,
     port: PORT,
 }, (info) => {
     console.log(`[azure] RFP Tool server listening on port ${info.port}`);
