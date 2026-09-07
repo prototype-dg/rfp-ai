@@ -1,0 +1,147 @@
+# .github/workflows/azure-deploy.yml
+# Deploys rfp-ai to Azure App Service (app-rfp-tool) on every push to main.
+# Auth:   User-assigned Managed Identity via OIDC (configured in Azure Deployment Center)
+# Build:  TypeScript → dist-azure/ via tsconfig.azure.json
+# Entry:  node dist-azure/server-azure.js
+# DB:     SQLite at /home/data/app.db (persists on Azure /home/ volume)
+
+name: Deploy to Azure App Service
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:   # allow manual trigger from GitHub Actions UI
+
+permissions:
+  id-token: write   # required for OIDC login (User-assigned identity)
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest   # MUST be Linux — better-sqlite3 native binary is Linux-only
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      # Install ALL deps — devDeps (typescript, @types/*) needed for tsc build
+      - name: Install all dependencies
+        run: npm ci
+
+      # Build TypeScript → dist-azure/
+      - name: Build (tsc → dist-azure)
+        run: npm run build:azure
+
+      # Verify key build outputs exist before stripping devDeps
+      - name: Verify build outputs
+        run: |
+          ls -lh dist-azure/server-azure.js dist-azure/index-azure.js dist-azure/api/index.js
+          echo "✅ Build outputs verified"
+
+      # Strip devDeps — reduces zip from ~300MB to ~80MB
+      - name: Install production dependencies only
+        run: npm ci --omit=dev
+
+      # Verify better-sqlite3 Linux native binary is present
+      - name: Verify native modules
+        run: |
+          ls node_modules/better-sqlite3/prebuilds/ 2>/dev/null || \
+          ls node_modules/better-sqlite3/build/Release/ 2>/dev/null || \
+          echo "⚠️  better-sqlite3 binary check — will rebuild on first startup if missing"
+          echo "node_modules size: $(du -sh node_modules/)"
+
+      # ── Azure login via OIDC (User-assigned Managed Identity) ──────────────
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # Sync secrets → Azure App Settings (process.env at runtime)
+      - name: Configure Azure App Settings
+        run: |
+          az webapp config appsettings set \
+            --name app-rfp-tool \
+            --resource-group rg-rfp-tool \
+            --settings \
+              NODE_ENV="production" \
+              PORT="8080" \
+              DB_PATH="/home/data/app.db" \
+              OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}" \
+              RESEND_API_KEY="${{ secrets.RESEND_API_KEY }}" \
+              DEMO_SWITCH_PIN="${{ secrets.DEMO_SWITCH_PIN }}"
+          echo "✅ App settings synced"
+
+      # Ensure startup command is correct
+      - name: Set startup command
+        run: |
+          az webapp config set \
+            --name app-rfp-tool \
+            --resource-group rg-rfp-tool \
+            --startup-file "node dist-azure/server-azure.js"
+          echo "✅ Startup command set"
+
+      # Create deployment zip — exclude source, secrets, CF-specific files
+      - name: Create deployment zip
+        run: |
+          zip -r deploy.zip . \
+            --exclude "*.git*" \
+            --exclude "*.zip" \
+            --exclude ".env*" \
+            --exclude ".dev.vars" \
+            --exclude "data/*" \
+            --exclude ".wrangler/*" \
+            --exclude "src/*" \
+            --exclude "vite.config*" \
+            --exclude "tsconfig*" \
+            --exclude "wrangler*" \
+            --exclude "ecosystem*" \
+            --exclude "*.md" \
+            --exclude "uploaded_files/*"
+          echo "Zip size: $(du -sh deploy.zip)"
+          echo "Key files in zip:"
+          unzip -l deploy.zip | grep -E "(server-azure|dist-azure/index|dist-azure/api|better-sqlite)" | head -10
+
+      # Deploy zip to Azure App Service
+      - name: Deploy zip to Azure
+        run: |
+          az webapp deploy \
+            --name app-rfp-tool \
+            --resource-group rg-rfp-tool \
+            --src-path deploy.zip \
+            --type zip
+          echo "✅ Deployment completed"
+
+      # Restart to pick up new App Settings
+      - name: Restart app
+        run: |
+          az webapp restart \
+            --name app-rfp-tool \
+            --resource-group rg-rfp-tool
+          echo "✅ App restarted"
+
+      # Poll until HTTP 200 (up to 10 minutes)
+      - name: Wait for app to come online
+        run: |
+          echo "Polling https://rfp.andersenlab.com.pl ..."
+          for i in $(seq 1 40); do
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" -L --max-time 15 \
+              https://rfp.andersenlab.com.pl/ 2>/dev/null || echo "000")
+            echo "$(date -u '+%H:%M:%S') Attempt $i/40: HTTP $CODE"
+            if [ "$CODE" = "200" ]; then
+              echo "✅ App is live at https://rfp.andersenlab.com.pl"
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "⚠️  App did not return 200 within 10 minutes — check Kudu logs:"
+          echo "    https://app-rfp-tool.scm.azurewebsites.net/DebugConsole"
+          exit 1
