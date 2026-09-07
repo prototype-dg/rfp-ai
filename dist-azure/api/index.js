@@ -11,7 +11,7 @@ const ocr_1 = require("../services/ocr");
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
 const WORKER_VERSION = '2026-08-17-v101'; // v101: full technical+commercial files to eval LLM (no cuts); supporting docs optional; benchmark uses structured scope fields only (no raw rfp_full_text hallucination)
 // ── OpenAI configuration ───────────────────────────────────────────────────────
-const OPENAI_API_KEY_FALLBACK = 'OPENAI_KEY_REMOVED';
+const OPENAI_API_KEY_FALLBACK = '';
 const OPENAI_BASE_URL = 'https://api.openai.com/v1';
 // ── Inline OCR helper ──────────────────────────────────────────────────────────
 // Replaces callSidecar() + callSidecarAsync() + all callback routes.

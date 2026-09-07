@@ -14,7 +14,7 @@ warmupBrowser().catch((e) => console.warn('[startup] Puppeteer warmup failed:', 
 const WORKER_VERSION = '2026-08-17-v101' // v101: full technical+commercial files to eval LLM (no cuts); supporting docs optional; benchmark uses structured scope fields only (no raw rfp_full_text hallucination)
 
 // ── OpenAI configuration ───────────────────────────────────────────────────────
-const OPENAI_API_KEY_FALLBACK = 'OPENAI_KEY_REMOVED'
+const OPENAI_API_KEY_FALLBACK = '' // key removed — use OPENAI_API_KEY Azure App Setting
 const OPENAI_BASE_URL = 'https://api.openai.com/v1'
 
 // ── Inline OCR helper ──────────────────────────────────────────────────────────
@@ -466,7 +466,7 @@ apiRouter.post('/rfps/:id/generate', async (c) => {
   // Build the prompts (same as generateRFPWithLLM but without calling callLLM yet)
   const { systemPrompt, userPrompt } = buildRFPPrompt(body, archDocText, brdDocText, existingScoringMatrix, settings)
 
-  const apiKey = OPENAI_API_KEY_FALLBACK || c.env?.OPENAI_API_KEY || (globalThis as any).OPENAI_API_KEY
+  const apiKey = c.env?.OPENAI_API_KEY || (globalThis as any).OPENAI_API_KEY || OPENAI_API_KEY_FALLBACK
   const baseUrl = OPENAI_BASE_URL
 
   if (!apiKey) {
@@ -1600,7 +1600,7 @@ apiRouter.post('/rfps/:id/rerun-phase3', async (c) => {
     )
     console.log(`[rerun-phase3] rfp=${rfpId} focus_len=${requirementsFocusText.length} — non-streaming single call`)
 
-    const apiKey = OPENAI_API_KEY_FALLBACK || c.env.OPENAI_API_KEY || (globalThis as any).OPENAI_API_KEY
+    const apiKey = c.env.OPENAI_API_KEY || (globalThis as any).OPENAI_API_KEY || OPENAI_API_KEY_FALLBACK
     const baseUrl = OPENAI_BASE_URL
 
     const systemPrompt = `You are an expert procurement analyst. Extract vendor requirements from an RFP document.
@@ -2327,7 +2327,7 @@ apiRouter.post('/webhook/inbound-email', async (c) => {
 
     // LLM intent classification — runs for ALL emails with body text.
     let llmVerdict = 'NEUTRAL'
-    const openAiKey = OPENAI_API_KEY_FALLBACK || (c.env as any).OPENAI_API_KEY || (globalThis as any).OPENAI_API_KEY
+    const openAiKey = (c.env as any).OPENAI_API_KEY || (globalThis as any).OPENAI_API_KEY || OPENAI_API_KEY_FALLBACK
     const openAiBase = OPENAI_BASE_URL
     if (openAiKey && cleanBody.length > 0) {
       try {
@@ -4814,7 +4814,7 @@ apiRouter.post('/submit/:rfpId', async (c) => {
 // ============================================================
 
 async function callLLM(systemPrompt: string, userPrompt: string, env: any, model = 'gpt-5.4-mini', maxTokens = 2000): Promise<string> {
-  const apiKey = OPENAI_API_KEY_FALLBACK || env?.OPENAI_API_KEY || (globalThis as any).OPENAI_API_KEY
+  const apiKey = env?.OPENAI_API_KEY || (globalThis as any).OPENAI_API_KEY || OPENAI_API_KEY_FALLBACK
   const baseUrl = OPENAI_BASE_URL
   if (!apiKey) throw new Error('OPENAI_API_KEY not configured')
 
