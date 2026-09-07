@@ -57,6 +57,7 @@ jobs:
             --settings \
               WEBSITE_RUN_FROM_PACKAGE="1" \
               SCM_DO_BUILD_DURING_DEPLOYMENT="false" \
+              DISABLE_ORYX_BUILD="true" \
               NODE_ENV="production" \
               PORT="8080" \
               DB_PATH="/home/data/app.db" \
@@ -95,14 +96,15 @@ jobs:
           echo "Key paths inside zip:"
           unzip -l deploy.zip | grep -E "(server-azure|dist-azure/index|dist-azure/api|better-sqlite)" | head -10
 
-      # Deploy — exactly mirrors lms-app: --type zip, synchronous, no extra flags
+      # Deploy — --clean wipes stale Oryx/Local-Git artifacts (oryx-manifest.toml, node_modules.tar.gz)
       - name: Deploy zip to Azure (synchronous — waits for completion)
         run: |
           az webapp deploy \
             --name app-rfp-tool \
             --resource-group Dima-Gibert-RG \
             --src-path deploy.zip \
-            --type zip
+            --type zip \
+            --clean true
           echo "✅ Deployment completed"
 
       # Restart as separate explicit step — same as lms-app
