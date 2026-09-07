@@ -24,7 +24,7 @@ jobs:
       - name: Install all dependencies (including devDeps for build)
         run: npm ci
 
-      # Build TypeScript → dist-azure/ (Azure entry point, not Vite)
+      # Build TypeScript → dist-azure/
       - name: Build (tsc → dist-azure)
         run: npm run build:azure
 
@@ -32,6 +32,7 @@ jobs:
       - name: Install production dependencies only (after build)
         run: npm ci --omit=dev
 
+      # Verify key files — mirrors lms-app pattern
       - name: Verify key files exist
         run: |
           echo "--- Checking required files ---"
@@ -46,6 +47,8 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
+      # WEBSITE_RUN_FROM_PACKAGE=1 — critical: routes zip upload through ARM plane,
+      # bypasses Kudu SCM /api/zipdeploy entirely (no SCM Basic Auth needed)
       - name: Set Azure App Service application settings
         run: |
           az webapp config appsettings set \
@@ -70,6 +73,7 @@ jobs:
             --startup-file "node dist-azure/server-azure.js"
           echo "✅ Startup command set"
 
+      # Create zip — same exclusions as lms-app
       - name: Create deployment zip (with node_modules)
         run: |
           zip -r deploy.zip . \
@@ -85,11 +89,13 @@ jobs:
             --exclude "wrangler*" \
             --exclude "ecosystem*" \
             --exclude "*.md" \
-            --exclude "uploaded_files/*"
+            --exclude "uploaded_files/*" \
+            --exclude ".deployment"
           echo "Zip size: $(du -sh deploy.zip)"
           echo "Key paths inside zip:"
           unzip -l deploy.zip | grep -E "(server-azure|dist-azure/index|dist-azure/api|better-sqlite)" | head -10
 
+      # Deploy — exactly mirrors lms-app: --type zip, synchronous, no extra flags
       - name: Deploy zip to Azure (synchronous — waits for completion)
         run: |
           az webapp deploy \
@@ -99,7 +105,8 @@ jobs:
             --type zip
           echo "✅ Deployment completed"
 
-      - name: Restart app to pick up new settings
+      # Restart as separate explicit step — same as lms-app
+      - name: Restart app to pick up new package
         run: |
           az webapp restart \
             --name app-rfp-tool \
