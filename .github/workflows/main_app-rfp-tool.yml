@@ -55,7 +55,6 @@ jobs:
             --name app-rfp-tool \
             --resource-group Dima-Gibert-RG \
             --settings \
-              WEBSITE_RUN_FROM_PACKAGE="1" \
               SCM_DO_BUILD_DURING_DEPLOYMENT="false" \
               DISABLE_ORYX_BUILD="true" \
               NODE_ENV="production" \
@@ -91,7 +90,7 @@ jobs:
             --exclude "ecosystem*" \
             --exclude "*.md" \
             --exclude "uploaded_files/*" \
-            --exclude ".deployment"
+            --exclude "uploaded_files2/*"
           echo "Zip size: $(du -sh deploy.zip)"
           echo "Key paths inside zip:"
           unzip -l deploy.zip | grep -E "(server-azure|dist-azure/index|dist-azure/api|better-sqlite)" | head -10
@@ -103,8 +102,7 @@ jobs:
             --name app-rfp-tool \
             --resource-group Dima-Gibert-RG \
             --src-path deploy.zip \
-            --type zip \
-            --clean true
+            --type zip
           echo "✅ Deployment completed"
 
       # Restart as separate explicit step — same as lms-app
