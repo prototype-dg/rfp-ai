@@ -109,6 +109,11 @@ export async function initDb(db: D1Database) {
       model_json TEXT,
       created_at TEXT
     )`,
+    // App-wide config — key/value store for runtime settings (e.g. active_profile)
+    `CREATE TABLE IF NOT EXISTS config (
+      key   TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    )`,
   ]
   for (const sql of statements) {
     await db.prepare(sql).run()

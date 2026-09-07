@@ -15,10 +15,12 @@ import { getSubmitPage } from './submit-page'
 import type { Bindings } from './types'
 import { sqliteDb } from './services/db'
 import { azureBlobBucket } from './services/blob-bucket'
+import { profileMiddleware } from './profiles/middleware'
 
 const app = new Hono<{ Bindings: Bindings }>()
 
 app.use('*', cors())
+app.use('*', profileMiddleware)
 
 // ── Azure adapter injection ────────────────────────────────────────────────
 app.use('*', async (c, next) => {

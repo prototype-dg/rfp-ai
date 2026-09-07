@@ -26,6 +26,7 @@
  */
 
 import { logoFullDataUri } from '../brand-assets'
+import { getActiveProfile } from '../profiles/index'
 
 // ── Brand tokens ──────────────────────────────────────────────────────────────
 export const BRAND = {
@@ -534,6 +535,178 @@ export function andersenEmailHtml(opts: {
 </table>
 </td></tr>
 </table>
+</body>
+</html>`
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PROFILE-AWARE UNIFIED FUNCTIONS
+// These read the active profile and dispatch to the correct brand template.
+// All call sites in api/index.ts should use these instead of the andersen-
+// specific functions above.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * profileEmailHtml — generates branded email HTML for the active profile.
+ * Andersen: yellow topo band + navy footer (existing andersenEmailHtml)
+ * CPC: dark navy header with gold text + minimal footer
+ */
+export function profileEmailHtml(opts: {
+  bodyText:   string
+  subject?:   string
+  refNumber?: string
+  email?:     string
+}): string {
+  const p = getActiveProfile()
+  const email = opts.email || p.procurementEmail
+  if (p.id === 'andersen') {
+    return andersenEmailHtml({ ...opts, email })
+  }
+  // ── CPC email template ────────────────────────────────────────────────────
+  const year = new Date().getFullYear()
+  const safeBody = (opts.bodyText || '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/\n/g, '<br>')
+  return `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>${escHtml(opts.subject || "Crown Prince's Court Procurement")}</title></head>
+<body style="margin:0;padding:0;background:#F0EDE8;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif">
+
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#F0EDE8;padding:32px 0">
+<tr><td align="center">
+<table width="620" cellpadding="0" cellspacing="0" border="0" style="max-width:620px;width:100%">
+
+  <!-- ── CPC Header ── -->
+  <tr>
+    <td style="background:#1a1a2e;padding:20px 36px;border-radius:12px 12px 0 0">
+      <table cellpadding="0" cellspacing="0" border="0" width="100%">
+        <tr>
+          <td>
+            <div style="font-size:16px;font-weight:700;color:#c9a84c;font-family:Georgia,serif">Crown Prince's Court</div>
+            <div style="font-size:11px;color:#e5c87a;margin-top:3px;font-family:Arial,sans-serif">Procurement &amp; Contracting Department</div>
+            <div style="font-size:10px;color:#8899aa;margin-top:2px;font-family:Arial,sans-serif">${email}</div>
+          </td>
+          <td align="right" style="font-family:Arial,sans-serif;font-size:10px;color:#8899aa;direction:rtl">
+            ديوان ولي العهد<br>أبوظبي، الإمارات العربية المتحدة
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+  <!-- ── Gold rule ── -->
+  <tr><td style="background:#c9a84c;height:3px;font-size:0;line-height:0">&nbsp;</td></tr>
+
+  <!-- ── Body ── -->
+  <tr>
+    <td style="background:#fff;padding:36px 36px 28px;border:1px solid #E7DFCE;border-top:none">
+      <div style="font-size:14px;line-height:1.75;color:#1B1712;font-family:Arial,sans-serif">${safeBody}</div>
+    </td>
+  </tr>
+
+  <!-- ── Ivory footer ── -->
+  <tr>
+    <td style="background:#F5EFE3;border-radius:0 0 12px 12px;padding:16px 36px;border:1px solid #E7DFCE;border-top:none">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0">
+        <tr>
+          <td>
+            <div style="font-size:10px;color:#745B35;font-family:Arial,sans-serif">
+              <strong>Crown Prince's Court</strong> &nbsp;|&nbsp; Procurement &amp; Contracting Department<br>
+              Abu Dhabi, United Arab Emirates &nbsp;|&nbsp; <a href="mailto:${email}" style="color:#745B35">${email}</a>
+            </div>
+            <div style="margin-top:6px;font-size:9px;color:#9ca3af;font-family:Arial,sans-serif">
+              &copy; ${year} Crown Prince's Court. This document is CONFIDENTIAL.<br>
+              هذه المراسلة سرية ومخصصة للمستلم المحدد فقط.
+            </div>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+</table>
+</td></tr>
+</table>
+</body>
+</html>`
+}
+
+/**
+ * profilePdfBodyHtml — generates a full A4 HTML document for Puppeteer PDF rendering.
+ * Andersen: inline topo SVG header + navy footer (existing andersenPdfBodyHtml)
+ * CPC: background image letterhead (bg_a4.png) with content overlaid
+ */
+export function profilePdfBodyHtml(opts: {
+  bodyHtml:   string
+  refNumber?: string
+  title?:     string
+}): string {
+  const p = getActiveProfile()
+  if (p.id === 'andersen') {
+    return andersenPdfBodyHtml({ bodyHtml: opts.bodyHtml })
+  }
+  // ── CPC PDF: background image letterhead ──────────────────────────────────
+  const { contentPaddingTop, contentPaddingBottom, contentPaddingLeft, contentPaddingRight,
+          fontFamily, bodyColor, accentBorderColor, footerText, footerColor, letterheadBgPath } = p.pdf
+  const bgUrl = letterheadBgPath || '/static/cpc-letterhead-bg.png'
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#fff; }
+  .cpc-page {
+    position: relative;
+    width: 210mm;
+    min-height: 297mm;
+    max-width: 210mm;
+    margin: 0 auto 8mm auto;
+    background-image: url('${bgUrl}');
+    background-size: 210mm 297mm;
+    background-repeat: no-repeat;
+    background-position: top left;
+    font-family: ${fontFamily};
+    color: ${bodyColor};
+    box-sizing: border-box;
+    overflow: hidden;
+    page-break-after: always;
+  }
+  .cpc-content {
+    padding-top: ${contentPaddingTop};
+    padding-bottom: ${contentPaddingBottom};
+    padding-left: ${contentPaddingLeft};
+    padding-right: ${contentPaddingRight};
+  }
+  .cpc-footer {
+    position: absolute;
+    bottom: 10mm;
+    left: 0; right: 0;
+    text-align: center;
+    font-family: ${fontFamily};
+    font-size: 9pt;
+    color: ${footerColor};
+  }
+  h1 { font-size:21pt; font-weight:700; text-align:center; color:${bodyColor}; margin:0 0 12pt 0; line-height:1.2; }
+  h2 { font-size:14pt; font-weight:700; color:${bodyColor}; margin-top:20pt; margin-bottom:9pt; padding-bottom:3pt; border-bottom:1px solid ${accentBorderColor}; }
+  h3 { font-size:12pt; font-weight:700; color:${bodyColor}; margin-top:13pt; margin-bottom:6pt; }
+  p  { font-size:11pt; line-height:1.28; color:${bodyColor}; margin:0 0 6pt 0; text-align:left; }
+  ul, ol { font-size:11pt; line-height:1.28; color:${bodyColor}; padding-left:20pt; margin:4pt 0 8pt 0; }
+  li { margin-bottom:3pt; }
+  table { width:100%; border-collapse:collapse; font-size:11pt; margin:6pt 0 10pt 0; }
+  th { font-weight:700; font-size:11pt; padding:6pt 8pt; border-bottom:0.5pt solid #CCCCCC; background:white; color:${bodyColor}; text-align:left; }
+  td { padding:4pt 8pt; border-bottom:0.5pt solid #CCCCCC; font-size:10.5pt; color:${bodyColor}; vertical-align:top; background:white; }
+  @media print { body { margin:0; } .cpc-page { margin:0; } }
+</style>
+</head>
+<body>
+<div class="cpc-page">
+  <div class="cpc-content">
+    ${opts.bodyHtml}
+  </div>
+  <div class="cpc-footer">${escHtml(footerText)}</div>
+</div>
 </body>
 </html>`
 }

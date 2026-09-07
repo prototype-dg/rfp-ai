@@ -11,6 +11,7 @@
 
 import puppeteer, { type Browser } from 'puppeteer'
 import { marked } from 'marked'
+import { getActiveProfile } from '../profiles/index'
 
 // ── Browser pool ──────────────────────────────────────────────────────────────
 // One Chromium instance is kept alive for the lifetime of the Node.js process.
@@ -456,22 +457,40 @@ export async function renderMarkdownToPdf(
   markdown: string,
   opts: { ref_number?: string; rfp_title?: string }
 ): Promise<Buffer> {
-  const bodyHtml = buildPdfBodyHtml(markdown, opts)
-  const { headerTemplate, footerTemplate } = buildPuppeteerTemplates({ ref_number: opts.ref_number })
-
+  const profile = getActiveProfile()
   const browser = await getBrowser()
   const page    = await browser.newPage()
+
   try {
-    await page.setContent(bodyHtml, { waitUntil: 'domcontentloaded' })
-    const pdfBuffer = await page.pdf({
-      format: 'A4',
-      printBackground: true,
-      displayHeaderFooter: true,
-      headerTemplate,
-      footerTemplate,
-      margin: { top: '29mm', bottom: '22mm', left: '16mm', right: '16mm' },
-    })
-    return Buffer.from(pdfBuffer)
+    if (profile.id === 'cpc') {
+      // ── CPC: background-image letterhead, no Puppeteer header/footer chrome ──
+      const { profilePdfBodyHtml } = await import('../brand/letterhead')
+      marked.setOptions({ gfm: true, breaks: false } as any)
+      const renderedBody = marked.parse(markdown || '') as string
+      const fullHtml = profilePdfBodyHtml({ bodyHtml: renderedBody, refNumber: opts.ref_number, title: opts.rfp_title })
+      await page.setContent(fullHtml, { waitUntil: 'domcontentloaded' })
+      const pdfBuffer = await page.pdf({
+        format: 'A4',
+        printBackground: true,
+        displayHeaderFooter: false,
+        margin: { top: '0', bottom: '0', left: '0', right: '0' },
+      })
+      return Buffer.from(pdfBuffer)
+    } else {
+      // ── Andersen: SVG topo header + footer via Puppeteer displayHeaderFooter ──
+      const bodyHtml = buildPdfBodyHtml(markdown, opts)
+      const { headerTemplate, footerTemplate } = buildPuppeteerTemplates({ ref_number: opts.ref_number })
+      await page.setContent(bodyHtml, { waitUntil: 'domcontentloaded' })
+      const pdfBuffer = await page.pdf({
+        format: 'A4',
+        printBackground: true,
+        displayHeaderFooter: true,
+        headerTemplate,
+        footerTemplate,
+        margin: { top: '29mm', bottom: '22mm', left: '16mm', right: '16mm' },
+      })
+      return Buffer.from(pdfBuffer)
+    }
   } finally {
     await page.close()
   }

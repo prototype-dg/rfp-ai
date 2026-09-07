@@ -12,10 +12,12 @@ import styleCss from '../public/static/style.css?raw'
 import submitJs from '../public/static/submit.js?raw'
 import patternSvg from '../public/static/pattern.svg?raw'
 import { emblemPngBase64 } from './emblem-data'
+import { profileMiddleware } from './profiles/middleware'
 
 const app = new Hono<{ Bindings: Bindings }>()
 
 app.use('*', cors())
+app.use('*', profileMiddleware)
 
 // ── Azure adapter injection ────────────────────────────────────────────────
 // On Azure App Service, Cloudflare bindings (D1, R2) are not available.
