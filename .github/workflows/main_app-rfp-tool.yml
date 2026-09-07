@@ -50,7 +50,7 @@ jobs:
         run: |
           az webapp config appsettings set \
             --name app-rfp-tool \
-            --resource-group rg-rfp-tool \
+            --resource-group Dima-Gibert-RG \
             --settings \
               NODE_ENV="production" \
               PORT="8080" \
@@ -64,7 +64,7 @@ jobs:
         run: |
           az webapp config set \
             --name app-rfp-tool \
-            --resource-group rg-rfp-tool \
+            --resource-group Dima-Gibert-RG \
             --startup-file "node dist-azure/server-azure.js"
           echo "✅ Startup command set"
 
@@ -92,7 +92,7 @@ jobs:
         run: |
           az webapp deploy \
             --name app-rfp-tool \
-            --resource-group rg-rfp-tool \
+            --resource-group Dima-Gibert-RG \
             --src-path deploy.zip \
             --type zip
           echo "✅ Deployment completed"
@@ -101,7 +101,7 @@ jobs:
         run: |
           az webapp restart \
             --name app-rfp-tool \
-            --resource-group rg-rfp-tool
+            --resource-group Dima-Gibert-RG
           echo "✅ App restarted"
 
       - name: Wait for app to come online (10 min timeout)
