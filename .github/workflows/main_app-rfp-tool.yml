@@ -52,6 +52,7 @@ jobs:
             --name app-rfp-tool \
             --resource-group Dima-Gibert-RG \
             --settings \
+              WEBSITE_RUN_FROM_PACKAGE="1" \
               SCM_DO_BUILD_DURING_DEPLOYMENT="false" \
               NODE_ENV="production" \
               PORT="8080" \
