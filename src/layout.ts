@@ -1,6 +1,9 @@
 import { logoFullDataUri, bgDarkDataUri, bgLightDataUri } from './brand-assets'
+import { getActiveProfile } from './profiles/index'
 
 export function getLayout(): string {
+  const p = getActiveProfile()
+  const isCpc = p.id === 'cpc'
   return `<!DOCTYPE html>
 <html lang="en" dir="ltr">
 <head>

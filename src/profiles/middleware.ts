@@ -22,7 +22,7 @@ export async function profileMiddleware(c: Context, next: Next) {
         // Ensure config table exists (safe on every request — SQLite no-ops if exists)
         await db.prepare(`CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT NOT NULL)`).run()
 
-        const row = await db.prepare(`SELECT value FROM config WHERE key = 'active_profile'`).first<{ value: string }>()
+        const row = await (db.prepare(`SELECT value FROM config WHERE key = 'active_profile'`).first as () => Promise<{ value: string } | null>)()
         const profileId: ProfileId = (row?.value as ProfileId) ?? 'andersen'
         setActiveProfile(profileId)
       } else {

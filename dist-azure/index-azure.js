@@ -15,8 +15,10 @@ const layout_1 = require("./layout");
 const submit_page_1 = require("./submit-page");
 const db_1 = require("./services/db");
 const blob_bucket_1 = require("./services/blob-bucket");
+const middleware_1 = require("./profiles/middleware");
 const app = new hono_1.Hono();
 app.use('*', (0, cors_1.cors)());
+app.use('*', middleware_1.profileMiddleware);
 // ── Azure adapter injection ────────────────────────────────────────────────
 app.use('*', async (c, next) => {
     if (!c.env)

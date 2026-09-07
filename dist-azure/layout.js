@@ -2,7 +2,10 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getLayout = getLayout;
 const brand_assets_1 = require("./brand-assets");
+const index_1 = require("./profiles/index");
 function getLayout() {
+    const p = (0, index_1.getActiveProfile)();
+    const isCpc = p.id === 'cpc';
     return `<!DOCTYPE html>
 <html lang="en" dir="ltr">
 <head>
@@ -98,7 +101,7 @@ function getLayout() {
       /* Light wave-line brand texture — fixed so it doesn't scroll */
       background: #EFEFEF var(--brand-bg-light) center center / cover fixed;
       color: var(--a-ink);
-      font-family: 'Roboto', system-ui, sans-serif;
+      font-family: ${p.fonts.body};
       font-weight: 400;
       line-height: 1.6;
       -webkit-font-smoothing: antialiased;
@@ -1431,7 +1434,7 @@ function getLayout() {
       <div class="user-avatar">PM</div>
       <div class="user-info">
         <div class="user-name" data-i18n="user_name">Procurement Manager</div>
-        <div class="user-role" data-i18n="user_role">Andersen · Global</div>
+        <div class="user-role" data-i18n="user_role">${p.orgNameShort} · ${isCpc ? 'Abu Dhabi' : 'Global'}</div>
       </div>
     </div>
   </aside>

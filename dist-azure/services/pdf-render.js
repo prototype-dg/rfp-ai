@@ -9,6 +9,39 @@
  *
  * Phase 1 of the Azure sidecar inline migration.
  */
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -19,6 +52,7 @@ exports.buildPreviewHtml = buildPreviewHtml;
 exports.renderMarkdownToPdf = renderMarkdownToPdf;
 const puppeteer_1 = __importDefault(require("puppeteer"));
 const marked_1 = require("marked");
+const index_1 = require("../profiles/index");
 // ── Browser pool ──────────────────────────────────────────────────────────────
 // One Chromium instance is kept alive for the lifetime of the Node.js process.
 // Per-render: a new Page is created, used, then closed (no page reuse — avoids
@@ -426,21 +460,40 @@ html, body { background: #e5e7eb; margin: 0; padding: 0; }
  * Uses the long-lived browser pool — warm calls take ~2–5s.
  */
 async function renderMarkdownToPdf(markdown, opts) {
-    const bodyHtml = buildPdfBodyHtml(markdown, opts);
-    const { headerTemplate, footerTemplate } = buildPuppeteerTemplates({ ref_number: opts.ref_number });
+    const profile = (0, index_1.getActiveProfile)();
     const browser = await getBrowser();
     const page = await browser.newPage();
     try {
-        await page.setContent(bodyHtml, { waitUntil: 'domcontentloaded' });
-        const pdfBuffer = await page.pdf({
-            format: 'A4',
-            printBackground: true,
-            displayHeaderFooter: true,
-            headerTemplate,
-            footerTemplate,
-            margin: { top: '29mm', bottom: '22mm', left: '16mm', right: '16mm' },
-        });
-        return Buffer.from(pdfBuffer);
+        if (profile.id === 'cpc') {
+            // ── CPC: background-image letterhead, no Puppeteer header/footer chrome ──
+            const { profilePdfBodyHtml } = await Promise.resolve().then(() => __importStar(require('../brand/letterhead')));
+            marked_1.marked.setOptions({ gfm: true, breaks: false });
+            const renderedBody = marked_1.marked.parse(markdown || '');
+            const fullHtml = profilePdfBodyHtml({ bodyHtml: renderedBody, refNumber: opts.ref_number, title: opts.rfp_title });
+            await page.setContent(fullHtml, { waitUntil: 'domcontentloaded' });
+            const pdfBuffer = await page.pdf({
+                format: 'A4',
+                printBackground: true,
+                displayHeaderFooter: false,
+                margin: { top: '0', bottom: '0', left: '0', right: '0' },
+            });
+            return Buffer.from(pdfBuffer);
+        }
+        else {
+            // ── Andersen: SVG topo header + footer via Puppeteer displayHeaderFooter ──
+            const bodyHtml = buildPdfBodyHtml(markdown, opts);
+            const { headerTemplate, footerTemplate } = buildPuppeteerTemplates({ ref_number: opts.ref_number });
+            await page.setContent(bodyHtml, { waitUntil: 'domcontentloaded' });
+            const pdfBuffer = await page.pdf({
+                format: 'A4',
+                printBackground: true,
+                displayHeaderFooter: true,
+                headerTemplate,
+                footerTemplate,
+                margin: { top: '29mm', bottom: '22mm', left: '16mm', right: '16mm' },
+            });
+            return Buffer.from(pdfBuffer);
+        }
     }
     finally {
         await page.close();

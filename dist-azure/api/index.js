@@ -1,9 +1,43 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.apiRouter = void 0;
 const hono_1 = require("hono");
 const seed_1 = require("../db/seed");
 const letterhead_1 = require("../brand/letterhead");
+const index_1 = require("../profiles/index");
 const pdf_render_1 = require("../services/pdf-render");
 const ocr_1 = require("../services/ocr");
 // Warm up Chromium once at module load time (pays cold-start cost before first request)
@@ -11,7 +45,7 @@ const ocr_1 = require("../services/ocr");
 // WORKER_VERSION: bump this to force Cloudflare to recognise the new bundle
 const WORKER_VERSION = '2026-08-17-v101'; // v101: full technical+commercial files to eval LLM (no cuts); supporting docs optional; benchmark uses structured scope fields only (no raw rfp_full_text hallucination)
 // ── OpenAI configuration ───────────────────────────────────────────────────────
-const OPENAI_API_KEY_FALLBACK = '';
+const OPENAI_API_KEY_FALLBACK = ''; // key removed — use OPENAI_API_KEY Azure App Setting
 const OPENAI_BASE_URL = 'https://api.openai.com/v1';
 // ── Inline OCR helper ──────────────────────────────────────────────────────────
 // Replaces callSidecar() + callSidecarAsync() + all callback routes.
@@ -321,7 +355,7 @@ exports.apiRouter.get('/rfps/:id/pdf', async (c) => {
 exports.apiRouter.post('/rfps', async (c) => {
     try {
         const body = await c.req.json();
-        const refNum = 'AND/PROC/' + new Date().getFullYear() + '/' + String(Math.floor(Math.random() * 9000) + 1000);
+        const refNum = (0, index_1.getActiveProfile)().rfpRefPrefix + new Date().getFullYear() + '/' + String(Math.floor(Math.random() * 9000) + 1000);
         const r = await c.env.DB.prepare(`
       INSERT INTO rfps (ref_number, title, category, budget, deadline, scope, tech_requirements, objectives, background, arch_doc_text, rfp_currency, country_of_issue, upload_source, stage, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'created', 'draft', datetime('now'), datetime('now'))
@@ -453,7 +487,7 @@ exports.apiRouter.post('/rfps/:id/generate', async (c) => {
     }
     // Build the prompts (same as generateRFPWithLLM but without calling callLLM yet)
     const { systemPrompt, userPrompt } = buildRFPPrompt(body, archDocText, brdDocText, existingScoringMatrix, settings);
-    const apiKey = OPENAI_API_KEY_FALLBACK || c.env?.OPENAI_API_KEY || globalThis.OPENAI_API_KEY;
+    const apiKey = c.env?.OPENAI_API_KEY || globalThis.OPENAI_API_KEY || OPENAI_API_KEY_FALLBACK;
     const baseUrl = OPENAI_BASE_URL;
     if (!apiKey) {
         return c.json({ error: 'OPENAI_API_KEY not configured' }, 500);
@@ -522,8 +556,8 @@ exports.apiRouter.post('/rfps/:id/generate', async (c) => {
         try {
             // ── PHASE 1: Outline ────────────────────────────────────────────────────
             await sendProgress('outline', 'Generating document outline and shared vocabulary…');
-            const procEmail = settings?.procurement_email || 'procurement@andersenlab.com';
-            const issuerName = settings?.issuer_name || 'Andersen';
+            const procEmail = settings?.procurement_email || (0, index_1.getActiveProfile)().procurementEmail;
+            const issuerName = settings?.issuer_name || (0, index_1.getActiveProfile)().orgName;
             // Location: RFP's country_of_issue > rfp_currency map > settings > no hardcoded fallback
             const _bodyLoc = (body.country_of_issue || '').trim();
             const _bodyCur = (body.rfp_currency || '').toUpperCase().trim();
@@ -638,7 +672,7 @@ Project Kick-off: ${kickoff}`;
 }
 
 PROJECT DATA:
-RFP Reference: ${body.ref_number || 'AND/PROC/' + new Date().getFullYear() + '/TBD'}
+RFP Reference: ${body.ref_number || (0, index_1.getActiveProfile)().rfpRefPrefix + new Date().getFullYear() + '/TBD'}
 Title: ${body.title || 'Not specified'}
 Category: ${body.category || 'IT & Digital Transformation'}
 Issuer: ${issuerName}, ${issuerLoc}
@@ -1010,7 +1044,7 @@ exports.apiRouter.post('/rfps/upload-rfp-pdf', async (c) => {
             });
         }
         // (2) INSERT rfp immediately — title from filename, placeholder text, fields empty
-        const refNum = 'AND/PROC/' + new Date().getFullYear() + '/' + String(Math.floor(Math.random() * 9000) + 1000);
+        const refNum = (0, index_1.getActiveProfile)().rfpRefPrefix + new Date().getFullYear() + '/' + String(Math.floor(Math.random() * 9000) + 1000);
         const titleFromFilename = file.name.replace(/\.pdf$/i, '').replace(/[_-]+/g, ' ').replace(/\s{2,}/g, ' ').trim().slice(0, 120);
         const placeholder = `[PDF: ${file.name}, ${sizeKb}KB — OCR in progress...]`;
         const r = await c.env.DB.prepare(`
@@ -1498,7 +1532,7 @@ exports.apiRouter.post('/rfps/:id/rerun-phase3', async (c) => {
         // extractFocusedSection anchors to the requirements section; 8k covers 3-6 pages of dense text.
         const requirementsFocusText = extractFocusedSection(ocrText, ['shall', 'must ', 'mandatory', 'required', 'requirement', 'scope of work'], 8000);
         console.log(`[rerun-phase3] rfp=${rfpId} focus_len=${requirementsFocusText.length} — non-streaming single call`);
-        const apiKey = OPENAI_API_KEY_FALLBACK || c.env.OPENAI_API_KEY || globalThis.OPENAI_API_KEY;
+        const apiKey = c.env.OPENAI_API_KEY || globalThis.OPENAI_API_KEY || OPENAI_API_KEY_FALLBACK;
         const baseUrl = OPENAI_BASE_URL;
         const systemPrompt = `You are an expert procurement analyst. Extract vendor requirements from an RFP document.
 Return ONLY a valid JSON array — no markdown fences, no explanation, no extra text before or after.
@@ -1897,7 +1931,7 @@ exports.apiRouter.post('/rfps/:id/questions/publish-all', async (c) => {
 
 Please find attached the official consolidated Q&A Response document for:
 
-RFP Title:        ${rfp?.title || 'Andersen RFP'}
+RFP Title:        ${rfp?.title || `${(0, index_1.getActiveProfile)().orgName} RFP`}
 Reference Number: ${rfp?.ref_number || ''}
 
 This document consolidates all clarification questions submitted by all participating vendors, together with Andersen's official answers. The document is provided to all shortlisted vendors to ensure full transparency and equal access to information.
@@ -1908,8 +1942,8 @@ For any further queries, please reply to this email referencing your Participant
 
 Best regards,
 Procurement & Contracting Department
-Andersen${rfp?.country_of_issue ? ', ' + rfp.country_of_issue : ''}
-procurement@cpc-rfp.website
+${(0, index_1.getActiveProfile)().orgName}${rfp?.country_of_issue ? ', ' + rfp.country_of_issue : ''}
+${(0, index_1.getActiveProfile)().procurementEmail}
 
 ──────────────────────────────────────────────
 PARTICIPANT REFERENCE: ${participantCode}
@@ -1918,11 +1952,11 @@ Please include this reference code in ALL correspondence regarding this RFP.
             if (resendKey) {
                 try {
                     const emailPayload = {
-                        from: 'Andersen Procurement <procurement@cpc-rfp.website>',
+                        from: `${(0, index_1.getActiveProfile)().procurementEmailLabel} <${(0, index_1.getActiveProfile)().procurementEmail}>`,
                         to: [vendor.contact_email],
-                        subject: `Q&A Consolidated Response – ${rfp?.title || 'Andersen RFP'} (Ref: ${rfp?.ref_number || ''})`,
+                        subject: `Q&A Consolidated Response – ${rfp?.title || `${(0, index_1.getActiveProfile)().orgName} RFP`} (Ref: ${rfp?.ref_number || ''})`,
                         text: emailText,
-                        html: buildAndersenEmailHtml(emailText),
+                        html: buildProfileEmailHtml(emailText),
                         attachments: [{ filename: xlsxFilename, content: xlsxBase64 }],
                     };
                     const sendRes = await fetch('https://api.resend.com/emails', {
@@ -1935,7 +1969,7 @@ Please include this reference code in ALL correspondence regarding this RFP.
                         await c.env.DB.prepare(`
               INSERT INTO email_log (rfp_id, vendor_id, recipient, subject, body, email_type, status, has_attachment, created_at)
               VALUES (?,?,?,?,?,'qa_response','sent',1,datetime('now'))
-            `).bind(rfpId, vendor.id, vendor.contact_email, `Q&A Consolidated Response – ${rfp?.title || 'Andersen RFP'} (Ref: ${rfp?.ref_number || ''})`, emailText).run();
+            `).bind(rfpId, vendor.id, vendor.contact_email, `Q&A Consolidated Response – ${rfp?.title || `${(0, index_1.getActiveProfile)().orgName} RFP`} (Ref: ${rfp?.ref_number || ''})`, emailText).run();
                     }
                     else {
                         sentTo.push(vendor.contact_email + ' (send-failed)');
@@ -1951,7 +1985,7 @@ Please include this reference code in ALL correspondence regarding this RFP.
                 await c.env.DB.prepare(`
           INSERT INTO email_log (rfp_id, vendor_id, recipient, subject, body, email_type, status, has_attachment, created_at)
           VALUES (?,?,?,?,?,'qa_response','simulated',1,datetime('now'))
-        `).bind(rfpId, vendor.id, vendor.contact_email, `Q&A Consolidated Response – ${rfp?.title || 'Andersen RFP'} (Ref: ${rfp?.ref_number || ''})`, emailText).run();
+        `).bind(rfpId, vendor.id, vendor.contact_email, `Q&A Consolidated Response – ${rfp?.title || `${(0, index_1.getActiveProfile)().orgName} RFP`} (Ref: ${rfp?.ref_number || ''})`, emailText).run();
             }
         }
         // Mark all approved questions as emailed (both real sends and simulated — simulated = dev environment)
@@ -2013,7 +2047,7 @@ exports.apiRouter.post('/rfps/:id/emails/send-invitations', async (c) => {
         const isAndersenVendor = (v.contact_email || '').toLowerCase().includes('@andersenlab.com');
         if (isAndersenVendor) {
             // Real Andersen email — attempt actual delivery via Resend
-            const result = await sendRealEmail(v.contact_email, `Invitation to Tender – ${rfp?.title || 'Andersen RFP'} (Ref: ${rfp?.ref_number || ''})`, emailBody, rfp, c.env, pdfBase64, pdfFilename);
+            const result = await sendRealEmail(v.contact_email, `Invitation to Tender – ${rfp?.title || `${(0, index_1.getActiveProfile)().orgName} RFP`} (Ref: ${rfp?.ref_number || ''})`, emailBody, rfp, c.env, pdfBase64, pdfFilename);
             status = result.ok ? 'sent' : 'simulated';
             sendError = result.error || '';
             resendId = result.id;
@@ -2023,7 +2057,7 @@ exports.apiRouter.post('/rfps/:id/emails/send-invitations', async (c) => {
         await c.env.DB.prepare(`
       INSERT INTO email_log (rfp_id, vendor_id, recipient, subject, body, email_type, status, has_pdf, created_at)
       VALUES (?,?,?,?,?,'invitation',?,1,datetime('now'))
-    `).bind(rfpId, v.id, v.contact_email || 'contact@vendor.com', `Invitation to Tender – ${rfp?.title || 'Andersen RFP'} (Ref: ${rfp?.ref_number || ''})`, emailBody, status).run();
+    `).bind(rfpId, v.id, v.contact_email || 'contact@vendor.com', `Invitation to Tender – ${rfp?.title || `${(0, index_1.getActiveProfile)().orgName} RFP`} (Ref: ${rfp?.ref_number || ''})`, emailBody, status).run();
     }
     return c.json({ ok: true, results });
 });
@@ -2167,7 +2201,7 @@ exports.apiRouter.post('/webhook/inbound-email', async (c) => {
         cleanBody = cleanBody.trim();
         // LLM intent classification — runs for ALL emails with body text.
         let llmVerdict = 'NEUTRAL';
-        const openAiKey = OPENAI_API_KEY_FALLBACK || c.env.OPENAI_API_KEY || globalThis.OPENAI_API_KEY;
+        const openAiKey = c.env.OPENAI_API_KEY || globalThis.OPENAI_API_KEY || OPENAI_API_KEY_FALLBACK;
         const openAiBase = OPENAI_BASE_URL;
         if (openAiKey && cleanBody.length > 0) {
             try {
@@ -2225,7 +2259,7 @@ exports.apiRouter.post('/webhook/inbound-email', async (c) => {
         const insertResult = await db.prepare(`
       INSERT INTO email_log (rfp_id, vendor_id, recipient, from_email, subject, body, email_body_html, email_type, email_category, status, has_attachment, resend_email_id, created_at)
       VALUES (?,?,?,?,?,?,?,?,?,'received',?,?,datetime('now'))
-    `).bind(rfpId, vendorId, 'procurement@cpc-rfp.website', fromAddress, subject, bodyText.slice(0, 4000), bodyHtml.slice(0, 16000), emailTypeForLog, emailCategory, hasAttachment ? 1 : 0, emailId).run();
+    `).bind(rfpId, vendorId, (0, index_1.getActiveProfile)().procurementEmail, fromAddress, subject, bodyText.slice(0, 4000), bodyHtml.slice(0, 16000), emailTypeForLog, emailCategory, hasAttachment ? 1 : 0, emailId).run();
         const emailLogId = insertResult.meta.last_row_id;
         let newCount = 0;
         if (emailCategory === 'decline') {
@@ -2245,7 +2279,7 @@ exports.apiRouter.post('/webhook/inbound-email', async (c) => {
                 // Send auto-rejection email back to sender
                 const resendKey = c.env.RESEND_API_KEY || '';
                 if (resendKey && fromAddress && fromAddress.includes('@')) {
-                    const rfpTitle = rfp?.title || 'Andersen RFP';
+                    const rfpTitle = rfp?.title || `${(0, index_1.getActiveProfile)().orgName} RFP`;
                     const rfpRef = rfp?.ref_number || '';
                     const rejectionBody = `Dear ${vendorDisplayName},
 
@@ -2254,9 +2288,9 @@ Thank you for your enquiry regarding the following procurement:
 RFP Title:        ${rfpTitle}
 Reference Number: ${rfpRef}
 
-We regret to inform you that the Q&A period for this Request for Proposal has now closed. The Andersen is no longer able to accept or process clarification questions for this tender.
+We regret to inform you that the Q&A period for this Request for Proposal has now closed. ${(0, index_1.getActiveProfile)().orgName} is no longer able to accept or process clarification questions for this tender.
 
-All vendors have been provided with a consolidated Q&A response document containing answers to all submitted questions. If you have not received this document, please contact procurement@cpc-rfp.website referencing the RFP above.
+All vendors have been provided with a consolidated Q&A response document containing answers to all submitted questions. If you have not received this document, please contact ${(0, index_1.getActiveProfile)().procurementEmail} referencing the RFP above.
 
 Proposal submissions continue to be accepted until the stated deadline. Please refer to your original invitation letter for submission instructions and the deadline date.
 
@@ -2264,18 +2298,18 @@ We appreciate your interest in participating in this procurement and look forwar
 
 Best regards,
 Procurement & Contracting Department
-Andersen${rfp?.country_of_issue ? ', ' + rfp.country_of_issue : ''}
-procurement@cpc-rfp.website`;
+${(0, index_1.getActiveProfile)().orgName}${rfp?.country_of_issue ? ', ' + rfp.country_of_issue : ''}
+${(0, index_1.getActiveProfile)().procurementEmail}`;
                     try {
                         await fetch('https://api.resend.com/emails', {
                             method: 'POST',
                             headers: { 'Authorization': `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
                             body: JSON.stringify({
-                                from: 'Andersen Procurement <procurement@cpc-rfp.website>',
+                                from: `${(0, index_1.getActiveProfile)().procurementEmailLabel} <${(0, index_1.getActiveProfile)().procurementEmail}>`,
                                 to: [fromAddress],
                                 subject: `RE: ${subject || 'Q&A Query'} — Q&A Period Closed`,
                                 text: rejectionBody,
-                                html: buildAndersenEmailHtml(rejectionBody),
+                                html: buildProfileEmailHtml(rejectionBody),
                             }),
                         });
                     }
@@ -2285,7 +2319,7 @@ procurement@cpc-rfp.website`;
                 await db.prepare(`
           INSERT INTO email_log (rfp_id, vendor_id, recipient, from_email, subject, body, email_type, status, created_at)
           VALUES (?,?,?,?,?,?,'qa_rejection','sent',datetime('now'))
-        `).bind(rfpId, vendorId, fromAddress, 'procurement@cpc-rfp.website', `RE: ${subject} — Q&A Period Closed`, `Auto-reply sent: Q&A closed for RFP ${rfp?.ref_number}. Question from ${vendorDisplayName} rejected.`).run();
+        `).bind(rfpId, vendorId, fromAddress, (0, index_1.getActiveProfile)().procurementEmail, `RE: ${subject} — Q&A Period Closed`, `Auto-reply sent: Q&A closed for RFP ${rfp?.ref_number}. Question from ${vendorDisplayName} rejected.`).run();
                 return c.json({ ok: true, emailCategory: 'questions_rejected', note: 'Q&A is closed — auto-rejection sent to sender' });
             }
             // Q&A is open — Parse questions from email body
@@ -2390,7 +2424,7 @@ exports.apiRouter.post('/rfps/:id/vendors/:vendorId/reply', async (c) => {
         if (rfpVendorRow?.status === 'declined') {
             return c.json({ ok: false, error: `Cannot send email — ${vendor.name} has declined participation in this RFP.` }, 403);
         }
-        const replySubject = subject || `RE: Invitation to Tender – ${rfp?.title || 'Andersen RFP'} (Ref: ${rfp?.ref_number || ''})`;
+        const replySubject = subject || `RE: Invitation to Tender – ${rfp?.title || `${(0, index_1.getActiveProfile)().orgName} RFP`} (Ref: ${rfp?.ref_number || ''})`;
         const participantCode = buildParticipantCode(rfpId, vendorId);
         const replyFooter = `\n\n──────────────────────────────────────────────\nPARTICIPANT REFERENCE: ${participantCode}\nPlease include this reference code in ALL correspondence regarding this RFP.\n──────────────────────────────────────────────`;
         const fullBody = (text || '') + replyFooter;
@@ -2545,7 +2579,7 @@ exports.apiRouter.post('/rfps/:rfpId/proposals/:proposalId/award', async (c) => 
         await db.prepare(`
       INSERT INTO email_log (rfp_id, vendor_id, recipient, subject, body, email_type, status, created_at)
       VALUES (?,?,?,?,?,'award','simulated',datetime('now'))
-    `).bind(rfpId, proposal.vendor_id, vendor?.contact_email || '', `Contract Award Notification – ${rfp?.title || 'Andersen RFP'} (Ref: ${rfp?.ref_number || ''})`, `Contract has been awarded to ${vendor?.name || 'vendor'} (Proposal ID: ${proposalId}). RFP stage set to Awarded.`).run();
+    `).bind(rfpId, proposal.vendor_id, vendor?.contact_email || '', `Contract Award Notification – ${rfp?.title || `${(0, index_1.getActiveProfile)().orgName} RFP`} (Ref: ${rfp?.ref_number || ''})`, `Contract has been awarded to ${vendor?.name || 'vendor'} (Proposal ID: ${proposalId}). RFP stage set to Awarded.`).run();
         return c.json({ ok: true, proposalId, rfpId, stage: 'awarded', vendorName: vendor?.name });
     }
     catch (e) {
@@ -4502,7 +4536,7 @@ exports.apiRouter.post('/submit/:rfpId', async (c) => {
 // LLM INTEGRATION — used for RFP generation and Q&A drafting
 // ============================================================
 async function callLLM(systemPrompt, userPrompt, env, model = 'gpt-5.4-mini', maxTokens = 2000) {
-    const apiKey = OPENAI_API_KEY_FALLBACK || env?.OPENAI_API_KEY || globalThis.OPENAI_API_KEY;
+    const apiKey = env?.OPENAI_API_KEY || globalThis.OPENAI_API_KEY || OPENAI_API_KEY_FALLBACK;
     const baseUrl = OPENAI_BASE_URL;
     if (!apiKey)
         throw new Error('OPENAI_API_KEY not configured');
@@ -4587,17 +4621,18 @@ async function callLLM(systemPrompt, userPrompt, env, model = 'gpt-5.4-mini', ma
 // Used by the streaming generate route. generateRFPWithLLM wraps it for batch/test usage.
 // settings: optional key→value map from the settings table (procurement_email, issuer_name)
 function buildRFPPrompt(data, archDocText, brdDocText, scoringMatrixJson, settings) {
-    const procEmail = settings?.procurement_email || 'procurement@andersenlab.com';
-    const issuerName = settings?.issuer_name || 'Andersen';
+    const procEmail = settings?.procurement_email || (0, index_1.getActiveProfile)().procurementEmail;
+    const issuerName = settings?.issuer_name || (0, index_1.getActiveProfile)().orgName;
     // Location: RFP's country_of_issue > rfp_currency map > settings > sensible default (no hardcoded city)
     const _dataLoc = (data.country_of_issue || '').trim();
     const _dataCur = (data.rfp_currency || '').toUpperCase().trim();
     const _BRP_LOC_MAP = { AED: 'Dubai / Abu Dhabi, UAE', BHD: 'Manama, Bahrain', SAR: 'Riyadh, Saudi Arabia', QAR: 'Doha, Qatar', KWD: 'Kuwait City, Kuwait', OMR: 'Muscat, Oman', EGP: 'Cairo, Egypt', EUR: 'Western Europe', GBP: 'London, United Kingdom', INR: 'Bangalore, India' };
     const issuerLoc = _dataLoc || (_dataCur && _BRP_LOC_MAP[_dataCur]) || 'Dubai / Abu Dhabi, UAE';
-    const systemPrompt = `You are a senior government procurement specialist at the Andersen. You are producing a formal, comprehensive, publication-ready Request for Proposal (RFP) document issued to external vendors on official Andersen letterhead.
+    const profile = (0, index_1.getActiveProfile)();
+    const systemPrompt = `${profile.llm.procurementSpecialistRole} You are producing a formal, comprehensive, publication-ready Request for Proposal (RFP) document issued to external vendors on official letterhead.
 
 IDENTITY AND TONE
-- You write on behalf of the Andersen, a leading professional services firm.
+- You write on behalf of ${profile.orgName}. ${profile.llm.orgContext}
 - Language must be authoritative, precise, and formal, as if it will be signed and approved by a Director-General.
 - No filler sentences, no vague boilerplate. Every paragraph must contain actionable, verifiable requirements.
 - Write in formal English throughout. No abbreviations unless industry-standard.
@@ -4680,7 +4715,7 @@ Use ONLY the information provided below. Do not add anything not stated here or 
 ${'='.repeat(60)}
 PROJECT DETAILS
 ${'='.repeat(60)}
-RFP Reference:          ${data.ref_number || 'AND/PROC/' + new Date().getFullYear() + '/TBD'}
+RFP Reference:          ${data.ref_number || (0, index_1.getActiveProfile)().rfpRefPrefix + new Date().getFullYear() + '/TBD'}
 Title:                  ${data.title || 'Not specified'}
 Category:               ${data.category || 'IT & Digital Transformation'}
 Budget Envelope:        CONFIDENTIAL — DO NOT include any budget figure, budget ceiling, or indicative cost in the RFP document. The budget is used only for internal evaluation and must never appear in the text published to vendors.
@@ -4814,12 +4849,13 @@ async function draftAnswerLLM(question, rfp, env) {
             : '',
     ].filter(Boolean).join('\n\n---\n\n');
     const _qaIssuerLoc = (rfp?.country_of_issue || '').trim() || (rfp?.rfp_currency && { AED: 'UAE', BHD: 'Bahrain', SAR: 'Saudi Arabia', QAR: 'Qatar', KWD: 'Kuwait', OMR: 'Oman', EGP: 'Egypt', EUR: 'Europe', GBP: 'United Kingdom', INR: 'India' }[rfp.rfp_currency.toUpperCase()]) || '';
-    const systemPrompt = `You are ${rfp?.contact_name || 'the procurement manager'} at Andersen${_qaIssuerLoc ? ', ' + _qaIssuerLoc : ''}. You are personally answering vendor clarification questions about this RFP. Write as a real, senior government procurement professional who knows this project inside out — not as a generic system or AI assistant.
+    const _qProfile = (0, index_1.getActiveProfile)();
+    const systemPrompt = `You are ${rfp?.contact_name || 'the procurement manager'} at ${_qProfile.orgName}${_qaIssuerLoc ? ', ' + _qaIssuerLoc : ''}. You are personally answering vendor clarification questions about this RFP. Write as a real, senior government procurement professional who knows this project inside out — not as a generic system or AI assistant.
 
 TONE RULES (critical):
 - Write in first person where natural: "We require...", "Our team will...", "From our side..."
 - Be direct and specific — never hedge with phrases like "Based on standard enterprise practice", "While the RFP doesn't specify", "It is generally expected that", "Industry-standard practice suggests"
-- Sound like a human expert who lives and breathes this project, not a consultant producing boilerplate
+- Sound like a human expert at ${_qProfile.orgName} who lives and breathes this project, not a consultant producing boilerplate
 - Short, confident sentences. No throat-clearing. No caveats unless genuinely needed.
 - If a question has an obvious answer given the project context, just answer it plainly
 
@@ -4827,9 +4863,9 @@ ANSWERING RULES — apply in order:
 
 1. DIRECT ANSWER (preferred): If the answer is in the RFP, Architecture doc, BRD, or project fields — answer it directly and specifically. You may reference the section (e.g. "Section 3.2 covers this") but skip filler like "As explicitly stated in..."
 
-2. INFORMED ANSWER (use for most questions): If not explicitly documented but you can answer it confidently as a senior Andersen procurement manager familiar with professional services projects of this type — just answer it. Do NOT signal that you are inferring or that the RFP doesn't cover it.
+2. INFORMED ANSWER (use for most questions): If not explicitly documented but you can answer it confidently as a senior ${_qProfile.orgName} procurement manager familiar with professional services projects of this type — just answer it. Do NOT signal that you are inferring or that the RFP doesn't cover it.
 
-3. ESCALATE TO MANUAL REVIEW (last resort only — < 10% of questions): Only if the answer genuinely requires an undisclosed internal Andersen decision. Respond with exactly: "NEEDS_MANUAL_REVIEW: " followed by one sentence.
+3. ESCALATE TO MANUAL REVIEW (last resort only — < 10% of questions): Only if the answer genuinely requires an undisclosed internal ${_qProfile.orgName} decision. Respond with exactly: "NEEDS_MANUAL_REVIEW: " followed by one sentence.
 
 Never say "I don't know". Never say "Based on standard enterprise/industry practice". Never say "While the RFP doesn't specify". Answer like a human who owns this procurement.`;
     const userPrompt = `${context ? `CONTEXT DOCUMENTS:\n${context}\n\n---\n\n` : ''}VENDOR QUESTION:\n${question}`;
@@ -4839,17 +4875,17 @@ Never say "I don't know". Never say "Based on standard enterprise/industry pract
         if (trimmed.startsWith('NEEDS_MANUAL_REVIEW')) {
             const explanation = trimmed.replace(/^NEEDS_MANUAL_REVIEW[:\s]*/i, '').trim();
             return {
-                answer: explanation || 'This question requires a decision or clarification from the Andersen procurement team.',
+                answer: explanation || `This question requires a decision or clarification from the ${(0, index_1.getActiveProfile)().orgName} procurement team.`,
                 needsManual: true
             };
         }
         if (trimmed.length < 20) {
-            return { answer: 'This question requires manual review by the procurement team.', needsManual: true };
+            return { answer: `This question requires manual review by the ${_qProfile.orgName} procurement team.`, needsManual: true };
         }
         return { answer: trimmed, needsManual: false };
     }
     catch (llmErr) {
-        return { answer: 'LLM unavailable — please provide a manual answer for this question.', needsManual: true };
+        return { answer: `LLM unavailable — please provide a manual answer for this question.`, needsManual: true };
     }
 }
 // ============================================================
@@ -5227,11 +5263,11 @@ function generateRfpPdf(rfp) {
         // Sub-label
         s += `${FONT_REG} 8.5 Tf\n`;
         s += `${PW / 2 - 78} ${logoMidY + 2} Td\n`;
-        s += `(Warsaw · Berlin · London · New York) Tj\n`;
+        s += `(${(0, index_1.getActiveProfile)().orgLocation}) Tj\n`;
         // Contact line
         s += `${FONT_REG} 7.5 Tf\n`;
         s += `${PW / 2 - 70} ${logoMidY - 13} Td\n`;
-        s += `(procurement@andersenlab.com     \u2022     andersenlab.com) Tj\n`;
+        s += `(${(0, index_1.getActiveProfile)().procurementEmail}) Tj\n`;
         s += `ET\n`;
         // Thin gold rule below header band
         s += `1.0 0.859 0.0 RG\n0.75 w\n0 ${PH - HEADER_H - 2} m ${PW} ${PH - HEADER_H - 2} l S\n`;
@@ -5594,9 +5630,9 @@ function buildInvitationEmailText(v, rfp, qDeadline, sDeadline, notes, baseUrl) 
 We are pleased to invite ${v.name} to participate in the competitive tendering process for the following procurement:
 
 INVITATION TO TENDER
-RFP Title:        ${rfp?.title || 'Andersen RFP'}
+RFP Title:        ${rfp?.title || `${(0, index_1.getActiveProfile)().orgName} RFP`}
 Reference Number: ${rfp?.ref_number || 'N/A'}
-Issuing Entity:   Andersen${rfp?.country_of_issue ? ', ' + rfp.country_of_issue : ''}
+Issuing Entity:   ${(0, index_1.getActiveProfile)().orgName}${rfp?.country_of_issue ? ', ' + rfp.country_of_issue : ''}
 
 IMPORTANT DATES:
 - Questions Submission Deadline: ${qDeadline}
@@ -5623,9 +5659,9 @@ ${notes ? 'ADDITIONAL NOTES:\n' + notes + '\n\n' : ''}We look forward to receivi
 
 Best regards,
 Procurement & Contracting Department
-Andersen
-Warsaw · Berlin · London · New York
-procurement@cpc-rfp.website
+${(0, index_1.getActiveProfile)().orgName}
+${(0, index_1.getActiveProfile)().orgLocation}
+${(0, index_1.getActiveProfile)().procurementEmail}
 
 ──────────────────────────────────────────────
 PARTICIPANT REFERENCE: ${participantCode}
@@ -5635,7 +5671,7 @@ SUBMISSION PORTAL:     ${submissionUrl}
 /** Build the Andersen-branded HTML email wrapper around plain-text body content.
  *  Delegates to src/brand/letterhead.ts andersenEmailHtml() — single source of truth
  *  for the Andersen letterhead design (topo band, accent rule, navy footer). */
-function buildAndersenEmailHtml(bodyText, opts = {}) {
+function buildProfileEmailHtml(bodyText, opts = {}) {
     return (0, letterhead_1.andersenEmailHtml)({
         bodyText,
         subject: opts.subject,
@@ -5649,14 +5685,14 @@ async function sendRealEmail(to, subject, bodyText, rfp, env, pdfBase64, pdfFile
     if (!RESEND_API_KEY) {
         return { ok: false, error: 'RESEND_API_KEY not configured' };
     }
-    const htmlBody = buildAndersenEmailHtml(bodyText);
+    const htmlBody = buildProfileEmailHtml(bodyText);
     // Attach PDF if provided (base64 string from client-side html2pdf generation)
     const attachments = pdfBase64
         ? [{ filename: pdfFilenameHint || 'RFP_Document.pdf', content: pdfBase64 }]
         : [];
     try {
         const payload = {
-            from: 'Andersen Procurement <procurement@cpc-rfp.website>',
+            from: `${(0, index_1.getActiveProfile)().procurementEmailLabel} <${(0, index_1.getActiveProfile)().procurementEmail}>`,
             to: [to],
             subject: subject,
             text: bodyText,
@@ -6000,6 +6036,30 @@ exports.apiRouter.post('/submit/:rfpId/confirmation', async (c) => {
     }
     catch (e) {
         return c.json({ error: e.message }, 500);
+    }
+});
+// ── POST /api/admin/set-profile — PIN-protected profile switcher ─────────────
+exports.apiRouter.post('/admin/set-profile', async (c) => {
+    const { pin, profileId } = await c.req.json();
+    const DEMO_PIN = c.env?.DEMO_SWITCH_PIN || process.env.DEMO_SWITCH_PIN || '';
+    if (!DEMO_PIN || pin !== DEMO_PIN) {
+        return c.json({ ok: false, error: 'Invalid PIN' }, 403);
+    }
+    if (profileId !== 'andersen' && profileId !== 'cpc') {
+        return c.json({ ok: false, error: 'Invalid profileId — must be andersen or cpc' }, 400);
+    }
+    try {
+        const db = c.env.DB;
+        await db.prepare(`CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT NOT NULL)`).run();
+        await db.prepare(`INSERT INTO config (key, value) VALUES ('active_profile', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`).bind(profileId).run();
+        // Force immediate cache refresh
+        const { setActiveProfile, markRefreshed } = await Promise.resolve().then(() => __importStar(require('../profiles/index')));
+        setActiveProfile(profileId);
+        markRefreshed();
+        return c.json({ ok: true, activeProfile: profileId });
+    }
+    catch (err) {
+        return c.json({ ok: false, error: err.message }, 500);
     }
 });
 //# sourceMappingURL=index.js.map

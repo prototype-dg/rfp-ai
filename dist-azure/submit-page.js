@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getSubmitPage = getSubmitPage;
+const index_1 = require("./profiles/index");
 const brand_assets_1 = require("./brand-assets");
 function getSubmitPage(rfpId, participantCode) {
     return `<!DOCTYPE html>
@@ -8,12 +9,12 @@ function getSubmitPage(rfpId, participantCode) {
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Proposal Submission — Andersen</title>
+  <title>${(0, index_1.getActiveProfile)().vendorPortal.pageTitle}</title>
 
   <!-- Andersen Brand Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
-  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+Arabic:wght@300;400;500;700&display=swap" rel="stylesheet"/>
+  <link href="${(0, index_1.getActiveProfile)().fonts.googleFontsUrl}" rel="stylesheet"/>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css"/>
 
   <style>
@@ -706,9 +707,9 @@ function getSubmitPage(rfpId, participantCode) {
       padding: 0.75rem 1rem;
       margin-top: 0.75rem;
       background: #f5f0e8;
-      border: 1.5px solid #FFDB00;
+      border: 1.5px solid ${(0, index_1.getActiveProfile)().css.accent};
       border-radius: 8px;
-      color: #020D1C;
+      color: ${(0, index_1.getActiveProfile)().css.sidebarBg};
       font-weight: 600;
       font-size: 0.92rem;
       cursor: pointer;
@@ -721,14 +722,14 @@ function getSubmitPage(rfpId, participantCode) {
 <header class="header">
   <div class="header-inner">
     <!-- Full brand logo: yellow glyph + ANDERSEN wordmark in one PNG -->
-    <img src="${brand_assets_1.logoFullDataUri}" alt="Andersen" class="header-logo-full"/>
+    <img src="${(0, index_1.getActiveProfile)().id === 'cpc' ? (0, index_1.getActiveProfile)().logoPath : brand_assets_1.logoFullDataUri}" alt="${(0, index_1.getActiveProfile)().orgName}" class="header-logo-full"/>
     <div class="header-divider"></div>
     <div class="header-text">
       <div class="sub">Procurement Portal &nbsp;·&nbsp; Proposal Submission</div>
     </div>
     <div class="header-badge">
       <div class="secure-label"><i class="fas fa-lock"></i> Secure Submission</div>
-      <div class="location-label">Warsaw · Berlin · London · New York</div>
+      <div class="location-label">${(0, index_1.getActiveProfile)().orgLocation}</div>
     </div>
   </div>
 </header>
@@ -770,13 +771,13 @@ function getSubmitPage(rfpId, participantCode) {
     <div class="success-icon"><i class="fas fa-check"></i></div>
     <h2>Proposal Successfully Submitted</h2>
     <p>
-      Thank you for submitting your proposal to the Andersen procurement process.
+      Thank you for submitting your proposal to the ${(0, index_1.getActiveProfile)().orgName} procurement process.
       Your submission has been received and securely recorded. Our evaluation team will review
       all proposals and notify shortlisted vendors of the next steps.
     </p>
     <p style="margin-top:10px">
       Please retain this confirmation for your records. For enquiries, contact us at
-      <strong>procurement@andersenlab.com</strong>, quoting your participant reference.
+      <strong>${(0, index_1.getActiveProfile)().procurementEmail}</strong>, quoting your participant reference.
     </p>
     <div class="success-ref">
       <div class="ref-label">Participant Reference</div>
@@ -876,7 +877,7 @@ function getSubmitPage(rfpId, participantCode) {
 <!-- ── Footer ── -->
 <footer class="page-footer">
   <div class="footer-left">
-    © Andersen · andersenlab.com<br/>
+    © ${(0, index_1.getActiveProfile)().orgName} · ${(0, index_1.getActiveProfile)().orgLocation}<br/>
     AI RFP Management System
   </div>
   <div class="footer-right">
