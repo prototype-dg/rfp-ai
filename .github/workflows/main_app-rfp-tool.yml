@@ -3,6 +3,13 @@ name: Deploy to Azure App Service
 on:
   workflow_dispatch:
 
+# Cancel any in-progress run on the same branch when a new run starts.
+# This prevents duplicate concurrent deployments (both push and dispatch triggers
+# can no longer overlap — the older run is cancelled automatically).
+concurrency:
+  group: azure-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   deploy:
     runs-on: ubuntu-latest   # MUST be Linux — better-sqlite3 native binary is Linux-only
