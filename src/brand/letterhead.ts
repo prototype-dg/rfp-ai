@@ -674,25 +674,21 @@ export function profilePdfBodyHtml(opts: {
   /* Two-zone layout: top margin = header zone (15%), no bottom chrome */
   @page { size: A4; margin: ${CPC_HDR_MM} ${CPC_SIDE_MM} ${CPC_BOT_MM} ${CPC_SIDE_MM}; }
 
-  /* Header zone: fixed, 794×168px, pulled into @page top margin — repeats every page */
+  /* Header zone: fixed, pulled into @page top margin — repeats every page.
+     Use background-image (not <img>) so Puppeteer renders synchronously.
+     left/right negative offsets expand to full A4 width; no explicit px width. */
   .cpc-pdf-hd {
     position: fixed;
     top: -${CPC_HDR_MM};
     left: -${CPC_SIDE_MM};
     right: -${CPC_SIDE_MM};
-    width: 794px;
     height: 168px;
+    background-image: url('${cpcHeaderDataUri}');
+    background-size: 100% 100%;
+    background-repeat: no-repeat;
+    background-position: top center;
     overflow: hidden;
     z-index: 1000;
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
-  }
-  .cpc-pdf-hd img {
-    display: block;
-    width: 794px;
-    height: 168px;
-    object-fit: cover;
-    object-position: top center;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
@@ -725,9 +721,7 @@ export function profilePdfBodyHtml(opts: {
 </head>
 <body>
 <!-- CPC Header zone: fixed at top, repeats on every PDF page -->
-<div class="cpc-pdf-hd">
-  <img src="${cpcHeaderDataUri}" alt="Crown Prince's Court" />
-</div>
+<div class="cpc-pdf-hd"></div>
 <!-- Content zone: 85% of A4 — bounded by @page top margin above -->
 <div class="cpc-pdf-body">
   ${opts.bodyHtml}
@@ -768,7 +762,9 @@ export function profilePageHtml(opts: {
   const year     = new Date().getFullYear()
 
   // Header block injected into every page card
-  const cpcPageHeaderHtml = `<div class="cpc-pg-hd" style="width:100%;height:168px;overflow:hidden;flex-shrink:0;"><img src="${cpcHeaderDataUri}" style="display:block;width:794px;height:168px;object-fit:cover;object-position:top center;" alt="Crown Prince's Court" /></div>`
+  // Header image: width:100% fills the 794px page card; height:auto preserves
+  // the natural aspect ratio so it scales correctly in any viewport/iframe.
+  const cpcPageHeaderHtml = `<div class="cpc-pg-hd" style="width:100%;overflow:hidden;flex-shrink:0;"><img src="${cpcHeaderDataUri}" style="display:block;width:100%;height:auto;" alt="Crown Prince's Court" /></div>`
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -791,9 +787,9 @@ export function profilePageHtml(opts: {
     overflow: hidden;
     page-break-after: always;
   }
-  /* Header zone: 15% = 168px */
-  .cpc-pg-hd { flex: 0 0 168px; width: 100%; overflow: hidden; }
-  .cpc-pg-hd img { display:block; width:794px; height:168px; object-fit:cover; object-position:top center; }
+  /* Header zone: width:100% of the 794px card; height follows natural image aspect ratio */
+  .cpc-pg-hd { flex: 0 0 auto; width: 100%; overflow: hidden; }
+  .cpc-pg-hd img { display:block; width:100%; height:auto; }
   /* Content zone: 85% = 955px — flex:1 fills remaining space (no footer div) */
   .cpc-pg-body {
     flex: 1 1 auto;
