@@ -2398,7 +2398,7 @@ apiRouter.get('/debug/budget-eval/:proposalId', async (c) => {
     try {
       scoringMatrixParsed = JSON.parse(rfp?.scoring_matrix || '[]')
       if (scoringMatrixParsed.length > 0) {
-        const cc = scoringMatrixParsed.find((x: any) => /commercial|cost competitiveness|price/i.test(x.criterion || x.name || ''))
+        const cc = scoringMatrixParsed.find((x: any) => /commercial|financial|cost.competitiveness|pricing?|budget/i.test(x.criterion || x.name || ''))
         if (cc) commercialWeight = Number(cc.weight) || 10
         const allW = scoringMatrixParsed.reduce((s: number, x: any) => s + (Number(x.weight) || 0), 0)
         if (allW > 0) technicalTotal = allW - commercialWeight
@@ -3016,7 +3016,7 @@ Respond ONLY with JSON: {"is_proposal": true|false, "reason": "<one sentence, ma
     const matrixArr: any[] = JSON.parse(rfp.scoring_matrix || '[]')
     if (matrixArr.length > 0) {
       const commercialCrit = matrixArr.find((c: any) =>
-        /commercial|cost competitiveness|price/i.test(c.criterion || c.name || '')
+        /commercial|financial|cost.competitiveness|pricing?|budget/i.test(c.criterion || c.name || '')
       )
       if (commercialCrit) {
         commercialWeight = Number(commercialCrit.weight) || 10
