@@ -3482,18 +3482,13 @@ apiRouter.post('/rfps/:rfpId/proposals/evaluate-all', async (c) => {
       return c.json({ blocked: true, message: 'Proposals are still being prepared (OCR in progress). Please wait a moment and try again.' })
     }
 
-    let evaluated = 0
-    let skipped   = 0
-    const results: any[] = []
-
-    for (const proposal of proposals) {
-      try {
+    // Run all proposals in parallel — each evaluateProposal() is an independent LLM call
+    const settled = await Promise.allSettled(
+      proposals.map(async (proposal: any) => {
         const evalResult = await evaluateProposal(proposal, rfp, c.env)
 
         if (evalResult.validation_status === 'OCR_PENDING') {
-          skipped++
-          results.push({ id: proposal.id, status: 'skipped', reason: 'OCR_PENDING' })
-          continue
+          return { id: proposal.id, status: 'skipped', reason: 'OCR_PENDING' }
         }
 
         await c.env.DB.prepare(`
@@ -3509,14 +3504,23 @@ apiRouter.post('/rfps/:rfpId/proposals/evaluate-all', async (c) => {
           proposal.id
         ).run()
 
-        evaluated++
-        results.push({ id: proposal.id, status: 'evaluated', score: evalResult.total_score, recommendation: evalResult.recommendation })
-      } catch (evalErr: any) {
-        console.error(`[evaluate-all] proposalId=${proposal.id} error: ${evalErr.message}`)
+        return { id: proposal.id, status: 'evaluated', score: evalResult.total_score, recommendation: evalResult.recommendation }
+      })
+    )
+
+    let evaluated = 0
+    let skipped   = 0
+    const results = settled.map(s => {
+      if (s.status === 'rejected') {
+        console.error(`[evaluate-all] error: ${(s as PromiseRejectedResult).reason?.message}`)
         skipped++
-        results.push({ id: proposal.id, status: 'error', reason: evalErr.message })
+        return { status: 'error', reason: (s as PromiseRejectedResult).reason?.message }
       }
-    }
+      const r = (s as PromiseFulfilledResult<any>).value
+      if (r.status === 'evaluated') evaluated++
+      else skipped++
+      return r
+    })
 
     return c.json({ evaluated, skipped, results })
   } catch (e: any) {
@@ -4003,31 +4007,37 @@ apiRouter.post('/submit/:rfpId/finalize', async (c) => {
 
   // Fire OCR for all files in parallel (background, non-blocking)
   ;(async () => {
-    for (const att of storedAttachments) {
-      const filePdfUrl = `${workerBase}/proposals/pdf/${encodeURIComponent(att.r2_key)}`
-      try {
-        const result = await runInlineOcr(filePdfUrl, c.env, 100)
+    await Promise.allSettled(
+      storedAttachments.map(async (att) => {
+        const filePdfUrl = `${workerBase}/proposals/pdf/${encodeURIComponent(att.r2_key)}`
         const label    = att.label || 'other'
         const filename = att.filename || 'document.pdf'
-        let fileText: string
-        if (result && result.chars >= 100) {
-          fileText = `=== FILE: ${filename} [label: ${label}] (${result.pages_extracted}/${result.pages_total} pages, ${result.chars} chars) ===\n\n${result.text}`
-        } else {
-          fileText = `=== FILE: ${filename} [label: ${label}] — OCR yielded ${result?.chars ?? 0} chars ===`
+        try {
+          const result = await runInlineOcr(filePdfUrl, c.env, 100)
+          let fileText: string
+          if (result && result.chars >= 100) {
+            fileText = `=== FILE: ${filename} [label: ${label}] (${result.pages_extracted}/${result.pages_total} pages, ${result.chars} chars) ===
+
+${result.text}`
+          } else {
+            fileText = `=== FILE: ${filename} [label: ${label}] — OCR yielded ${result?.chars ?? 0} chars ===`
+          }
+          // Serialise DB writes — read-modify-write must not race between parallel files
+          const existing2 = await c.env.DB.prepare(`SELECT proposal_full_text FROM proposals WHERE id=?`).bind(proposalId).first<any>()
+          const merged = ((existing2?.proposal_full_text || '') + '\n\n' + fileText).slice(0, 200000).trim()
+          await c.env.DB.prepare(`UPDATE proposals SET proposal_full_text=?, updated_at=datetime('now') WHERE id=?`).bind(merged, proposalId).run()
+          await c.env.DB.prepare(`UPDATE proposals SET ocr_pending_files=MAX(0,COALESCE(ocr_pending_files,1)-1), updated_at=datetime('now') WHERE id=?`).bind(proposalId).run()
+          console.log(`[finalize-ocr] proposal=${proposalId} file=${filename} chars=${result?.chars ?? 0}`)
+        } catch (e: any) {
+          console.error(`[finalize-ocr] proposal=${proposalId} file=${att.filename} error:`, e.message)
+          await c.env.DB.prepare(`UPDATE proposals SET ocr_pending_files=MAX(0,COALESCE(ocr_pending_files,1)-1), updated_at=datetime('now') WHERE id=?`).bind(proposalId).run().catch(() => {})
         }
-        const existing2 = await c.env.DB.prepare(`SELECT proposal_full_text FROM proposals WHERE id=?`).bind(proposalId).first<any>()
-        const merged = ((existing2?.proposal_full_text || '') + '\n\n' + fileText).slice(0, 200000).trim()
-        await c.env.DB.prepare(`UPDATE proposals SET proposal_full_text=?, updated_at=datetime('now') WHERE id=?`).bind(merged, proposalId).run()
-        await c.env.DB.prepare(`UPDATE proposals SET ocr_pending_files=MAX(0,COALESCE(ocr_pending_files,1)-1), updated_at=datetime('now') WHERE id=?`).bind(proposalId).run()
-        const fresh2 = await c.env.DB.prepare(`SELECT ocr_pending_files, proposal_full_text FROM proposals WHERE id=?`).bind(proposalId).first<any>()
-        if ((fresh2?.ocr_pending_files ?? 0) === 0 && (fresh2?.proposal_full_text?.length || 0) > 100) {
-          await c.env.DB.prepare(`UPDATE proposals SET status='ready_for_evaluation', updated_at=datetime('now') WHERE id=?`).bind(proposalId).run()
-        }
-        console.log(`[finalize-ocr] proposal=${proposalId} file=${filename} chars=${result?.chars ?? 0}`)
-      } catch (e: any) {
-        console.error(`[finalize-ocr] proposal=${proposalId} file=${att.filename} error:`, e.message)
-        await c.env.DB.prepare(`UPDATE proposals SET ocr_pending_files=MAX(0,COALESCE(ocr_pending_files,1)-1), updated_at=datetime('now') WHERE id=?`).bind(proposalId).run().catch(() => {})
-      }
+      })
+    )
+    // After all OCR jobs settle, check if proposal is ready
+    const fresh2 = await c.env.DB.prepare(`SELECT ocr_pending_files, proposal_full_text FROM proposals WHERE id=?`).bind(proposalId).first<any>()
+    if ((fresh2?.ocr_pending_files ?? 0) === 0 && (fresh2?.proposal_full_text?.length || 0) > 100) {
+      await c.env.DB.prepare(`UPDATE proposals SET status='ready_for_evaluation', updated_at=datetime('now') WHERE id=?`).bind(proposalId).run()
     }
   })()
 
