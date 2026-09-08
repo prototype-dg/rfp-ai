@@ -3424,6 +3424,106 @@ ${proposalText.slice(0, 30_000)}${proposalText.length > 30_000 ? '\n\n[... text 
   }
 }
 
+// ── POST /api/rfps/:rfpId/proposals/:proposalId/evaluate — evaluate single proposal ──
+apiRouter.post('/rfps/:rfpId/proposals/:proposalId/evaluate', async (c) => {
+  const rfpId      = c.req.param('rfpId')
+  const proposalId = c.req.param('proposalId')
+  try {
+    const rfp      = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(rfpId).first<any>()
+    if (!rfp) return c.json({ error: 'RFP not found' }, 404)
+    const proposal = await c.env.DB.prepare('SELECT * FROM proposals WHERE id=?').bind(proposalId).first<any>()
+    if (!proposal) return c.json({ error: 'Proposal not found' }, 404)
+
+    const evalResult = await evaluateProposal(proposal, rfp, c.env)
+
+    if (evalResult.validation_status === 'OCR_PENDING') {
+      return c.json({ ok: false, status: 'OCR_PENDING', message: evalResult.recommendation_reasoning })
+    }
+
+    await c.env.DB.prepare(`
+      UPDATE proposals SET
+        ai_total_score=?, ai_recommendation=?, ai_validation_status=?,
+        ai_evaluated_at=datetime('now'), evaluation_data=?, updated_at=datetime('now')
+      WHERE id=?
+    `).bind(
+      evalResult.total_score ?? null,
+      evalResult.recommendation ?? null,
+      evalResult.validation_status ?? null,
+      JSON.stringify(evalResult),
+      proposalId
+    ).run()
+
+    return c.json({ ok: true, evaluation: evalResult })
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500)
+  }
+})
+
+// ── POST /api/rfps/:rfpId/proposals/evaluate-all — bulk evaluate all proposals ──
+apiRouter.post('/rfps/:rfpId/proposals/evaluate-all', async (c) => {
+  const rfpId = c.req.param('rfpId')
+  try {
+    const rfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(rfpId).first<any>()
+    if (!rfp) return c.json({ error: 'RFP not found' }, 404)
+
+    const rows = await c.env.DB.prepare(
+      `SELECT * FROM proposals WHERE rfp_id=? AND status != 'draft'`
+    ).bind(rfpId).all<any>()
+    const proposals: any[] = rows.results || []
+
+    if (proposals.length === 0) return c.json({ evaluated: 0, skipped: 0, results: [] })
+
+    // Check if ALL proposals are still OCR-pending — return blocked so UI shows a wait message
+    const allPending = proposals.every((p: any) => {
+      const text = (p.proposal_full_text || p.technical_proposal || '').trim()
+      return text.length < 200
+    })
+    if (allPending) {
+      return c.json({ blocked: true, message: 'Proposals are still being prepared (OCR in progress). Please wait a moment and try again.' })
+    }
+
+    let evaluated = 0
+    let skipped   = 0
+    const results: any[] = []
+
+    for (const proposal of proposals) {
+      try {
+        const evalResult = await evaluateProposal(proposal, rfp, c.env)
+
+        if (evalResult.validation_status === 'OCR_PENDING') {
+          skipped++
+          results.push({ id: proposal.id, status: 'skipped', reason: 'OCR_PENDING' })
+          continue
+        }
+
+        await c.env.DB.prepare(`
+          UPDATE proposals SET
+            ai_total_score=?, ai_recommendation=?, ai_validation_status=?,
+            ai_evaluated_at=datetime('now'), evaluation_data=?, updated_at=datetime('now')
+          WHERE id=?
+        `).bind(
+          evalResult.total_score ?? null,
+          evalResult.recommendation ?? null,
+          evalResult.validation_status ?? null,
+          JSON.stringify(evalResult),
+          proposal.id
+        ).run()
+
+        evaluated++
+        results.push({ id: proposal.id, status: 'evaluated', score: evalResult.total_score, recommendation: evalResult.recommendation })
+      } catch (evalErr: any) {
+        console.error(`[evaluate-all] proposalId=${proposal.id} error: ${evalErr.message}`)
+        skipped++
+        results.push({ id: proposal.id, status: 'error', reason: evalErr.message })
+      }
+    }
+
+    return c.json({ evaluated, skipped, results })
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500)
+  }
+})
+
 // ── GET /api/rfps/:rfpId/proposals/:proposalId/evaluation — fetch results ────
 apiRouter.get('/rfps/:rfpId/proposals/:proposalId/evaluation', async (c) => {
   const proposalId = c.req.param('proposalId')
