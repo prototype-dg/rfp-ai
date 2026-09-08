@@ -444,6 +444,29 @@ apiRouter.put('/rfps/:id', async (c) => {
   }
 })
 
+// POST /rfps/:id/stage — advance (or set) the RFP workflow stage
+// Called by advanceRfpStage() in the frontend for: published, qa_open,
+// submissions_closed, etc.  The 'awarded' transition goes through the
+// separate /proposals/:id/award endpoint which also records the winner.
+const VALID_STAGES = ['draft', 'published', 'qa_open', 'submissions_closed', 'evaluation', 'awarded']
+apiRouter.post('/rfps/:id/stage', async (c) => {
+  try {
+    const id   = c.req.param('id')
+    const body = await c.req.json()
+    const stage: string = body.stage
+    if (!stage || !VALID_STAGES.includes(stage)) {
+      return c.json({ error: `Invalid stage "${stage}". Must be one of: ${VALID_STAGES.join(', ')}` }, 400)
+    }
+    await c.env.DB.prepare(`UPDATE rfps SET stage=?, updated_at=datetime('now') WHERE id=?`)
+      .bind(stage, id).run()
+    const rfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(id).first()
+    if (!rfp) return c.json({ error: 'RFP not found' }, 404)
+    return c.json(rfp)
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500)
+  }
+})
+
 // Save scoring matrix separately (lightweight, no full PUT needed)
 apiRouter.post('/rfps/:id/scoring-matrix', async (c) => {
   try {
