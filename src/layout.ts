@@ -167,8 +167,9 @@ export function getLayout(): string {
       padding: 18px 16px 14px;
       border-bottom: 1px solid ${isCpc ? '#E9DCC4' : 'rgba(255,255,255,0.08)'};
       display: flex;
-      flex-direction: column;
-      gap: 6px;
+      flex-direction: ${isCpc ? 'row' : 'column'};
+      align-items: ${isCpc ? 'center' : 'flex-start'};
+      gap: ${isCpc ? '10px' : '6px'};
     }
     /* Full logo: icon + wordmark in one image (landscape, e.g. Andersen 1024×267) */
     .sidebar-logo-full {
@@ -182,11 +183,37 @@ export function getLayout(): string {
     /* Square/portrait emblem variant (e.g. CPC emblem PNG) */
     .sidebar-logo-emblem {
       display: block;
-      height: 52px;
-      width: 52px;
+      height: 46px;
+      width: 46px;
       object-fit: contain;
       object-position: center;
-      margin-bottom: 2px;
+      flex-shrink: 0;
+    }
+    /* CPC: org name block sitting to the right of the emblem */
+    .cpc-org-name {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 0;
+    }
+    .cpc-org-name .cpc-name-en {
+      font-family: ${p.fonts.display};
+      font-size: 13.5px;
+      font-weight: 600;
+      color: #3A332B;
+      line-height: 1.2;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .cpc-org-name .cpc-name-ar {
+      font-family: ${p.fonts.arabic};
+      font-size: 11px;
+      font-weight: 400;
+      color: #745B35;
+      line-height: 1.3;
+      direction: rtl;
+      text-align: left;
     }
     .sidebar-wordmark .wm-product {
       font-family: ${p.fonts.body};
@@ -1429,11 +1456,16 @@ export function getLayout(): string {
   <aside class="cpc-sidebar">
     <!-- Brand -->
     <div class="sidebar-brand">
-      <!-- Brand logo — profile-driven: landscape wordmark (Andersen) or square emblem (CPC) -->
+      <!-- Brand logo — profile-driven: landscape wordmark (Andersen) or square emblem + name (CPC) -->
       <img src="${p.logoPath}" alt="${p.logoAlt}" class="${isCpc ? 'sidebar-logo-emblem' : 'sidebar-logo-full'}">
+      ${isCpc ? `
+      <div class="cpc-org-name">
+        <span class="cpc-name-en">Crown Prince's Court</span>
+        <span class="cpc-name-ar">ديوان ولي العهد</span>
+      </div>` : `
       <div class="sidebar-wordmark">
         <div class="wm-product" data-i18n="product_name">AI RFP Management</div>
-      </div>
+      </div>`}
     </div>
 
     <!-- Navigation -->
