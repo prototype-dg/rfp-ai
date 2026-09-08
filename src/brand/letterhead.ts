@@ -711,6 +711,100 @@ export function profilePdfBodyHtml(opts: {
 </html>`
 }
 
+/**
+ * profilePageHtml — generates a full A4 HTML page for browser preview / print fallback.
+ * Andersen: existing topo-band letterhead (andersenPageHtml).
+ * CPC:      clean ivory page with CPC header bar and profile fonts.
+ */
+export function profilePageHtml(opts: {
+  title:       string
+  bodyHtml:    string
+  logo?:       string
+  email?:      string
+  refNumber?:  string
+  showToolbar?: boolean
+}): string {
+  const p = getActiveProfile()
+  if (p.id === 'andersen') {
+    return andersenPageHtml(opts)
+  }
+  // ── CPC page HTML ─────────────────────────────────────────────────────────
+  const title = escHtml(opts.title || 'RFP')
+  const ref   = escHtml(opts.refNumber || '')
+  const email = opts.email || p.procurementEmail
+  const year  = new Date().getFullYear()
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=794,initial-scale=1"/>
+<title>${title}</title>
+<link href="${p.fonts.googleFontsUrl}" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #F0EDE8; font-family: ${p.fonts.body}; font-size: 10.5pt; line-height: 1.65; color: ${p.css.ink}; }
+  .cpc-pg-wrap { width: 794px; margin: 24px auto; background: #fff; box-shadow: 0 2px 12px rgba(0,0,0,0.12); }
+  .cpc-pg-hd   { background: ${p.css.sidebarBg}; border-bottom: 3px solid ${p.css.accent}; padding: 18px 48px; display: flex; align-items: center; justify-content: space-between; }
+  .cpc-pg-hd-l { font-family: ${p.fonts.display}; font-size: 17px; font-weight: 700; color: ${p.css.accent}; }
+  .cpc-pg-hd-sub { font-size: 10px; color: ${p.css.accent}99; margin-top: 3px; font-family: ${p.fonts.mono}; letter-spacing: 0.08em; text-transform: uppercase; }
+  .cpc-pg-hd-r { font-family: ${p.fonts.mono}; font-size: 9px; color: ${p.css.accent}cc; text-align: right; letter-spacing: 0.06em; text-transform: uppercase; }
+  .cpc-pg-body { padding: 32px 48px 24px; }
+  .cpc-pg-ft   { background: ${p.css.accentTint}; border-top: 1px solid ${p.css.accentLine}; padding: 12px 48px; display: flex; align-items: center; justify-content: space-between; }
+  .cpc-pg-ft-l { font-size: 9px; color: ${p.css.inkMid}; font-family: ${p.fonts.mono}; letter-spacing: 0.06em; }
+  .cpc-pg-ft-r { font-size: 9px; color: ${p.css.inkMuted}; font-family: ${p.fonts.mono}; }
+  h1 { font-family: ${p.fonts.display}; font-size: 18pt; font-weight: 700; border-bottom: 2px solid ${p.css.accent}; padding-bottom: 6pt; margin: 0 0 14pt; }
+  h2 { font-size: 12pt; font-weight: 700; color: ${p.css.ink}; border-bottom: 1px solid ${p.css.line}; margin: 14pt 0 5pt; padding-bottom: 3pt; }
+  h3 { font-size: 10.5pt; font-weight: 700; color: ${p.css.inkMid}; margin: 10pt 0 3pt; }
+  h4 { font-size: 10pt; font-weight: 600; color: ${p.css.inkMuted}; margin: 8pt 0 2pt; }
+  p  { margin: 0 0 7pt; }
+  ul, ol { margin: 0 0 7pt; padding-left: 20pt; }
+  li { margin-bottom: 2pt; }
+  hr { border: none; border-top: 2px solid ${p.css.accent}; margin: 16pt 0; }
+  table { width: 100%; border-collapse: collapse; font-size: 9.5pt; margin: 8pt 0 12pt; }
+  th { background: ${p.css.sidebarBg}; color: ${p.css.accent}; font-weight: 700; padding: 6pt 10pt; text-align: left; border: 1px solid ${p.css.sidebarBg}; }
+  td { padding: 5pt 10pt; border: 1px solid ${p.css.line}; vertical-align: top; }
+  tr:nth-child(even) td { background: ${p.css.accentTint}; }
+  blockquote { border-left: 4px solid ${p.css.accent}; margin: 8pt 0; padding: 6pt 12pt; background: ${p.css.accentTint}; }
+  code { font-family: ${p.fonts.mono}; font-size: 9pt; background: #f3f4f6; padding: 1pt 3pt; border-radius: 2pt; }
+  pre  { background: #f3f4f6; padding: 10pt; border-radius: 4pt; margin: 8pt 0; overflow-x: auto; }
+  * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+  @media print { body { background: #fff; } .cpc-pg-wrap { box-shadow: none; margin: 0; } .no-print { display: none !important; } }
+</style>
+</head>
+<body>
+${opts.showToolbar ? `
+<div class="no-print" style="position:fixed;top:0;left:0;right:0;z-index:9999;background:${p.css.sidebarBg};color:${p.css.accent};padding:10px 24px;display:flex;align-items:center;justify-content:space-between;font-family:Arial,sans-serif;font-size:13px;box-shadow:0 2px 8px rgba(0,0,0,0.3)">
+  <div style="display:flex;align-items:center;gap:12px">
+    <span style="font-weight:700;letter-spacing:.05em">${p.orgNameShort} \u2014 RFP Document</span>
+    <span style="opacity:.6;font-size:11px">${ref}</span>
+  </div>
+  <div style="display:flex;gap:10px">
+    <button onclick="window.print()" style="background:${p.css.accent};color:${p.css.sidebarBg};border:none;padding:7px 20px;border-radius:5px;font-size:13px;font-weight:600;cursor:pointer">&#x2193; Save as PDF / Print</button>
+    <button onclick="window.close()" style="background:transparent;color:${p.css.inkMuted};border:1px solid ${p.css.line};padding:7px 14px;border-radius:5px;font-size:12px;cursor:pointer">Close</button>
+  </div>
+</div>
+<div class="no-print" style="height:52px"></div>
+` : ''}
+<div class="cpc-pg-wrap">
+  <div class="cpc-pg-hd">
+    <div>
+      <div class="cpc-pg-hd-l">${escHtml(p.orgName)}</div>
+      <div class="cpc-pg-hd-sub">Procurement &amp; Contracting Department</div>
+    </div>
+    <div class="cpc-pg-hd-r">${ref ? `REF: ${ref}` : escHtml(p.orgLocation)}</div>
+  </div>
+  <div class="cpc-pg-body">
+    ${opts.bodyHtml}
+  </div>
+  <div class="cpc-pg-ft">
+    <div class="cpc-pg-ft-l">${escHtml(email)}</div>
+    <div class="cpc-pg-ft-r">&copy; ${year} ${escHtml(p.orgNameShort)} &mdash; Confidential</div>
+  </div>
+</div>
+</body>
+</html>`
+}
+
 // ── Internal: HTML entity escape ─────────────────────────────────────────────
 function escHtml(s: string): string {
   return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')

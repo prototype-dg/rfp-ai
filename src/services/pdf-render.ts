@@ -169,8 +169,9 @@ function buildPuppeteerTemplates(opts: { ref_number?: string }): {
   headerTemplate: string
   footerTemplate: string
 } {
-  const refBadge = opts.ref_number ? String(opts.ref_number) : 'Andersen · Est. 2007'
-  const email = 'procurement@cpc-rfp.website'
+  const profile = getActiveProfile()
+  const refBadge = opts.ref_number ? String(opts.ref_number) : `${profile.orgNameShort} · ${profile.orgLocation.split(',')[0]}`
+  const email = profile.procurementEmail
   const year  = new Date().getFullYear()
 
   const svgContent = buildHeaderSvg(refBadge)
@@ -242,20 +243,29 @@ body { background: #fff; margin: 0; padding: 0; }
 }
 
 // ── buildPreviewHtml ──────────────────────────────────────────────────────────
-// Paginated letterhead HTML preview — JS paginator distributes content across
-// simulated A4 page cards, each with the full Andersen letterhead.
-// (Ported 1-to-1 from server.js buildPreviewHtml, ~240 lines of inline JS)
-export function buildPreviewHtml(
+// Profile-aware preview HTML:
+//   Andersen: paginated JS letterhead preview (simulated A4 page cards).
+//   CPC:      single-page profilePageHtml from brand/letterhead.
+export async function buildPreviewHtml(
   markdown: string,
   opts: { ref_number?: string; rfp_title?: string }
-): string {
-  const rfpTitle  = opts.rfp_title  ? escHtml(opts.rfp_title)  : 'Request for Proposal'
-  const refNumber = opts.ref_number ? escHtml(opts.ref_number) : ''
+): Promise<string> {
+  const profile  = getActiveProfile()
+  const rfpTitle = opts.rfp_title || 'Request for Proposal'
 
   marked.setOptions({ gfm: true, breaks: false } as any)
   const bodyHtml = marked.parse(markdown || '') as string
 
-  // Letterhead header HTML (injected into every A4 page card)
+  if (profile.id !== 'andersen') {
+    // Non-Andersen profiles: use profilePageHtml for a properly branded page
+    const { profilePageHtml } = await import('../brand/letterhead')
+    return profilePageHtml({ title: rfpTitle, bodyHtml, refNumber: opts.ref_number })
+  }
+
+  const rfpTitleEsc  = escHtml(rfpTitle)
+  const refNumber    = opts.ref_number ? escHtml(opts.ref_number) : ''
+
+  // Letterhead header HTML (injected into every A4 page card — Andersen only)
   const svgContent = buildHeaderSvg(refNumber || undefined)
   const svgDataUri = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgContent)
   const pageHeaderHtml = `<div class="a-pg-hd"><img src="${svgDataUri}" width="794" height="87" style="display:block;width:100%;height:auto;"/></div>`
@@ -265,7 +275,7 @@ export function buildPreviewHtml(
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=794,initial-scale=1"/>
-<title>${rfpTitle}</title>
+<title>${rfpTitleEsc}</title>
 <style>
 ${TYPOGRAPHY_CSS}
 html, body { background: #e5e7eb; margin: 0; padding: 0; }
@@ -305,7 +315,7 @@ html, body { background: #e5e7eb; margin: 0; padding: 0; }
   var BODY_PAD_T  = 20;
   var BODY_PAD_LR = 60;
   var BODY_H      = PAGE_H - HDR_H - FTR_H - BODY_PAD_T;
-  var email       = 'procurement@cpc-rfp.website';
+  var email       = ${JSON.stringify(getActiveProfile().procurementEmail)};
   var year        = new Date().getFullYear();
   var pageHeaderHtml = ${JSON.stringify(pageHeaderHtml)};
 
@@ -314,9 +324,9 @@ html, body { background: #e5e7eb; margin: 0; padding: 0; }
       '<div class="a-pg-ft-left">' +
         '<div><span class="a-pg-ft-lbl">Contact</span><span class="a-pg-ft-val">' + email + '</span></div>' +
         '<div class="a-pg-ft-sep"></div>' +
-        '<div><span class="a-pg-ft-lbl">Offices</span><span class="a-pg-ft-val">Warsaw · Berlin · London · NY</span></div>' +
+        '<div><span class="a-pg-ft-lbl">Offices</span><span class="a-pg-ft-val">${getActiveProfile().orgLocation}</span></div>' +
       '</div>' +
-      '<div><span class="a-pg-ft-lbl" style="text-align:right">© Andersen ' + year + '</span>' +
+      '<div><span class="a-pg-ft-lbl" style="text-align:right">© ${getActiveProfile().orgNameShort} ' + year + '</span>' +
         '<span class="a-pg-ft-page">Page ' + pgNum + ' of ' + total + '</span></div>' +
     '</div>';
   }

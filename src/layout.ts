@@ -206,7 +206,7 @@ export function getLayout(): string {
     /* Nav */
     .sidebar-nav { flex: 1; padding: 12px 8px; }
     .nav-section-label {
-      font-family: 'JetBrains Mono', monospace;
+      font-family: var(--font-mono);
       font-size: 10px;
       font-weight: 500;
       letter-spacing: 0.18em;
@@ -268,7 +268,7 @@ export function getLayout(): string {
       display: flex;
       align-items: center;
       justify-content: center;
-      font-family: 'JetBrains Mono', monospace;
+      font-family: var(--font-mono);
       font-size: 10px;
       font-weight: 500;
       color: var(--a-yellow);
@@ -281,7 +281,7 @@ export function getLayout(): string {
       line-height: 1.2;
     }
     .user-info .user-role {
-      font-family: 'JetBrains Mono', monospace;
+      font-family: var(--font-mono);
       font-size: 10px;
       letter-spacing: 0.06em;
       text-transform: uppercase;
@@ -314,14 +314,14 @@ export function getLayout(): string {
     }
     .header-left { display: flex; align-items: center; gap: 12px; }
     .header-page-title {
-      font-family: 'Roboto', sans-serif;
+      font-family: var(--font-body);
       font-weight: 700;
       font-size: 22px;
       color: var(--a-ink);
       line-height: 1.2;
     }
     .header-page-subtitle {
-      font-family: 'JetBrains Mono', monospace;
+      font-family: var(--font-mono);
       font-size: 11px;
       letter-spacing: 0.10em;
       text-transform: uppercase;
@@ -330,7 +330,7 @@ export function getLayout(): string {
     }
     .header-right { display: flex; align-items: center; gap: 12px; }
     .header-date {
-      font-family: 'JetBrains Mono', monospace;
+      font-family: var(--font-mono);
       font-size: 12px;
       letter-spacing: 0.05em;
       color: var(--a-slate);
@@ -347,7 +347,7 @@ export function getLayout(): string {
       border: 1px solid var(--a-line);
       border-radius: 4px;
       background: #FFFFFF;
-      font-family: 'JetBrains Mono', monospace;
+      font-family: var(--font-mono);
       font-size: 11px;
       font-weight: 500;
       letter-spacing: 0.10em;
@@ -381,7 +381,7 @@ export function getLayout(): string {
       align-items: center;
       gap: 8px;
       padding: 8px 12px;
-      font-family: 'JetBrains Mono', monospace;
+      font-family: var(--font-mono);
       font-size: 11px;
       font-weight: 400;
       letter-spacing: 0.08em;
@@ -447,7 +447,7 @@ export function getLayout(): string {
       display: none;
       align-items: center;
       justify-content: center;
-      font-family: 'JetBrains Mono', monospace;
+      font-family: var(--font-mono);
       font-size: 9px;
       font-weight: 500;
       border: 2px solid var(--cpc-paper);
@@ -564,7 +564,7 @@ export function getLayout(): string {
       border-bottom: 1px solid var(--a-line);
       background: transparent;
       color: var(--a-ink);
-      font-family: 'Roboto', sans-serif;
+      font-family: var(--font-body);
       outline: none;
       box-sizing: border-box;
     }
@@ -638,14 +638,14 @@ export function getLayout(): string {
       display: flex;
       align-items: center;
       justify-content: center;
-      font-family: 'JetBrains Mono', monospace;
+      font-family: var(--font-mono);
       font-size: 11px;
       font-weight: 500;
       flex-shrink: 0;
       border: 2px solid transparent;
     }
     .lc-label {
-      font-family: 'JetBrains Mono', monospace;
+      font-family: var(--font-mono);
       font-size: 11px;
       letter-spacing: 0.04em;
       text-transform: uppercase;
@@ -680,7 +680,7 @@ export function getLayout(): string {
       border: 1px solid #FFE963;
       border-radius: 4px;
       padding: 4px 14px;
-      font-family: 'JetBrains Mono', monospace;
+      font-family: var(--font-mono);
       font-size: 10px;
       letter-spacing: 0.06em;
       color: var(--a-charcoal);
@@ -739,7 +739,7 @@ export function getLayout(): string {
       gap: 6px;
       white-space: nowrap;
       transition: color 0.15s;
-      font-family: 'Roboto', sans-serif;
+      font-family: var(--font-body);
     }
     .rfp-tab:hover { color: var(--a-ink); }
     .rfp-tab.active { color: var(--a-ink); border-bottom-color: var(--a-yellow); font-weight: 500; }
@@ -826,7 +826,7 @@ export function getLayout(): string {
       border-radius: 4px;
       padding: 10px 20px;
       border: 1px solid var(--a-yellow);
-      font-family: 'Roboto', sans-serif;
+      font-family: var(--font-body);
       font-size: 14px;
       cursor: pointer;
       display: inline-flex;
@@ -845,7 +845,7 @@ export function getLayout(): string {
       border-radius: 4px;
       padding: 10px 20px;
       border: 1px solid var(--a-ink);
-      font-family: 'Roboto', sans-serif;
+      font-family: var(--font-body);
       font-size: 14px;
       cursor: pointer;
       display: inline-flex;
@@ -862,7 +862,7 @@ export function getLayout(): string {
       border-radius: 4px;
       padding: 10px 20px;
       border: 1px solid var(--a-line);
-      font-family: 'Roboto', sans-serif;
+      font-family: var(--font-body);
       font-size: 14px;
       cursor: pointer;
       display: inline-flex;
@@ -879,7 +879,7 @@ export function getLayout(): string {
       border-radius: 4px;
       padding: 10px 20px;
       border: 1px solid var(--status-err-fg);
-      font-family: 'Roboto', sans-serif;
+      font-family: var(--font-body);
       font-size: 14px;
       cursor: pointer;
       display: inline-flex;
@@ -903,7 +903,7 @@ export function getLayout(): string {
       align-items: center;
       gap: 6px;
       font-size: 12px;
-      font-family: 'Roboto', sans-serif;
+      font-family: var(--font-body);
       transition: background 0.2s;
     }
     .award-btn:hover { background: var(--a-yellow-hover); border-color: var(--a-yellow-hover); }
@@ -940,7 +940,7 @@ export function getLayout(): string {
       border-radius: 8px 0 0 8px;
     }
     .stat-value {
-      font-family: 'Roboto', sans-serif;
+      font-family: var(--font-body);
       font-weight: 700;
       font-size: 36px;
       line-height: 1.1;
@@ -949,7 +949,7 @@ export function getLayout(): string {
       letter-spacing: -0.02em;
     }
     .stat-label {
-      font-family: 'JetBrains Mono', monospace;
+      font-family: var(--font-mono);
       font-size: 11px;
       letter-spacing: 0.10em;
       text-transform: uppercase;
@@ -963,7 +963,7 @@ export function getLayout(): string {
       align-items: center;
       gap: 4px;
       color: var(--a-slate);
-      font-family: 'Roboto', sans-serif;
+      font-family: var(--font-body);
     }
 
     /* ── STAGE BADGES — rectangular (4px radius), Andersen style ── */
@@ -971,7 +971,7 @@ export function getLayout(): string {
       display: inline-block;
       padding: 3px 10px;
       border-radius: 4px;
-      font-family: 'JetBrains Mono', monospace;
+      font-family: var(--font-mono);
       font-size: 11px;
       font-weight: 500;
       letter-spacing: 0.05em;
@@ -992,7 +992,7 @@ export function getLayout(): string {
       color: var(--a-slate);
       padding: 11px 16px;
       text-align: left;
-      font-family: 'JetBrains Mono', monospace;
+      font-family: var(--font-mono);
       font-size: 12px;
       font-weight: 400;
       letter-spacing: 0.10em;
@@ -1004,7 +1004,7 @@ export function getLayout(): string {
       border-bottom: 1px solid var(--a-line);
       font-size: 14px;
       color: var(--a-ink);
-      font-family: 'Roboto', sans-serif;
+      font-family: var(--font-body);
       vertical-align: middle;
     }
     tbody tr:nth-child(even) td { background: var(--a-pale); }
@@ -1013,7 +1013,7 @@ export function getLayout(): string {
 
     /* Mono ID chips in tables */
     .id-chip {
-      font-family: 'JetBrains Mono', monospace;
+      font-family: var(--font-mono);
       font-size: 11px;
       background: var(--a-pale);
       color: var(--a-charcoal);
@@ -1030,7 +1030,7 @@ export function getLayout(): string {
       padding: 10px 14px;
       width: 100%;
       font-size: 14px;
-      font-family: 'Roboto', sans-serif;
+      font-family: var(--font-body);
       outline: none;
       transition: border-color 0.2s, box-shadow 0.2s;
       background: var(--cpc-paper);
@@ -1042,7 +1042,7 @@ export function getLayout(): string {
       box-shadow: 0 0 0 2px var(--a-yellow);
     }
     label {
-      font-family: 'JetBrains Mono', monospace;
+      font-family: var(--font-mono);
       font-weight: 400;
       font-size: 12px;
       letter-spacing: 0.08em;
@@ -1139,7 +1139,7 @@ export function getLayout(): string {
       padding: 16px 20px;
     }
     .ai-label {
-      font-family: 'JetBrains Mono', monospace;
+      font-family: var(--font-mono);
       font-size: 10px;
       letter-spacing: 0.16em;
       text-transform: uppercase;
@@ -1149,7 +1149,7 @@ export function getLayout(): string {
     }
     .ai-label::before { content: 'AI · '; color: var(--a-yellow); font-weight: 700; }
     .ai-meta {
-      font-family: 'JetBrains Mono', monospace;
+      font-family: var(--font-mono);
       font-size: 10px;
       color: var(--a-slate);
       letter-spacing: 0.06em;
@@ -1165,13 +1165,13 @@ export function getLayout(): string {
       border-bottom: 2px solid var(--a-yellow);
     }
     .sec-num {
-      font-family: 'JetBrains Mono', monospace;
+      font-family: var(--font-mono);
       font-size: 11px;
       color: var(--a-slate);
       letter-spacing: 0.15em;
     }
     .sec-title {
-      font-family: 'Roboto', sans-serif;
+      font-family: var(--font-body);
       font-weight: 700;
       font-size: 22px;
       color: var(--a-ink);
@@ -1181,7 +1181,7 @@ export function getLayout(): string {
 
     /* Page-level heading */
     .page-heading {
-      font-family: 'Roboto', sans-serif;
+      font-family: var(--font-body);
       font-weight: 700;
       font-size: 28px;
       color: var(--a-ink);
@@ -1190,7 +1190,7 @@ export function getLayout(): string {
       letter-spacing: -0.01em;
     }
     .page-sub {
-      font-family: 'JetBrains Mono', monospace;
+      font-family: var(--font-mono);
       font-size: 11px;
       letter-spacing: 0.1em;
       text-transform: uppercase;
@@ -1210,7 +1210,7 @@ export function getLayout(): string {
       padding: 3px 10px;
       border-radius: 4px;
       font-size: 11px;
-      font-family: 'JetBrains Mono', monospace;
+      font-family: var(--font-mono);
       letter-spacing: 0.04em;
       margin: 2px 2px;
       border: 1px solid #FFE963;
@@ -1232,7 +1232,7 @@ export function getLayout(): string {
     .space-y-6 > * + * { margin-top: 1.5rem; }
 
     /* ── PERF BADGE ── */
-    .perf-badge { padding: 3px 8px; border-radius: 4px; font-size: 10px; font-weight: 500; font-family: 'JetBrains Mono', monospace; letter-spacing: 0.05em; border: 1px solid transparent; }
+    .perf-badge { padding: 3px 8px; border-radius: 4px; font-size: 10px; font-weight: 500; font-family: var(--font-mono); letter-spacing: 0.05em; border: 1px solid transparent; }
     .perf-high  { background: var(--status-ok-bg); color: var(--status-ok-fg); border-color: #BBF7D0; }
     .perf-mid   { background: #FEF9C3; color: #854D0E; border-color: #FDE047; }
     .perf-low   { background: var(--status-err-bg); color: var(--status-err-fg); border-color: #FECDD3; }
@@ -1242,7 +1242,7 @@ export function getLayout(): string {
       display: inline-flex;
       align-items: center;
       gap: 5px;
-      font-family: 'JetBrains Mono', monospace;
+      font-family: var(--font-mono);
       font-size: 10px;
       font-weight: 500;
       letter-spacing: 0.05em;
@@ -1263,7 +1263,7 @@ export function getLayout(): string {
       display: flex;
       align-items: center;
       gap: 6px;
-      font-family: 'JetBrains Mono', monospace;
+      font-family: var(--font-mono);
       font-size: 10px;
       letter-spacing: 0.12em;
       text-transform: uppercase;
@@ -1283,7 +1283,7 @@ export function getLayout(): string {
 
     /* ── RFP DOCUMENT STYLES ── */
     .rfp-doc {
-      font-family: 'Roboto', Arial, sans-serif;
+      font-family: var(--font-body);
       color: #1A1A1A;
       max-width: 860px;
       margin: 0 auto;

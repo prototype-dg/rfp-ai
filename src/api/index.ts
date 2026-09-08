@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { initDb, seedVendors } from '../db/seed'
 import type { Bindings } from '../types'
-import { andersenEmailHtml, andersenPageHtml, profileEmailHtml, profilePdfBodyHtml } from '../brand/letterhead'
+import { andersenEmailHtml, andersenPageHtml, profileEmailHtml, profilePdfBodyHtml, profilePageHtml } from '../brand/letterhead'
 import { getActiveProfile } from '../profiles/index'
 import { renderMarkdownToPdf, buildPreviewHtml, warmupBrowser } from '../services/pdf-render'
 import { extractTextFromPdf } from '../services/ocr'
@@ -237,7 +237,7 @@ apiRouter.get('/rfps/:id/preview-html', async (c) => {
   const rfpTitle  = (rfp as any).title as string || 'Request for Proposal'
 
   try {
-    const html = buildPreviewHtml(markdown, { ref_number: refNumber, rfp_title: rfpTitle })
+    const html = await buildPreviewHtml(markdown, { ref_number: refNumber, rfp_title: rfpTitle })
     return new Response(html, {
       status: 200,
       headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' },
@@ -245,7 +245,7 @@ apiRouter.get('/rfps/:id/preview-html', async (c) => {
   } catch (err: any) {
     console.error('[preview-html] inline render error:', err.message)
     // Fallback — client-side marked.js
-    const fallbackHtml = andersenPageHtml({
+    const fallbackHtml = profilePageHtml({
       title:    rfpTitle,
       refNumber,
       bodyHtml: `<div id="md-content"></div>
@@ -284,7 +284,8 @@ apiRouter.get('/rfps/:id/pdf', async (c) => {
   if (!(rfp as any).content) return c.json({ error: 'RFP has no generated content yet' }, 400)
 
   const safeRef  = ((rfp as any).ref_number || String(id)).replace(/\//g, '_').replace(/[^a-zA-Z0-9_\-]/g, '')
-  const filename = `Andersen_RFP_${safeRef}.pdf`
+  const orgSlug  = getActiveProfile().orgNameShort.replace(/[^a-zA-Z0-9]/g, '')
+  const filename = `${orgSlug}_RFP_${safeRef}.pdf`
   const markdown  = (rfp as any).content as string
   const refNumber = (rfp as any).ref_number as string || ''
   const rfpTitle  = (rfp as any).title as string || 'Request for Proposal'
@@ -303,7 +304,7 @@ apiRouter.get('/rfps/:id/pdf', async (c) => {
   } catch (err: any) {
     console.error('[pdf-render] inline render failed, falling back to print-HTML:', err.message)
     // Fallback: browser-print HTML page
-    const printHtml = andersenPageHtml({
+    const printHtml = profilePageHtml({
       title:       rfpTitle,
       refNumber,
       showToolbar: true,
@@ -1641,7 +1642,7 @@ Please find attached the official consolidated Q&A Response document for:
 RFP Title:        ${rfp?.title || `${getActiveProfile().orgName} RFP`}
 Reference Number: ${rfp?.ref_number || ''}
 
-This document consolidates all clarification questions submitted by all participating vendors, together with Andersen's official answers. The document is provided to all shortlisted vendors to ensure full transparency and equal access to information.
+This document consolidates all clarification questions submitted by all participating vendors, together with the official answers from ${getActiveProfile().orgName}. The document is provided to all shortlisted vendors to ensure full transparency and equal access to information.
 
 Please review the attached Excel file carefully and incorporate the clarifications into your proposal submission.
 
@@ -3380,7 +3381,7 @@ apiRouter.post('/rfps/:rfpId/market-benchmark', async (c) => {
     const settingsRows = await db.prepare(`SELECT key, value FROM settings`).all().catch(() => ({ results: [] }))
     const settings: Record<string, string> = {}
     for (const r of (settingsRows.results || [])) { settings[(r as any).key] = (r as any).value }
-    const issuerName = settings?.issuer_name     || 'Andersen'
+    const issuerName = settings?.issuer_name     || getActiveProfile().orgName
 
     // ── Determine region and currency from the RFP itself (v100) ─────────────────
     // Priority: rfp.country_of_issue → rfp.rfp_currency → settings.issuer_location → fallback
@@ -4276,10 +4277,10 @@ ${'='.repeat(60)}
 
 1. PROJECT BACKGROUND AND CONTEXT
    Expand into 4–6 substantial paragraphs:
-   - Organisational context: what the Andersen is, the new operating unit being established, its position within Andersen Oracle ERP environment.
-   - Current-state problem: describe the fragmented data landscape in specific terms — which source systems hold which data, what the operational impact is (reporting delays, reconciliation burden, inconsistent KPIs, reliance on BI Publisher static reports).
+   - Organisational context: who the issuing organisation is, the new operating unit being established, and its position within the organisation's existing ERP/technology environment.
+   - Current-state problem: describe the fragmented data landscape in specific terms — which source systems hold which data, what the operational impact is (reporting delays, reconciliation burden, inconsistent KPIs, reliance on static reports).
    - Strategic mandate: why this initiative was commissioned, what governance or leadership directive drives it.
-   - Why external vendor engagement is required: specific capability gap that Andersen cannot address internally.
+   - Why external vendor engagement is required: specific capability gap that the organisation cannot address internally.
    - Closing sentence: state exactly what this RFP is soliciting.
    Write at least 400 words for this section.
 
@@ -4293,7 +4294,7 @@ ${'='.repeat(60)}
    a) A descriptive sub-heading
    b) An introductory paragraph (2–4 sentences) explaining what this workstream covers and why it is critical
    c) A detailed bullet list of specific activities, inputs, tools, and methods — be specific about source systems, data volumes, layer names, tool names
-   d) Specific acceptance criteria for this workstream (what Andersen will test or verify before sign-off)
+   d) Specific acceptance criteria for this workstream (what the issuing organisation will test or verify before sign-off)
    e) A "Key Deliverables" line listing formal deliverable artifacts
    Include at minimum these sub-sections (add more if the supporting documents indicate additional scope):
    - Architecture Design and Data Platform Build
@@ -4795,7 +4796,7 @@ function generateRfpPdf(rfp: any): Uint8Array {
     const logoMidY = PH - HEADER_H + (HEADER_H - 28) / 2
     s += `BT\n${FONT_BOLD} 13 Tf\n`
     s += `${PW/2 - 120} ${logoMidY + 18} Td\n`
-    s += `(ANDERSEN) Tj\n`
+    s += `(${getActiveProfile().orgNameShort.toUpperCase()}) Tj\n`
     // Sub-label
     s += `${FONT_REG} 8.5 Tf\n`
     s += `${PW/2 - 78} ${logoMidY + 2} Td\n`
@@ -5217,11 +5218,11 @@ SUBMISSION PORTAL:     ${submissionUrl}
 ──────────────────────────────────────────────`
 }
 
-/** Build the Andersen-branded HTML email wrapper around plain-text body content.
- *  Delegates to src/brand/letterhead.ts andersenEmailHtml() — single source of truth
- *  for the Andersen letterhead design (topo band, accent rule, navy footer). */
+/** Build the profile-branded HTML email wrapper around plain-text body content.
+ *  Routes to the correct brand template via profileEmailHtml() — Andersen topo
+ *  letterhead or CPC dark-header template depending on active profile. */
 function buildProfileEmailHtml(bodyText: string, opts: { refNumber?: string; subject?: string } = {}): string {
-  return andersenEmailHtml({
+  return profileEmailHtml({
     bodyText,
     subject:   opts.subject,
     refNumber: opts.refNumber,

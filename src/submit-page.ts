@@ -2,17 +2,19 @@ import { getActiveProfile } from './profiles/index'
 import { logoFullDataUri, bgDarkDataUri, bgLightDataUri } from './brand-assets'
 
 export function getSubmitPage(rfpId: string, participantCode: string): string {
+  const p = getActiveProfile()
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>${getActiveProfile().vendorPortal.pageTitle}</title>
+  <meta name="theme-color" content="${p.faviconColor}"/>
+  <title>${p.vendorPortal.pageTitle}</title>
 
-  <!-- Andersen Brand Fonts -->
+  <!-- Brand Fonts (profile-specific) -->
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
-  <link href="${getActiveProfile().fonts.googleFontsUrl}" rel="stylesheet"/>
+  <link href="${p.fonts.googleFontsUrl}" rel="stylesheet"/>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css"/>
 
   <style>
@@ -24,7 +26,7 @@ export function getSubmitPage(rfpId: string, participantCode: string): string {
     }
   </style>
   <style>
-    /* ── Andersen Design Tokens ── */
+    /* ── Base Design Tokens (Andersen defaults) ── */
     :root {
       --cpc-gold:        #FFDB00;
       --cpc-gold-deep:   #3A3E45;
@@ -42,16 +44,38 @@ export function getSubmitPage(rfpId: string, participantCode: string): string {
       --cpc-error:       #8B2020;
       --cpc-error-bg:    #FDF2F2;
       --cpc-error-bdr:   #F5C0C0;
-      /* Andersen primaries */
       --a-yellow:        #FFDB00;
       --a-navy:          #020D1C;
       --a-ink:           #020303;
       --a-charcoal:      #3A3E45;
-
       --font-display: 'Roboto', system-ui, sans-serif;
       --font-body:    'Roboto', system-ui, sans-serif;
       --font-mono:    'JetBrains Mono', 'Courier New', monospace;
       --font-arabic:  'Noto Sans Arabic', sans-serif;
+    }
+    /* ── PROFILE DESIGN TOKEN OVERRIDES ── injected server-side per active profile ── */
+    :root {
+      --cpc-gold:        ${p.css.accent};
+      --cpc-gold-deep:   ${p.css.accentDeep};
+      --cpc-gold-tint:   ${p.css.accentTint};
+      --cpc-gold-line:   ${p.css.accentLine};
+      --cpc-ivory:       ${p.css.accentTint};
+      --cpc-ink:         ${p.css.ink};
+      --cpc-ink-mid:     ${p.css.inkMid};
+      --cpc-ink-muted:   ${p.css.inkMuted};
+      --cpc-line:        ${p.css.line};
+      --cpc-success:     ${p.css.successFg};
+      --cpc-success-bg:  ${p.css.successBg};
+      --cpc-error:       ${p.css.errorFg};
+      --cpc-error-bg:    ${p.css.errorBg};
+      --a-yellow:        ${p.css.accent};
+      --a-navy:          ${p.css.sidebarBg};
+      --a-ink:           ${p.css.ink};
+      --a-charcoal:      ${p.css.accentDeep};
+      --font-display: ${p.fonts.display};
+      --font-body:    ${p.fonts.body};
+      --font-mono:    ${p.fonts.mono};
+      --font-arabic:  ${p.fonts.arabic || p.fonts.body};
     }
 
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -59,7 +83,7 @@ export function getSubmitPage(rfpId: string, participantCode: string): string {
     body {
       font-family: var(--font-body);
       /* Light wave-line brand texture — inlined as data URI for guaranteed rendering */
-      background: #EFEFEF var(--brand-bg-light) center top / cover fixed;
+      background: ${p.css.pageBg} var(--brand-bg-light) center top / cover fixed;
       min-height: 100vh;
       color: var(--cpc-ink);
       -webkit-font-smoothing: antialiased;
@@ -69,7 +93,7 @@ export function getSubmitPage(rfpId: string, participantCode: string): string {
     .header {
       /* Gradient overlay dims the charcoal texture; right-align shows the flame lines */
       background:
-        linear-gradient(180deg, rgba(2,13,28,0.72) 0%, rgba(2,13,28,0.60) 100%),
+        linear-gradient(180deg, ${p.css.sidebarBg}d4 0%, ${p.css.sidebarBg}c8 100%),
         var(--brand-bg-dark) right center / auto 100% no-repeat;
       border-bottom: 4px solid var(--a-yellow);
       padding: 0;
@@ -79,7 +103,7 @@ export function getSubmitPage(rfpId: string, participantCode: string): string {
       content: '';
       position: absolute;
       inset: 0;
-      background: rgba(2,13,28,0.68);
+      background: ${p.css.sidebarBg}ad;
       pointer-events: none;
     }
     .header-inner {
@@ -92,7 +116,7 @@ export function getSubmitPage(rfpId: string, participantCode: string): string {
       align-items: center;
       gap: 24px;
     }
-    /* Full logo PNG (icon glyph + ANDERSEN wordmark) — 1024×267 landscape */
+    /* Brand logo — profile-driven sizing (landscape wordmark vs square emblem) */
     .header-logo-full {
       display: block;
       height: 40px;
@@ -112,7 +136,7 @@ export function getSubmitPage(rfpId: string, participantCode: string): string {
     .header-text .sub {
       font-family: var(--font-mono);
       font-size: 0.65rem;
-      color: rgba(255,219,0,0.85);
+      color: ${p.css.accent}cc;
       letter-spacing: 0.16em;
       text-transform: uppercase;
     }
@@ -126,7 +150,7 @@ export function getSubmitPage(rfpId: string, participantCode: string): string {
     .header-badge .secure-label {
       font-family: var(--font-mono);
       font-size: 0.6rem;
-      color: rgba(255,219,0,0.85);
+      color: ${p.css.accent}cc;
       letter-spacing: 0.12em;
       text-transform: uppercase;
       display: flex;
@@ -705,9 +729,9 @@ export function getSubmitPage(rfpId: string, participantCode: string): string {
       padding: 0.75rem 1rem;
       margin-top: 0.75rem;
       background: #f5f0e8;
-      border: 1.5px solid ${getActiveProfile().css.accent};
+      border: 1.5px solid ${p.css.accent};
       border-radius: 8px;
-      color: ${getActiveProfile().css.sidebarBg};
+      color: ${p.css.sidebarBg};
       font-weight: 600;
       font-size: 0.92rem;
       cursor: pointer;
@@ -719,15 +743,15 @@ export function getSubmitPage(rfpId: string, participantCode: string): string {
 <!-- ── Header ── -->
 <header class="header">
   <div class="header-inner">
-    <!-- Full brand logo: yellow glyph + ANDERSEN wordmark in one PNG -->
-    <img src="${getActiveProfile().id === 'cpc' ? getActiveProfile().logoPath : logoFullDataUri}" alt="${getActiveProfile().orgName}" class="header-logo-full"/>
+    <!-- Brand logo — profile-driven -->
+    <img src="${p.id === 'cpc' ? p.logoPath : logoFullDataUri}" alt="${p.orgName}" class="header-logo-full"/>
     <div class="header-divider"></div>
     <div class="header-text">
       <div class="sub">Procurement Portal &nbsp;·&nbsp; Proposal Submission</div>
     </div>
     <div class="header-badge">
       <div class="secure-label"><i class="fas fa-lock"></i> Secure Submission</div>
-      <div class="location-label">${getActiveProfile().orgLocation}</div>
+      <div class="location-label">${p.orgLocation}</div>
     </div>
   </div>
 </header>
@@ -769,13 +793,13 @@ export function getSubmitPage(rfpId: string, participantCode: string): string {
     <div class="success-icon"><i class="fas fa-check"></i></div>
     <h2>Proposal Successfully Submitted</h2>
     <p>
-      Thank you for submitting your proposal to the ${getActiveProfile().orgName} procurement process.
+      Thank you for submitting your proposal to the ${p.orgName} procurement process.
       Your submission has been received and securely recorded. Our evaluation team will review
       all proposals and notify shortlisted vendors of the next steps.
     </p>
     <p style="margin-top:10px">
       Please retain this confirmation for your records. For enquiries, contact us at
-      <strong>${getActiveProfile().procurementEmail}</strong>, quoting your participant reference.
+      <strong>${p.procurementEmail}</strong>, quoting your participant reference.
     </p>
     <div class="success-ref">
       <div class="ref-label">Participant Reference</div>
@@ -875,7 +899,7 @@ export function getSubmitPage(rfpId: string, participantCode: string): string {
 <!-- ── Footer ── -->
 <footer class="page-footer">
   <div class="footer-left">
-    © ${getActiveProfile().orgName} · ${getActiveProfile().orgLocation}<br/>
+    © ${p.orgName} · ${p.orgLocation}<br/>
     AI RFP Management System
   </div>
   <div class="footer-right">
