@@ -652,15 +652,16 @@ export function profilePdfBodyHtml(opts: {
   // ── CPC PDF: two-zone model — header image (15%) + content (85%), no footer ──
   //
   // Zone allocation (A4 at 96 dpi = 794 × 1123 px):
-  //   Header : top 15% = 168 px  →  44.6 mm  (@page margin-top)
-  //   Content: bot 85% = 955 px  →  no bottom margin needed
+  //   Header : 129 px  →  48.3 mm  (image natural height at 794px width)
+  //   Content: remaining space below header
   //
   // The header image is served as an inline data URI so Puppeteer never
   // makes a network request (it runs on Azure with no local static server).
-  // position:fixed pulls the header into the @page top-margin zone and
-  // it repeats on every page identically to Andersen's approach.
+  // position:fixed + background-image pulls the header into the @page top-margin
+  // zone and repeats on every page. background-image renders synchronously
+  // (no async img load), which is critical for Puppeteer correctness.
   const { fontFamily, bodyColor, accentBorderColor } = p.pdf
-  const CPC_HDR_MM   = '44.6mm'   // 15% of 297mm
+  const CPC_HDR_MM   = '48.3mm'   // 129px / 794px × 297mm
   const CPC_SIDE_MM  = '16mm'
   const CPC_BOT_MM   = '10mm'
   return `<!DOCTYPE html>
@@ -682,7 +683,7 @@ export function profilePdfBodyHtml(opts: {
     top: -${CPC_HDR_MM};
     left: -${CPC_SIDE_MM};
     right: -${CPC_SIDE_MM};
-    height: 168px;
+    height: 129px;
     background-image: url('${cpcHeaderDataUri}');
     background-size: 100% 100%;
     background-repeat: no-repeat;
@@ -860,10 +861,10 @@ ${opts.showToolbar ? `
 (function(){
   var PAGE_W     = 794;
   var PAGE_H     = 1123;
-  var HDR_H      = 168;    // 15% of 1123 — header image
+  var HDR_H      = 129;    // natural height of 794px-wide header image
   var BODY_PAD_T = 16;     // .cpc-pg-body padding-top
   var BODY_PAD_B = 20;     // .cpc-pg-body padding-bottom
-  var BODY_H     = PAGE_H - HDR_H - BODY_PAD_T - BODY_PAD_B;  // 919px usable
+  var BODY_H     = PAGE_H - HDR_H - BODY_PAD_T - BODY_PAD_B;  // 958px usable
   var pageHeaderHtml = ${JSON.stringify(cpcPageHeaderHtml)};
 
   function makePageDiv(bodyInner) {
