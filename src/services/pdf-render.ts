@@ -25,17 +25,35 @@ export async function getBrowser(): Promise<Browser> {
   if (_browser && _browser.connected) return _browser
   if (_browserLaunching) return _browserLaunching
 
+  // On Azure App Service (Linux) Chromium requires --no-zygote + --single-process
+  // to avoid the sandbox process failing to start in the container environment.
+  // PUPPETEER_EXECUTABLE_PATH env var lets us point at the system chromium if needed.
+  const launchArgs = [
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-dev-shm-usage',
+    '--disable-gpu',
+    '--font-render-hinting=none',
+    '--no-zygote',
+    '--single-process',        // required on Azure App Service B-tier Linux containers
+  ]
+
+  const launchOpts: Parameters<typeof puppeteer.launch>[0] = {
+    headless: true,
+    args:     launchArgs,
+    pipe:     true,            // use pipe transport instead of WebSocket — more stable in containers
+  }
+
+  // Allow overriding the Chromium path via environment variable
+  // (e.g. PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser on Azure)
+  const execPath = process.env.PUPPETEER_EXECUTABLE_PATH
+  if (execPath) {
+    console.log(`[pdf-render] using custom Chromium: ${execPath}`)
+    launchOpts.executablePath = execPath
+  }
+
   _browserLaunching = puppeteer
-    .launch({
-      headless: true,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-        '--font-render-hinting=none',
-      ],
-    })
+    .launch(launchOpts)
     .then((b) => {
       _browser = b
       _browserLaunching = null
@@ -481,7 +499,10 @@ export async function renderMarkdownToPdf(
       marked.setOptions({ gfm: true, breaks: false } as any)
       const renderedBody = marked.parse(markdown || '') as string
       const fullHtml = profilePdfBodyHtml({ bodyHtml: renderedBody, refNumber: opts.ref_number, title: opts.rfp_title })
-      await page.setContent(fullHtml, { waitUntil: 'domcontentloaded' })
+      // CPC PDF: background image from local path — no external network requests.
+      // 'load' waits for all subresources (images/fonts); networkidle0 not needed
+      // and is excluded from setContent's type signature in Puppeteer v25.
+      await page.setContent(fullHtml, { waitUntil: 'load' })
       const pdfBuffer = await page.pdf({
         format: 'A4',
         printBackground: true,
@@ -493,7 +514,9 @@ export async function renderMarkdownToPdf(
       // ── Andersen: SVG topo header + footer via Puppeteer displayHeaderFooter ──
       const bodyHtml = buildPdfBodyHtml(markdown, opts)
       const { headerTemplate, footerTemplate } = buildPuppeteerTemplates({ ref_number: opts.ref_number })
-      await page.setContent(bodyHtml, { waitUntil: 'domcontentloaded' })
+      // Andersen PDF body: fully inline HTML, no external resources.
+      // 'load' is sufficient; networkidle0 excluded from setContent types in Puppeteer v25.
+      await page.setContent(bodyHtml, { waitUntil: 'load' })
       const pdfBuffer = await page.pdf({
         format: 'A4',
         printBackground: true,

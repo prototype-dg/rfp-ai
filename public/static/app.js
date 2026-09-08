@@ -5555,15 +5555,31 @@ function downloadRfpPdf(rfpId) {
   }
 
   var safeRef = (rfp.ref_number || rfp.title || String(rfpId)).replace(/[^a-zA-Z0-9_\-]/g, '_');
-  var filename = 'Andersen_RFP_' + safeRef + '.pdf';
+  // Filename derived from server profile (orgNameShort) — use a generic prefix here;
+  // the server sets Content-Disposition with the real profile-aware filename.
+  var filename = safeRef + '.pdf';
 
-  showToast('Generating PDF — please wait…', 'info', 25000);
+  showToast('Generating PDF — please wait…', 'info', 30000);
   fetch('/api/rfps/' + rfpId + '/pdf')
     .then(function(res) {
       if (!res.ok) throw new Error('Server returned ' + res.status);
+      var ct = res.headers.get('Content-Type') || '';
+      // If Puppeteer failed on the server it returns an HTML print-preview page
+      // as a fallback (Content-Type: text/html).  Detect this and open it as a
+      // browser tab for manual print-to-PDF instead of saving as a broken .pdf file.
+      if (ct.indexOf('text/html') !== -1) {
+        showToast('PDF engine unavailable — opening print preview (use browser Print → Save as PDF)', 'warning', 8000);
+        window.open('/api/rfps/' + rfpId + '/pdf', '_blank');
+        return null;
+      }
+      // Try to get the server-supplied filename from Content-Disposition header
+      var cd = res.headers.get('Content-Disposition') || '';
+      var match = cd.match(/filename="?([^";\s]+)"?/);
+      if (match && match[1]) filename = match[1];
       return res.blob();
     })
     .then(function(blob) {
+      if (!blob) return; // HTML fallback already handled above
       var url = URL.createObjectURL(blob);
       var a = document.createElement('a');
       a.href = url;
