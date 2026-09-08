@@ -412,16 +412,19 @@ html, body { background: #e5e7eb; margin: 0; padding: 0; }
           segH += rh;
         }
         flushTableSeg();
-      } else if (measureContent.offsetHeight <= BODY_H) {
+      } else {
         var c2 = el.cloneNode(true);
         measureContent.appendChild(c2);
         var h2 = c2.getBoundingClientRect().height || c2.offsetHeight;
         measureContent.removeChild(c2);
-        if (currentH() + h2 > BODY_H) newPage();
-        addHtml(el.outerHTML, h2);
-      } else {
-        if (currentH() > 0) newPage();
-        addHtml(el.outerHTML, BODY_H);
+        if (h2 <= BODY_H) {
+          if (currentH() + h2 > BODY_H) newPage();
+          addHtml(el.outerHTML, h2);
+        } else {
+          // Element taller than a full page (e.g. very long pre block) — add on fresh page
+          if (currentH() > 0) newPage();
+          addHtml(el.outerHTML, h2);
+        }
       }
     }
 
