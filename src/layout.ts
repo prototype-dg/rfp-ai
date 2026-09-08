@@ -1498,8 +1498,12 @@ export function getLayout(): string {
     <div class="sidebar-user">
       <div class="user-avatar">PM</div>
       <div class="user-info">
-        <div class="user-name" data-i18n="user_name">Procurement Manager</div>
-        <div class="user-role" data-i18n="user_role">${p.orgNameShort} · ${isCpc ? 'Abu Dhabi' : 'Global'}</div>
+        ${isCpc
+          ? `<div class="user-name">Procurement Manager</div>
+        <div class="user-role">CPC Procurement</div>`
+          : `<div class="user-name" data-i18n="user_name">Procurement Manager</div>
+        <div class="user-role" data-i18n="user_role">Andersen · Global</div>`
+        }
       </div>
     </div>
   </aside>
