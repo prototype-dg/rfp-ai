@@ -652,7 +652,7 @@ export function profilePdfBodyHtml(opts: {
   // ── CPC PDF: two-zone model — header image (15%) + content (85%), no footer ──
   //
   // Zone allocation (A4 at 96 dpi = 794 × 1123 px):
-  //   Header : 129 px  →  48.3 mm  (image natural height at 794px width)
+  //   Header : 219 px  →  82mm  (ornament strip + logo, 794px-wide natural height)
   //   Content: remaining space below header
   //
   // The header image is served as an inline data URI so Puppeteer never
@@ -661,7 +661,7 @@ export function profilePdfBodyHtml(opts: {
   // zone and repeats on every page. background-image renders synchronously
   // (no async img load), which is critical for Puppeteer correctness.
   const { fontFamily, bodyColor, accentBorderColor } = p.pdf
-  const CPC_HDR_MM   = '48.3mm'   // 129px / 794px × 297mm
+  const CPC_HDR_MM   = '82mm'   // 219px / 794px × 297mm ≈ 82mm
   const CPC_SIDE_MM  = '16mm'
   const CPC_BOT_MM   = '10mm'
   return `<!DOCTYPE html>
@@ -672,18 +672,23 @@ export function profilePdfBodyHtml(opts: {
   *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
   body { background:#fff; font-family:${fontFamily}; color:${bodyColor}; }
 
-  /* Two-zone layout: top margin = header zone (15%), no bottom chrome */
+  /* Two-zone layout: top margin = header zone height, no bottom chrome.
+     @page margin carves out space; the fixed header sits at top:0 (page-box origin)
+     so it fills that carved-out zone on every page without the unit-mismatch
+     that caused the header to drift to the bottom in earlier builds. */
   @page { size: A4; margin: ${CPC_HDR_MM} ${CPC_SIDE_MM} ${CPC_BOT_MM} ${CPC_SIDE_MM}; }
 
-  /* Header zone: fixed, pulled into @page top margin — repeats every page.
-     Use background-image (not <img>) so Puppeteer renders synchronously.
-     left/right negative offsets expand to full A4 width; no explicit px width. */
+  /* Header zone: position:fixed top:0 places the element at the top of the
+     printable page-box (which starts AFTER the @page top margin when Chromium/
+     Puppeteer renders). We extend it left/right by the side margins so it spans
+     the full A4 width. background-image renders synchronously (no async img load). */
   .cpc-pdf-hd {
     position: fixed;
-    top: -${CPC_HDR_MM};
+    top: 0;
     left: -${CPC_SIDE_MM};
     right: -${CPC_SIDE_MM};
-    height: 129px;
+    height: 219px;
+    margin-top: -${CPC_HDR_MM};
     background-image: url('${cpcHeaderDataUri}');
     background-size: 100% 100%;
     background-repeat: no-repeat;
@@ -694,7 +699,7 @@ export function profilePdfBodyHtml(opts: {
     print-color-adjust: exact;
   }
 
-  /* Content zone: 85% of A4, starts below header */
+  /* Content zone: starts below the @page top margin */
   .cpc-pdf-body { padding: 12pt 0 0; }
 
   /* Typography */
@@ -751,8 +756,8 @@ export function profilePageHtml(opts: {
   // ── CPC page HTML: two-zone paginated preview ────────────────────────────
   // Matches the PDF exactly:
   //   • Each .cpc-page = 794×1123px card
-  //   • Header zone: 168px (15%) — cpc-header.png scaled to full 794px width
-  //   • Content zone: 955px (85%) — RFP body text
+  //   • Header zone: 219px — ornament strip + logo, scaled to full 794px width
+  //   • Content zone: 868px — RFP body text
   //   • No footer zone (two-zone model)
   //
   // JS paginator slices the body HTML across pages identically to Andersen,
@@ -861,10 +866,10 @@ ${opts.showToolbar ? `
 (function(){
   var PAGE_W     = 794;
   var PAGE_H     = 1123;
-  var HDR_H      = 129;    // natural height of 794px-wide header image
+  var HDR_H      = 219;    // natural height of 794px-wide header (ornament strip + logo)
   var BODY_PAD_T = 16;     // .cpc-pg-body padding-top
   var BODY_PAD_B = 20;     // .cpc-pg-body padding-bottom
-  var BODY_H     = PAGE_H - HDR_H - BODY_PAD_T - BODY_PAD_B;  // 958px usable
+  var BODY_H     = PAGE_H - HDR_H - BODY_PAD_T - BODY_PAD_B;  // 868px usable
   var pageHeaderHtml = ${JSON.stringify(cpcPageHeaderHtml)};
 
   function makePageDiv(bodyInner) {
