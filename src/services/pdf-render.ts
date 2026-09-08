@@ -314,6 +314,26 @@ html, body { margin: 0; padding: 0; font-size: 10px; background: #020D1C; }
   return { headerTemplate, footerTemplate }
 }
 
+// ── Page layout constants (A4 three-zone model) ──────────────────────────────
+// A4 at 96 dpi = 794 × 1123 px  /  210 × 297 mm
+//
+// Zone allocation (fixed percentages of total page height):
+//   Header : top 15%  → 1123 × 0.15 = 168 px  = 44.6 mm
+//   Footer : bot 10%  → 1123 × 0.10 = 112 px  = 29.7 mm
+//   Content: mid 75%  → 1123 × 0.75 = 843 px  (available body area)
+//
+// These constants are shared between buildPdfBodyHtml (Puppeteer PDF) and
+// buildPreviewHtml (JS paginator) so both outputs are pixel-identical.
+const A4_H_PX   = 1123   // A4 page height at 96 dpi
+const A4_W_PX   = 794    // A4 page width  at 96 dpi
+const HDR_H_PX  = Math.round(A4_H_PX * 0.15)   // 168 px  — header zone
+const FTR_H_PX  = Math.round(A4_H_PX * 0.10)   // 112 px  — footer zone
+const BODY_H_PX = A4_H_PX - HDR_H_PX - FTR_H_PX // 843 px  — content zone
+// @page margins in mm (exact conversions: px / 1123 * 297, rounded up 0.5mm)
+const HDR_MM    = '44.6mm'   // top margin  = header zone
+const FTR_MM    = '29.7mm'   // bottom margin = footer zone
+const SIDE_MM   = '16mm'     // left / right margins (unchanged)
+
 // ── buildPdfBodyHtml ──────────────────────────────────────────────────────────
 // Embeds header + footer as position:fixed HTML inside the page body.
 //
@@ -325,12 +345,11 @@ html, body { margin: 0; padding: 0; font-size: 10px; background: #020D1C; }
 // FIX: position:fixed elements are part of the page's own DOM — no IPC needed.
 // Chromium repeats fixed elements on every printed page, identical to how
 // displayHeaderFooter works but entirely in-process.  displayHeaderFooter is
-// set to false so Puppeteer doesn't attempt the IPC injection at all.
+// set to false so Puppeteer never attempts the IPC injection.
 //
-// MARGINS: @page margin must reserve space for the fixed elements:
-//   top:    29mm  = ~110px (header 87px + 23px gap)
-//   bottom: 26mm  = ~98px  (footer 83px + 15px gap)
-//   left/right: 16mm each
+// LAYOUT: three fixed zones — header 15% / content 75% / footer 10% of A4.
+// The @page margin equals each zone's mm height so the content area starts
+// exactly at the header bottom and ends exactly at the footer top.
 function buildPdfBodyHtml(markdown: string, opts: { ref_number?: string; rfp_title?: string }): string {
   const profile  = getActiveProfile()
   const rfpTitle = opts.rfp_title ? escHtml(opts.rfp_title) : 'Request for Proposal'
@@ -343,7 +362,7 @@ function buildPdfBodyHtml(markdown: string, opts: { ref_number?: string; rfp_tit
   marked.setOptions({ gfm: true, breaks: false } as any)
   const bodyHtml = marked.parse(markdown || '') as string
 
-  // Build header SVG data URI
+  // Build header SVG — scaled to fill the full header zone (HDR_H_PX tall)
   const svgContent = buildHeaderSvg(refBadge)
   const svgDataUri = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgContent)
 
@@ -351,44 +370,49 @@ function buildPdfBodyHtml(markdown: string, opts: { ref_number?: string; rfp_tit
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
-<meta name="viewport" content="width=794,initial-scale=1"/>
+<meta name="viewport" content="width=${A4_W_PX},initial-scale=1"/>
 <title>${rfpTitle}</title>
 <style>
 ${TYPOGRAPHY_CSS}
 body { background: #fff; margin: 0; padding: 0; }
-.a-body { padding: 0; }
-/* @page margin reserves space for the fixed header (87px ≈ 23mm) and footer (83px ≈ 22mm).
-   We use 29mm top / 26mm bottom for a comfortable gap above/below the fixed elements. */
-@page { size: A4; margin: 29mm 16mm 26mm 16mm; }
 
-/* ── Fixed header — repeats on every printed page ── */
+/* Three-zone A4 layout:
+   @page margin top    = header zone  (${HDR_MM})  → content starts below header
+   @page margin bottom = footer zone  (${FTR_MM})  → content ends above footer
+   Fixed elements are pulled into those margin zones via negative top/bottom. */
+@page { size: A4; margin: ${HDR_MM} ${SIDE_MM} ${FTR_MM} ${SIDE_MM}; }
+
+/* ── Header zone: top 15% of A4 (${HDR_H_PX}px) — repeats every page ── */
 .pdf-header {
   position: fixed;
-  top: -29mm;          /* pulls into the @page top margin */
-  left: -16mm;
-  right: -16mm;
-  width: 794px;
-  height: 87px;
+  top: -${HDR_MM};
+  left: -${SIDE_MM};
+  right: -${SIDE_MM};
+  width: ${A4_W_PX}px;
+  height: ${HDR_H_PX}px;
   z-index: 1000;
+  overflow: hidden;
   -webkit-print-color-adjust: exact;
   print-color-adjust: exact;
 }
 .pdf-header img {
   display: block;
-  width: 794px;
-  height: 87px;
+  width: ${A4_W_PX}px;
+  height: ${HDR_H_PX}px;
+  object-fit: cover;
+  object-position: top;
   -webkit-print-color-adjust: exact;
   print-color-adjust: exact;
 }
 
-/* ── Fixed footer — repeats on every printed page ── */
+/* ── Footer zone: bottom 10% of A4 (${FTR_H_PX}px) — repeats every page ── */
 .pdf-footer {
   position: fixed;
-  bottom: -26mm;       /* pulls into the @page bottom margin */
-  left: -16mm;
-  right: -16mm;
-  width: 794px;
-  height: 83px;
+  bottom: -${FTR_MM};
+  left: -${SIDE_MM};
+  right: -${SIDE_MM};
+  width: ${A4_W_PX}px;
+  height: ${FTR_H_PX}px;
   background: #020D1C;
   display: flex;
   align-items: center;
@@ -401,23 +425,26 @@ body { background: #fff; margin: 0; padding: 0; }
 }
 .pdf-footer * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
 .pdf-ft-left  { display:flex; align-items:center; }
-.pdf-ft-sep   { width:1px; height:22px; background:rgba(255,255,255,0.25); margin:0 16px; flex-shrink:0; }
-.pdf-ft-lbl   { font-family:'Courier New',monospace; font-size:6px; letter-spacing:1.5px;
-                text-transform:uppercase; color:#FFDB00; display:block; margin-bottom:2px; }
-.pdf-ft-val   { font-family:Arial,sans-serif; font-size:7.5px; color:#D8DEE8; display:block; }
-.pdf-ft-right { text-align:right; }
-.pdf-ft-copy  { font-family:'Courier New',monospace; font-size:6px; letter-spacing:1.2px;
+.pdf-ft-sep   { width:1px; height:24px; background:rgba(255,255,255,0.25); margin:0 16px; flex-shrink:0; }
+.pdf-ft-lbl   { font-family:'Courier New',monospace; font-size:6.5px; letter-spacing:1.5px;
                 text-transform:uppercase; color:#FFDB00; display:block; margin-bottom:3px; }
-.pdf-ft-page  { font-family:'Courier New',monospace; font-size:7px; letter-spacing:0.8px; color:#9ca3af; display:block; }
+.pdf-ft-val   { font-family:Arial,sans-serif; font-size:8px; color:#D8DEE8; display:block; }
+.pdf-ft-right { text-align:right; }
+.pdf-ft-copy  { font-family:'Courier New',monospace; font-size:6.5px; letter-spacing:1.2px;
+                text-transform:uppercase; color:#FFDB00; display:block; margin-bottom:3px; }
+.pdf-ft-page  { font-family:'Courier New',monospace; font-size:7.5px; letter-spacing:0.8px; color:#9ca3af; display:block; }
+
+/* ── Content zone: middle 75% of A4 (${BODY_H_PX}px) ── */
+.a-body { padding: 16px 0 0; }
 </style>
 </head>
 <body>
-<!-- Fixed header: position:fixed pulls into @page top margin; repeats on every page -->
+<!-- Header zone: fixed, pulled into @page top margin, repeats on every page -->
 <div class="pdf-header">
-  <img src="${svgDataUri}" width="794" height="87" alt=""/>
+  <img src="${svgDataUri}" width="${A4_W_PX}" height="${HDR_H_PX}" alt=""/>
 </div>
 
-<!-- Fixed footer: position:fixed pulls into @page bottom margin; repeats on every page -->
+<!-- Footer zone: fixed, pulled into @page bottom margin, repeats on every page -->
 <div class="pdf-footer">
   <div class="pdf-ft-left">
     <div>
@@ -436,6 +463,7 @@ body { background: #fff; margin: 0; padding: 0; }
   </div>
 </div>
 
+<!-- Content zone: middle 75% — bounded by @page margins above and below -->
 <div class="a-body">${bodyHtml}</div>
 </body>
 </html>`
@@ -467,7 +495,7 @@ export async function buildPreviewHtml(
   // Letterhead header HTML (injected into every A4 page card — Andersen only)
   const svgContent = buildHeaderSvg(refNumber || undefined)
   const svgDataUri = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgContent)
-  const pageHeaderHtml = `<div class="a-pg-hd"><img src="${svgDataUri}" width="794" height="87" style="display:block;width:100%;height:auto;"/></div>`
+  const pageHeaderHtml = `<div class="a-pg-hd"><img src="${svgDataUri}" width="${A4_W_PX}" height="${HDR_H_PX}" style="display:block;width:100%;height:${HDR_H_PX}px;object-fit:cover;object-position:top;"/></div>`
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -488,16 +516,20 @@ html, body { background: #e5e7eb; margin: 0; padding: 0; }
   overflow: hidden;
   page-break-after: always;
 }
-.a-pg-hd  { flex: 0 0 auto; width: 100%; }
-.a-pg-body{ flex: 1 1 auto; padding: 20px 60px 0; overflow: hidden; }
-.a-pg-ft  { flex: 0 0 83px; width: 100%; background: #020D1C;
+/* Header zone: 15% of 1123px = 168px */
+.a-pg-hd  { flex: 0 0 168px; width: 100%; overflow: hidden; }
+.a-pg-hd img { display:block; width:100%; height:168px; object-fit:cover; object-position:top; }
+/* Content zone: 75% of 1123px = 843px — flex:1 fills the remaining space */
+.a-pg-body{ flex: 1 1 auto; padding: 16px 60px 0; overflow: hidden; }
+/* Footer zone: 10% of 1123px = 112px */
+.a-pg-ft  { flex: 0 0 112px; width: 100%; background: #020D1C;
              display: flex; align-items: center; justify-content: space-between;
-             padding: 0 60px; margin-top: auto; }
+             padding: 0 60px; box-sizing: border-box; }
 .a-pg-ft-left { display:flex; align-items:center; gap:0; }
-.a-pg-ft-sep  { width:1px; height:22px; background:rgba(255,255,255,0.15); margin:0 16px; }
-.a-pg-ft-lbl  { font-family: 'Courier New',monospace; font-size:6px; letter-spacing:1.5px; text-transform:uppercase; color:#FFDB00; display:block; margin-bottom:2px; }
-.a-pg-ft-val  { font-family:Arial,sans-serif; font-size:7.5px; color:#D8DEE8; display:block; }
-.a-pg-ft-page { font-family:'Courier New',monospace; font-size:7px; letter-spacing:0.8px; color:#9ca3af; }
+.a-pg-ft-sep  { width:1px; height:24px; background:rgba(255,255,255,0.15); margin:0 16px; }
+.a-pg-ft-lbl  { font-family: 'Courier New',monospace; font-size:6.5px; letter-spacing:1.5px; text-transform:uppercase; color:#FFDB00; display:block; margin-bottom:3px; }
+.a-pg-ft-val  { font-family:Arial,sans-serif; font-size:8px; color:#D8DEE8; display:block; }
+.a-pg-ft-page { font-family:'Courier New',monospace; font-size:7.5px; letter-spacing:0.8px; color:#9ca3af; }
 #measure { position:fixed; top:-9999px; left:0; width:674px; visibility:hidden; pointer-events:none; font-family:Arial,'Segoe UI',Helvetica,sans-serif; font-size:10.5pt; line-height:1.65; color:#020303; }
 </style>
 </head>
@@ -509,11 +541,11 @@ html, body { background: #e5e7eb; margin: 0; padding: 0; }
 (function(){
   var PAGE_W      = 794;
   var PAGE_H      = 1123;
-  var HDR_H       = 87;
-  var FTR_H       = 83;
-  var BODY_PAD_T  = 20;
+  var HDR_H       = 168;   // 15% of 1123
+  var FTR_H       = 112;   // 10% of 1123
+  var BODY_PAD_T  = 16;
   var BODY_PAD_LR = 60;
-  var BODY_H      = PAGE_H - HDR_H - FTR_H - BODY_PAD_T;
+  var BODY_H      = PAGE_H - HDR_H - FTR_H - BODY_PAD_T;  // 843 - 16 = 827px usable
   var email       = ${JSON.stringify(getActiveProfile().procurementEmail)};
   var year        = new Date().getFullYear();
   var pageHeaderHtml = ${JSON.stringify(pageHeaderHtml)};
@@ -709,7 +741,7 @@ export async function renderMarkdownToPdf(
         format: 'A4',
         printBackground: true,
         displayHeaderFooter: false,
-        margin: { top: '29mm', bottom: '26mm', left: '16mm', right: '16mm' },
+        margin: { top: HDR_MM, bottom: FTR_MM, left: SIDE_MM, right: SIDE_MM },
         timeout: 60000,
       })
       console.log(`[pdf-render] Andersen page.pdf() done, ${pdfBuffer.length} bytes`)
