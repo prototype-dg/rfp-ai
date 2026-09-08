@@ -27,35 +27,39 @@ export async function getBrowser(): Promise<Browser> {
 
   // Azure App Service (Linux) container launch flags.
   //
-  // --single-process is intentionally REMOVED: it causes the renderer thread to crash
-  // when Puppeteer calls page.pdf() with displayHeaderFooter:true inside a restricted
-  // container (the PDF renderer uses IPC to a separate renderer process; collapsing them
-  // into one thread deadlocks or segfaults under memory pressure).
+  // PIPE TRANSPORT REMOVED: pipe:true uses /proc/self/fd/3+4 for the DevTools protocol.
+  // Azure App Service containers mount /proc with restricted fd access — the pipe FDs are
+  // never established, causing immediate "Target closed" on launch.
+  // Solution: use WebSocket transport (pipe:false, the default) which uses a TCP socket
+  // on localhost and is fully supported in Azure App Service containers.
   //
-  // --no-zygote alone is sufficient to avoid the zygote sandbox failure on App Service.
-  // --user-data-dir in /tmp ensures Chrome has a writable profile dir (wwwroot is read-only
-  // for the app process on some App Service configurations).
+  // --no-zygote: avoids zygote sandbox failure in restricted Linux namespaces.
+  // --single-process REMOVED: collapses renderer into browser process, deadlocks page.pdf().
+  // --user-data-dir=/tmp: ensures writable profile dir (/home/site/wwwroot is read-only).
+  // --disable-dev-shm-usage: /dev/shm is typically tiny (64MB) or absent in containers.
+  // --remote-debugging-port=0: required when pipe:false so Chromium binds a random port
+  //   for the WebSocket DevTools endpoint (Puppeteer connects to it automatically).
   const launchArgs = [
     '--no-sandbox',
     '--disable-setuid-sandbox',
     '--disable-dev-shm-usage',
     '--disable-gpu',
-    '--font-render-hinting=none',
     '--no-zygote',
     '--user-data-dir=/tmp/chrome-user-data',
+    '--remote-debugging-port=0',
     '--disable-extensions',
     '--disable-background-networking',
     '--disable-sync',
-    '--metrics-recording-only',
     '--mute-audio',
     '--hide-scrollbars',
+    '--font-render-hinting=none',
   ]
 
   const launchOpts: Parameters<typeof puppeteer.launch>[0] = {
     headless: true,
     args:     launchArgs,
-    pipe:     true,            // pipe transport — more stable than WebSocket in containers
-    timeout:  60000,           // 60s launch timeout (default 30s can expire under cold-start load)
+    pipe:     false,           // WebSocket transport — works in Azure (pipe needs /proc/self/fd)
+    timeout:  60000,
   }
 
   // Resolve the chrome-headless-shell binary from the bundled cache.
@@ -111,6 +115,13 @@ export async function getBrowser(): Promise<Browser> {
         console.warn('[pdf-render] browser disconnected — will relaunch on next request')
       })
       return b
+    })
+    .catch((err) => {
+      // Clear the launching promise on failure so the next request retries cleanly
+      // instead of awaiting a permanently rejected promise.
+      _browserLaunching = null
+      _browser = null
+      throw err
     })
 
   return _browserLaunching
