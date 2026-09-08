@@ -304,10 +304,37 @@ html, body { margin: 0; padding: 0; font-size: 10px; background: #020D1C; }
 }
 
 // ── buildPdfBodyHtml ──────────────────────────────────────────────────────────
+// Embeds header + footer as position:fixed HTML inside the page body.
+//
+// WHY: Puppeteer's displayHeaderFooter:true injects templates via IPC into an
+// isolated renderer context.  On Azure App Service Linux (restricted namespaces,
+// no /dev/shm) that IPC channel crashes even without --single-process, producing
+// "Protocol error (Target.setDiscoverTargets): Target closed".
+//
+// FIX: position:fixed elements are part of the page's own DOM — no IPC needed.
+// Chromium repeats fixed elements on every printed page, identical to how
+// displayHeaderFooter works but entirely in-process.  displayHeaderFooter is
+// set to false so Puppeteer doesn't attempt the IPC injection at all.
+//
+// MARGINS: @page margin must reserve space for the fixed elements:
+//   top:    29mm  = ~110px (header 87px + 23px gap)
+//   bottom: 26mm  = ~98px  (footer 83px + 15px gap)
+//   left/right: 16mm each
 function buildPdfBodyHtml(markdown: string, opts: { ref_number?: string; rfp_title?: string }): string {
+  const profile  = getActiveProfile()
   const rfpTitle = opts.rfp_title ? escHtml(opts.rfp_title) : 'Request for Proposal'
+  const refBadge = opts.ref_number
+    ? String(opts.ref_number)
+    : `${profile.orgNameShort} · ${profile.orgLocation.split(',')[0]}`
+  const email = profile.procurementEmail
+  const year  = new Date().getFullYear()
+
   marked.setOptions({ gfm: true, breaks: false } as any)
   const bodyHtml = marked.parse(markdown || '') as string
+
+  // Build header SVG data URI
+  const svgContent = buildHeaderSvg(refBadge)
+  const svgDataUri = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgContent)
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -319,12 +346,87 @@ function buildPdfBodyHtml(markdown: string, opts: { ref_number?: string; rfp_tit
 ${TYPOGRAPHY_CSS}
 body { background: #fff; margin: 0; padding: 0; }
 .a-body { padding: 0; }
-/* @page margin mirrors page.pdf() margin: top matches 87px header, bottom matches 83px footer.
-   top: 29mm = ~109px (header 87px + 22px gap).  bottom: 26mm = ~98px (footer 83px + 15px gap). */
+/* @page margin reserves space for the fixed header (87px ≈ 23mm) and footer (83px ≈ 22mm).
+   We use 29mm top / 26mm bottom for a comfortable gap above/below the fixed elements. */
 @page { size: A4; margin: 29mm 16mm 26mm 16mm; }
+
+/* ── Fixed header — repeats on every printed page ── */
+.pdf-header {
+  position: fixed;
+  top: -29mm;          /* pulls into the @page top margin */
+  left: -16mm;
+  right: -16mm;
+  width: 794px;
+  height: 87px;
+  z-index: 1000;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+.pdf-header img {
+  display: block;
+  width: 794px;
+  height: 87px;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+/* ── Fixed footer — repeats on every printed page ── */
+.pdf-footer {
+  position: fixed;
+  bottom: -26mm;       /* pulls into the @page bottom margin */
+  left: -16mm;
+  right: -16mm;
+  width: 794px;
+  height: 83px;
+  background: #020D1C;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 60px;
+  box-sizing: border-box;
+  z-index: 1000;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+.pdf-footer * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+.pdf-ft-left  { display:flex; align-items:center; }
+.pdf-ft-sep   { width:1px; height:22px; background:rgba(255,255,255,0.25); margin:0 16px; flex-shrink:0; }
+.pdf-ft-lbl   { font-family:'Courier New',monospace; font-size:6px; letter-spacing:1.5px;
+                text-transform:uppercase; color:#FFDB00; display:block; margin-bottom:2px; }
+.pdf-ft-val   { font-family:Arial,sans-serif; font-size:7.5px; color:#D8DEE8; display:block; }
+.pdf-ft-right { text-align:right; }
+.pdf-ft-copy  { font-family:'Courier New',monospace; font-size:6px; letter-spacing:1.2px;
+                text-transform:uppercase; color:#FFDB00; display:block; margin-bottom:3px; }
+.pdf-ft-page  { font-family:'Courier New',monospace; font-size:7px; letter-spacing:0.8px; color:#9ca3af; display:block; }
 </style>
 </head>
-<body><div class="a-body">${bodyHtml}</div></body>
+<body>
+<!-- Fixed header: position:fixed pulls into @page top margin; repeats on every page -->
+<div class="pdf-header">
+  <img src="${svgDataUri}" width="794" height="87" alt=""/>
+</div>
+
+<!-- Fixed footer: position:fixed pulls into @page bottom margin; repeats on every page -->
+<div class="pdf-footer">
+  <div class="pdf-ft-left">
+    <div>
+      <span class="pdf-ft-lbl">Contact</span>
+      <span class="pdf-ft-val">${email}</span>
+    </div>
+    <div class="pdf-ft-sep"></div>
+    <div>
+      <span class="pdf-ft-lbl">Offices</span>
+      <span class="pdf-ft-val">${profile.orgLocation}</span>
+    </div>
+  </div>
+  <div class="pdf-ft-right">
+    <span class="pdf-ft-copy">© ${profile.orgNameShort} ${year}</span>
+    <span class="pdf-ft-page">Confidential</span>
+  </div>
+</div>
+
+<div class="a-body">${bodyHtml}</div>
+</body>
 </html>`
 }
 
@@ -582,17 +684,20 @@ export async function renderMarkdownToPdf(
       console.log(`[pdf-render] CPC page.pdf() done, ${pdfBuffer.length} bytes`)
       return Buffer.from(pdfBuffer)
     } else {
-      // ── Andersen: SVG topo header + footer via Puppeteer displayHeaderFooter ──
+      // ── Andersen: header + footer embedded as position:fixed in body HTML ──
+      //
+      // displayHeaderFooter:false — avoids Puppeteer IPC injection into an
+      // isolated renderer context, which crashes on Azure App Service Linux
+      // ("Protocol error (Target.setDiscoverTargets): Target closed").
+      // The fixed-position header/footer in buildPdfBodyHtml() render identically
+      // and require zero IPC — they live entirely in the page's own DOM.
       const bodyHtml = buildPdfBodyHtml(markdown, opts)
-      const { headerTemplate, footerTemplate } = buildPuppeteerTemplates({ ref_number: opts.ref_number })
       await page.setContent(bodyHtml, { waitUntil: 'load', timeout: 30000 })
       console.log(`[pdf-render] Andersen content set, calling page.pdf()`)
       const pdfBuffer = await page.pdf({
         format: 'A4',
         printBackground: true,
-        displayHeaderFooter: true,
-        headerTemplate,
-        footerTemplate,
+        displayHeaderFooter: false,
         margin: { top: '29mm', bottom: '26mm', left: '16mm', right: '16mm' },
         timeout: 60000,
       })
