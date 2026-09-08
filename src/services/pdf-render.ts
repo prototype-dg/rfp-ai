@@ -334,19 +334,19 @@ html, body { margin: 0; padding: 0; font-size: 10px; background: #020D1C; }
 //
 // Zone allocation (fixed percentages of total page height):
 //   Header : top 15%  → 1123 × 0.15 = 168 px  = 44.6 mm
-//   Footer : bot 10%  → 1123 × 0.10 = 112 px  = 29.7 mm
-//   Content: mid 75%  → 1123 × 0.75 = 843 px  (available body area)
+//   Footer : bot  4%  → 1123 × 0.04 =  45 px  = 11.9 mm
+//   Content: mid 81%  → 1123 × 0.81 = 910 px  (available body area)
 //
 // These constants are shared between buildPdfBodyHtml (Puppeteer PDF) and
 // buildPreviewHtml (JS paginator) so both outputs are pixel-identical.
 const A4_H_PX   = 1123   // A4 page height at 96 dpi
 const A4_W_PX   = 794    // A4 page width  at 96 dpi
 const HDR_H_PX  = Math.round(A4_H_PX * 0.15)   // 168 px  — header zone
-const FTR_H_PX  = Math.round(A4_H_PX * 0.10)   // 112 px  — footer zone
-const BODY_H_PX = A4_H_PX - HDR_H_PX - FTR_H_PX // 843 px  — content zone
+const FTR_H_PX  = Math.round(A4_H_PX * 0.04)   //  45 px  — footer zone
+const BODY_H_PX = A4_H_PX - HDR_H_PX - FTR_H_PX // 910 px  — content zone
 // @page margins in mm (exact conversions: px / 1123 * 297, rounded up 0.5mm)
 const HDR_MM    = '44.6mm'   // top margin  = header zone
-const FTR_MM    = '29.7mm'   // bottom margin = footer zone
+const FTR_MM    = '11.9mm'   // bottom margin = footer zone
 const SIDE_MM   = '16mm'     // left / right margins (unchanged)
 
 // ── buildPdfBodyHtml ──────────────────────────────────────────────────────────
@@ -417,7 +417,7 @@ body { background: #fff; margin: 0; padding: 0; }
   print-color-adjust: exact;
 }
 
-/* ── Footer zone: bottom 10% of A4 (${FTR_H_PX}px) — repeats every page ── */
+/* ── Footer zone: bottom 4% of A4 (${FTR_H_PX}px) — repeats every page ── */
 .pdf-footer {
   position: fixed;
   bottom: -${FTR_MM};
@@ -437,14 +437,11 @@ body { background: #fff; margin: 0; padding: 0; }
 }
 .pdf-footer * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
 .pdf-ft-left  { display:flex; align-items:center; }
-.pdf-ft-sep   { width:1px; height:24px; background:rgba(255,255,255,0.25); margin:0 16px; flex-shrink:0; }
-.pdf-ft-lbl   { font-family:'Courier New',monospace; font-size:6.5px; letter-spacing:1.5px;
-                text-transform:uppercase; color:#FFDB00; display:block; margin-bottom:3px; }
-.pdf-ft-val   { font-family:Arial,sans-serif; font-size:8px; color:#D8DEE8; display:block; }
-.pdf-ft-right { text-align:right; }
-.pdf-ft-copy  { font-family:'Courier New',monospace; font-size:6.5px; letter-spacing:1.2px;
-                text-transform:uppercase; color:#FFDB00; display:block; margin-bottom:3px; }
-.pdf-ft-page  { font-family:'Courier New',monospace; font-size:7.5px; letter-spacing:0.8px; color:#9ca3af; display:block; }
+.pdf-ft-sep   { width:1px; height:16px; background:rgba(255,255,255,0.20); margin:0 12px; flex-shrink:0; }
+.pdf-ft-val   { font-family:Arial,sans-serif; font-size:7.5px; color:#D8DEE8; }
+.pdf-ft-copy  { font-family:'Courier New',monospace; font-size:7px; letter-spacing:1px;
+                text-transform:uppercase; color:#FFDB00; margin-right:10px; }
+.pdf-ft-page  { font-family:'Courier New',monospace; font-size:7px; letter-spacing:0.8px; color:#9ca3af; }
 
 /* ── Content zone: middle 75% of A4 (${BODY_H_PX}px) ── */
 .a-body { padding: 16px 0 0; }
@@ -459,17 +456,11 @@ body { background: #fff; margin: 0; padding: 0; }
 <!-- Footer zone: fixed, pulled into @page bottom margin, repeats on every page -->
 <div class="pdf-footer">
   <div class="pdf-ft-left">
-    <div>
-      <span class="pdf-ft-lbl">Contact</span>
-      <span class="pdf-ft-val">${email}</span>
-    </div>
+    <span class="pdf-ft-val">${email}</span>
     <div class="pdf-ft-sep"></div>
-    <div>
-      <span class="pdf-ft-lbl">Offices</span>
-      <span class="pdf-ft-val">${profile.orgLocation}</span>
-    </div>
+    <span class="pdf-ft-val">${profile.orgLocation}</span>
   </div>
-  <div class="pdf-ft-right">
+  <div style="display:flex;align-items:center;">
     <span class="pdf-ft-copy">© ${profile.orgNameShort} ${year}</span>
     <span class="pdf-ft-page">Confidential</span>
   </div>
@@ -533,15 +524,15 @@ html, body { background: #e5e7eb; margin: 0; padding: 0; }
 .a-pg-hd img { display:block; width:100%; height:168px; object-fit:cover; object-position:top; }
 /* Content zone: 75% of 1123px = 843px — flex:1 fills the remaining space */
 .a-pg-body{ flex: 1 1 auto; padding: 16px 60px 0; overflow: hidden; }
-/* Footer zone: 10% of 1123px = 112px */
-.a-pg-ft  { flex: 0 0 112px; width: 100%; background: #020D1C;
+/* Footer zone: 4% of 1123px = 45px */
+.a-pg-ft  { flex: 0 0 45px; width: 100%; background: #020D1C;
              display: flex; align-items: center; justify-content: space-between;
              padding: 0 60px; box-sizing: border-box; }
 .a-pg-ft-left { display:flex; align-items:center; gap:0; }
-.a-pg-ft-sep  { width:1px; height:24px; background:rgba(255,255,255,0.15); margin:0 16px; }
-.a-pg-ft-lbl  { font-family: 'Courier New',monospace; font-size:6.5px; letter-spacing:1.5px; text-transform:uppercase; color:#FFDB00; display:block; margin-bottom:3px; }
-.a-pg-ft-val  { font-family:Arial,sans-serif; font-size:8px; color:#D8DEE8; display:block; }
-.a-pg-ft-page { font-family:'Courier New',monospace; font-size:7.5px; letter-spacing:0.8px; color:#9ca3af; }
+.a-pg-ft-sep  { width:1px; height:16px; background:rgba(255,255,255,0.20); margin:0 12px; }
+.a-pg-ft-val  { font-family:Arial,sans-serif; font-size:7.5px; color:#D8DEE8; }
+.a-pg-ft-page { font-family:'Courier New',monospace; font-size:7px; letter-spacing:0.8px; color:#9ca3af; }
+.a-pg-ft-copy { font-family:'Courier New',monospace; font-size:7px; letter-spacing:1px; text-transform:uppercase; color:#FFDB00; margin-right:10px; }
 #measure { position:fixed; top:-9999px; left:0; width:674px; visibility:hidden; pointer-events:none; font-family:Arial,'Segoe UI',Helvetica,sans-serif; font-size:10.5pt; line-height:1.65; color:#020303; }
 </style>
 </head>
@@ -554,10 +545,10 @@ html, body { background: #e5e7eb; margin: 0; padding: 0; }
   var PAGE_W      = 794;
   var PAGE_H      = 1123;
   var HDR_H       = 168;   // 15% of 1123
-  var FTR_H       = 112;   // 10% of 1123
+  var FTR_H       = 45;    //  4% of 1123
   var BODY_PAD_T  = 16;
   var BODY_PAD_LR = 60;
-  var BODY_H      = PAGE_H - HDR_H - FTR_H - BODY_PAD_T;  // 843 - 16 = 827px usable
+  var BODY_H      = PAGE_H - HDR_H - FTR_H - BODY_PAD_T;  // 910 - 16 = 894px usable
   var email       = ${JSON.stringify(getActiveProfile().procurementEmail)};
   var year        = new Date().getFullYear();
   var pageHeaderHtml = ${JSON.stringify(pageHeaderHtml)};
@@ -565,12 +556,14 @@ html, body { background: #e5e7eb; margin: 0; padding: 0; }
   function makeFooter(pgNum, total) {
     return '<div class="a-pg-ft">' +
       '<div class="a-pg-ft-left">' +
-        '<div><span class="a-pg-ft-lbl">Contact</span><span class="a-pg-ft-val">' + email + '</span></div>' +
+        '<span class="a-pg-ft-val">' + email + '</span>' +
         '<div class="a-pg-ft-sep"></div>' +
-        '<div><span class="a-pg-ft-lbl">Offices</span><span class="a-pg-ft-val">${getActiveProfile().orgLocation}</span></div>' +
+        '<span class="a-pg-ft-val">${getActiveProfile().orgLocation}</span>' +
       '</div>' +
-      '<div><span class="a-pg-ft-lbl" style="text-align:right">© ${getActiveProfile().orgNameShort} ' + year + '</span>' +
-        '<span class="a-pg-ft-page">Page ' + pgNum + ' of ' + total + '</span></div>' +
+      '<div style="display:flex;align-items:center;">' +
+        '<span class="a-pg-ft-copy">© ${getActiveProfile().orgNameShort} ' + year + '</span>' +
+        '<span class="a-pg-ft-page">Page ' + pgNum + ' / ' + total + '</span>' +
+      '</div>' +
     '</div>';
   }
 
