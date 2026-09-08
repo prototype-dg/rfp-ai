@@ -420,7 +420,7 @@ export function getLayout(): string {
       text-align: left;
     }
     .lang-option:hover { background: var(--a-pale); color: var(--a-ink); }
-    .lang-option.active { color: var(--a-ink); font-weight: 500; background: #FFFBEC; }
+    .lang-option.active { color: var(--a-ink); font-weight: 500; background: var(--a-yellow-wash); }
     .lang-option .lang-flag { font-size: 14px; }
 
     /* Keep old class name for backward compat */
@@ -621,8 +621,8 @@ export function getLayout(): string {
       justify-content: space-between;
       gap: 12px;
       padding: 9px 24px;
-      background: linear-gradient(90deg, #FFFBEC 0%, #FFFFFF 100%);
-      border-bottom: 1px solid #FFE963;
+      background: linear-gradient(90deg, var(--a-yellow-wash) 0%, var(--cpc-paper) 100%);
+      border-bottom: 1px solid var(--a-yellow-hover);
       font-size: 14px;
       flex-shrink: 0;
     }
@@ -689,9 +689,9 @@ export function getLayout(): string {
     .lc-done .lc-label     { color: var(--a-charcoal); }
     .lc-done .lc-connector { background: var(--a-yellow); }
     @keyframes lc-pulse {
-      0%   { box-shadow: 0 0 0 0 rgba(255,219,0,0.5); }
-      70%  { box-shadow: 0 0 0 7px rgba(255,219,0,0); }
-      100% { box-shadow: 0 0 0 0 rgba(255,219,0,0); }
+      0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--a-yellow) 50%, transparent); }
+      70%  { box-shadow: 0 0 0 7px color-mix(in srgb, var(--a-yellow) 0%, transparent); }
+      100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--a-yellow) 0%, transparent); }
     }
     .lc-active .lc-circle  { background: var(--a-ink); color: #FFFFFF; border-color: var(--a-ink); animation: lc-pulse 1.8s ease-out infinite; }
     .lc-active .lc-label   { color: var(--a-ink); font-weight: 600; }
@@ -701,8 +701,8 @@ export function getLayout(): string {
     .lc-pending .lc-connector { background: var(--a-line); }
     .lc-info-pill {
       margin-left: 20px;
-      background: #FFFBEC;
-      border: 1px solid #FFE963;
+      background: var(--a-yellow-wash);
+      border: 1px solid var(--a-yellow-hover);
       border-radius: 4px;
       padding: 4px 14px;
       font-family: var(--font-mono);
@@ -827,7 +827,7 @@ export function getLayout(): string {
     }
     .confirm-icon.danger { background: #fee2e2; color: #dc2626; }
     .confirm-icon.warning { background: #fef3c7; color: #d97706; }
-    .confirm-icon.info { background: #FFFBEC; color: var(--a-charcoal); }
+    .confirm-icon.info { background: var(--a-yellow-wash); color: var(--a-charcoal); }
     .confirm-title { font-size: 1rem; font-weight: 700; text-align: center; margin-bottom: 8px; color: var(--a-ink); }
     .confirm-body { font-size: 0.85rem; text-align: center; color: #6b7280; margin-bottom: 20px; line-height: 1.55; }
     .confirm-list {
@@ -1005,7 +1005,7 @@ export function getLayout(): string {
     }
     .stage-draft            { background: var(--a-yellow); color: var(--a-ink); border-color: var(--a-yellow); }
     .stage-published        { background: #EEF2FF; color: #3730A3; border-color: #C7D2FE; }
-    .stage-qa_open          { background: #FFFBEC; color: var(--a-charcoal); border-color: #FFE963; }
+    .stage-qa_open          { background: var(--a-yellow-wash); color: var(--a-charcoal); border-color: var(--a-yellow-hover); }
     .stage-submissions_closed { background: #FEF9C3; color: #854D0E; border-color: #FDE047; }
     .stage-evaluation       { background: #FFF7ED; color: #9A3412; border-color: #FED7AA; }
     .stage-awarded          { background: var(--status-ok-bg); color: var(--status-ok-fg); border-color: #BBF7D0; }
@@ -1033,7 +1033,7 @@ export function getLayout(): string {
       vertical-align: middle;
     }
     tbody tr:nth-child(even) td { background: var(--a-pale); }
-    tbody tr:hover > td { background: #FFFBEC !important; }
+    tbody tr:hover > td { background: var(--a-yellow-wash) !important; }
     tbody tr:hover > td:last-child > * { background: transparent; }
 
     /* Mono ID chips in tables */
@@ -1123,7 +1123,7 @@ export function getLayout(): string {
     .toast.show { opacity: 1; }
     .toast.success { background: var(--status-ok-bg); color: var(--status-ok-fg); border-color: #BBF7D0; }
     .toast.error   { background: var(--status-err-bg); color: var(--status-err-fg); border-color: #FECDD3; }
-    .toast.info    { background: #FFFBEC; color: var(--a-charcoal); border-color: #FFE963; }
+    .toast.info    { background: var(--a-yellow-wash); color: var(--a-charcoal); border-color: var(--a-yellow-hover); }
     .toast.warning { background: #FEF9C3; color: #854D0E; border-color: #FDE047; }
 
     /* ── SPINNER ── */
@@ -1157,8 +1157,8 @@ export function getLayout(): string {
 
     /* ── AI SUGGESTION CARD — 4px yellow left rail on dark surface ── */
     .ai-suggestion {
-      background: #FFFBEC;
-      border: 1px solid #FFE963;
+      background: var(--a-yellow-wash);
+      border: 1px solid var(--a-yellow-hover);
       border-left: 4px solid var(--a-yellow);
       border-radius: var(--r-card);
       padding: 16px 20px;
@@ -1230,7 +1230,7 @@ export function getLayout(): string {
     /* ── TAGS ── */
     .tag {
       display: inline-block;
-      background: #FFFBEC;
+      background: var(--a-yellow-wash);
       color: var(--a-charcoal);
       padding: 3px 10px;
       border-radius: 4px;
@@ -1238,7 +1238,7 @@ export function getLayout(): string {
       font-family: var(--font-mono);
       letter-spacing: 0.04em;
       margin: 2px 2px;
-      border: 1px solid #FFE963;
+      border: 1px solid var(--a-yellow-hover);
       white-space: nowrap;
       max-width: 220px;
       overflow: hidden;
@@ -1272,8 +1272,8 @@ export function getLayout(): string {
       font-weight: 500;
       letter-spacing: 0.05em;
       color: var(--a-charcoal);
-      background: #FFFBEC;
-      border: 1px solid #FFE963;
+      background: var(--a-yellow-wash);
+      border: 1px solid var(--a-yellow-hover);
       border-radius: 4px;
       padding: 3px 10px;
       cursor: pointer;
@@ -1281,7 +1281,7 @@ export function getLayout(): string {
       user-select: none;
       white-space: nowrap;
     }
-    .file-count-badge:hover { background: #FFE963; border-color: var(--a-yellow); }
+    .file-count-badge:hover { background: var(--a-yellow-hover); border-color: var(--a-yellow); }
 
     /* ── PANEL SECTION TITLE ── */
     .panel-section-title {
