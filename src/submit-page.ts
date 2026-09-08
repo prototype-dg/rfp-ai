@@ -3,6 +3,7 @@ import { logoFullDataUri, bgDarkDataUri, bgLightDataUri } from './brand-assets'
 
 export function getSubmitPage(rfpId: string, participantCode: string): string {
   const p = getActiveProfile()
+  const isCpc = p.id === 'cpc'
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -89,13 +90,12 @@ export function getSubmitPage(rfpId: string, participantCode: string): string {
       -webkit-font-smoothing: antialiased;
     }
 
-    /* ── Header — dark brand texture + navy overlay ── */
+    /* ── Header — dark brand texture + navy overlay (Andersen) / cream panel (CPC) ── */
     .header {
-      /* Gradient overlay dims the charcoal texture; right-align shows the flame lines */
-      background:
-        linear-gradient(180deg, ${p.css.sidebarBg}d4 0%, ${p.css.sidebarBg}c8 100%),
-        var(--brand-bg-dark) right center / auto 100% no-repeat;
-      border-bottom: 4px solid var(--a-yellow);
+      background: ${isCpc
+        ? `linear-gradient(180deg, #FAF7F0 0%, #F3EDE0 100%)`
+        : `linear-gradient(180deg, ${p.css.sidebarBg}d4 0%, ${p.css.sidebarBg}c8 100%), var(--brand-bg-dark) right center / auto 100% no-repeat`};
+      border-bottom: 4px solid ${isCpc ? '#BA9765' : 'var(--a-yellow)'};
       padding: 0;
       position: relative;
     }
@@ -103,7 +103,7 @@ export function getSubmitPage(rfpId: string, participantCode: string): string {
       content: '';
       position: absolute;
       inset: 0;
-      background: ${p.css.sidebarBg}ad;
+      background: ${isCpc ? 'transparent' : `${p.css.sidebarBg}ad`};
       pointer-events: none;
     }
     .header-inner {
@@ -129,7 +129,7 @@ export function getSubmitPage(rfpId: string, participantCode: string): string {
     .header-divider {
       width: 1px;
       height: 44px;
-      background: rgba(255,255,255,0.18);
+      background: ${isCpc ? '#E9DCC4' : 'rgba(255,255,255,0.18)'};
       flex-shrink: 0;
     }
     .header-text {}
@@ -161,7 +161,7 @@ export function getSubmitPage(rfpId: string, participantCode: string): string {
     .header-badge .location-label {
       font-family: var(--font-mono);
       font-size: 0.6rem;
-      color: rgba(255,255,255,0.45);
+      color: ${isCpc ? '#7A6E62' : 'rgba(255,255,255,0.45)'};
       letter-spacing: 0.1em;
     }
 
@@ -210,9 +210,10 @@ export function getSubmitPage(rfpId: string, participantCode: string): string {
     .card {
       background: var(--cpc-white);
       border: 1px solid var(--cpc-line);
-      border-radius: 4px;
+      border-radius: ${isCpc ? '16px' : '4px'};
       padding: 24px 28px;
       margin-bottom: 20px;
+      ${isCpc ? 'box-shadow: 0 2px 12px rgba(58,51,43,0.06);' : ''}
     }
     .card-title {
       font-family: var(--font-mono);
@@ -529,10 +530,10 @@ export function getSubmitPage(rfpId: string, participantCode: string): string {
     .submit-btn {
       width: 100%;
       padding: 14px;
-      background: var(--a-yellow);
-      color: var(--a-ink);
+      background: ${isCpc ? '#BA9765' : 'var(--a-yellow)'};
+      color: ${isCpc ? '#FFFFFF' : 'var(--a-ink)'};
       border: none;
-      border-radius: 3px;
+      border-radius: ${isCpc ? '12px' : '3px'};
       font-family: var(--font-mono);
       font-size: 0.75rem;
       font-weight: 600;
@@ -545,7 +546,7 @@ export function getSubmitPage(rfpId: string, participantCode: string): string {
       justify-content: center;
       gap: 10px;
     }
-    .submit-btn:hover:not(:disabled) { background: #FFE963; }
+    .submit-btn:hover:not(:disabled) { background: ${isCpc ? '#745B35' : '#FFE963'}; }
     .submit-btn:disabled { background: var(--cpc-line); color: var(--cpc-ink-muted); cursor: not-allowed; }
 
     .submit-footer {
@@ -744,7 +745,7 @@ export function getSubmitPage(rfpId: string, participantCode: string): string {
 <header class="header">
   <div class="header-inner">
     <!-- Brand logo — profile-driven -->
-    <img src="${p.id === 'cpc' ? p.logoPath : logoFullDataUri}" alt="${p.orgName}" class="header-logo-full"/>
+    <img src="${p.id === 'cpc' ? '/static/cpc-logo-hires.png' : logoFullDataUri}" alt="${p.orgName}" class="header-logo-full" style="${p.id === 'cpc' ? 'height:52px;width:52px;object-fit:contain;border-radius:4px;' : ''}"/>
     <div class="header-divider"></div>
     <div class="header-text">
       <div class="sub">Procurement Portal &nbsp;·&nbsp; Proposal Submission</div>

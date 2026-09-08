@@ -25,7 +25,7 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
-import { logoFullDataUri } from '../brand-assets'
+import { logoFullDataUri, cpcHeaderDataUri } from '../brand-assets'
 import { getActiveProfile } from '../profiles/index'
 
 // ── Brand tokens ──────────────────────────────────────────────────────────────
@@ -649,66 +649,88 @@ export function profilePdfBodyHtml(opts: {
   if (p.id === 'andersen') {
     return andersenPdfBodyHtml({ bodyHtml: opts.bodyHtml })
   }
-  // ── CPC PDF: background image letterhead ──────────────────────────────────
-  const { contentPaddingTop, contentPaddingBottom, contentPaddingLeft, contentPaddingRight,
-          fontFamily, bodyColor, accentBorderColor, footerText, footerColor, letterheadBgPath } = p.pdf
-  const bgUrl = letterheadBgPath || '/static/cpc-letterhead-bg.png'
+  // ── CPC PDF: two-zone model — header image (15%) + content (85%), no footer ──
+  //
+  // Zone allocation (A4 at 96 dpi = 794 × 1123 px):
+  //   Header : top 15% = 168 px  →  44.6 mm  (@page margin-top)
+  //   Content: bot 85% = 955 px  →  no bottom margin needed
+  //
+  // The header image is served as an inline data URI so Puppeteer never
+  // makes a network request (it runs on Azure with no local static server).
+  // position:fixed pulls the header into the @page top-margin zone and
+  // it repeats on every page identically to Andersen's approach.
+  const { fontFamily, bodyColor, accentBorderColor } = p.pdf
+  const CPC_HDR_MM   = '44.6mm'   // 15% of 297mm
+  const CPC_SIDE_MM  = '16mm'
+  const CPC_BOT_MM   = '10mm'
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <style>
-  * { margin:0; padding:0; box-sizing:border-box; }
-  body { background:#fff; }
-  .cpc-page {
-    position: relative;
-    width: 210mm;
-    min-height: 297mm;
-    max-width: 210mm;
-    margin: 0 auto 8mm auto;
-    background-image: url('${bgUrl}');
-    background-size: 210mm 297mm;
-    background-repeat: no-repeat;
-    background-position: top left;
-    font-family: ${fontFamily};
-    color: ${bodyColor};
-    box-sizing: border-box;
+  *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#fff; font-family:${fontFamily}; color:${bodyColor}; }
+
+  /* Two-zone layout: top margin = header zone (15%), no bottom chrome */
+  @page { size: A4; margin: ${CPC_HDR_MM} ${CPC_SIDE_MM} ${CPC_BOT_MM} ${CPC_SIDE_MM}; }
+
+  /* Header zone: fixed, 794×168px, pulled into @page top margin — repeats every page */
+  .cpc-pdf-hd {
+    position: fixed;
+    top: -${CPC_HDR_MM};
+    left: -${CPC_SIDE_MM};
+    right: -${CPC_SIDE_MM};
+    width: 794px;
+    height: 168px;
     overflow: hidden;
-    page-break-after: always;
+    z-index: 1000;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
-  .cpc-content {
-    padding-top: ${contentPaddingTop};
-    padding-bottom: ${contentPaddingBottom};
-    padding-left: ${contentPaddingLeft};
-    padding-right: ${contentPaddingRight};
+  .cpc-pdf-hd img {
+    display: block;
+    width: 794px;
+    height: 168px;
+    object-fit: cover;
+    object-position: top center;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
-  .cpc-footer {
-    position: absolute;
-    bottom: 10mm;
-    left: 0; right: 0;
-    text-align: center;
-    font-family: ${fontFamily};
-    font-size: 9pt;
-    color: ${footerColor};
-  }
-  h1 { font-size:21pt; font-weight:700; text-align:center; color:${bodyColor}; margin:0 0 12pt 0; line-height:1.2; }
-  h2 { font-size:14pt; font-weight:700; color:${bodyColor}; margin-top:20pt; margin-bottom:9pt; padding-bottom:3pt; border-bottom:1px solid ${accentBorderColor}; }
-  h3 { font-size:12pt; font-weight:700; color:${bodyColor}; margin-top:13pt; margin-bottom:6pt; }
-  p  { font-size:11pt; line-height:1.28; color:${bodyColor}; margin:0 0 6pt 0; text-align:left; }
-  ul, ol { font-size:11pt; line-height:1.28; color:${bodyColor}; padding-left:20pt; margin:4pt 0 8pt 0; }
-  li { margin-bottom:3pt; }
-  table { width:100%; border-collapse:collapse; font-size:11pt; margin:6pt 0 10pt 0; }
-  th { font-weight:700; font-size:11pt; padding:6pt 8pt; border-bottom:0.5pt solid #CCCCCC; background:white; color:${bodyColor}; text-align:left; }
-  td { padding:4pt 8pt; border-bottom:0.5pt solid #CCCCCC; font-size:10.5pt; color:${bodyColor}; vertical-align:top; background:white; }
-  @media print { body { margin:0; } .cpc-page { margin:0; } }
+
+  /* Content zone: 85% of A4, starts below header */
+  .cpc-pdf-body { padding: 12pt 0 0; }
+
+  /* Typography */
+  h1 { font-size:18pt; font-weight:700; color:${bodyColor}; margin:0 0 12pt; line-height:1.2; border-bottom:2px solid #BA9765; padding-bottom:6pt; page-break-after:avoid; }
+  h2 { font-size:13pt; font-weight:700; color:${bodyColor}; margin:16pt 0 6pt; border-bottom:1px solid ${accentBorderColor}; padding-bottom:3pt; page-break-after:avoid; }
+  h3 { font-size:11pt; font-weight:700; color:${bodyColor}; margin:11pt 0 4pt; page-break-after:avoid; }
+  h4 { font-size:10.5pt; font-weight:600; color:#745B35; margin:9pt 0 3pt; }
+  p  { font-size:10.5pt; line-height:1.65; color:${bodyColor}; margin:0 0 7pt; orphans:3; widows:3; }
+  ul, ol { font-size:10.5pt; line-height:1.65; color:${bodyColor}; padding-left:18pt; margin:0 0 7pt; }
+  li { margin-bottom:3pt; page-break-inside:avoid; }
+  hr { border:none; border-top:2px solid #BA9765; margin:14pt 0; }
+  table { width:100%; border-collapse:collapse; font-size:10pt; margin:6pt 0 10pt; page-break-inside:avoid; }
+  thead { display:table-header-group; }
+  th { background:#FAF7F0; color:#745B35; font-weight:700; padding:6pt 10pt; text-align:left; border:1px solid #E9DCC4; font-family:'JetBrains Mono','Courier New',monospace; font-size:9pt; letter-spacing:0.04em; }
+  td { padding:5pt 10pt; border:1px solid #E9DCC4; vertical-align:top; }
+  tr { page-break-inside:avoid; }
+  tr:nth-child(even) td { background:#FAF7F0; }
+  blockquote { border-left:4px solid #BA9765; margin:8pt 0; padding:6pt 12pt; background:#FAF7F0; page-break-inside:avoid; }
+  code { font-family:'Courier New',monospace; font-size:9pt; background:#f3f4f6; padding:1pt 3pt; border-radius:2pt; }
+  pre  { background:#f3f4f6; padding:8pt; border-radius:3pt; margin:6pt 0; page-break-inside:avoid; }
+  pre code { background:transparent; padding:0; }
+  strong { color:#3A332B; }
+  * { -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important; }
 </style>
 </head>
 <body>
-<div class="cpc-page">
-  <div class="cpc-content">
-    ${opts.bodyHtml}
-  </div>
-  <div class="cpc-footer">${escHtml(footerText)}</div>
+<!-- CPC Header zone: fixed at top, repeats on every PDF page -->
+<div class="cpc-pdf-hd">
+  <img src="${cpcHeaderDataUri}" alt="Crown Prince's Court" />
+</div>
+<!-- Content zone: 85% of A4 — bounded by @page top margin above -->
+<div class="cpc-pdf-body">
+  ${opts.bodyHtml}
 </div>
 </body>
 </html>`
@@ -731,11 +753,23 @@ export function profilePageHtml(opts: {
   if (p.id === 'andersen') {
     return andersenPageHtml(opts)
   }
-  // ── CPC page HTML ─────────────────────────────────────────────────────────
-  const title = escHtml(opts.title || 'RFP')
-  const ref   = escHtml(opts.refNumber || '')
-  const email = opts.email || p.procurementEmail
-  const year  = new Date().getFullYear()
+  // ── CPC page HTML: two-zone paginated preview ────────────────────────────
+  // Matches the PDF exactly:
+  //   • Each .cpc-page = 794×1123px card
+  //   • Header zone: 168px (15%) — cpc-header.png scaled to full 794px width
+  //   • Content zone: 955px (85%) — RFP body text
+  //   • No footer zone (two-zone model)
+  //
+  // JS paginator slices the body HTML across pages identically to Andersen,
+  // using BODY_H (955 - 16px top-pad = 939px usable) as the breakpoint.
+  const title    = escHtml(opts.title || 'RFP')
+  const refBadge = escHtml(opts.refNumber || '')
+  const email    = opts.email || p.procurementEmail
+  const year     = new Date().getFullYear()
+
+  // Header block injected into every page card
+  const cpcPageHeaderHtml = `<div class="cpc-pg-hd" style="width:100%;height:168px;overflow:hidden;flex-shrink:0;"><img src="${cpcHeaderDataUri}" style="display:block;width:794px;height:168px;object-fit:cover;object-position:top center;" alt="Crown Prince's Court" /></div>`
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -745,65 +779,167 @@ export function profilePageHtml(opts: {
 <link href="${p.fonts.googleFontsUrl}" rel="stylesheet">
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: #F0EDE8; font-family: ${p.fonts.body}; font-size: 10.5pt; line-height: 1.65; color: ${p.css.ink}; }
-  .cpc-pg-wrap { width: 794px; margin: 24px auto; background: #fff; box-shadow: 0 2px 12px rgba(0,0,0,0.12); }
-  .cpc-pg-hd   { background: ${p.css.sidebarBg}; border-bottom: 3px solid ${p.css.accent}; padding: 18px 48px; display: flex; align-items: center; justify-content: space-between; }
-  .cpc-pg-hd-l { font-family: ${p.fonts.display}; font-size: 17px; font-weight: 700; color: ${p.css.accent}; }
-  .cpc-pg-hd-sub { font-size: 10px; color: ${p.css.accent}99; margin-top: 3px; font-family: ${p.fonts.mono}; letter-spacing: 0.08em; text-transform: uppercase; }
-  .cpc-pg-hd-r { font-family: ${p.fonts.mono}; font-size: 9px; color: ${p.css.accent}cc; text-align: right; letter-spacing: 0.06em; text-transform: uppercase; }
-  .cpc-pg-body { padding: 32px 48px 24px; }
-  .cpc-pg-ft   { background: ${p.css.accentTint}; border-top: 1px solid ${p.css.accentLine}; padding: 12px 48px; display: flex; align-items: center; justify-content: space-between; }
-  .cpc-pg-ft-l { font-size: 9px; color: ${p.css.inkMid}; font-family: ${p.fonts.mono}; letter-spacing: 0.06em; }
-  .cpc-pg-ft-r { font-size: 9px; color: ${p.css.inkMuted}; font-family: ${p.fonts.mono}; }
-  h1 { font-family: ${p.fonts.display}; font-size: 18pt; font-weight: 700; border-bottom: 2px solid ${p.css.accent}; padding-bottom: 6pt; margin: 0 0 14pt; }
-  h2 { font-size: 12pt; font-weight: 700; color: ${p.css.ink}; border-bottom: 1px solid ${p.css.line}; margin: 14pt 0 5pt; padding-bottom: 3pt; }
-  h3 { font-size: 10.5pt; font-weight: 700; color: ${p.css.inkMid}; margin: 10pt 0 3pt; }
-  h4 { font-size: 10pt; font-weight: 600; color: ${p.css.inkMuted}; margin: 8pt 0 2pt; }
-  p  { margin: 0 0 7pt; }
-  ul, ol { margin: 0 0 7pt; padding-left: 20pt; }
-  li { margin-bottom: 2pt; }
-  hr { border: none; border-top: 2px solid ${p.css.accent}; margin: 16pt 0; }
-  table { width: 100%; border-collapse: collapse; font-size: 9.5pt; margin: 8pt 0 12pt; }
-  th { background: ${p.css.sidebarBg}; color: ${p.css.accent}; font-weight: 700; padding: 6pt 10pt; text-align: left; border: 1px solid ${p.css.sidebarBg}; }
-  td { padding: 5pt 10pt; border: 1px solid ${p.css.line}; vertical-align: top; }
-  tr:nth-child(even) td { background: ${p.css.accentTint}; }
-  blockquote { border-left: 4px solid ${p.css.accent}; margin: 8pt 0; padding: 6pt 12pt; background: ${p.css.accentTint}; }
-  code { font-family: ${p.fonts.mono}; font-size: 9pt; background: #f3f4f6; padding: 1pt 3pt; border-radius: 2pt; }
-  pre  { background: #f3f4f6; padding: 10pt; border-radius: 4pt; margin: 8pt 0; overflow-x: auto; }
-  * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-  @media print { body { background: #fff; } .cpc-pg-wrap { box-shadow: none; margin: 0; } .no-print { display: none !important; } }
+  html, body { background: #E9DCC4; }
+
+  /* ── A4 page card ── */
+  .cpc-page {
+    width: 794px; min-height: 1123px;
+    background: #fff;
+    margin: 24px auto;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+    page-break-after: always;
+  }
+  /* Header zone: 15% = 168px */
+  .cpc-pg-hd { flex: 0 0 168px; width: 100%; overflow: hidden; }
+  .cpc-pg-hd img { display:block; width:794px; height:168px; object-fit:cover; object-position:top center; }
+  /* Content zone: 85% = 955px — flex:1 fills remaining space (no footer div) */
+  .cpc-pg-body {
+    flex: 1 1 auto;
+    padding: 16px 56px 20px;
+    overflow: hidden;
+    font-family: ${p.fonts.body};
+    font-size: 10.5pt;
+    line-height: 1.65;
+    color: ${p.css.ink};
+  }
+
+  /* Typography */
+  .cpc-pg-body h1 { font-family: ${p.fonts.display}; font-size: 18pt; font-weight: 700; border-bottom: 2px solid #BA9765; padding-bottom: 6pt; margin: 0 0 14pt; page-break-after: avoid; }
+  .cpc-pg-body h2 { font-size: 12pt; font-weight: 700; color: ${p.css.ink}; border-bottom: 1px solid #E9DCC4; margin: 14pt 0 5pt; padding-bottom: 3pt; page-break-after: avoid; }
+  .cpc-pg-body h3 { font-size: 10.5pt; font-weight: 700; color: ${p.css.inkMid}; margin: 10pt 0 3pt; page-break-after: avoid; }
+  .cpc-pg-body h4 { font-size: 10pt; font-weight: 600; color: #745B35; margin: 8pt 0 2pt; }
+  .cpc-pg-body p  { margin: 0 0 7pt; orphans: 3; widows: 3; }
+  .cpc-pg-body ul, .cpc-pg-body ol { margin: 0 0 7pt; padding-left: 20pt; }
+  .cpc-pg-body li { margin-bottom: 2pt; page-break-inside: avoid; }
+  .cpc-pg-body hr { border: none; border-top: 2px solid #BA9765; margin: 16pt 0; }
+  .cpc-pg-body table { width: 100%; border-collapse: collapse; font-size: 9.5pt; margin: 8pt 0 12pt; page-break-inside: avoid; }
+  .cpc-pg-body thead { display: table-header-group; }
+  .cpc-pg-body th { background: #FAF7F0; color: #745B35; font-weight: 700; padding: 6pt 10pt; text-align: left; border: 1px solid #E9DCC4; font-family: ${p.fonts.mono}; font-size: 9pt; letter-spacing: 0.04em; }
+  .cpc-pg-body td { padding: 5pt 10pt; border: 1px solid #E9DCC4; vertical-align: top; }
+  .cpc-pg-body tr { page-break-inside: avoid; }
+  .cpc-pg-body tr:nth-child(even) td { background: #FAF7F0; }
+  .cpc-pg-body blockquote { border-left: 4px solid #BA9765; margin: 8pt 0; padding: 6pt 12pt; background: #FAF7F0; page-break-inside: avoid; }
+  .cpc-pg-body code { font-family: ${p.fonts.mono}; font-size: 9pt; background: #f3f4f6; padding: 1pt 3pt; border-radius: 2pt; }
+  .cpc-pg-body pre  { background: #f3f4f6; padding: 10pt; border-radius: 4pt; margin: 8pt 0; page-break-inside: avoid; }
+  .cpc-pg-body pre code { background: transparent; padding: 0; }
+  .cpc-pg-body strong { color: #3A332B; }
+
+  /* Hidden measurement div */
+  #cpc-measure { position:fixed; top:-9999px; left:0; width:682px; visibility:hidden; pointer-events:none;
+    font-family:${p.fonts.body}; font-size:10.5pt; line-height:1.65; color:${p.css.ink}; }
+
+  @media print {
+    html, body { background: #fff !important; margin: 0; padding: 0; }
+    #cpc-measure { display: none !important; }
+    .cpc-page {
+      width: 794px !important; height: 1123px !important; min-height: 1123px !important;
+      max-height: 1123px !important; margin: 0 !important; box-shadow: none !important;
+      page-break-after: always !important; break-after: page !important; overflow: hidden !important;
+    }
+    .cpc-page:last-child { page-break-after: auto !important; break-after: auto !important; }
+    * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+  }
 </style>
 </head>
 <body>
 ${opts.showToolbar ? `
-<div class="no-print" style="position:fixed;top:0;left:0;right:0;z-index:9999;background:${p.css.sidebarBg};color:${p.css.accent};padding:10px 24px;display:flex;align-items:center;justify-content:space-between;font-family:Arial,sans-serif;font-size:13px;box-shadow:0 2px 8px rgba(0,0,0,0.3)">
+<div class="no-print" style="position:fixed;top:0;left:0;right:0;z-index:9999;background:${p.css.sidebarBg};color:${p.css.accent};padding:10px 24px;display:flex;align-items:center;justify-content:space-between;font-family:Arial,sans-serif;font-size:13px;box-shadow:0 2px 8px rgba(0,0,0,0.3);border-bottom:2px solid ${p.css.accent}">
   <div style="display:flex;align-items:center;gap:12px">
     <span style="font-weight:700;letter-spacing:.05em">${p.orgNameShort} \u2014 RFP Document</span>
-    <span style="opacity:.6;font-size:11px">${ref}</span>
+    <span style="opacity:.6;font-size:11px">${refBadge}</span>
   </div>
   <div style="display:flex;gap:10px">
-    <button onclick="window.print()" style="background:${p.css.accent};color:${p.css.sidebarBg};border:none;padding:7px 20px;border-radius:5px;font-size:13px;font-weight:600;cursor:pointer">&#x2193; Save as PDF / Print</button>
-    <button onclick="window.close()" style="background:transparent;color:${p.css.inkMuted};border:1px solid ${p.css.line};padding:7px 14px;border-radius:5px;font-size:12px;cursor:pointer">Close</button>
+    <button onclick="window.print()" style="background:${p.css.accent};color:#fff;border:none;padding:7px 20px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer">&#x2193; Save as PDF / Print</button>
+    <button onclick="window.close()" style="background:transparent;color:${p.css.inkMuted};border:1px solid ${p.css.line};padding:7px 14px;border-radius:8px;font-size:12px;cursor:pointer">Close</button>
   </div>
 </div>
 <div class="no-print" style="height:52px"></div>
 ` : ''}
-<div class="cpc-pg-wrap">
-  <div class="cpc-pg-hd">
-    <div>
-      <div class="cpc-pg-hd-l">${escHtml(p.orgName)}</div>
-      <div class="cpc-pg-hd-sub">Procurement &amp; Contracting Department</div>
-    </div>
-    <div class="cpc-pg-hd-r">${ref ? `REF: ${ref}` : escHtml(p.orgLocation)}</div>
-  </div>
-  <div class="cpc-pg-body">
-    ${opts.bodyHtml}
-  </div>
-  <div class="cpc-pg-ft">
-    <div class="cpc-pg-ft-l">${escHtml(email)}</div>
-    <div class="cpc-pg-ft-r">&copy; ${year} ${escHtml(p.orgNameShort)} &mdash; Confidential</div>
-  </div>
-</div>
+<!-- Hidden measurement div for JS paginator -->
+<div id="cpc-measure"><div id="cpc-measure-content">${opts.bodyHtml}</div></div>
+<div id="cpc-pages"></div>
+<script>
+(function(){
+  var PAGE_W     = 794;
+  var PAGE_H     = 1123;
+  var HDR_H      = 168;    // 15% of 1123 — header image
+  var BODY_PAD_T = 16;     // .cpc-pg-body padding-top
+  var BODY_PAD_B = 20;     // .cpc-pg-body padding-bottom
+  var BODY_H     = PAGE_H - HDR_H - BODY_PAD_T - BODY_PAD_B;  // 919px usable
+  var pageHeaderHtml = ${JSON.stringify(cpcPageHeaderHtml)};
+
+  function makePageDiv(bodyInner) {
+    var div = document.createElement('div');
+    div.className = 'cpc-page';
+    div.innerHTML = pageHeaderHtml + '<div class="cpc-pg-body">' + bodyInner + '</div>';
+    return div;
+  }
+
+  function paginate() {
+    var measureContent = document.getElementById('cpc-measure-content');
+    if (!measureContent) return;
+
+    var slices  = [[]];
+    var heights = [0];
+
+    function currentH() { return heights[heights.length - 1]; }
+    function newPage()  { slices.push([]); heights.push(0); }
+    function addHtml(html, h) {
+      slices[slices.length - 1].push(html);
+      heights[heights.length - 1] += h;
+    }
+
+    function processElement(el) {
+      var tag = el.tagName;
+
+      if (tag === 'TABLE') {
+        var thead = el.querySelector('thead');
+        var theadHtml = thead ? thead.outerHTML : '';
+        var rows = el.querySelectorAll('tr');
+        var tableOpen = '<table style="' + (el.getAttribute('style') || '') + '">';
+        var tableClose = '</table>';
+        for (var ri = 0; ri < rows.length; ri++) {
+          var row = rows[ri];
+          if (row.closest('thead')) continue;
+          var rowH = row.offsetHeight || 24;
+          if (currentH() + rowH > BODY_H && currentH() > 0) newPage();
+          addHtml(tableOpen + (theadHtml ? '<thead>' + theadHtml + '</thead>' : '') + '<tbody>' + row.outerHTML + '</tbody>' + tableClose, rowH);
+        }
+        return;
+      }
+
+      var h = el.offsetHeight || 0;
+      if (h === 0) { addHtml(el.outerHTML, 0); return; }
+
+      if (currentH() + h > BODY_H && currentH() > 0) newPage();
+      if (h > BODY_H) {
+        // Element taller than one page — force onto current page
+        addHtml(el.outerHTML, h);
+      } else {
+        addHtml(el.outerHTML, h);
+      }
+    }
+
+    var children = measureContent.children;
+    for (var i = 0; i < children.length; i++) processElement(children[i]);
+
+    var pages = document.getElementById('cpc-pages');
+    if (!pages) return;
+    for (var p = 0; p < slices.length; p++) {
+      var pageDiv = makePageDiv(slices[p].join(''));
+      pages.appendChild(pageDiv);
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', paginate);
+  } else {
+    paginate();
+  }
+})();
+</script>
 </body>
 </html>`
 }

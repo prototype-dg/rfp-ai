@@ -239,7 +239,7 @@ export const CPC_PROFILE: BrandProfile = {
     sidebarBg:      '#FBF8F2',
     sidebarActiveBg:'#F5EFE3',
 
-    ink:            '#1B1712',
+    ink:            '#3A332B',
     inkMid:         '#4A4238',
     inkMuted:       '#7A6E62',
     line:           '#E7DFCE',
