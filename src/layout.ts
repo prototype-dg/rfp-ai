@@ -9,12 +9,12 @@ export function getLayout(): string {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="theme-color" content="#FFDB00">
-  <title>AI RFP Management — Andersen</title>
-  <!-- Andersen Brand Fonts -->
+  <meta name="theme-color" content="${p.faviconColor}">
+  <title>${p.appTitle}</title>
+  <!-- Brand Fonts (profile-specific) -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=Noto+Sans+Arabic:wght@300;400;500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="${p.fonts.googleFontsUrl}" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"><\/script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"><\/script>
@@ -92,12 +92,46 @@ export function getLayout(): string {
       --shadow-modal:  0 20px 60px rgba(0,0,0,0.2);
     }
 
+    /* ── PROFILE DESIGN TOKEN OVERRIDES ── injected server-side per active profile ── */
+    :root {
+      --a-yellow:        ${p.css.accent};
+      --a-yellow-hover:  ${p.css.accentHover};
+      --a-yellow-wash:   ${p.css.accentTint};
+      --a-navy:          ${p.css.sidebarBg};
+      --a-ink:           ${p.css.ink};
+      --a-charcoal:      ${p.css.accentDeep};
+      --a-slate:         ${p.css.inkMid};
+      --a-line:          ${p.css.line};
+      --a-mute:          ${p.css.inkMuted};
+      --a-pale:          ${p.css.pageBg};
+
+      --cpc-gold:        ${p.css.accent};
+      --cpc-gold-stroke: ${p.css.accentHover};
+      --cpc-gold-deep:   ${p.css.accentDeep};
+      --cpc-gold-light:  ${p.css.accentHover};
+      --cpc-gold-tint:   ${p.css.accentTint};
+      --cpc-paper:       ${p.css.paper};
+      --cpc-ink:         ${p.css.ink};
+      --cpc-ink-2:       ${p.css.inkMid};
+      --cpc-line:        ${p.css.line};
+      --cpc-gray-bg:     ${p.css.pageBg};
+      --cpc-ivory:       ${p.css.accentTint};
+
+      --status-err-bg:   ${p.css.errorBg};
+      --status-err-fg:   ${p.css.errorFg};
+      --status-ok-bg:    ${p.css.successBg};
+      --status-ok-fg:    ${p.css.successFg};
+
+      --dark-surface:    ${p.css.sidebarBg};
+      --r-pill:          ${p.css.radiusPill};
+    }
+
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     html, body {
       height: 100%;
       /* Light wave-line brand texture — fixed so it doesn't scroll */
-      background: #EFEFEF var(--brand-bg-light) center center / cover fixed;
+      background: ${p.css.pageBg} var(--brand-bg-light) center center / cover fixed;
       color: var(--a-ink);
       font-family: ${p.fonts.body};
       font-weight: 400;
@@ -120,7 +154,7 @@ export function getLayout(): string {
        * right center keeps line-art (right half of landscape image) visible.
        */
       background:
-        linear-gradient(180deg, rgba(36,39,43,0.82) 0%, rgba(44,48,54,0.78) 100%),
+        linear-gradient(180deg, ${p.css.sidebarBg}d4 0%, ${p.css.sidebarBg}c8 100%),
         var(--brand-bg-dark) right center / auto 100% fixed;
       border-right: 1px solid rgba(255,255,255,0.08);
       display: flex;
@@ -138,23 +172,26 @@ export function getLayout(): string {
       flex-direction: column;
       gap: 6px;
     }
-    /* Full logo: icon + "ANDERSEN" wordmark in one image */
+    /* Full logo: icon + wordmark in one image (landscape, e.g. Andersen 1024×267) */
     .sidebar-logo-full {
       display: block;
-      /*
-       * The logo PNG is 1024×267 landscape (icon left + ANDERSEN text right).
-       * Fix height and let width scale naturally to show full wordmark.
-       * max-width caps it at the sidebar inner width minus padding.
-       */
       height: 34px;
       width: auto;
       max-width: 188px;
       object-fit: contain;
       object-position: left center;
-      /* Yellow glyph + white text renders natively on dark navy bg */
+    }
+    /* Square/portrait emblem variant (e.g. CPC emblem PNG) */
+    .sidebar-logo-emblem {
+      display: block;
+      height: 52px;
+      width: 52px;
+      object-fit: contain;
+      object-position: center;
+      margin-bottom: 2px;
     }
     .sidebar-wordmark .wm-product {
-      font-family: 'Roboto', sans-serif;
+      font-family: ${p.fonts.body};
       font-size: 14px;
       font-weight: 600;
       letter-spacing: 0.02em;
@@ -1356,7 +1393,7 @@ export function getLayout(): string {
     }
 
     /* ── RTL / ARABIC OVERRIDES ── */
-    html[dir="rtl"] body { font-family: 'Noto Sans Arabic', 'Roboto', system-ui, sans-serif; }
+    html[dir="rtl"] body { font-family: ${p.fonts.arabic || p.fonts.body}; }
     html[dir="rtl"] .app-shell { flex-direction: row-reverse; }
     html[dir="rtl"] .cpc-sidebar { border-right: none; border-left: 1px solid rgba(255,255,255,0.06); }
     html[dir="rtl"] .sidebar-brand { flex-direction: row-reverse; }
@@ -1394,8 +1431,8 @@ export function getLayout(): string {
   <aside class="cpc-sidebar">
     <!-- Brand -->
     <div class="sidebar-brand">
-      <!-- Full brand logo: yellow glyph + ANDERSEN wordmark — data URI for guaranteed rendering -->
-      <img src="${logoFullDataUri}" alt="Andersen" class="sidebar-logo-full">
+      <!-- Brand logo — profile-driven: landscape wordmark (Andersen) or square emblem (CPC) -->
+      <img src="${p.logoPath}" alt="${p.logoAlt}" class="${isCpc ? 'sidebar-logo-emblem' : 'sidebar-logo-full'}">
       <div class="sidebar-wordmark">
         <div class="wm-product" data-i18n="product_name">AI RFP Management</div>
       </div>
