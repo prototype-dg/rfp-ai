@@ -870,8 +870,12 @@ Write the complete Markdown for section "${sectionSpec?.heading || sectionKey}" 
   // the Worker from being killed before the stream completes.
   // On Azure App Service (Node.js), the HTTP response stream keeps the process
   // alive automatically — executionCtx does not exist, so we guard against it.
-  if (c.executionCtx) {
+  // IMPORTANT: c.executionCtx is a getter that THROWS (not returns null/undefined)
+  // when there is no ExecutionContext, so we must use try/catch — not an if-check.
+  try {
     c.executionCtx.waitUntil(streamTask)
+  } catch {
+    // Node.js / Azure: no ExecutionContext — stream keeps the response alive naturally
   }
 
   return new Response(readable, {
