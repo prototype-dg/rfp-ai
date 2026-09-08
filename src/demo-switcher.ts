@@ -348,8 +348,8 @@ export function getDemoSwitcherPage(): string {
         <i class="fa-solid fa-arrow-up-right-from-square"></i>
         Open Live App
       </a>
-      <a href="https://rfp-ai.andersenlab.com/" class="open-link" target="_blank" rel="noopener">
-        rfp-ai.andersenlab.com
+      <a href="https://rfp.andersenlab.com.pl/" class="open-link" target="_blank" rel="noopener">
+        rfp.andersenlab.com.pl
       </a>
     </div>
 

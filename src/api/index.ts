@@ -431,7 +431,7 @@ apiRouter.post('/rfps/:id/generate', async (c) => {
 
         // Build a proxied URL through our own /api/proposals/pdf/:key endpoint
         // (Azure App Service serves itself — no cross-service network hop needed)
-        const pdfUrl = `https://a7b32759-e743-4139-9bb0-4bae44886667.vip.gensparksite.com/api/proposals/pdf/${encodeURIComponent(obj.key)}`
+        const pdfUrl = `https://rfp.andersenlab.com.pl/api/proposals/pdf/${encodeURIComponent(obj.key)}`
 
         const result = await runInlineOcr(pdfUrl, c.env, 100)
         if (!result || result.chars < 200) continue
@@ -1004,7 +1004,7 @@ apiRouter.post('/rfps/:id/upload-arch-doc', async (c) => {
 
     // Phase 2: run OCR inline — no callback, result written directly to DB
     if (r2Key) {
-      const workerBase = `https://a7b32759-e743-4139-9bb0-4bae44886667.vip.gensparksite.com/api`
+      const workerBase = `https://rfp.andersenlab.com.pl/api`
       const pdfUrl = `${workerBase}/proposals/pdf/${encodeURIComponent(r2Key)}`
       // Run OCR in background (don't block the HTTP response)
       runInlineOcr(pdfUrl, c.env, 100).then(async (result) => {
@@ -1031,9 +1031,8 @@ apiRouter.post('/rfps/:id/upload-arch-doc', async (c) => {
 
 // POST /rfps/upload-rfp-pdf — upload an existing RFP PDF; async OCR + AI extraction flow.
 // Flow: (1) store PDF in R2  (2) INSERT rfp with filename-title + placeholder text
-//       (3) fire ASYNC OCR → sidecar calls back /callback/rfps/:id/rfp-upload-ocr-complete
-//       (4) callback runs AI extraction and UPDATEs all rfp fields
-//       Returns immediately with rfp record and ocr_status='processing'.
+//       (3) run OCR inline (async, non-blocking) then run AI extraction
+//       Returns immediately with rfp record and ai_extraction_status='processing'.
 apiRouter.post('/rfps/upload-rfp-pdf', async (c) => {
   try {
     const formData = await c.req.formData()
@@ -1081,7 +1080,7 @@ apiRouter.post('/rfps/upload-rfp-pdf', async (c) => {
 
     // (3) Phase 2: run OCR inline then run AI extraction — no callback needed
     if (r2Key) {
-      const workerBase = `https://a7b32759-e743-4139-9bb0-4bae44886667.vip.gensparksite.com/api`
+      const workerBase = `https://rfp.andersenlab.com.pl/api`
       const pdfUrl     = `${workerBase}/proposals/pdf/${encodeURIComponent(r2Key)}`
       // Run OCR + AI extraction asynchronously (background, non-blocking)
       ;(async () => {
@@ -1223,48 +1222,6 @@ function parseJsonArray(raw: string): any[] | null {
   }
 }
 
-// ── Sidecar LLM-extract helper ───────────────────────────────────────────────
-// Calls the sidecar /llm-extract endpoint asynchronously.
-// The sidecar runs llama-server locally and POSTs results to callbackUrl.
-async function callSidecarLlmExtract(
-  rfpId: string | number,
-  ocrText: string,
-  callbackUrl: string,
-  env: any,
-): Promise<boolean> {
-  const sidecarUrl    = env?.PDF_SIDECAR_URL    || (globalThis as any).PDF_SIDECAR_URL    || ''
-  const sidecarSecret = env?.PDF_SIDECAR_SECRET || (globalThis as any).PDF_SIDECAR_SECRET || ''
-  if (!sidecarUrl || !sidecarSecret) {
-    console.warn('[sidecar-llm] PDF_SIDECAR_URL or PDF_SIDECAR_SECRET not configured')
-    return false
-  }
-  try {
-    const res = await fetch(`${sidecarUrl}/llm-extract`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${sidecarSecret}` },
-      body: JSON.stringify({
-        rfp_id: Number(rfpId),
-        ocr_text: ocrText,
-        callback_url: callbackUrl,
-        callback_secret: sidecarSecret,
-        max_input_chars: 20000,
-        max_completion_tokens: 2000,
-      }),
-      signal: AbortSignal.timeout(15000),
-    })
-    if (!res.ok) {
-      const err = await res.text().catch(() => '')
-      console.error(`[sidecar-llm] rfp=${rfpId} HTTP ${res.status}: ${err.slice(0, 200)}`)
-      return false
-    }
-    const body: any = await res.json()
-    console.log(`[sidecar-llm] rfp=${rfpId} queued: status=${body.status}`)
-    return true
-  } catch (e: any) {
-    console.error(`[sidecar-llm] rfp=${rfpId} failed to queue: ${e.message}`)
-    return false
-  }
-}
 
 // ── Single-phase LLM extraction (v86/v89) ────────────────────────────────────
 // One LLM call returns scalar fields + scoring_criteria only.
@@ -1435,342 +1392,6 @@ async function writeExtractedRfpFields(
   ).run()
   return { newTitle, newCategory }
 }
-
-// POST /callback/rfps/:rfpId/rfp-upload-ocr-complete
-// Called by the PDF sidecar after async OCR of an uploaded RFP PDF.
-//
-// v79 architecture: returns 200 to the sidecar IMMEDIATELY after storing OCR text,
-// then runs all 3 LLM extraction phases via ctx.waitUntil() — completely outside
-// the HTTP response deadline, so the Cloudflare Worker wall-clock limit (30s) no
-// longer applies to the LLM calls. All 3 phases complete reliably.
-//
-// Populates: title, category, background, objectives, scope, tech_requirements, budget, deadline,
-//            content (formatted summary), rfp_full_text (full OCR for eval/Q&A),
-//            scoring_matrix (JSON eval criteria), requirement_glossary (JSON requirement list).
-apiRouter.post('/callback/rfps/:rfpId/rfp-upload-ocr-complete', async (c) => {
-  const rfpId   = c.req.param('rfpId')
-  const filename = decodeURIComponent(c.req.query('filename') || 'document.pdf')
-  const sizeKb   = c.req.query('size_kb') || '?'
-  const expectedSecret = c.env.PDF_SIDECAR_SECRET || (globalThis as any).PDF_SIDECAR_SECRET || ''
-
-  // ── Parse body and authenticate ─────────────────────────────────────────────
-  let body: any
-  try {
-    body = await c.req.json()
-  } catch (e: any) {
-    return c.json({ error: 'Invalid JSON body' }, 400)
-  }
-  if (expectedSecret && body.callback_secret !== expectedSecret) {
-    return c.json({ error: 'Unauthorized' }, 401)
-  }
-
-  // ── Validate OCR output ─────────────────────────────────────────────────────
-  const ocrOk = body.text && (body.chars || body.text.length) >= 200
-  if (!ocrOk) {
-    const stub = `[PDF: ${filename}, ${sizeKb}KB — OCR yielded ${body.chars || 0} chars. ${body.error || ''}]`
-    console.warn(`[rfp-upload-ocr-cb] rfp=${rfpId} OCR insufficient — storing stub, skipping AI`)
-    await c.env.DB.prepare(`UPDATE rfps SET uploaded_rfp_text=?, updated_at=datetime('now') WHERE id=?`)
-      .bind(stub, rfpId).run()
-    return c.json({ ok: false, reason: 'ocr_insufficient', chars: body.chars || 0 })
-  }
-
-  const extractedText = (body.text as string).slice(0, 120000)
-  console.log(`[rfp-upload-ocr-cb] rfp=${rfpId} OCR ok: ${body.chars} chars, ${body.pages_extracted}/${body.pages_total} pages`)
-
-  // ── Store raw OCR text immediately so it's never lost ──────────────────────
-  // This also clears the "[PDF: … in progress]" placeholder, which the frontend
-  // polls for. We add an ai_extracting marker so the frontend knows LLM is running.
-  await c.env.DB.prepare(
-    `UPDATE rfps SET uploaded_rfp_text=?, rfp_full_text=?, ai_extraction_status='extracting', updated_at=datetime('now') WHERE id=?`
-  ).bind(extractedText, extractedText.slice(0, 100000), rfpId).run()
-
-  // ── v98: Run OpenAI extraction DIRECTLY — bypass sidecar LLM ────────────────
-  // The sidecar /llm-extract ran Qwen2.5-3B on the VPS at ~8.8 tok/s — 85–200s for
-  // a typical RFP. Switching to OpenAI gpt-5.4-mini cuts this to ~3–5s.
-  // The sidecar is still used for PDF OCR (step above); only the LLM step changes.
-  const db = c.env.DB
-  try {
-    const { extracted, scoringMatrixJson, requirementGlossaryJson, phaseErrors } =
-      await extractRfpFieldsFromOcr(extractedText, c.env, `rfp=${rfpId}`)
-    const { newTitle } = await writeExtractedRfpFields(
-      db, rfpId, extractedText, extracted, scoringMatrixJson, requirementGlossaryJson)
-    await db.prepare(`UPDATE rfps SET ai_extraction_status='done', updated_at=datetime('now') WHERE id=?`).bind(rfpId).run()
-    console.log(`[rfp-upload-ocr-cb] rfp=${rfpId} OpenAI extraction done — title="${newTitle}" errors=${phaseErrors.length}`)
-    return c.json({ ok: true, rfpId, status: 'done' })
-  } catch (e: any) {
-    await db.prepare(`UPDATE rfps SET ai_extraction_status='error', updated_at=datetime('now') WHERE id=?`).bind(rfpId).run().catch(() => {})
-    return c.json({ ok: true, rfpId, status: 'error', error: e.message })
-  }
-})
-
-// POST /rfps/:id/rerun-ai-extraction
-// Admin/recovery endpoint: re-run three-phase AI extraction against stored uploaded_rfp_text.
-// Phases 2+3 now run in PARALLEL (halves wall-clock). Exposes phase_errors for diagnosis.
-// Body params (optional JSON):
-//   debug_phases: boolean — if true, include raw LLM output for phases 2+3 in response
-//   force_phases: boolean — if true, run all phases even if scalar fields already populated
-apiRouter.post('/rfps/:id/rerun-ai-extraction', async (c) => {
-  // v90: async — queues extraction via sidecar /llm-extract, returns immediately.
-  // Results arrive via /api/callback/rfps/:rfpId/llm-extract-complete callback.
-  const rfpId = c.req.param('id')
-  try {
-    const rfp = await c.env.DB.prepare('SELECT id, uploaded_rfp_text FROM rfps WHERE id=?')
-      .bind(rfpId).first<any>()
-    if (!rfp) return c.json({ error: 'RFP not found' }, 404)
-    const ocrText = rfp.uploaded_rfp_text || ''
-    if (!ocrText || ocrText.startsWith('[PDF:')) {
-      return c.json({ error: 'No usable OCR text stored for this RFP', chars: ocrText.length }, 400)
-    }
-
-    await c.env.DB.prepare(`UPDATE rfps SET ai_extraction_status='extracting', updated_at=datetime('now') WHERE id=?`).bind(rfpId).run()
-
-    // v98: Always use OpenAI directly — sidecar Qwen2.5-3B was 85-200s; OpenAI is ~3-5s
-    console.log(`[rerun-ai-extraction] rfp=${rfpId} running OpenAI extraction directly`)
-    const { extracted, scoringMatrixJson, requirementGlossaryJson, phaseErrors } =
-      await extractRfpFieldsFromOcr(ocrText, c.env, `rfp=${rfpId}`)
-    if (!extracted || Object.keys(extracted).length === 0) {
-      await c.env.DB.prepare(`UPDATE rfps SET ai_extraction_status='error', updated_at=datetime('now') WHERE id=?`).bind(rfpId).run()
-      return c.json({ ok: false, error: 'AI extraction returned no fields', phase_errors: phaseErrors }, 500)
-    }
-    const { newTitle } = await writeExtractedRfpFields(
-      c.env.DB, rfpId, ocrText, extracted, scoringMatrixJson, requirementGlossaryJson)
-    await c.env.DB.prepare(`UPDATE rfps SET ai_extraction_status='done', updated_at=datetime('now') WHERE id=?`).bind(rfpId).run()
-    console.log(`[rerun-ai-extraction] rfp=${rfpId} OpenAI done — title="${newTitle}" errors=${phaseErrors.length}`)
-    return c.json({ ok: true, rfpId, status: 'done', title: newTitle, phase_errors: phaseErrors })
-  } catch (e: any) {
-    console.error(`[rerun-ai-extraction] rfp=${rfpId} error: ${e.message}`)
-    return c.json({ ok: false, error: e.message }, 500)
-  }
-})
-
-// POST /callback/rfps/:rfpId/llm-extract-complete
-// Receives async LLM extraction results from the VPS sidecar /llm-extract task.
-apiRouter.post('/callback/rfps/:rfpId/llm-extract-complete', async (c) => {
-  const rfpId = c.req.param('rfpId')
-  const expectedSecret = c.env.PDF_SIDECAR_SECRET || (globalThis as any).PDF_SIDECAR_SECRET || ''
-  let body: any
-  try { body = await c.req.json() } catch { return c.json({ error: 'Invalid JSON' }, 400) }
-  if (expectedSecret && body.callback_secret !== expectedSecret) {
-    return c.json({ error: 'Unauthorized' }, 401)
-  }
-  console.log(`[llm-extract-cb] rfp=${rfpId} ok=${body.ok} prompt_tok=${body.prompt_tokens} completion_tok=${body.completion_tokens}`)
-  if (!body.ok || !body.extracted) {
-    console.error(`[llm-extract-cb] rfp=${rfpId} extraction failed: ${body.error}`)
-    await c.env.DB.prepare(`UPDATE rfps SET ai_extraction_status='error', updated_at=datetime('now') WHERE id=?`)
-      .bind(rfpId).run().catch(() => {})
-    return c.json({ ok: true, rfpId, status: 'error' })
-  }
-  const { scoring_criteria, vendor_requirements, ...scalarFields } = body.extracted
-  const scoringMatrixJson = Array.isArray(scoring_criteria) && scoring_criteria.length > 0
-    ? JSON.stringify(scoring_criteria) : null
-  const requirementGlossaryJson = Array.isArray(vendor_requirements) && vendor_requirements.length > 0
-    ? JSON.stringify(vendor_requirements) : null
-  const rfpRow = await c.env.DB.prepare('SELECT uploaded_rfp_text FROM rfps WHERE id=?').bind(rfpId).first<any>()
-  const ocrText = rfpRow?.uploaded_rfp_text || ''
-  try {
-    const { newTitle } = await writeExtractedRfpFields(
-      c.env.DB, rfpId, ocrText, scalarFields, scoringMatrixJson, requirementGlossaryJson)
-    await c.env.DB.prepare(`UPDATE rfps SET ai_extraction_status='done', updated_at=datetime('now') WHERE id=?`)
-      .bind(rfpId).run()
-    console.log(`[llm-extract-cb] rfp=${rfpId} done — title="${newTitle}" scoring=${!!scoringMatrixJson} glossary=${!!requirementGlossaryJson}`)
-    return c.json({ ok: true, rfpId, status: 'done', title: newTitle })
-  } catch (e: any) {
-    console.error(`[llm-extract-cb] rfp=${rfpId} writeFields error: ${e.message}`)
-    await c.env.DB.prepare(`UPDATE rfps SET ai_extraction_status='error', updated_at=datetime('now') WHERE id=?`)
-      .bind(rfpId).run().catch(() => {})
-    return c.json({ ok: false, rfpId, status: 'error', error: e.message })
-  }
-})
-
-// POST /rfps/:id/rerun-phase3
-// Runs ONLY Phase 3 (requirement_glossary) as a single isolated LLM call.
-// Uses stream:false (non-streaming) to avoid SSE empty-stream issues from the proxy.
-// This is reliable since Phase 3 runs as its own standalone request with no concurrency.
-apiRouter.post('/rfps/:id/rerun-phase3', async (c) => {
-  const rfpId = c.req.param('id')
-  try {
-    const rfp = await c.env.DB.prepare('SELECT id, uploaded_rfp_text, requirement_glossary FROM rfps WHERE id=?')
-      .bind(rfpId).first<any>()
-    if (!rfp) return c.json({ error: 'RFP not found' }, 404)
-    const ocrText = rfp.uploaded_rfp_text || ''
-    if (!ocrText || ocrText.startsWith('[PDF:')) {
-      return c.json({ error: 'No usable OCR text stored for this RFP' }, 400)
-    }
-
-    // Use a compact 8k-char slice to avoid proxy throttling on large inputs.
-    // extractFocusedSection anchors to the requirements section; 8k covers 3-6 pages of dense text.
-    const requirementsFocusText = extractFocusedSection(
-      ocrText,
-      ['shall', 'must ', 'mandatory', 'required', 'requirement', 'scope of work'],
-      8000
-    )
-    console.log(`[rerun-phase3] rfp=${rfpId} focus_len=${requirementsFocusText.length} — non-streaming single call`)
-
-    const apiKey = c.env.OPENAI_API_KEY || (globalThis as any).OPENAI_API_KEY || OPENAI_API_KEY_FALLBACK
-    const baseUrl = OPENAI_BASE_URL
-
-    const systemPrompt = `You are an expert procurement analyst. Extract vendor requirements from an RFP document.
-Return ONLY a valid JSON array — no markdown fences, no explanation, no extra text before or after.
-Each element must be: {"id":"req_N","text":"<requirement text>","mandatory":<true|false>}.
-Rules:
-- mandatory=true when the text contains "must", "shall", "required", "mandatory", or equivalent imperative language.
-- mandatory=false for "should", "may", "recommended", "preferred".
-- Extract 15–40 requirements. Cover: technical, security, commercial, submission, compliance requirements.
-- Each requirement should be a single actionable statement (not a section heading).
-- Number sequentially: req_1, req_2, req_3, ...`
-
-    // Use stream:true with SSE reader — the proxy requires streaming; stream:false returns empty body.
-    const res = await fetch(`${baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'gpt-5.4-mini',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: `Extract all vendor requirements from this RFP section:\n\n${requirementsFocusText}` },
-        ],
-        max_completion_tokens: 1500,
-        stream: true,
-      }),
-    })
-
-    const httpStatus = res.status
-    console.log(`[rerun-phase3] rfp=${rfpId} http=${httpStatus} ok=${res.ok}`)
-
-    if (!res.ok) {
-      const errText = await res.text().catch(() => 'unknown')
-      return c.json({ ok: false, error: `LLM error ${httpStatus}: ${errText.slice(0, 200)}` }, 500)
-    }
-    if (!res.body) {
-      return c.json({ ok: false, error: 'LLM returned no response body' }, 500)
-    }
-
-    // Read SSE stream
-    const reader = res.body.getReader()
-    const decoder = new TextDecoder()
-    let raw = '', buf = ''
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buf += decoder.decode(value, { stream: true })
-      const lines = buf.split('\n'); buf = lines.pop() ?? ''
-      for (const line of lines) {
-        const t = line.trim()
-        if (!t || t === 'data: [DONE]' || !t.startsWith('data: ')) continue
-        try { const j = JSON.parse(t.slice(6)); const d = j.choices?.[0]?.delta?.content; if (d) raw += d } catch { /* skip */ }
-      }
-    }
-    console.log(`[rerun-phase3] rfp=${rfpId} raw_len=${raw.length} preview=${raw.slice(0,100)}`)
-
-    const arr = parseJsonArray(raw)
-    if (!arr) {
-      return c.json({ ok: false, error: `Phase 3 returned unparseable output (len=${raw.length})`, raw: raw.slice(0, 300) }, 500)
-    }
-
-    const glossaryJson = JSON.stringify(arr)
-    await c.env.DB.prepare(
-      `UPDATE rfps SET requirement_glossary=?, updated_at=datetime('now') WHERE id=?`
-    ).bind(glossaryJson, rfpId).run()
-
-    console.log(`[rerun-phase3] rfp=${rfpId} done — ${arr.length} requirements`)
-    return c.json({ ok: true, rfpId, requirement_count: arr.length, requirement_glossary: arr })
-  } catch (e: any) {
-    console.error(`[rerun-phase3] rfp=${rfpId} error: ${e.message}`)
-    return c.json({ ok: false, error: e.message }, 500)
-  }
-})
-
-// POST /rfps/:id/inject-fields
-// Admin endpoint: directly write scoring_matrix and/or requirement_glossary (and other fields)
-// without re-running the LLM. Used when manual data entry is faster than AI extraction.
-// Body: { scoring_matrix?: [...], requirement_glossary?: [...], content?: string, rfp_full_text?: string }
-apiRouter.post('/rfps/:id/inject-fields', async (c) => {
-  const rfpId = c.req.param('id')
-  try {
-    const body = await c.req.json() as any
-    const rfp = await c.env.DB.prepare('SELECT id FROM rfps WHERE id=?').bind(rfpId).first<any>()
-    if (!rfp) return c.json({ error: 'RFP not found' }, 404)
-
-    const updates: string[] = []
-    const bindings: any[] = []
-
-    if (body.scoring_matrix !== undefined) {
-      const val = Array.isArray(body.scoring_matrix) ? JSON.stringify(body.scoring_matrix)
-        : (typeof body.scoring_matrix === 'string' ? body.scoring_matrix : null)
-      updates.push('scoring_matrix=?')
-      bindings.push(val)
-    }
-    if (body.requirement_glossary !== undefined) {
-      const val = Array.isArray(body.requirement_glossary) ? JSON.stringify(body.requirement_glossary)
-        : (typeof body.requirement_glossary === 'string' ? body.requirement_glossary : null)
-      updates.push('requirement_glossary=?')
-      bindings.push(val)
-    }
-    if (body.content !== undefined) { updates.push('content=?'); bindings.push(body.content) }
-    if (body.rfp_full_text !== undefined) { updates.push('rfp_full_text=?'); bindings.push(body.rfp_full_text) }
-    if (body.title !== undefined) { updates.push('title=?'); bindings.push(body.title) }
-    if (body.background !== undefined) { updates.push('background=?'); bindings.push(body.background) }
-    if (body.objectives !== undefined) { updates.push('objectives=?'); bindings.push(body.objectives) }
-    if (body.scope !== undefined) { updates.push('scope=?'); bindings.push(body.scope) }
-    if (body.tech_requirements !== undefined) { updates.push('tech_requirements=?'); bindings.push(body.tech_requirements) }
-    if (body.budget !== undefined) { updates.push('budget=?'); bindings.push(body.budget) }
-    if (body.deadline !== undefined) { updates.push('deadline=?'); bindings.push(body.deadline) }
-    if (body.category !== undefined) { updates.push('category=?'); bindings.push(body.category) }
-
-    if (updates.length === 0) return c.json({ error: 'No fields to update provided' }, 400)
-    updates.push("updated_at=datetime('now')")
-    bindings.push(rfpId)
-
-    await c.env.DB.prepare(`UPDATE rfps SET ${updates.join(',')} WHERE id=?`).bind(...bindings).run()
-    console.log(`[inject-fields] rfp=${rfpId} wrote ${updates.length - 1} fields`)
-    const updated = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(rfpId).first()
-    return c.json({ ok: true, rfpId, fields_written: updates.length - 1, rfp: updated })
-  } catch (e: any) {
-    console.error(`[inject-fields] rfp=${rfpId} error: ${e.message}`)
-    return c.json({ ok: false, error: e.message }, 500)
-  }
-})
-
-// POST /callback/rfps/:rfpId/doc-ocr-complete — sidecar calls this when arch/brd OCR finishes
-apiRouter.post('/callback/rfps/:rfpId/doc-ocr-complete', async (c) => {
-  const rfpId = c.req.param('rfpId')
-  const docType  = c.req.query('doc_type') || 'arch'
-  const filename = decodeURIComponent(c.req.query('filename') || 'document.pdf')
-  const sizeKb   = c.req.query('size_kb') || '?'
-  const db = c.env.DB
-  const expectedSecret = c.env.PDF_SIDECAR_SECRET || (globalThis as any).PDF_SIDECAR_SECRET || ''
-  try {
-    const body: any = await c.req.json()
-    if (expectedSecret && body.callback_secret !== expectedSecret) return c.json({ error: 'Unauthorized' }, 401)
-    let text: string
-    if (body.ok && body.chars >= 200) {
-      text = `[Source: ${filename}, ${sizeKb}KB, ${body.pages_extracted}/${body.pages_total} pages]\n\n${body.text}`
-      if (text.length > 60000) text = text.slice(0, 60000) + '\n\n[... truncated ...]'
-    } else {
-      text = `[PDF: ${filename}, ${sizeKb}KB — OCR yielded ${body.chars || 0} chars. ${body.error || ''}]`
-    }
-    if (docType === 'brd') {
-      await db.prepare(`UPDATE rfps SET brd_doc_text=?, updated_at=datetime('now') WHERE id=?`).bind(text, rfpId).run()
-    } else {
-      await db.prepare(`UPDATE rfps SET arch_doc_text=?, updated_at=datetime('now') WHERE id=?`).bind(text, rfpId).run()
-    }
-    console.log(`[doc-ocr-callback] rfp=${rfpId} docType=${docType} chars=${text.length}`)
-    return c.json({ ok: true, chars: text.length })
-  } catch (e: any) {
-    return c.json({ ok: false, error: e?.message }, 500)
-  }
-})
-
-apiRouter.post('/rfps/:id/stage', async (c) => {
-  try {
-    const id = c.req.param('id')
-    const { stage } = await c.req.json()
-    await c.env.DB.prepare(`UPDATE rfps SET stage=?, updated_at=datetime('now') WHERE id=?`).bind(stage, id).run()
-    return c.json({ ok: true, stage })
-  } catch (e: any) {
-    return c.json({ error: e.message }, 500)
-  }
-})
 
 apiRouter.delete('/rfps/:id', async (c) => {
   const id = c.req.param('id')
@@ -3595,399 +3216,6 @@ Now return the JSON evaluation object.`
   }
 }
 
-// ── POST /callback/proposals/:proposalId/file-ocr-complete ───────────────────
-// Called by sidecar once per uploaded file when OCR finishes at submission time.
-// Appends extracted text to proposal_full_text. Multiple files arrive as separate calls.
-apiRouter.post('/callback/proposals/:proposalId/file-ocr-complete', async (c) => {
-  const proposalId = c.req.param('proposalId')
-  const label    = decodeURIComponent(c.req.query('label') || 'other')
-  const filename = decodeURIComponent(c.req.query('filename') || 'document.pdf')
-  const db = c.env.DB
-  const expectedSecret = c.env.PDF_SIDECAR_SECRET || (globalThis as any).PDF_SIDECAR_SECRET || ''
-  try {
-    const body: any = await c.req.json()
-    if (expectedSecret && body.callback_secret !== expectedSecret) return c.json({ error: 'Unauthorized' }, 401)
-
-    // Build section text for this file
-    let fileText: string
-    if (body.ok && body.chars >= 100) {
-      fileText = `=== FILE: ${filename} [label: ${label}] (${body.pages_extracted}/${body.pages_total} pages, ${body.chars} chars) ===\n\n${body.text}`
-    } else {
-      fileText = `=== FILE: ${filename} [label: ${label}] — OCR yielded ${body.chars || 0} chars${body.error ? ': ' + body.error : ''} ===`
-    }
-
-    // Append to existing proposal_full_text (multiple files arrive independently)
-    const existing = await db.prepare(`SELECT proposal_full_text FROM proposals WHERE id=?`).bind(proposalId).first<any>()
-    const currentText: string = existing?.proposal_full_text || ''
-    const merged = (currentText + '\n\n' + fileText).slice(0, 200000).trim()
-
-    await db.prepare(`UPDATE proposals SET proposal_full_text=?, updated_at=datetime('now') WHERE id=?`).bind(merged, proposalId).run()
-    console.log(`[file-ocr-callback] proposalId=${proposalId} label=${label} chars=${body.chars} total_merged=${merged.length}`)
-
-    // v49: Decrement ocr_pending_files counter. When it hits 0 and we have text, mark ready_for_evaluation.
-    await db.prepare(`
-      UPDATE proposals
-      SET ocr_pending_files = MAX(0, COALESCE(ocr_pending_files, 1) - 1),
-          updated_at = datetime('now')
-      WHERE id=?
-    `).bind(proposalId).run()
-
-    const fresh = await db.prepare(`SELECT ocr_pending_files, proposal_full_text FROM proposals WHERE id=?`).bind(proposalId).first<any>()
-    const pending = fresh?.ocr_pending_files ?? 0
-    const hasText = (fresh?.proposal_full_text?.length || 0) > 100
-    if (pending === 0 && hasText) {
-      await db.prepare(`UPDATE proposals SET status='ready_for_evaluation', updated_at=datetime('now') WHERE id=?`).bind(proposalId).run()
-      console.log(`[file-ocr-callback] proposalId=${proposalId} → status=ready_for_evaluation`)
-    } else {
-      console.log(`[file-ocr-callback] proposalId=${proposalId} pending_files=${pending} hasText=${hasText} — not yet ready`)
-    }
-
-    return c.json({ ok: true, merged_chars: merged.length, pending_files: pending })
-  } catch (e: any) {
-    console.error(`[file-ocr-callback] error: ${e?.message}`)
-    return c.json({ ok: false, error: e?.message }, 500)
-  }
-})
-
-// ── POST /api/rfps/:id/proposals/evaluate-all — batch AI evaluation ────────
-apiRouter.post('/rfps/:id/proposals/evaluate-all', async (c) => {
-  const rfpId = c.req.param('id')
-  const db = c.env.DB
-  try {
-    const rfp = await db.prepare('SELECT * FROM rfps WHERE id=?').bind(rfpId).first<any>()
-    if (!rfp) return c.json({ error: 'RFP not found' }, 404)
-
-    const { results: proposals } = await db.prepare(`
-      SELECT p.*, v.name as vendor_name FROM proposals p
-      LEFT JOIN vendors v ON p.vendor_id = v.id
-      WHERE p.rfp_id=? ORDER BY p.id ASC
-    `).bind(rfpId).all<any>()
-
-    if (!proposals.length) return c.json({ ok: true, evaluated: 0, message: 'No proposals to evaluate' })
-
-    // v49: Gate on OCR readiness — only evaluate proposals with status in the allowed set.
-    // Legacy grace: submitted proposals with OCR text already extracted are also allowed.
-    const EVAL_READY_STATUSES = ['ready_for_evaluation', 'evaluated', 'awarded', 'not_awarded', 'simulated']
-    const isReadyP = (p: any) => {
-      const st = p.status || 'submitted'
-      if (EVAL_READY_STATUSES.includes(st)) return true
-      // Legacy: text already extracted
-      return (p.proposal_full_text?.length || 0) > 100 || p.ocr_job_status === 'done'
-    }
-    const notReady = proposals.filter((p: any) => !isReadyP(p))
-    if (notReady.length > 0) {
-      // If ALL proposals are not ready, block entirely
-      if (notReady.length === proposals.length) {
-        return c.json({
-          ok: false,
-          blocked: true,
-          not_ready_count: notReady.length,
-          message: `${notReady.length} proposal(s) are still being prepared for evaluation — their documents are being processed. Please wait a moment and try again.`,
-        }, 202)
-      }
-      // Partial: filter to only ready proposals and continue
-    }
-    const readyProposals = proposals.filter((p: any) => isReadyP(p))
-
-    const results: any[] = []
-    // Add skipped entries for not-ready proposals
-    for (const p of notReady) {
-      results.push({ id: p.id, vendor: p.vendor_name, skipped: true, reason: 'Documents still being processed' })
-    }
-    for (const proposal of readyProposals) {
-      try {
-        const evalData = await evaluateProposal(proposal, rfp, c.env)
-        await db.prepare(`
-          UPDATE proposals SET
-            evaluation_data=?, ai_total_score=?, ai_recommendation=?,
-            ai_validation_status=?, ai_evaluated_at=datetime('now'),
-            ai_compliance_score=?, ai_quality_score=?, ai_commercial_score=?,
-            status='evaluated', updated_at=datetime('now')
-          WHERE id=?
-        `).bind(
-          JSON.stringify(evalData),
-          evalData.total_score,
-          evalData.recommendation,
-          evalData.validation_status,
-          evalData.compliance_score,
-          evalData.quality_score,
-          evalData.commercial_score,
-          proposal.id
-        ).run()
-        results.push({ id: proposal.id, vendor: proposal.vendor_name, score: evalData.total_score, recommendation: evalData.recommendation })
-      } catch (e: any) {
-        results.push({ id: proposal.id, vendor: proposal.vendor_name, error: e?.message || 'failed' })
-      }
-    }
-    return c.json({ ok: true, evaluated: results.filter((r: any) => !r.skipped).length, skipped: notReady.length, results })
-  } catch (e: any) {
-    return c.json({ ok: false, error: e?.message }, 500)
-  }
-})
-
-// ── POST /api/rfps/:rfpId/proposals/:proposalId/evaluate — single evaluation ─
-// New async flow for image-based PDFs:
-//   1. If proposalText is available in DB → run scoring synchronously as before (fast path)
-//   2. If proposalText is empty → fire sidecar async with callback_url, return 202 immediately
-//      Sidecar will POST back to /api/callback/proposals/:id/ocr-complete when done
-apiRouter.post('/rfps/:rfpId/proposals/:proposalId/evaluate', async (c) => {
-  const rfpId = c.req.param('rfpId')
-  const proposalId = c.req.param('proposalId')
-  const db = c.env.DB
-  try {
-    const rfp = await db.prepare('SELECT * FROM rfps WHERE id=?').bind(rfpId).first<any>()
-    if (!rfp) return c.json({ error: 'RFP not found' }, 404)
-    const proposal = await db.prepare(`
-      SELECT p.*, v.name as vendor_name FROM proposals p
-      LEFT JOIN vendors v ON p.vendor_id = v.id WHERE p.id=? AND p.rfp_id=?
-    `).bind(proposalId, rfpId).first<any>()
-    if (!proposal) return c.json({ error: 'Proposal not found' }, 404)
-
-    // v49: Gate on OCR readiness — block evaluation if documents are still being processed.
-    // Legacy grace: if status='submitted' but OCR text already exists (ocr_job_status='done' or
-    // proposal_full_text present), allow evaluation so existing proposals keep working.
-    const SINGLE_EVAL_READY = ['ready_for_evaluation', 'evaluated', 'awarded', 'not_awarded', 'simulated']
-    const propStatus = proposal.status || 'submitted'
-    const hasText = (proposal.proposal_full_text?.length || 0) > 100 || proposal.ocr_job_status === 'done'
-    if (!SINGLE_EVAL_READY.includes(propStatus) && !hasText) {
-      return c.json({
-        ok: false,
-        blocked: true,
-        status: propStatus,
-        message: 'This proposal\'s documents are still being prepared for evaluation. Please wait a moment and try again.',
-        proposal_id: parseInt(proposalId),
-      }, 202)
-    }
-
-    // v28: text must already be in DB (extracted at upload time)
-    // evaluateProposal() returns OCR_PENDING if proposal_full_text is empty
-    const evalData = await evaluateProposal(proposal, rfp, c.env)
-
-    if (evalData.validation_status === 'OCR_PENDING') {
-      // Text not ready yet — tell UI to wait and retry
-      return c.json({
-        ok: true,
-        status: 'ocr_pending',
-        validation_status: 'OCR_PENDING',
-        message: 'Proposal text extraction is still running. Please wait 1-2 minutes and try again.',
-        proposal_id: parseInt(proposalId),
-      }, 202)
-    }
-
-    await db.prepare(`
-      UPDATE proposals SET
-        evaluation_data=?, ai_total_score=?, ai_recommendation=?,
-        ai_validation_status=?, ai_evaluated_at=datetime('now'),
-        ai_compliance_score=?, ai_quality_score=?, ai_commercial_score=?,
-        ocr_job_status='done', status='evaluated', updated_at=datetime('now')
-      WHERE id=?
-    `).bind(
-      JSON.stringify(evalData), evalData.total_score, evalData.recommendation,
-      evalData.validation_status, evalData.compliance_score, evalData.quality_score,
-      evalData.commercial_score, proposal.id
-    ).run()
-    return c.json({ ok: true, ...evalData })
-
-  } catch (e: any) {
-    return c.json({ ok: false, error: e?.message }, 500)
-  }
-})
-
-// ── POST /api/callback/proposals/:proposalId/ocr-complete ─────────────────────
-// Called by the sidecar when OCR finishes (async callback pattern).
-// PIPELINE — (1) persist OCR text, (2) load proposal + RFP rows,
-//            (3) call evaluateProposal() — same single gpt-5 full-document
-//                scoring path used by the synchronous evaluate endpoint.
-apiRouter.post('/callback/proposals/:proposalId/ocr-complete', async (c) => {
-  const proposalId = c.req.param('proposalId')
-  const rfpId = c.req.query('rfp_id') || ''
-  const db = c.env.DB
-  const expectedSecret = c.env.PDF_SIDECAR_SECRET || (globalThis as any).PDF_SIDECAR_SECRET || ''
-
-  try {
-    const body: any = await c.req.json()
-    console.log(`[ocr-callback] received proposalId=${proposalId} ok=${body.ok} chars=${body.chars}`)
-
-    if (expectedSecret && body.callback_secret !== expectedSecret) {
-      console.error(`[ocr-callback] invalid callback_secret`)
-      return c.json({ error: 'Unauthorized' }, 401)
-    }
-
-    if (!body.ok) {
-      await db.prepare(`UPDATE proposals SET ocr_job_status='error', updated_at=datetime('now') WHERE id=?`).bind(proposalId).run()
-      return c.json({ ok: false, error: body.error })
-    }
-
-    const ocrText: string = (body.text || '').slice(0, 50000)
-    console.log(`[ocr-callback] OCR chars=${ocrText.length}`)
-
-    // 1. Persist OCR text immediately
-    await db.prepare(`UPDATE proposals SET ocr_job_text=?, updated_at=datetime('now') WHERE id=?`)
-      .bind(ocrText, proposalId).run()
-
-    // 2. Load proposal + RFP
-    const proposal = await db.prepare(
-      `SELECT p.*, v.name as vendor_name FROM proposals p LEFT JOIN vendors v ON p.vendor_id=v.id WHERE p.id=?`
-    ).bind(proposalId).first<any>()
-    if (!proposal) return c.json({ error: 'Proposal not found' }, 404)
-
-    const rfpRow = rfpId
-      ? await db.prepare('SELECT * FROM rfps WHERE id=?').bind(rfpId).first<any>()
-      : await db.prepare('SELECT * FROM rfps WHERE id=?').bind(proposal.rfp_id).first<any>()
-    if (!rfpRow) return c.json({ error: 'RFP not found' }, 404)
-
-    // 3. Run full evaluation using the same single gpt-5 call as evaluateProposal()
-    // proposal_full_text already includes ocrText merged in — pass the freshly stored row
-    // (reload so proposal_full_text reflects the newly written ocr text if needed)
-    const freshProposal = await db.prepare(
-      `SELECT p.*, v.name as vendor_name FROM proposals p LEFT JOIN vendors v ON p.vendor_id=v.id WHERE p.id=?`
-    ).bind(proposalId).first<any>()
-
-    // evaluateProposal reads proposal_full_text (or falls back to ocr_job_text) internally
-    const evalData = await evaluateProposal(freshProposal || proposal, rfpRow, { DB: db })
-
-    // 4. Save to DB
-    const totalScore = evalData.total_score ?? 0
-    const recommendation = evalData.recommendation ?? 'NOT RECOMMENDED'
-    await db.prepare(`
-      UPDATE proposals SET
-        evaluation_data=?, ai_total_score=?, ai_recommendation=?,
-        ai_validation_status=?, ai_evaluated_at=datetime('now'),
-        ai_compliance_score=?, ai_quality_score=?, ai_commercial_score=NULL,
-        ocr_job_status='done', status='evaluated', updated_at=datetime('now')
-      WHERE id=?
-    `).bind(
-      JSON.stringify(evalData),
-      totalScore,
-      recommendation,
-      evalData.validation_status ?? 'EVALUATED',
-      Math.round(evalData.compliance_score ?? totalScore),
-      Math.round(evalData.quality_score ?? totalScore),
-      proposalId
-    ).run()
-
-    console.log(`[ocr-callback] DONE score=${totalScore} recommendation=${recommendation} chars=${evalData.text_chars_analyzed}`)
-    return c.json({ ok: true, score: totalScore, recommendation, chars_analyzed: evalData.text_chars_analyzed })
-
-  } catch (e: any) {
-    console.error(`[ocr-callback] error: ${e?.message}`)
-    await db.prepare(`UPDATE proposals SET ocr_job_status='error', updated_at=datetime('now') WHERE id=?`).bind(proposalId).run()
-    return c.json({ ok: false, error: e?.message }, 500)
-  }
-})
-
-// ── POST /api/rfps/:rfpId/proposals/:proposalId/evaluate-budget ──────────────
-// v28: No sidecar calls. Reads directly from proposal_full_text (extracted at upload time).
-// Finds the commercial file section (=== FILE: ... [label: commercial] ===) and runs
-// runBudgetLLM() synchronously. Falls back to full proposal_full_text or legacy fields
-// if no commercial section is found. Returns 200 with budget data or 202 if text missing.
-apiRouter.post('/rfps/:rfpId/proposals/:proposalId/evaluate-budget', async (c) => {
-  const rfpId = c.req.param('rfpId')
-  const proposalId = c.req.param('proposalId')
-  const db = c.env.DB
-
-  try {
-    const proposal = await db.prepare(`
-      SELECT p.*, v.name as vendor_name FROM proposals p
-      LEFT JOIN vendors v ON p.vendor_id = v.id WHERE p.id=? AND p.rfp_id=?
-    `).bind(proposalId, rfpId).first<any>()
-    if (!proposal) return c.json({ error: 'Proposal not found' }, 404)
-
-    // ── Step 1: build the full text from DB (no PDFs ever touched here) ──────
-    const fullText: string = extractProposalText(proposal)
-    if (fullText.length < 100) {
-      console.log(`[eval-budget] no text in DB for proposalId=${proposalId} — OCR may still be running`)
-      return c.json({
-        ok: true,
-        status: 'ocr_pending',
-        message: 'Proposal text extraction is still running. Please wait 1-2 minutes and try again.',
-        proposal_id: parseInt(proposalId),
-      }, 202)
-    }
-
-    // ── Step 2: try to isolate the commercial section ─────────────────────────
-    // proposal_full_text is built by the callback as:
-    //   === FILE: <filename> [label: <label>] ===\n<text>\n
-    // We find the block whose label includes "commercial".
-    let budgetText = ''
-    let textSource = 'full_text'
-
-    // Try to find commercial section marker
-    const commercialMatch = fullText.match(
-      /={3} FILE:[^\n]*\[label:\s*commercial[^\]]*\][^\n]*\n([\s\S]*?)(?:={3} FILE:|$)/i
-    )
-    if (commercialMatch && commercialMatch[1].trim().length > 100) {
-      budgetText = commercialMatch[1].trim()
-      textSource = 'commercial_section'
-      console.log(`[eval-budget] found commercial section: ${budgetText.length} chars`)
-    } else {
-      // No labelled commercial section — fall back to entire merged text
-      // (covers legacy proposals that have ocr_job_text or only one attachment)
-      budgetText = fullText
-      textSource = fullText === proposal.proposal_full_text ? 'proposal_full_text'
-                 : fullText === proposal.ocr_job_text       ? 'ocr_job_text'
-                 : 'legacy_fields'
-      console.log(`[eval-budget] no commercial section found — using ${textSource} (${budgetText.length} chars)`)
-    }
-
-    // ── Step 3: run budget LLM synchronously ─────────────────────────────────
-    const result = await runBudgetLLM(budgetText, proposal, db, c.env)
-    return c.json({ ok: true, ...result, text_source: textSource })
-
-  } catch (e: any) {
-    console.error(`[eval-budget] error: ${e?.message}`)
-    return c.json({ ok: false, error: e?.message }, 500)
-  }
-})
-
-// ── POST /api/callback/proposals/:proposalId/budget-complete ──────────────────
-// Called by sidecar when commercial PDF OCR finishes.
-// Runs the 6-step budget LLM prompt and saves result to DB.
-apiRouter.post('/callback/proposals/:proposalId/budget-complete', async (c) => {
-  const proposalId = c.req.param('proposalId')
-  const db = c.env.DB
-  const expectedSecret = c.env.PDF_SIDECAR_SECRET || (globalThis as any).PDF_SIDECAR_SECRET || ''
-
-  try {
-    const body: any = await c.req.json()
-    console.log(`[budget-callback] received for proposalId=${proposalId} ok=${body.ok} chars=${body.chars}`)
-
-    if (expectedSecret && body.callback_secret !== expectedSecret) {
-      return c.json({ error: 'Unauthorized' }, 401)
-    }
-
-    if (!body.ok) {
-      await db.prepare(`UPDATE proposals SET ocr_job_status='error', updated_at=datetime('now') WHERE id=?`).bind(proposalId).run()
-      return c.json({ ok: false, error: body.error })
-    }
-
-    const ocrText: string = body.text || ''
-    console.log(`[budget-callback] OCR text: ${ocrText.length} chars`)
-
-    const proposal = await db.prepare(`
-      SELECT p.*, v.name as vendor_name FROM proposals p
-      LEFT JOIN vendors v ON p.vendor_id = v.id WHERE p.id=?
-    `).bind(proposalId).first<any>()
-    if (!proposal) return c.json({ error: 'Proposal not found' }, 404)
-
-    // Cache OCR text so future calls skip sidecar
-    await db.prepare(`UPDATE proposals SET ocr_budget_text=?, updated_at=datetime('now') WHERE id=?`)
-      .bind(ocrText.slice(0, 50000), proposalId).run()
-
-    const result = await runBudgetLLM(ocrText, proposal, db, undefined)
-
-    await db.prepare(`UPDATE proposals SET ocr_job_status='done', updated_at=datetime('now') WHERE id=?`).bind(proposalId).run()
-
-    console.log(`[budget-callback] budget extracted: amount=${result.budget_amount} currency=${result.budget_currency}`)
-    return c.json({ ok: true, ...result })
-
-  } catch (e: any) {
-    console.error(`[budget-callback] error: ${e?.message}`)
-    await db.prepare(`UPDATE proposals SET ocr_job_status='error', updated_at=datetime('now') WHERE id=?`).bind(proposalId).run()
-    return c.json({ ok: false, error: e?.message }, 500)
-  }
-})
-
 // ── Shared budget LLM function ────────────────────────────────────────────────
 // Uses the structured extraction prompt: sums core phase costs + mandatory
 // 3rd-party licenses; excludes optional add-ons, support, VAT, hosting.
@@ -4493,7 +3721,7 @@ apiRouter.post('/submit/:rfpId/presign', async (c) => {
   if (files.length > 10) return c.json({ error: 'Maximum 10 files per submission.' }, 400)
 
   // Mint in-process upload tokens — no VPS round-trip needed
-  const serverBase = `https://a7b32759-e743-4139-9bb0-4bae44886667.vip.gensparksite.com/api`
+  const serverBase = `https://rfp.andersenlab.com.pl/api`
   const slots = files.map((f, i) => {
     const token = `${rfpId}-${vendorId}-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 8)}`
     const safeName = f.filename.replace(/[^a-zA-Z0-9._-]/g, '_')
@@ -4588,7 +3816,7 @@ apiRouter.post('/submit/:rfpId/finalize', async (c) => {
   console.log(`[finalize] Proposal ${proposalId} from ${vendorName} — ${storedAttachments.length} file(s) stored in R2`)
 
   // ── Phase 2: inline OCR for each stored file (no callback) ─────────────────
-  const workerBase = `https://a7b32759-e743-4139-9bb0-4bae44886667.vip.gensparksite.com/api`
+  const workerBase = `https://rfp.andersenlab.com.pl/api`
   const ocrFiles = storedAttachments.length
   await c.env.DB.prepare(`UPDATE proposals SET ocr_pending_files=?, updated_at=datetime('now') WHERE id=?`).bind(ocrFiles, proposalId).run()
 
@@ -4762,10 +3990,9 @@ apiRouter.post('/submit/:rfpId', async (c) => {
 
     console.log(`[submit] Proposal from ${vendorName} stored — ${storedAttachments.length} file(s)`)
 
-    // Fire async OCR for each uploaded file — each calls back to /callback/proposals/:id/file-ocr-complete
-    // The callback merges all texts into proposal_full_text. No OCR happens at evaluation time.
-    // Phase 2: inline OCR — no callback, result written directly
-    const workerBase = `https://a7b32759-e743-4139-9bb0-4bae44886667.vip.gensparksite.com/api`
+    // Fire async OCR for each uploaded file — inline, result written directly to DB.
+    // All texts are merged into proposal_full_text. No OCR happens at evaluation time.
+    const workerBase = `https://rfp.andersenlab.com.pl/api`
     const ocrFiles = storedAttachments.filter(a => !!a.r2_key).length
     if (ocrFiles > 0) {
       await c.env.DB.prepare(`UPDATE proposals SET ocr_pending_files=?, updated_at=datetime('now') WHERE id=?`).bind(ocrFiles, proposalId).run()
@@ -5941,7 +5168,7 @@ function buildInvitationEmailText(v: any, rfp: any, qDeadline: string, sDeadline
   const participantCode = buildParticipantCode(rfp?.id || 0, v.id)
   const submissionUrl = baseUrl
     ? `${baseUrl}/submit/${rfp?.id || 0}?code=${participantCode}`
-    : `https://a7b32759-e743-4139-9bb0-4bae44886667.vip.gensparksite.com/submit/${rfp?.id || 0}?code=${participantCode}`
+    : `https://rfp.andersenlab.com.pl/submit/${rfp?.id || 0}?code=${participantCode}`
   return `Dear ${v.name},
 
 We are pleased to invite ${v.name} to participate in the competitive tendering process for the following procurement:

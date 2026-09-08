@@ -48,7 +48,7 @@ Find this exact block in the RFP card:
 ```html
         <p class="card-desc">AI-powered procurement intelligence that digitalises and automates the entire RFP lifecycle — drafting, vendor evaluation with weighted scoring, and ranked shortlist recommendations, all in one audit-ready interface.</p>
         <span class="read-more-link" data-modal-target="modal-procurement">Learn more</span>
-        <a href="https://rfp-ai.andersenlab.com/" target="_blank" rel="noopener" class="open-demo-btn">Open Demo <i class="fa-solid fa-arrow-right"></i></a>
+        <a href="https://rfp.andersenlab.com.pl/" target="_blank" rel="noopener" class="open-demo-btn">Open Demo <i class="fa-solid fa-arrow-right"></i></a>
 ```
 
 Replace it with:
@@ -116,8 +116,8 @@ Replace it with:
 In `<div class="modal-overlay" id="modal-procurement">`, update the Open Demo link:
 
 ```html
-<!-- BEFORE -->
-<a href="https://rfp-ai.andersenlab.com/" target="_blank" rel="noopener" class="open-demo-btn">
+<!-- BEFORE (already updated) -->
+<a href="https://rfp.andersenlab.com.pl/" target="_blank" rel="noopener" class="open-demo-btn">
 
 <!-- AFTER -->
 <a href="https://rfp.andersenlab.com.pl/" target="_blank" rel="noopener" class="open-demo-btn">
@@ -490,7 +490,7 @@ Append this **entire block** at the very end of `main.js`, outside and after the
 | File | Change |
 |---|---|
 | `index.html` | Insert `.rfp-switcher` HTML block inside the RFP card body, between `<p class="card-desc">` and `<span class="read-more-link">` |
-| `index.html` | Update both `rfp-ai.andersenlab.com` → `rfp.andersenlab.com.pl` links (card button + modal button) |
+| `index.html` | Update both Open Demo links to `https://rfp.andersenlab.com.pl/` (card button + modal button) |
 | `css/style.css` | Append all `.rfp-switcher` CSS rules at the end of the file |
 | `js/main.js` | Append the self-contained switcher IIFE at the end of the file |
 
