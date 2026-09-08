@@ -39,17 +39,26 @@ jobs:
       - name: Install production dependencies only (after build)
         run: npm ci --omit=dev
 
-      # Download Chromium into ./puppeteer-cache/ so it travels inside the zip.
+      # Download chrome-headless-shell ONLY into ./puppeteer-cache/ so it travels in the zip.
       # Puppeteer's default cache is ~/.cache/puppeteer which is NOT in the zip.
-      # By setting PUPPETEER_CACHE_DIR to a project-relative path and running the
-      # install script, Chrome ends up at ./puppeteer-cache/chrome/<rev>/chrome-linux64/chrome.
-      # On Azure, PUPPETEER_CACHE_DIR is set to the same relative path via app settings,
-      # so puppeteer.launch() finds the binary without any extra steps.
-      - name: Download Chromium into project-relative cache (for zip deploy)
+      #
+      # Why headless-shell, not full chrome:
+      #   full chrome (chrome-linux64/chrome)               = ~391 MB
+      #   headless-shell (chrome-headless-shell-linux64)    = ~261 MB  (187 MB binary)
+      # Shipping both would add 652 MB on top of 543 MB node_modules — too large for zip deploy.
+      # chrome-headless-shell fully supports page.pdf() / page.screenshot(); it is
+      # purpose-built for headless rendering. The full browser adds UI chrome we don't need.
+      #
+      # PUPPETEER_SKIP_CHROME_DOWNLOAD=true        — skip full Chrome download
+      # PUPPETEER_CHROME_HEADLESS_SHELL_SKIP_DOWNLOAD=false — explicitly download headless-shell
+      - name: Download chrome-headless-shell into project-relative cache (for zip deploy)
         run: |
-          PUPPETEER_CACHE_DIR=./puppeteer-cache node node_modules/puppeteer/install.mjs
-          echo "--- Chromium binary ---"
-          find ./puppeteer-cache -name "chrome" -type f | head -3
+          PUPPETEER_CACHE_DIR=./puppeteer-cache \
+          PUPPETEER_CHROME_SKIP_DOWNLOAD=true \
+          PUPPETEER_CHROME_HEADLESS_SHELL_SKIP_DOWNLOAD=false \
+          node node_modules/puppeteer/install.mjs
+          echo "--- headless-shell binary ---"
+          find ./puppeteer-cache/chrome-headless-shell -name "chrome-headless-shell" -type f | head -3
           du -sh ./puppeteer-cache/
 
       # Verify key files — mirrors lms-app pattern
@@ -59,8 +68,8 @@ jobs:
           ls -lh dist-azure/server-azure.js dist-azure/index-azure.js dist-azure/api/index.js
           ls -lh node_modules/@hono/node-server/dist/index.mjs
           ls -lh node_modules/better-sqlite3/prebuilds/linux-x64.node
-          echo "--- Chromium binary ---"
-          find ./puppeteer-cache -name "chrome" -type f | head -3
+          echo "--- headless-shell binary ---"
+          find ./puppeteer-cache/chrome-headless-shell -name "chrome-headless-shell" -type f | head -3
           echo "--- node_modules size ---"
           du -sh node_modules/
 
@@ -85,7 +94,8 @@ jobs:
               OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}" \
               RESEND_API_KEY="${{ secrets.RESEND_API_KEY }}" \
               DEMO_SWITCH_PIN="${{ secrets.DEMO_SWITCH_PIN }}" \
-              PUPPETEER_CACHE_DIR="/home/site/wwwroot/puppeteer-cache"
+              PUPPETEER_CACHE_DIR="/home/site/wwwroot/puppeteer-cache" \
+              PUPPETEER_CHROME_SKIP_DOWNLOAD="true"
           echo "✅ App settings configured"
 
       - name: Set startup command
@@ -106,6 +116,7 @@ jobs:
             --exclude ".dev.vars" \
             --exclude "data/*" \
             --exclude ".wrangler/*" \
+            --exclude "puppeteer-cache/chrome/*" \
             --exclude "src/*" \
             --exclude "vite.config*" \
             --exclude "tsconfig*" \

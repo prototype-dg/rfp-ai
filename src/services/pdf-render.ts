@@ -44,12 +44,47 @@ export async function getBrowser(): Promise<Browser> {
     pipe:     true,            // use pipe transport instead of WebSocket — more stable in containers
   }
 
-  // Allow overriding the Chromium path via environment variable
-  // (e.g. PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser on Azure)
-  const execPath = process.env.PUPPETEER_EXECUTABLE_PATH
-  if (execPath) {
-    console.log(`[pdf-render] using custom Chromium: ${execPath}`)
-    launchOpts.executablePath = execPath
+  // Resolve the chrome-headless-shell binary from the bundled cache.
+  //
+  // We ship chrome-headless-shell (not the full Chrome) in the zip because it is
+  // purpose-built for headless rendering (page.pdf / page.screenshot) and is ~130 MB
+  // smaller than full Chrome.  The binary lands at:
+  //   <PUPPETEER_CACHE_DIR>/chrome-headless-shell/linux-<rev>/chrome-headless-shell-linux64/chrome-headless-shell
+  //
+  // Priority order:
+  //   1. PUPPETEER_EXECUTABLE_PATH — explicit override (e.g. system chromium in dev)
+  //   2. PUPPETEER_CACHE_DIR       — bundled headless-shell (production / Azure)
+  //   3. puppeteer.executablePath() — Puppeteer's own default resolution (local dev)
+  const explicitPath = process.env.PUPPETEER_EXECUTABLE_PATH
+  if (explicitPath) {
+    console.log(`[pdf-render] using PUPPETEER_EXECUTABLE_PATH: ${explicitPath}`)
+    launchOpts.executablePath = explicitPath
+  } else {
+    const cacheDir = process.env.PUPPETEER_CACHE_DIR
+    if (cacheDir) {
+      // Glob for the headless-shell binary under the cache dir.
+      // The revision directory name changes with Puppeteer version (e.g. linux-152.0.7977.54),
+      // so we scan one level rather than hardcoding the revision.
+      const fs   = require('fs')  as typeof import('fs')
+      const path = require('path') as typeof import('path')
+      const shellBase = path.join(cacheDir, 'chrome-headless-shell')
+      try {
+        const revDirs = fs.readdirSync(shellBase)
+        for (const rev of revDirs) {
+          const candidate = path.join(shellBase, rev, 'chrome-headless-shell-linux64', 'chrome-headless-shell')
+          if (fs.existsSync(candidate)) {
+            console.log(`[pdf-render] using bundled headless-shell: ${candidate}`)
+            launchOpts.executablePath = candidate
+            break
+          }
+        }
+      } catch {
+        // shellBase doesn't exist — fall through to Puppeteer default
+      }
+      if (!launchOpts.executablePath) {
+        console.warn(`[pdf-render] PUPPETEER_CACHE_DIR set but no headless-shell found under ${shellBase} — falling back to Puppeteer default`)
+      }
+    }
   }
 
   _browserLaunching = puppeteer
