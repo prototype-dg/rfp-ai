@@ -4055,14 +4055,30 @@ pages.dashboard = async function() {
   const stageBreakdown = stats.stageBreakdown || [];
   const maxStage = stageBreakdown.reduce(function(m,s){ return Math.max(m, s.cnt); }, 1);
 
-  // KPI cards — Total RFPs uses yellow accent (consistent with other cards)
+  // KPI cards — read accent/ink from CSS vars so both profiles render correctly
+  var _cs = getComputedStyle(document.documentElement);
+  var _accent     = _cs.getPropertyValue('--a-yellow').trim()      || '#FFDB00';
+  var _accentWash = _cs.getPropertyValue('--a-yellow-wash').trim()  || '#FFFBEC';
+  var _navy       = _cs.getPropertyValue('--a-navy').trim()         || '#020D1C';
+  var _ink        = _cs.getPropertyValue('--a-ink').trim()          || '#020303';
+  var _inkMid     = _cs.getPropertyValue('--a-slate').trim()        || '#556170';
+  var _inkMuted   = _cs.getPropertyValue('--a-mute').trim()         || '#ADADAD';
+  var _line       = _cs.getPropertyValue('--a-line').trim()         || '#E0E0E0';
+  var _paper      = _cs.getPropertyValue('--cpc-paper').trim()      || '#FFFFFF';
+  var _okFg       = _cs.getPropertyValue('--status-ok-fg').trim()   || '#1B7A32';
+  var _okBg       = _cs.getPropertyValue('--status-ok-bg').trim()   || '#E6F5E9';
+  // Semantic metric colours — intentional variety kept, toned slightly
+  var _orange = '#c2700a'; var _orangeBg = '#fff4e6';
+  var _blue   = '#1d4ed8'; var _blueBg   = '#eff6ff';
+  // Stage palette: slot 0 = profile accent, rest = stable data colours
+  var _stageClrs = [_accent, '#1d4ed8', '#065f46', '#c2700a', '#7c3aed', '#0891b2'];
   const kpis = [
-    { label:t('dash_total_rfps'),      value: stats.totalRfps || 0,      icon:'fa-layer-group',   color:'#FFDB00', bg:'#020D1C', sub: (stats.activeRfps||0) + ' ' + t('dash_active_suffix'),  trend: stats.totalRfps > 0 ? 0 : null },
-    { label:t('dash_win_rate'),        value: (stats.winRate||0) + '%',  icon:'fa-trophy',        color:'#FFDB00', bg:null,     sub: (stats.awardedRfps||0) + ' ' + t('dash_awarded_suffix'), trend: null },
-    { label:t('dash_avg_duration'),    value: stats.avgDuration ? stats.avgDuration + 'd' : 'N/A', icon:'fa-clock', color:'#065f46', bg:null, sub: t('dash_per_rfp'), trend: null },
-    { label:t('dash_vendor_pool'),     value: stats.totalVendors || 0,   icon:'fa-building',      color:'#FFDB00', bg:null,     sub: t('dash_reg_vendors'), trend: null },
-    { label:t('dash_proposals_lbl'),   value: stats.totalProposals || 0, icon:'fa-inbox',         color:'#dc6803', bg:null,     sub: t('dash_total_recv'), trend: stats.totalProposals > 0 ? null : null },
-    { label:t('dash_emails_sent'),     value: stats.totalEmails || 0,    icon:'fa-envelope',      color:'#1d4ed8', bg:null,     sub: t('dash_inv_replies'), trend: null },
+    { label:t('dash_total_rfps'),      value: stats.totalRfps || 0,      icon:'fa-layer-group',   color:_accent,  bg:_navy,  sub: (stats.activeRfps||0) + ' ' + t('dash_active_suffix'),  trend: stats.totalRfps > 0 ? 0 : null },
+    { label:t('dash_win_rate'),        value: (stats.winRate||0) + '%',  icon:'fa-trophy',        color:_accent,  bg:null,   sub: (stats.awardedRfps||0) + ' ' + t('dash_awarded_suffix'), trend: null },
+    { label:t('dash_avg_duration'),    value: stats.avgDuration ? stats.avgDuration + 'd' : 'N/A', icon:'fa-clock', color:_okFg, bg:null, sub: t('dash_per_rfp'), trend: null },
+    { label:t('dash_vendor_pool'),     value: stats.totalVendors || 0,   icon:'fa-building',      color:_accent,  bg:null,   sub: t('dash_reg_vendors'), trend: null },
+    { label:t('dash_proposals_lbl'),   value: stats.totalProposals || 0, icon:'fa-inbox',         color:_orange,  bg:null,   sub: t('dash_total_recv'), trend: stats.totalProposals > 0 ? null : null },
+    { label:t('dash_emails_sent'),     value: stats.totalEmails || 0,    icon:'fa-envelope',      color:_blue,    bg:null,   sub: t('dash_inv_replies'), trend: null },
   ];
   // 2.1 — KPI trend indicators (compare to previous period via stats.prev if available)
   let kpiHtml = '';
@@ -4070,20 +4086,20 @@ pages.dashboard = async function() {
     var trendHtml = '';
     if (k.trend !== undefined && k.trend !== null) {
       var up = k.trend >= 0;
-      trendHtml = '<span style="font-size:0.7rem;font-weight:600;color:' + (up ? '#059669' : '#dc2626') + ';background:' + (up ? '#d1fae5' : '#fee2e2') + ';border-radius:4px;padding:1px 5px;margin-left:4px">'
+      trendHtml = '<span style="font-size:0.7rem;font-weight:600;color:' + (up ? _okFg : '#dc2626') + ';background:' + (up ? _okBg : '#fee2e2') + ';border-radius:4px;padding:1px 5px;margin-left:4px">'
         + (up ? '↑' : '↓') + ' ' + Math.abs(k.trend) + '%</span>';
     }
-    var iconBg   = k.bg ? k.bg : (k.color + '18');
-    var iconClr  = k.bg ? k.color : k.color;
-    var valueClr = k.bg ? '#020D1C' : k.color;
-    kpiHtml += '<div class="stat-card" style="cursor:default' + (k.bg ? ';border-top:3px solid ' + k.color : '') + '">'
+    var iconBg  = k.bg ? k.bg : (k.color === _accent ? _accentWash : k.color === _okFg ? _okBg : k.color === _orange ? _orangeBg : _blueBg);
+    var iconClr = k.color;
+    var valueClr = k.bg ? _accent : k.color;
+    kpiHtml += '<div class="stat-card" style="cursor:default' + (k.bg ? ';border-top:3px solid ' + _accent : '') + '">'
       + '<div style="display:flex;align-items:flex-start;justify-content:space-between">'
       + '<div style="width:40px;height:40px;border-radius:10px;background:' + iconBg + ';display:flex;align-items:center;justify-content:center">'
       + '<i class="fas ' + k.icon + '" style="color:' + iconClr + ';font-size:1rem"></i></div>'
       + '<div style="text-align:right"><div class="stat-value" style="color:' + valueClr + '">' + k.value + '</div>' + trendHtml + '</div>'
       + '</div>'
       + '<div class="stat-label">' + k.label + '</div>'
-      + '<div style="font-size:0.72rem;color:#9ca3af;margin-top:2px">' + k.sub + '</div>'
+      + '<div style="font-size:0.72rem;color:' + _inkMuted + ';margin-top:2px">' + k.sub + '</div>'
       + '</div>';
   });
 
@@ -4094,29 +4110,28 @@ pages.dashboard = async function() {
       + '<div style="flex:0 0 160px;height:160px;position:relative"><canvas id="stageDonutChart" width="160" height="160"></canvas></div>'
       + '<div style="flex:1;display:flex;flex-direction:column;gap:6px;overflow:hidden">'
       + stageBreakdown.map(function(s,i){
-          var clrs = ['#FFDB00','#1d4ed8','#065f46','#dc6803','#7c3aed','#0891b2'];
-          var clr = clrs[i % clrs.length];
+          var clr = _stageClrs[i % _stageClrs.length];
           var pct = Math.round((s.cnt / Math.max(stats.totalRfps,1)) * 100);
           return '<div style="display:flex;align-items:center;gap:8px;cursor:pointer" onclick="navigateTo(\'rfps\',{filterStage:\'' + s.stage + '\'})">'
             + '<div style="width:10px;height:10px;border-radius:2px;background:' + clr + ';flex-shrink:0"></div>'
-            + '<div style="font-size:0.75rem;color:#374151;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + stageLabelMap(s.stage) + '</div>'
-            + '<div style="font-size:0.75rem;font-weight:700;color:#020D1C;flex-shrink:0">' + s.cnt + '</div>'
-            + '<div style="font-size:0.7rem;color:#9ca3af;flex-shrink:0;width:32px;text-align:right">' + pct + '%</div>'
+            + '<div style="font-size:0.75rem;color:' + _inkMid + ';flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + stageLabelMap(s.stage) + '</div>'
+            + '<div style="font-size:0.75rem;font-weight:700;color:' + _ink + ';flex-shrink:0">' + s.cnt + '</div>'
+            + '<div style="font-size:0.7rem;color:' + _inkMuted + ';flex-shrink:0;width:32px;text-align:right">' + pct + '%</div>'
             + '</div>';
         }).join('')
       + '</div>'
       + '</div>'
-    : '<div style="color:#9ca3af;font-size:0.85rem;padding:1rem;text-align:center"><i class="fas fa-chart-pie" style="font-size:2rem;display:block;margin-bottom:0.5rem;color:#e5e7eb"></i>' + t('dash_no_rfp_data') + '</div>';
+    : '<div style="color:' + _inkMuted + ';font-size:0.85rem;padding:1rem;text-align:center"><i class="fas fa-chart-pie" style="font-size:2rem;display:block;margin-bottom:0.5rem;color:' + _line + '"></i>' + t('dash_no_rfp_data') + '</div>';
 
   // Contextual action cards (2.2)
   var contextCards = '';
   var _dRfps = (appState.rfps||[]).filter(function(r){ return r.stage==='draft'; });
   var _qRfps = (appState.rfps||[]).filter(function(r){ return r.stage==='qa_open'; });
   var _cRfps = (appState.rfps||[]).filter(function(r){ return r.stage==='submissions_closed'; });
-  if (_dRfps.length) contextCards += '<div class="card" style="padding:0.875rem 1rem;border-left:3px solid var(--cpc-gold);cursor:pointer;margin-bottom:0" onclick="navigateTo(\x27rfps\x27,{filterStage:\x27draft\x27})"><div style="font-size:0.72rem;color:var(--cpc-gold);font-weight:700;text-transform:uppercase;letter-spacing:0.05em">' + t('dash_action_needed') + '</div><div style="font-size:0.88rem;font-weight:600;color:#1f2937;margin-top:2px">' + _dRfps.length + ' ' + t('dash_awaiting_publish') + '</div></div>';
-  if (_qRfps.length) { var _pqa = _qRfps.reduce(function(n,r){ return n+(r.pending_qa||0); },0); if (_pqa) contextCards += '<div class="card" style="padding:0.875rem 1rem;border-left:3px solid #f59e0b;cursor:pointer;margin-bottom:0" onclick="navigateTo(\x27rfps\x27,{filterStage:\x27qa_open\x27})"><div style="font-size:0.72rem;color:#f59e0b;font-weight:700;text-transform:uppercase;letter-spacing:0.05em">' + t('dash_pending_qa_lbl') + '</div><div style="font-size:0.88rem;font-weight:600;color:#1f2937;margin-top:2px">' + _pqa + ' ' + t('dash_unanswered_qs') + '</div></div>'; }
-  if (_cRfps.length) contextCards += '<div class="card" style="padding:0.875rem 1rem;border-left:3px solid #10b981;cursor:pointer;margin-bottom:0" onclick="navigateTo(\x27rfps\x27,{filterStage:\x27submissions_closed\x27})"><div style="font-size:0.72rem;color:#10b981;font-weight:700;text-transform:uppercase;letter-spacing:0.05em">' + t('dash_ready_evaluate') + '</div><div style="font-size:0.88rem;font-weight:600;color:#1f2937;margin-top:2px">' + _cRfps.length + ' ' + t('dash_ready_award') + '</div></div>';
-  if (!contextCards) contextCards = '<div style="color:#9ca3af;font-size:0.85rem;padding:0.25rem 0">' + t('dash_no_rfp_data') + '</div>';
+  if (_dRfps.length) contextCards += '<div class="card" style="padding:0.875rem 1rem;border-left:3px solid ' + _accent + ';cursor:pointer;margin-bottom:0" onclick="navigateTo(\x27rfps\x27,{filterStage:\x27draft\x27})"><div style="font-size:0.72rem;color:' + _accent + ';font-weight:700;text-transform:uppercase;letter-spacing:0.05em">' + t('dash_action_needed') + '</div><div style="font-size:0.88rem;font-weight:600;color:' + _ink + ';margin-top:2px">' + _dRfps.length + ' ' + t('dash_awaiting_publish') + '</div></div>';
+  if (_qRfps.length) { var _pqa = _qRfps.reduce(function(n,r){ return n+(r.pending_qa||0); },0); if (_pqa) contextCards += '<div class="card" style="padding:0.875rem 1rem;border-left:3px solid #d97706;cursor:pointer;margin-bottom:0" onclick="navigateTo(\x27rfps\x27,{filterStage:\x27qa_open\x27})"><div style="font-size:0.72rem;color:#d97706;font-weight:700;text-transform:uppercase;letter-spacing:0.05em">' + t('dash_pending_qa_lbl') + '</div><div style="font-size:0.88rem;font-weight:600;color:' + _ink + ';margin-top:2px">' + _pqa + ' ' + t('dash_unanswered_qs') + '</div></div>'; }
+  if (_cRfps.length) contextCards += '<div class="card" style="padding:0.875rem 1rem;border-left:3px solid ' + _okFg + ';cursor:pointer;margin-bottom:0" onclick="navigateTo(\x27rfps\x27,{filterStage:\x27submissions_closed\x27})"><div style="font-size:0.72rem;color:' + _okFg + ';font-weight:700;text-transform:uppercase;letter-spacing:0.05em">' + t('dash_ready_evaluate') + '</div><div style="font-size:0.88rem;font-weight:600;color:' + _ink + ';margin-top:2px">' + _cRfps.length + ' ' + t('dash_ready_award') + '</div></div>';
+  if (!contextCards) contextCards = '<div style="color:' + _inkMuted + ';font-size:0.85rem;padding:0.25rem 0">' + t('dash_no_rfp_data') + '</div>';
 
   setContent(
     '<div style="display:flex;flex-direction:column;gap:1.25rem">'
@@ -4125,13 +4140,13 @@ pages.dashboard = async function() {
     // Row 2: clickable stage bars + pipeline actions
     + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1.25rem">'
     + '<div class="card" style="padding:1.25rem">'
-    + '<h3 style="font-weight:700;color:#1f2937;font-size:0.9rem;margin:0 0 0.75rem"><i class="fas fa-chart-pie" style="color:var(--cpc-gold);margin-right:0.5rem"></i>' + t('dash_stage_breakdown') + ' <span style="font-size:0.7rem;color:#9ca3af;font-weight:400">(click to filter)</span></h3>'
+    + '<h3 style="font-weight:700;color:' + _ink + ';font-size:0.9rem;margin:0 0 0.75rem"><i class="fas fa-chart-pie" style="color:' + _accent + ';margin-right:0.5rem"></i>' + t('dash_stage_breakdown') + ' <span style="font-size:0.7rem;color:' + _inkMuted + ';font-weight:400">(click to filter)</span></h3>'
     + stageChartHtml
     + '</div>'
     + '<div class="card" style="padding:1.25rem">'
-    + '<h3 style="font-weight:700;color:#1f2937;font-size:0.9rem;margin:0 0 0.75rem"><i class="fas fa-bolt cpc-gold" style="margin-right:0.5rem"></i>' + t('dash_pipeline_actions') + '</h3>'
+    + '<h3 style="font-weight:700;color:' + _ink + ';font-size:0.9rem;margin:0 0 0.75rem"><i class="fas fa-bolt" style="color:' + _accent + ';margin-right:0.5rem"></i>' + t('dash_pipeline_actions') + '</h3>'
     + '<div style="display:flex;flex-direction:column;gap:0.5rem;margin-bottom:0.75rem">' + contextCards + '</div>'
-    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;border-top:1px solid #f3f4f6;padding-top:0.75rem">'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;border-top:1px solid ' + _line + ';padding-top:0.75rem">'
     + '<button class="btn-primary" style="flex-direction:column;padding:0.75rem;justify-content:center" onclick="showCreateRfpModal()"><i class="fas fa-plus-circle" style="font-size:1.1rem;margin-bottom:3px"></i><span style="font-size:0.78rem">' + t('qa_btn_new_rfp') + '</span></button>'
     + '<button class="btn-secondary" style="flex-direction:column;padding:0.75rem;justify-content:center" onclick="navigateTo(\x27rfps\x27)"><i class="fas fa-layer-group" style="font-size:1.1rem;margin-bottom:3px"></i><span style="font-size:0.78rem">' + t('qa_btn_all_rfps') + '</span></button>'
     + '<button class="btn-ghost" style="flex-direction:column;padding:0.75rem;justify-content:center" onclick="navigateTo(\x27vendors\x27)"><i class="fas fa-building" style="font-size:1.1rem;margin-bottom:3px"></i><span style="font-size:0.78rem">' + t('qa_btn_vendors') + '</span></button>'
@@ -4147,16 +4162,15 @@ pages.dashboard = async function() {
     if (stageCanvas) {
       // Destroy previous instance if navigating back to dashboard
       if (stageCanvas._chartInstance) { stageCanvas._chartInstance.destroy(); }
-      var stageColors = ['#FFDB00','#1d4ed8','#065f46','#dc6803','#7c3aed','#0891b2'];
       stageCanvas._chartInstance = new Chart(stageCanvas, {
         type: 'doughnut',
         data: {
           labels: stageBreakdown.map(function(s){ return stageLabelMap(s.stage); }),
           datasets: [{
             data: stageBreakdown.map(function(s){ return s.cnt; }),
-            backgroundColor: stageBreakdown.map(function(s,i){ return stageColors[i % stageColors.length]; }),
+            backgroundColor: stageBreakdown.map(function(s,i){ return _stageClrs[i % _stageClrs.length]; }),
             borderWidth: 2,
-            borderColor: '#ffffff',
+            borderColor: _paper,
             hoverOffset: 4
           }]
         },
