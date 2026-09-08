@@ -185,32 +185,42 @@ function wordmarkSvg(width: number, height: number, textColor?: string): string 
 }
 
 // ── buildHeaderSvg ────────────────────────────────────────────────────────────
-// v13 layout: Row1 48px lockup | Row2 34px yellow band | Row3 5px accent = 87px total
-function buildHeaderSvg(refBadge?: string): string {
+// Produces a 794×168 SVG (= HDR_H_PX, 15% of A4) that fills the header zone
+// with no scaling or distortion.
+//
+// Layout (top → bottom):
+//   Row 1 — white lockup bar  : 48 px  (wordmark + company subtitle + ref badge)
+//   Row 2 — yellow topo band  : 115 px (expanded to consume the full 168px zone)
+//   Row 3 — accent strip      :   5 px
+//
+// The optional `_targetH` parameter is kept for call-site compatibility but is
+// ignored — the SVG is always rendered at its native 794×168 size.
+function buildHeaderSvg(refBadge?: string, _targetH?: number): string {
   const W    = 794
-  const LKH  = 48
-  const BAND = 34
-  const ACC  = 5
-  const H    = LKH + BAND + ACC   // 87px
+  const LKH  = 48    // white lockup row height
+  const BAND = 115   // yellow band — expanded to fill 168px total (48+115+5)
+  const ACC  = 5     // accent strip
+  const H    = LKH + BAND + ACC   // 168px — exactly HDR_H_PX
   const PAD  = 60
 
   const glyphX = PAD
   const glyphY = Math.round((LKH - 16) / 2)
 
-  const bY = LKH
-  const bH = BAND
+  const bY = LKH   // yellow band starts here
 
-  const topo1 = `M-10,${bY+7}  Q130,${bY+1}  280,${bY+9}  T520,${bY+11} Q650,${bY+14} 810,${bY+5}`
-  const topo2 = `M-10,${bY+15} Q150,${bY+6}  300,${bY+16} T540,${bY+19} Q660,${bY+23} 810,${bY+12}`
-  const topo3 = `M-10,${bY+23} Q160,${bY+14} 320,${bY+25} T560,${bY+27} Q680,${bY+30} 810,${bY+20}`
+  // Topo contour lines — spread across the taller yellow band
+  const topo1 = `M-10,${bY+20}  Q130,${bY+8}   280,${bY+28}  T520,${bY+35} Q650,${bY+42} 810,${bY+18}`
+  const topo2 = `M-10,${bY+45}  Q150,${bY+20}  300,${bY+52}  T540,${bY+60} Q660,${bY+72} 810,${bY+40}`
+  const topo3 = `M-10,${bY+72}  Q160,${bY+45}  320,${bY+80}  T560,${bY+88} Q680,${bY+95} 810,${bY+65}`
+  const topo4 = `M-10,${bY+95}  Q200,${bY+70}  380,${bY+102} T600,${bY+108} Q720,${bY+112} 810,${bY+92}`
 
-  const d1y = bY + 8, d2y = bY + 17, d3y = bY + 10, d4y = bY + 22, d5y = bY + 9
+  const d1y = bY + 22, d2y = bY + 55, d3y = bY + 32, d4y = bY + 78, d5y = bY + 30
+  const d6y = bY + 90, d7y = bY + 48, d8y = bY + 100
 
   const badge = String(refBadge || '').slice(0, 50)
 
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">
-
-  <!-- Row 1: White lockup (48px) -->
+  <!-- Row 1: White lockup (${LKH}px) -->
   <rect x="0" y="0" width="${W}" height="${LKH}" fill="#ffffff"/>
   <line x1="0" y1="${LKH}" x2="${W}" y2="${LKH}" stroke="#E8E8E8" stroke-width="1"/>
 
@@ -223,24 +233,28 @@ function buildHeaderSvg(refBadge?: string): string {
   <text x="${glyphX+130}" y="${glyphY+8}" font-family="Courier New,monospace" font-weight="600" font-size="6.5" letter-spacing="0.8" fill="#020303">SOFTWARE ENGINEERING</text>
   <text x="${glyphX+130}" y="${glyphY+16}" font-family="Courier New,monospace" font-size="6.5" letter-spacing="0.8" fill="#556170">GROUP · GLOBAL</text>
 
-  <!-- RFP ref badge -->
+  <!-- RFP ref badge (top-right) -->
   ${badge ? `<text x="${W - PAD}" y="${glyphY+8}" font-family="Courier New,monospace" font-size="7" letter-spacing="1.8" fill="#556170" text-anchor="end">REF</text>
   <text x="${W - PAD}" y="${glyphY+17}" font-family="Courier New,monospace" font-weight="600" font-size="7.5" letter-spacing="1.2" fill="#020303" text-anchor="end">${badge}</text>` : ''}
 
-  <!-- Row 2: Yellow band (34px) -->
+  <!-- Row 2: Yellow topo band (${BAND}px) -->
   <rect x="0" y="${bY}" width="${W}" height="${BAND}" fill="#FFDB00"/>
 
-  <!-- Topo contour lines -->
+  <!-- Topo contour lines (spread across expanded band) -->
   <path d="${topo1}" stroke="#020303" stroke-width="0.9" stroke-opacity="0.28" fill="none"/>
   <path d="${topo2}" stroke="#020303" stroke-width="0.9" stroke-opacity="0.20" fill="none"/>
   <path d="${topo3}" stroke="#020303" stroke-width="0.9" stroke-opacity="0.14" fill="none"/>
+  <path d="${topo4}" stroke="#020303" stroke-width="0.8" stroke-opacity="0.10" fill="none"/>
   <circle cx="140" cy="${d1y}" r="2"   fill="#020303" opacity="0.25"/>
   <circle cx="320" cy="${d2y}" r="1.5" fill="#020303" opacity="0.20"/>
   <circle cx="490" cy="${d3y}" r="2.2" fill="#020303" opacity="0.20"/>
   <circle cx="640" cy="${d4y}" r="1.5" fill="#020303" opacity="0.16"/>
   <circle cx="750" cy="${d5y}" r="2"   fill="#020303" opacity="0.20"/>
+  <circle cx="200" cy="${d6y}" r="1.8" fill="#020303" opacity="0.18"/>
+  <circle cx="550" cy="${d7y}" r="1.5" fill="#020303" opacity="0.15"/>
+  <circle cx="400" cy="${d8y}" r="2"   fill="#020303" opacity="0.12"/>
 
-  <!-- Row 3: White accent strip (5px) -->
+  <!-- Row 3: White accent strip (${ACC}px) -->
   <rect x="0" y="${bY + BAND}" width="${W}" height="${ACC}" fill="#ffffff"/>
   <line x1="0" y1="${bY + BAND}" x2="${W}" y2="${bY + BAND}" stroke="#E0E0E0" stroke-width="1"/>
 </svg>`
@@ -255,6 +269,7 @@ function buildPuppeteerTemplates(opts: { ref_number?: string }): {
   const email = profile.procurementEmail
   const year  = new Date().getFullYear()
 
+  // buildHeaderSvg now returns a native 794×168 SVG (= HDR_H_PX)
   const svgContent = buildHeaderSvg(refBadge)
   const svgDataUri = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgContent)
 
@@ -264,8 +279,8 @@ function buildPuppeteerTemplates(opts: { ref_number?: string }): {
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html, body { margin: 0; padding: 0; font-size: 10px; }
 </style>
-<img src="${svgDataUri}" width="794" height="87"
-     style="display:block;width:794px;height:87px;-webkit-print-color-adjust:exact;print-color-adjust:exact;"/>` 
+<img src="${svgDataUri}" width="794" height="168"
+     style="display:block;width:794px;height:168px;-webkit-print-color-adjust:exact;print-color-adjust:exact;"/>` 
 
   // Puppeteer header/footer templates run in an isolated context:
   //   • body font-size is forced to 0 → every font-size MUST be absolute px
@@ -362,9 +377,8 @@ function buildPdfBodyHtml(markdown: string, opts: { ref_number?: string; rfp_tit
   marked.setOptions({ gfm: true, breaks: false } as any)
   const bodyHtml = marked.parse(markdown || '') as string
 
-  // Build header SVG — scaled to fill the full header zone (HDR_H_PX tall)
-  const svgContent = buildHeaderSvg(refBadge)
-  const svgDataUri = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgContent)
+  // Build header SVG — native 794×168 (HDR_H_PX), no scaling needed
+  const svgInlineHeader = buildHeaderSvg(refBadge)
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -395,12 +409,10 @@ body { background: #fff; margin: 0; padding: 0; }
   -webkit-print-color-adjust: exact;
   print-color-adjust: exact;
 }
-.pdf-header img {
+.pdf-header svg {
   display: block;
   width: ${A4_W_PX}px;
   height: ${HDR_H_PX}px;
-  object-fit: cover;
-  object-position: top;
   -webkit-print-color-adjust: exact;
   print-color-adjust: exact;
 }
@@ -441,7 +453,7 @@ body { background: #fff; margin: 0; padding: 0; }
 <body>
 <!-- Header zone: fixed, pulled into @page top margin, repeats on every page -->
 <div class="pdf-header">
-  <img src="${svgDataUri}" width="${A4_W_PX}" height="${HDR_H_PX}" alt=""/>
+  ${svgInlineHeader}
 </div>
 
 <!-- Footer zone: fixed, pulled into @page bottom margin, repeats on every page -->
@@ -492,10 +504,10 @@ export async function buildPreviewHtml(
   const rfpTitleEsc  = escHtml(rfpTitle)
   const refNumber    = opts.ref_number ? escHtml(opts.ref_number) : ''
 
-  // Letterhead header HTML (injected into every A4 page card — Andersen only)
-  const svgContent = buildHeaderSvg(refNumber || undefined)
-  const svgDataUri = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgContent)
-  const pageHeaderHtml = `<div class="a-pg-hd"><img src="${svgDataUri}" width="${A4_W_PX}" height="${HDR_H_PX}" style="display:block;width:100%;height:${HDR_H_PX}px;object-fit:cover;object-position:top;"/></div>`
+  // Inline SVG directly — buildHeaderSvg returns a native 794×168 SVG (= HDR_H_PX)
+  // No <img> wrapper needed; no scaling issues with SVG data URIs in Chromium print
+  const svgInline = buildHeaderSvg(refNumber || undefined)
+  const pageHeaderHtml = `<div class="a-pg-hd" style="width:100%;height:${HDR_H_PX}px;overflow:hidden;flex-shrink:0;">${svgInline}</div>`
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -727,21 +739,60 @@ export async function renderMarkdownToPdf(
       console.log(`[pdf-render] CPC page.pdf() done, ${pdfBuffer.length} bytes`)
       return Buffer.from(pdfBuffer)
     } else {
-      // ── Andersen: header + footer embedded as position:fixed in body HTML ──
+      // ── Andersen: reuse the JS paginator from buildPreviewHtml ──
       //
-      // displayHeaderFooter:false — avoids Puppeteer IPC injection into an
-      // isolated renderer context, which crashes on Azure App Service Linux
-      // ("Protocol error (Target.setDiscoverTargets): Target closed").
-      // The fixed-position header/footer in buildPdfBodyHtml() render identically
-      // and require zero IPC — they live entirely in the page's own DOM.
-      const bodyHtml = buildPdfBodyHtml(markdown, opts)
-      await page.setContent(bodyHtml, { waitUntil: 'load', timeout: 30000 })
-      console.log(`[pdf-render] Andersen content set, calling page.pdf()`)
+      // The preview paginator already produces exact 794×1123px page divs,
+      // each containing header (168px) + body (auto) + footer (112px) as
+      // normal block children — no position:fixed, no IPC, no margin tricks.
+      //
+      // For PDF we inject @media print CSS that:
+      //   • sets @page { size: A4; margin: 0 }  — no Puppeteer margins needed
+      //   • removes screen chrome (body background, box-shadow, gap between pages)
+      //   • forces each .a-page to break onto its own PDF page
+      //
+      // waitUntil:'networkidle0' ensures the paginator JS has run and all
+      // .a-page divs are in the DOM before page.pdf() is called.
+      const paginatorHtml = await buildPreviewHtml(markdown, opts)
+
+      // Inject print-only overrides into the <head>
+      const printHtml = paginatorHtml.replace('</head>', `
+<style>
+@media print {
+  @page { size: A4; margin: 0; }
+  html, body { background: #fff !important; margin: 0; padding: 0; }
+  #measure { display: none !important; }
+  .a-page {
+    width: 794px !important;
+    height: 1123px !important;
+    min-height: 1123px !important;
+    max-height: 1123px !important;
+    margin: 0 !important;
+    box-shadow: none !important;
+    page-break-after: always !important;
+    break-after: page !important;
+    overflow: hidden !important;
+  }
+  .a-page:last-child { page-break-after: auto !important; break-after: auto !important; }
+}
+</style>
+</head>`)
+
+      // waitUntil:'load' fires after the DOM is ready; we then wait explicitly
+      // for the JS paginator to finish (it populates #pages synchronously on
+      // DOMContentLoaded, so by 'load' it's always done).
+      await page.setContent(printHtml, { waitUntil: 'load', timeout: 45000 })
+      // Extra guard: wait until at least one .a-page exists in the DOM
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await page.waitForFunction(
+        () => (globalThis as any).document.querySelectorAll('.a-page').length > 0,
+        { timeout: 15000 }
+      )
+      console.log(`[pdf-render] Andersen paginator done, calling page.pdf()`)
       const pdfBuffer = await page.pdf({
         format: 'A4',
         printBackground: true,
         displayHeaderFooter: false,
-        margin: { top: HDR_MM, bottom: FTR_MM, left: SIDE_MM, right: SIDE_MM },
+        margin: { top: '0', bottom: '0', left: '0', right: '0' },
         timeout: 60000,
       })
       console.log(`[pdf-render] Andersen page.pdf() done, ${pdfBuffer.length} bytes`)
