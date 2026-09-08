@@ -4473,7 +4473,12 @@ ANSWERING RULES — apply in order:
 
 3. ESCALATE TO MANUAL REVIEW (last resort only — < 10% of questions): Only if the answer genuinely requires an undisclosed internal ${_qProfile.orgName} decision. Respond with exactly: "NEEDS_MANUAL_REVIEW: " followed by one sentence.
 
-Never say "I don't know". Never say "Based on standard enterprise/industry practice". Never say "While the RFP doesn't specify". Answer like a human who owns this procurement.`
+Never say "I don't know". Never say "Based on standard enterprise/industry practice". Never say "While the RFP doesn't specify". Answer like a human who owns this procurement.
+
+OUTPUT FORMAT (mandatory):
+- Plain text only. No Markdown. No asterisks, no underscores, no backticks, no pound signs, no hyphens used as bullets.
+- Use plain numbered lists (1. 2. 3.) or plain dash-free bullet lines if a list is needed — just start each item on a new line.
+- Never bold or italicise any word. The output will be pasted directly into an Excel cell and Markdown symbols will appear as literal characters.`
 
   const userPrompt = `${context ? `CONTEXT DOCUMENTS:\n${context}\n\n---\n\n` : ''}VENDOR QUESTION:\n${question}`
 
