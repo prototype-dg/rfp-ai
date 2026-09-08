@@ -5381,7 +5381,9 @@ async function generateRfpPdfBlob(rfpId) {
   var jsPDF = window.jspdf.jsPDF;
 
   var safeRef = (rfp.ref_number || rfp.title || String(rfpId)).replace(/[^a-zA-Z0-9_\-]/g, '_');
-  var filename = 'Andersen_RFP_' + safeRef + '.pdf';
+  // Filename prefix derived from server Content-Disposition when downloaded;
+  // use a plain safeRef here for the client-side html2canvas blob path.
+  var filename = safeRef + '.pdf';
 
   // Inline letterhead as base64 data URI — avoids any CORS issue inside the iframe.
   var dataUri = await fetchLetterheadDataUri();
@@ -5834,9 +5836,14 @@ async function confirmSendInvitations(rfpId) {
       try {
         setLoading(btn, true, 'Generating PDF…');
         var safeRef = (rfp.ref_number || rfp.title || String(rfpId)).replace(/[^a-zA-Z0-9_\-]/g, '_');
-        pdfFilename = 'Andersen_RFP_' + safeRef + '.pdf';
+        // Default filename — overridden below if server sends Content-Disposition
+        pdfFilename = safeRef + '.pdf';
         var pdfRes = await fetch('/api/rfps/' + rfpId + '/pdf');
         if (!pdfRes.ok) throw new Error('PDF service returned ' + pdfRes.status);
+        // Read server-supplied filename from Content-Disposition (profile-aware)
+        var cdHdr = pdfRes.headers.get('Content-Disposition') || '';
+        var cdMatch = cdHdr.match(/filename="?([^";\/\s]+\.pdf)"?/i);
+        if (cdMatch && cdMatch[1]) pdfFilename = cdMatch[1];
         var pdfBlob = await pdfRes.blob();
         pdfBase64 = await blobToBase64(pdfBlob);
         setLoading(btn, true, 'Sending…');

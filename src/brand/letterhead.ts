@@ -244,7 +244,8 @@ export function andersenFooter(
   logo: string = logoFullDataUri,
   opts: { email?: string; year?: number } = {}
 ): string {
-  const email = opts.email || 'procurement@cpc-rfp.website'
+  const p     = getActiveProfile()
+  const email = opts.email || p.procurementEmail
   const year  = opts.year  || new Date().getFullYear()
   return `
   <!-- Andersen Letterhead: Footer -->
@@ -252,7 +253,7 @@ export function andersenFooter(
     <div class="a-foot-cols">
       <div class="a-foot-col">
         <div class="a-k">Web</div>
-        <div class="a-v">andersenlab.com</div>
+        <div class="a-v">${p.procurementEmail.replace(/^[^@]+@/, '')}</div>
       </div>
       <div class="a-foot-col">
         <div class="a-k">Contact</div>
@@ -260,12 +261,12 @@ export function andersenFooter(
       </div>
       <div class="a-foot-col">
         <div class="a-k">Offices</div>
-        <div class="a-v">Warsaw &middot; Berlin &middot; London &middot; New York</div>
+        <div class="a-v">${p.orgLocation}</div>
       </div>
     </div>
     <div class="a-foot-right">
-      <img src="${logo}" alt="Andersen" />
-      <div class="a-mono">&copy; Andersen ${year}</div>
+      <img src="${logo}" alt="${p.orgNameShort}" />
+      <div class="a-mono">&copy; ${p.orgNameShort} ${year}</div>
     </div>
   </div>`
 }
@@ -388,7 +389,8 @@ export function andersenPdfHeaderTemplate(opts: {
 export function andersenPdfFooterTemplate(opts: {
   email?: string
 } = {}): string {
-  const email = escHtml(opts.email || 'procurement@cpc-rfp.website')
+  const p     = getActiveProfile()
+  const email = escHtml(opts.email || p.procurementEmail)
   const year  = new Date().getFullYear()
   return `<div style="
     width:100%;height:100%;
@@ -399,7 +401,7 @@ export function andersenPdfFooterTemplate(opts: {
     font-size:8pt;
     box-sizing:border-box;
   ">
-    <span style="color:#FFDB00;letter-spacing:.1em;font-size:7.5pt">&copy; Andersen ${year} &nbsp;&middot;&nbsp; ${email}</span>
+    <span style="color:#FFDB00;letter-spacing:.1em;font-size:7.5pt">&copy; ${p.orgNameShort} ${year} &nbsp;&middot;&nbsp; ${email}</span>
     <span style="color:#9ca3af">
       Page <span class="pageNumber"></span> of <span class="totalPages"></span>
     </span>
@@ -416,7 +418,8 @@ export function andersenEmailHtml(opts: {
   refNumber?: string
   email?:     string
 }): string {
-  const email = opts.email || 'procurement@cpc-rfp.website'
+  const p     = getActiveProfile()
+  const email = opts.email || p.procurementEmail
   const year  = new Date().getFullYear()
   const safeBody = (opts.bodyText || '')
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -427,7 +430,7 @@ export function andersenEmailHtml(opts: {
   return `<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>${escHtml(opts.subject || 'Andersen Procurement')}</title></head>
+<title>${escHtml(opts.subject || p.orgNameShort + ' Procurement')}</title></head>
 <body style="margin:0;padding:0;background:#EDEEF1;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif">
 
 <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#EDEEF1;padding:32px 0">
@@ -513,11 +516,11 @@ export function andersenEmailHtml(opts: {
                 </td>
                 <td style="vertical-align:top">
                   <div style="font-family:'Courier New',monospace;font-size:8px;letter-spacing:.2em;text-transform:uppercase;color:#FFDB00;margin-bottom:3px">Offices</div>
-                  <div style="font-size:10px;color:#D8DEE8">Warsaw &middot; Berlin &middot; London &middot; New York</div>
+                  <div style="font-size:10px;color:#D8DEE8">${p.orgLocation}</div>
                 </td>
               </tr>
             </table>
-            <div style="font-family:'Courier New',monospace;font-size:7.5px;color:#4a6080;letter-spacing:.08em;text-transform:uppercase">&copy; Andersen ${year} &nbsp;&middot;&nbsp; Official Procurement Correspondence</div>
+            <div style="font-family:'Courier New',monospace;font-size:7.5px;color:#4a6080;letter-spacing:.08em;text-transform:uppercase">&copy; ${p.orgNameShort} ${year} &nbsp;&middot;&nbsp; Official Procurement Correspondence</div>
           </td>
         </tr>
       </table>
