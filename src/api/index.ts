@@ -6339,6 +6339,12 @@ apiRouter.post('/submit/:rfpId/confirmation', async (c) => {
     return c.json({ ok: true, message: 'Confirmation noted' })
   } catch(e:any) { return c.json({ error: e.message }, 500) }
 })
+// ── GET /api/demo/status — public read of active profile (for demo switcher UI) ──
+apiRouter.get('/demo/status', (c) => {
+  const p = getActiveProfile()
+  return c.json({ ok: true, activeProfile: p.id, orgName: p.orgName })
+})
+
 // ── POST /api/admin/set-profile — PIN-protected profile switcher ─────────────
 apiRouter.post('/admin/set-profile', async (c) => {
   const { pin, profileId } = await c.req.json<{ pin?: string; profileId?: string }>()

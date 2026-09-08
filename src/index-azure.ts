@@ -12,6 +12,7 @@ import { serveStatic } from '@hono/node-server/serve-static'
 import { apiRouter } from './api/index'
 import { getLayout } from './layout'
 import { getSubmitPage } from './submit-page'
+import { getDemoSwitcherPage } from './demo-switcher'
 import type { Bindings } from './types'
 import { sqliteDb } from './services/db'
 import { azureBlobBucket } from './services/blob-bucket'
@@ -48,6 +49,11 @@ app.use('/static/*', serveStatic({ root: './public' }))
 
 // API routes
 app.route('/api', apiRouter)
+
+// Demo presenter control panel
+app.get('/demo', (c) => {
+  return c.html(getDemoSwitcherPage())
+})
 
 // Public vendor proposal submission page
 app.get('/submit/:rfpId', (c) => {
