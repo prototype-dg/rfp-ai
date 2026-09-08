@@ -52,6 +52,7 @@ app.route('/api', apiRouter)
 
 // Demo presenter control panel
 app.get('/demo', (c) => {
+  c.header('Cache-Control', 'no-store')
   return c.html(getDemoSwitcherPage())
 })
 
@@ -62,8 +63,11 @@ app.get('/submit/:rfpId', (c) => {
   return c.html(getSubmitPage(rfpId, code))
 })
 
-// SPA — serve for all non-API, non-static routes
+// SPA — profile-aware HTML must never be cached by browser or proxy.
+// layout.ts injects profile-specific font-family and org name server-side,
+// so a stale cached page would show the wrong brand after a profile switch.
 app.get('*', (c) => {
+  c.header('Cache-Control', 'no-store')
   return c.html(getLayout())
 })
 
