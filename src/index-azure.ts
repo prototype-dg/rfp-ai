@@ -21,9 +21,11 @@ import { profileMiddleware } from './profiles/middleware'
 const app = new Hono<{ Bindings: Bindings }>()
 
 app.use('*', cors())
-app.use('*', profileMiddleware)
 
-// ── Azure adapter injection ────────────────────────────────────────────────
+// ── Azure adapter injection ─────────────────────────────────────────────────
+// MUST be registered BEFORE profileMiddleware so c.env.DB is available when
+// the profile loader runs. Reverse order caused active_profile to be silently
+// skipped (DB was undefined → markRefreshed() fired → 60s window of wrong profile).
 app.use('*', async (c, next) => {
   if (!c.env) (c as any).env = {}
   if (!c.env.DB) (c.env as any).DB = sqliteDb
@@ -36,6 +38,9 @@ app.use('*', async (c, next) => {
   if (!(c.env as any).AZURE_STORAGE_CONNECTION_STRING) (c.env as any).AZURE_STORAGE_CONNECTION_STRING = process.env.AZURE_STORAGE_CONNECTION_STRING
   await next()
 })
+
+// ── Profile loader — runs after DB adapter so c.env.DB is always set ────────
+app.use('*', profileMiddleware)
 
 // Global error handler
 app.onError((err, c) => {
