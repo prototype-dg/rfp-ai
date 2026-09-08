@@ -103,7 +103,7 @@ jobs:
           az webapp config set \
             --name app-rfp-tool \
             --resource-group Dima-Gibert-RG \
-            --startup-file "node dist-azure/server-azure.js"
+            --startup-file "/home/site/wwwroot/startup.sh"
           echo "✅ Startup command set"
 
       # Create zip — same exclusions as lms-app
@@ -127,7 +127,7 @@ jobs:
             --exclude "uploaded_files2/*"
           echo "Zip size: $(du -sh deploy.zip)"
           echo "Key paths inside zip:"
-          unzip -l deploy.zip | grep -E "(server-azure|dist-azure/index|dist-azure/api|better-sqlite|puppeteer-cache.*chrome)" | head -15
+          unzip -l deploy.zip | grep -E "(server-azure|dist-azure/index|dist-azure/api|better-sqlite|puppeteer-cache.*chrome|startup.sh)" | head -15
 
       # Deploy — --clean wipes stale Oryx/Local-Git artifacts (oryx-manifest.toml, node_modules.tar.gz)
       - name: Deploy zip to Azure (synchronous — waits for completion)

@@ -380,7 +380,7 @@ apiRouter.get('/rfps/:id/pdf', async (c) => {
         'Content-Type': 'text/html; charset=utf-8',
         'Content-Disposition': `inline; filename="${filename}.html"`,
         'Cache-Control': 'no-cache',
-        'X-PDF-Error': errMsg.slice(0, 500),   // visible in Network tab — remove after debugging
+        'X-PDF-Error': errMsg.replace(/[\r\n]+/g, ' | ').slice(0, 500),  // newlines invalid in headers
       },
     })
   }
