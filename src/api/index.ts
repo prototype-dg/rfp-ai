@@ -2334,6 +2334,211 @@ apiRouter.get('/debug/email-log', async (c) => {
   return c.json(results)
 })
 
+// ── GET /api/debug/budget-eval/:proposalId ────────────────────────────────────
+// Diagnostic endpoint: surfaces all data that the budget extraction path uses,
+// replays the commercial-section regex isolation, and re-runs runBudgetLLM so
+// the caller can see exactly what the LLM receives and returns.
+// Returns a structured JSON report — no side-effects except updating proposal
+// budget_amount / budget_currency if the LLM finds a value (same as evaluation).
+apiRouter.get('/debug/budget-eval/:proposalId', async (c) => {
+  const proposalId = c.req.param('proposalId')
+  try {
+    // ── 1. Fetch proposal row ─────────────────────────────────────────────────
+    const proposal = await c.env.DB.prepare(`SELECT * FROM proposals WHERE id=?`).bind(proposalId).first<any>()
+    if (!proposal) return c.json({ error: `Proposal ${proposalId} not found` }, 404)
+
+    // ── 2. Fetch associated RFP row ───────────────────────────────────────────
+    const rfp = await c.env.DB.prepare(`SELECT * FROM rfps WHERE id=?`).bind(proposal.rfp_id).first<any>()
+
+    // ── 3. Replay extractProposalText logic ───────────────────────────────────
+    let proposalText = ''
+    const textSources: string[] = []
+    if (proposal.proposal_full_text && proposal.proposal_full_text.length > 200) {
+      proposalText = proposal.proposal_full_text
+      textSources.push('proposal_full_text')
+    } else if (proposal.ocr_job_text && proposal.ocr_job_text.length > 200) {
+      proposalText = proposal.ocr_job_text
+      textSources.push('ocr_job_text (legacy)')
+    } else if (proposal.technical_proposal || proposal.commercial_proposal) {
+      proposalText = [proposal.technical_proposal, proposal.commercial_proposal].filter(Boolean).join('\n\n')
+      textSources.push('technical_proposal + commercial_proposal (legacy fields)')
+    }
+
+    // ── 4. Extract file labels ────────────────────────────────────────────────
+    const labelRe = /\[label:\s*([^\]]+)\]/gi
+    const foundLabels: string[] = []
+    let lm: RegExpExecArray | null
+    while ((lm = labelRe.exec(proposalText)) !== null) {
+      foundLabels.push(lm[1].trim().toLowerCase())
+    }
+
+    // ── 5. Replay commercial-section isolation ────────────────────────────────
+    const commercialSectionMatch = proposalText.match(
+      /={3} FILE:[^\n]*\[label:\s*commercial[^\]]*\][^\n]*\n([\s\S]*?)(?:={3} FILE:|$)/i
+    )
+    let budgetInputText = proposalText
+    let commercialSectionFound = false
+    let commercialSectionChars = 0
+    if (commercialSectionMatch && commercialSectionMatch[1].trim().length > 100) {
+      budgetInputText = commercialSectionMatch[1].trim()
+      commercialSectionFound = true
+      commercialSectionChars = budgetInputText.length
+    }
+
+    // ── 6. Replay scoring_matrix parsing ─────────────────────────────────────
+    let commercialWeight = 10
+    let technicalTotal   = 90
+    let scoringMatrixParsed: any[] = []
+    let scoringMatrixError: string | null = null
+    try {
+      scoringMatrixParsed = JSON.parse(rfp?.scoring_matrix || '[]')
+      if (scoringMatrixParsed.length > 0) {
+        const cc = scoringMatrixParsed.find((x: any) => /commercial|cost competitiveness|price/i.test(x.criterion || x.name || ''))
+        if (cc) commercialWeight = Number(cc.weight) || 10
+        const allW = scoringMatrixParsed.reduce((s: number, x: any) => s + (Number(x.weight) || 0), 0)
+        if (allW > 0) technicalTotal = allW - commercialWeight
+      }
+    } catch (e: any) { scoringMatrixError = e.message }
+
+    // ── 7. Re-run budget LLM ──────────────────────────────────────────────────
+    let llmResult: any = null
+    let llmError: string | null = null
+    try {
+      llmResult = await runBudgetLLM(budgetInputText, proposal, c.env.DB, c.env)
+    } catch (e: any) {
+      llmError = e.message
+    }
+
+    // ── 8. Assemble report ────────────────────────────────────────────────────
+    const report = {
+      // === Proposal metadata ===
+      proposal: {
+        id: proposal.id,
+        rfp_id: proposal.rfp_id,
+        vendor_name: proposal.vendor_name,
+        status: proposal.status,
+        ai_total_score: proposal.ai_total_score,
+        ai_recommendation: proposal.ai_recommendation,
+        ai_validation_status: proposal.ai_validation_status,
+        ai_evaluated_at: proposal.ai_evaluated_at,
+        // Stored budget (from previous runs)
+        budget_amount_stored: proposal.budget_amount,
+        budget_currency_stored: proposal.budget_currency,
+        proposed_duration_stored: proposal.proposed_duration,
+        ocr_pending_files: proposal.ocr_pending_files,
+        updated_at: proposal.updated_at,
+      },
+
+      // === RFP metadata ===
+      rfp: rfp ? {
+        id: rfp.id,
+        title: rfp.title,
+        budget: rfp.budget,
+        rfp_currency: rfp.rfp_currency,
+        country_of_issue: rfp.country_of_issue,
+        scoring_matrix_raw: rfp.scoring_matrix,
+        scoring_matrix_parsed: scoringMatrixParsed,
+        scoring_matrix_error: scoringMatrixError,
+        commercial_weight_detected: commercialWeight,
+        technical_total_detected: technicalTotal,
+      } : null,
+
+      // === Text analysis ===
+      text_analysis: {
+        text_source: textSources.join(' + ') || 'NO TEXT FOUND',
+        total_chars: proposalText.length,
+        total_chars_first_500: proposalText.slice(0, 500),
+        file_labels_found: foundLabels,
+        has_technical_label: foundLabels.includes('technical'),
+        has_commercial_label: foundLabels.includes('commercial'),
+        has_supporting_label: foundLabels.includes('supporting'),
+      },
+
+      // === Budget isolation ===
+      budget_isolation: {
+        commercial_section_found: commercialSectionFound,
+        commercial_section_chars: commercialSectionFound ? commercialSectionChars : null,
+        budget_input_chars: budgetInputText.length,
+        budget_input_preview_500: budgetInputText.slice(0, 500),
+        budget_input_sent_to_llm_chars: Math.min(budgetInputText.length, 30_000),
+        was_truncated: budgetInputText.length > 30_000,
+        note: commercialSectionFound
+          ? 'Commercial section isolated — LLM only sees this section (up to 30k chars)'
+          : 'No [label: commercial] section found — LLM sees full proposal text (up to 30k chars)',
+      },
+
+      // === LLM result ===
+      budget_llm: {
+        error: llmError,
+        budget_amount: llmResult?.budget_amount ?? null,
+        budget_currency: llmResult?.budget_currency ?? null,
+        budget_confidence: llmResult?.budget_confidence ?? null,
+        duration: llmResult?.duration ?? null,
+        raw_total_cost: llmResult?.raw_total_cost ?? null,
+        line_items: llmResult?.line_items ?? null,
+        missing_info: llmResult?.missing_info ?? null,
+        text_chars_sent: llmResult?.text_chars ?? null,
+      },
+
+      // === Diagnosis ===
+      diagnosis: (() => {
+        const issues: string[] = []
+        if (!proposalText || proposalText.length < 200) {
+          issues.push('CRITICAL: proposal_full_text is empty or too short — OCR may not have completed')
+        }
+        if (!foundLabels.includes('commercial') && !foundLabels.includes('technical')) {
+          issues.push('WARNING: No [label: commercial] or [label: technical] found in proposal text — files may have been uploaded without labels, or OCR failed')
+        }
+        if (!foundLabels.includes('commercial')) {
+          issues.push('WARNING: No [label: commercial] section — budget LLM must scan full text (up to 30k chars); if pricing tables appear after 30k chars they will be missed')
+        }
+        if (proposalText.length > 30_000 && !commercialSectionFound) {
+          issues.push(`LIKELY ROOT CAUSE: Proposal text is ${proposalText.length} chars but no commercial section label found — budget LLM only sees the first 30k chars. If pricing is in a later section, it will be missed.`)
+        }
+        if (llmError) {
+          issues.push(`LLM call failed: ${llmError}`)
+        }
+        if (!llmResult?.budget_amount) {
+          issues.push('Budget LLM returned no amount — either no pricing found in text, or JSON parse failed')
+        }
+        if (issues.length === 0) {
+          issues.push('No obvious issues detected — budget extraction should work or has now succeeded')
+        }
+        return issues
+      })(),
+    }
+
+    return c.json(report, 200)
+  } catch (e: any) {
+    return c.json({ error: e.message, stack: e.stack?.split('\n').slice(0, 6) }, 500)
+  }
+})
+
+// ── GET /api/debug/proposals-recent — list recent proposals with budget fields ─
+// Quick overview: see all recent proposals with their extracted budget values.
+// Useful to spot which proposals have budget_amount=null vs populated.
+apiRouter.get('/debug/proposals-recent', async (c) => {
+  try {
+    const limit = Number(c.req.query('limit') || '20')
+    const { results } = await c.env.DB.prepare(`
+      SELECT
+        p.id, p.rfp_id, p.vendor_name, p.status,
+        p.budget_amount, p.budget_currency, p.proposed_duration,
+        p.ai_total_score, p.ai_recommendation, p.ai_validation_status,
+        p.ai_evaluated_at, p.ocr_pending_files, p.updated_at,
+        LENGTH(p.proposal_full_text) AS full_text_chars,
+        r.title AS rfp_title, r.budget AS rfp_budget, r.rfp_currency, r.scoring_matrix IS NOT NULL AS has_scoring_matrix
+      FROM proposals p
+      LEFT JOIN rfps r ON r.id = p.rfp_id
+      ORDER BY p.updated_at DESC
+      LIMIT ?
+    `).bind(limit).all()
+    return c.json({ count: results.length, proposals: results })
+  } catch (e: any) {
+    return c.json({ error: e.message }, 500)
+  }
+})
+
 // ============================================================
 // PROPOSALS
 // ============================================================
