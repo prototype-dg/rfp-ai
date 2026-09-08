@@ -39,6 +39,19 @@ jobs:
       - name: Install production dependencies only (after build)
         run: npm ci --omit=dev
 
+      # Download Chromium into ./puppeteer-cache/ so it travels inside the zip.
+      # Puppeteer's default cache is ~/.cache/puppeteer which is NOT in the zip.
+      # By setting PUPPETEER_CACHE_DIR to a project-relative path and running the
+      # install script, Chrome ends up at ./puppeteer-cache/chrome/<rev>/chrome-linux64/chrome.
+      # On Azure, PUPPETEER_CACHE_DIR is set to the same relative path via app settings,
+      # so puppeteer.launch() finds the binary without any extra steps.
+      - name: Download Chromium into project-relative cache (for zip deploy)
+        run: |
+          PUPPETEER_CACHE_DIR=./puppeteer-cache node node_modules/puppeteer/install.mjs
+          echo "--- Chromium binary ---"
+          find ./puppeteer-cache -name "chrome" -type f | head -3
+          du -sh ./puppeteer-cache/
+
       # Verify key files — mirrors lms-app pattern
       - name: Verify key files exist
         run: |
@@ -46,6 +59,8 @@ jobs:
           ls -lh dist-azure/server-azure.js dist-azure/index-azure.js dist-azure/api/index.js
           ls -lh node_modules/@hono/node-server/dist/index.mjs
           ls -lh node_modules/better-sqlite3/prebuilds/linux-x64.node
+          echo "--- Chromium binary ---"
+          find ./puppeteer-cache -name "chrome" -type f | head -3
           echo "--- node_modules size ---"
           du -sh node_modules/
 
@@ -69,7 +84,8 @@ jobs:
               DB_PATH="/home/data/app.db" \
               OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}" \
               RESEND_API_KEY="${{ secrets.RESEND_API_KEY }}" \
-              DEMO_SWITCH_PIN="${{ secrets.DEMO_SWITCH_PIN }}"
+              DEMO_SWITCH_PIN="${{ secrets.DEMO_SWITCH_PIN }}" \
+              PUPPETEER_CACHE_DIR="/home/site/wwwroot/puppeteer-cache"
           echo "✅ App settings configured"
 
       - name: Set startup command
@@ -100,7 +116,7 @@ jobs:
             --exclude "uploaded_files2/*"
           echo "Zip size: $(du -sh deploy.zip)"
           echo "Key paths inside zip:"
-          unzip -l deploy.zip | grep -E "(server-azure|dist-azure/index|dist-azure/api|better-sqlite)" | head -10
+          unzip -l deploy.zip | grep -E "(server-azure|dist-azure/index|dist-azure/api|better-sqlite|puppeteer-cache.*chrome)" | head -15
 
       # Deploy — --clean wipes stale Oryx/Local-Git artifacts (oryx-manifest.toml, node_modules.tar.gz)
       - name: Deploy zip to Azure (synchronous — waits for completion)

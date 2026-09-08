@@ -198,41 +198,55 @@ function buildPuppeteerTemplates(opts: { ref_number?: string }): {
   const svgContent = buildHeaderSvg(refBadge)
   const svgDataUri = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgContent)
 
+  // Puppeteer sets body font-size to 0 inside header/footer template context,
+  // so every font-size must use absolute px units. Relative units (em/rem/pt) collapse.
   const headerTemplate = `<style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body { margin: 0; padding: 0; }
+html, body { margin: 0; padding: 0; font-size: 10px; }
 </style>
-<img src="${svgDataUri}" width="794" height="87" style="display:block;width:794px;height:87px;"/>`
+<img src="${svgDataUri}" width="794" height="87"
+     style="display:block;width:794px;height:87px;-webkit-print-color-adjust:exact;print-color-adjust:exact;"/>` 
 
+  // Puppeteer header/footer templates run in an isolated context:
+  //   • body font-size is forced to 0 → every font-size MUST be absolute px
+  //   • -webkit-print-color-adjust must be on EACH colored element (the * rule
+  //     is applied but sometimes dropped by the isolated renderer)
+  //   • background-color on <body> alone is insufficient — needs to be on the
+  //     outermost visible element too
+  //   • height: 83px on the table tells Puppeteer exactly how much space to reserve
   const footerTemplate = `<style>
-* { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important;
-    margin: 0; padding: 0; box-sizing: border-box; }
-body { margin: 0; padding: 0; background: #020D1C; }
-table.ftr { width: 794px; height: 83px; background: #020D1C;
-            border-collapse: collapse; table-layout: fixed; }
-td.fl { width: 440px; padding: 0 0 0 60px; vertical-align: middle; }
-td.fr { width: 294px; padding: 0 60px 0 0; vertical-align: middle; text-align: right; }
-.fk { font-family: 'Courier New', monospace; font-size: 6px; letter-spacing: 1.5px;
-      text-transform: uppercase; color: #FFDB00; display: block; margin-bottom: 2px; }
-.fv { font-family: Arial, sans-serif; font-size: 7.5px; color: #D8DEE8; display: block; }
-.fsep { display: inline-block; width: 1px; height: 22px; background: rgba(255,255,255,0.15);
-        margin: 0 16px; vertical-align: middle; }
-.fcopy { font-family: 'Courier New', monospace; font-size: 6px; letter-spacing: 1.2px;
-         text-transform: uppercase; color: #FFDB00; display: block; margin-bottom: 3px; }
-.fpg { font-family: 'Courier New', monospace; font-size: 7px; letter-spacing: 0.8px;
-       color: #9ca3af; display: block; }
+* { margin: 0; padding: 0; box-sizing: border-box;
+    -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+html, body { margin: 0; padding: 0; font-size: 10px; background: #020D1C; }
 </style>
-<table class="ftr">
+<table style="width:794px;height:83px;min-height:83px;background:#020D1C;
+             border-collapse:collapse;table-layout:fixed;
+             -webkit-print-color-adjust:exact;print-color-adjust:exact;">
   <tr>
-    <td class="fl">
-      <span class="fk">Contact</span><span class="fv">${email}</span>
-      <span class="fsep"></span>
-      <span class="fk" style="display:inline-block;margin-bottom:0">Offices</span>
-      <span class="fv" style="display:inline-block">${profile.orgLocation}</span>
+    <td style="width:440px;padding:0 0 0 60px;vertical-align:middle;
+               background:#020D1C;-webkit-print-color-adjust:exact;">
+      <span style="font-family:'Courier New',monospace;font-size:6px;letter-spacing:1.5px;
+                   text-transform:uppercase;color:#FFDB00;display:block;margin-bottom:2px;
+                   -webkit-print-color-adjust:exact;">Contact</span>
+      <span style="font-family:Arial,sans-serif;font-size:7.5px;color:#D8DEE8;
+                   display:block;-webkit-print-color-adjust:exact;">${email}</span>
+      <span style="display:inline-block;width:1px;height:22px;
+                   background:rgba(255,255,255,0.25);margin:0 16px;
+                   vertical-align:middle;-webkit-print-color-adjust:exact;"></span>
+      <span style="font-family:'Courier New',monospace;font-size:6px;letter-spacing:1.5px;
+                   text-transform:uppercase;color:#FFDB00;display:inline-block;
+                   -webkit-print-color-adjust:exact;">Offices</span>
+      <span style="font-family:Arial,sans-serif;font-size:7.5px;color:#D8DEE8;
+                   display:inline-block;margin-left:6px;
+                   -webkit-print-color-adjust:exact;">${profile.orgLocation}</span>
     </td>
-    <td class="fr">
-      <span class="fcopy">© ${profile.orgNameShort} ${year}</span>
-      <span class="fpg">Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>
+    <td style="width:294px;padding:0 60px 0 0;vertical-align:middle;text-align:right;
+               background:#020D1C;-webkit-print-color-adjust:exact;">
+      <span style="font-family:'Courier New',monospace;font-size:6px;letter-spacing:1.2px;
+                   text-transform:uppercase;color:#FFDB00;display:block;margin-bottom:3px;
+                   -webkit-print-color-adjust:exact;">© ${profile.orgNameShort} ${year}</span>
+      <span style="font-family:'Courier New',monospace;font-size:7px;letter-spacing:0.8px;
+                   color:#9ca3af;display:block;-webkit-print-color-adjust:exact;">Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>
     </td>
   </tr>
 </table>`
@@ -256,7 +270,9 @@ function buildPdfBodyHtml(markdown: string, opts: { ref_number?: string; rfp_tit
 ${TYPOGRAPHY_CSS}
 body { background: #fff; margin: 0; padding: 0; }
 .a-body { padding: 0; }
-@page { size: A4; margin: 29mm 16mm 22mm 16mm; }
+/* @page margin mirrors page.pdf() margin: top matches 87px header, bottom matches 83px footer.
+   top: 29mm = ~109px (header 87px + 22px gap).  bottom: 26mm = ~98px (footer 83px + 15px gap). */
+@page { size: A4; margin: 29mm 16mm 26mm 16mm; }
 </style>
 </head>
 <body><div class="a-body">${bodyHtml}</div></body>
@@ -526,7 +542,10 @@ export async function renderMarkdownToPdf(
         displayHeaderFooter: true,
         headerTemplate,
         footerTemplate,
-        margin: { top: '29mm', bottom: '22mm', left: '16mm', right: '16mm' },
+        // top: 29mm ≈ 109px reserves space for 87px header + 22px gap.
+        // bottom: 26mm ≈ 98px reserves space for 83px footer + 15px gap.
+        // (22mm was only ~83.1px — dangerously tight for the 83px footer.)
+        margin: { top: '29mm', bottom: '26mm', left: '16mm', right: '16mm' },
       })
       return Buffer.from(pdfBuffer)
     }
