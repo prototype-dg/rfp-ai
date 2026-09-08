@@ -48,10 +48,10 @@ export function getSubmitPage(rfpId: string, participantCode: string): string {
       --a-navy:          #020D1C;
       --a-ink:           #020303;
       --a-charcoal:      #3A3E45;
-      --font-display: 'Roboto', system-ui, sans-serif;
-      --font-body:    'Roboto', system-ui, sans-serif;
-      --font-mono:    'JetBrains Mono', 'Courier New', monospace;
-      --font-arabic:  'Noto Sans Arabic', sans-serif;
+      --font-display: 'Roboto', system-ui, sans-serif; /* overridden below */
+      --font-body:    'Roboto', system-ui, sans-serif; /* overridden below */
+      --font-mono:    'JetBrains Mono', 'Courier New', monospace; /* overridden below */
+      --font-arabic:  'Noto Sans Arabic', sans-serif; /* overridden below */
     }
     /* ── PROFILE DESIGN TOKEN OVERRIDES ── injected server-side per active profile ── */
     :root {

@@ -99,8 +99,11 @@ const TYPOGRAPHY_CSS = `
 `
 
 function wordmarkSvg(width: number, height: number, textColor?: string): string {
-  const tc = textColor || '#020303'
-  return `<svg viewBox="0 0 180 38" width="${width}" height="${height}" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="0" y="3" width="24" height="24" rx="2" fill="${tc}"/><rect x="4" y="7" width="6" height="14" fill="#FFDB00"/><rect x="14" y="7" width="6" height="14" fill="#FFDB00"/><text x="30" y="23" font-family="Arial,Helvetica,sans-serif" font-weight="700" font-size="15" letter-spacing="1.5" fill="${tc}">ANDERSEN</text></svg>`
+  const tc    = textColor || '#020303'
+  const p     = getActiveProfile()
+  const label = p.orgNameShort.toUpperCase()
+  const acc   = p.css.accent
+  return `<svg viewBox="0 0 180 38" width="${width}" height="${height}" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="0" y="3" width="24" height="24" rx="2" fill="${tc}"/><rect x="4" y="7" width="6" height="14" fill="${acc}"/><rect x="14" y="7" width="6" height="14" fill="${acc}"/><text x="30" y="23" font-family="Arial,Helvetica,sans-serif" font-weight="700" font-size="15" letter-spacing="1.5" fill="${tc}">${label}</text></svg>`
 }
 
 // ── buildHeaderSvg ────────────────────────────────────────────────────────────
@@ -135,9 +138,9 @@ function buildHeaderSvg(refBadge?: string): string {
 
   <!-- Wordmark glyph -->
   <rect x="${glyphX}" y="${glyphY}" width="16" height="16" rx="2" fill="#020303"/>
-  <rect x="${glyphX+3}" y="${glyphY+3}" width="4" height="10" fill="#FFDB00"/>
-  <rect x="${glyphX+9}" y="${glyphY+3}" width="4" height="10" fill="#FFDB00"/>
-  <text x="${glyphX+22}" y="${glyphY+12}" font-family="Arial,Helvetica,sans-serif" font-weight="700" font-size="12" letter-spacing="1.5" fill="#020303">ANDERSEN</text>
+  <rect x="${glyphX+3}" y="${glyphY+3}" width="4" height="10" fill="${getActiveProfile().css.accent}"/>
+  <rect x="${glyphX+9}" y="${glyphY+3}" width="4" height="10" fill="${getActiveProfile().css.accent}"/>
+  <text x="${glyphX+22}" y="${glyphY+12}" font-family="Arial,Helvetica,sans-serif" font-weight="700" font-size="12" letter-spacing="1.5" fill="#020303">${getActiveProfile().orgNameShort.toUpperCase()}</text>
   <line x1="${glyphX+122}" y1="${glyphY+2}" x2="${glyphX+122}" y2="${glyphY+14}" stroke="#D0D0D0" stroke-width="1"/>
   <text x="${glyphX+130}" y="${glyphY+8}" font-family="Courier New,monospace" font-weight="600" font-size="6.5" letter-spacing="0.8" fill="#020303">SOFTWARE ENGINEERING</text>
   <text x="${glyphX+130}" y="${glyphY+16}" font-family="Courier New,monospace" font-size="6.5" letter-spacing="0.8" fill="#556170">GROUP · GLOBAL</text>
@@ -207,10 +210,10 @@ td.fr { width: 294px; padding: 0 60px 0 0; vertical-align: middle; text-align: r
       <span class="fk">Contact</span><span class="fv">${email}</span>
       <span class="fsep"></span>
       <span class="fk" style="display:inline-block;margin-bottom:0">Offices</span>
-      <span class="fv" style="display:inline-block">Warsaw · Berlin · London · NY</span>
+      <span class="fv" style="display:inline-block">${profile.orgLocation}</span>
     </td>
     <td class="fr">
-      <span class="fcopy">© Andersen ${year}</span>
+      <span class="fcopy">© ${profile.orgNameShort} ${year}</span>
       <span class="fpg">Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>
     </td>
   </tr>
