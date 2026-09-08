@@ -2343,8 +2343,13 @@ apiRouter.get('/debug/email-log', async (c) => {
 apiRouter.get('/debug/budget-eval/:proposalId', async (c) => {
   const proposalId = c.req.param('proposalId')
   try {
-    // ── 1. Fetch proposal row ─────────────────────────────────────────────────
-    const proposal = await c.env.DB.prepare(`SELECT * FROM proposals WHERE id=?`).bind(proposalId).first<any>()
+    // ── 1. Fetch proposal row (join vendor name) ──────────────────────────────
+    const proposal = await c.env.DB.prepare(`
+      SELECT p.*, v.name AS vendor_name
+      FROM proposals p
+      LEFT JOIN vendors v ON v.id = p.vendor_id
+      WHERE p.id=?
+    `).bind(proposalId).first<any>()
     if (!proposal) return c.json({ error: `Proposal ${proposalId} not found` }, 404)
 
     // ── 2. Fetch associated RFP row ───────────────────────────────────────────
@@ -2522,14 +2527,17 @@ apiRouter.get('/debug/proposals-recent', async (c) => {
     const limit = Number(c.req.query('limit') || '20')
     const { results } = await c.env.DB.prepare(`
       SELECT
-        p.id, p.rfp_id, p.vendor_name, p.status,
+        p.id, p.rfp_id, p.status,
+        v.name AS vendor_name,
         p.budget_amount, p.budget_currency, p.proposed_duration,
         p.ai_total_score, p.ai_recommendation, p.ai_validation_status,
         p.ai_evaluated_at, p.ocr_pending_files, p.updated_at,
         LENGTH(p.proposal_full_text) AS full_text_chars,
-        r.title AS rfp_title, r.budget AS rfp_budget, r.rfp_currency, r.scoring_matrix IS NOT NULL AS has_scoring_matrix
+        r.title AS rfp_title, r.budget AS rfp_budget, r.rfp_currency,
+        r.scoring_matrix IS NOT NULL AS has_scoring_matrix
       FROM proposals p
       LEFT JOIN rfps r ON r.id = p.rfp_id
+      LEFT JOIN vendors v ON v.id = p.vendor_id
       ORDER BY p.updated_at DESC
       LIMIT ?
     `).bind(limit).all()
