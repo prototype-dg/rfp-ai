@@ -25,9 +25,16 @@ export async function getBrowser(): Promise<Browser> {
   if (_browser && _browser.connected) return _browser
   if (_browserLaunching) return _browserLaunching
 
-  // On Azure App Service (Linux) Chromium requires --no-zygote + --single-process
-  // to avoid the sandbox process failing to start in the container environment.
-  // PUPPETEER_EXECUTABLE_PATH env var lets us point at the system chromium if needed.
+  // Azure App Service (Linux) container launch flags.
+  //
+  // --single-process is intentionally REMOVED: it causes the renderer thread to crash
+  // when Puppeteer calls page.pdf() with displayHeaderFooter:true inside a restricted
+  // container (the PDF renderer uses IPC to a separate renderer process; collapsing them
+  // into one thread deadlocks or segfaults under memory pressure).
+  //
+  // --no-zygote alone is sufficient to avoid the zygote sandbox failure on App Service.
+  // --user-data-dir in /tmp ensures Chrome has a writable profile dir (wwwroot is read-only
+  // for the app process on some App Service configurations).
   const launchArgs = [
     '--no-sandbox',
     '--disable-setuid-sandbox',
@@ -35,13 +42,20 @@ export async function getBrowser(): Promise<Browser> {
     '--disable-gpu',
     '--font-render-hinting=none',
     '--no-zygote',
-    '--single-process',        // required on Azure App Service B-tier Linux containers
+    '--user-data-dir=/tmp/chrome-user-data',
+    '--disable-extensions',
+    '--disable-background-networking',
+    '--disable-sync',
+    '--metrics-recording-only',
+    '--mute-audio',
+    '--hide-scrollbars',
   ]
 
   const launchOpts: Parameters<typeof puppeteer.launch>[0] = {
     headless: true,
     args:     launchArgs,
-    pipe:     true,            // use pipe transport instead of WebSocket — more stable in containers
+    pipe:     true,            // pipe transport — more stable than WebSocket in containers
+    timeout:  60000,           // 60s launch timeout (default 30s can expire under cold-start load)
   }
 
   // Resolve the chrome-headless-shell binary from the bundled cache.
@@ -543,8 +557,11 @@ export async function renderMarkdownToPdf(
   opts: { ref_number?: string; rfp_title?: string }
 ): Promise<Buffer> {
   const profile = getActiveProfile()
+  console.log(`[pdf-render] launching browser for profile=${profile.id}`)
   const browser = await getBrowser()
+  console.log(`[pdf-render] browser launched, opening new page`)
   const page    = await browser.newPage()
+  console.log(`[pdf-render] page opened, rendering content`)
 
   try {
     if (profile.id === 'cpc') {
@@ -553,35 +570,33 @@ export async function renderMarkdownToPdf(
       marked.setOptions({ gfm: true, breaks: false } as any)
       const renderedBody = marked.parse(markdown || '') as string
       const fullHtml = profilePdfBodyHtml({ bodyHtml: renderedBody, refNumber: opts.ref_number, title: opts.rfp_title })
-      // CPC PDF: background image from local path — no external network requests.
-      // 'load' waits for all subresources (images/fonts); networkidle0 not needed
-      // and is excluded from setContent's type signature in Puppeteer v25.
-      await page.setContent(fullHtml, { waitUntil: 'load' })
+      await page.setContent(fullHtml, { waitUntil: 'load', timeout: 30000 })
+      console.log(`[pdf-render] CPC content set, calling page.pdf()`)
       const pdfBuffer = await page.pdf({
         format: 'A4',
         printBackground: true,
         displayHeaderFooter: false,
         margin: { top: '0', bottom: '0', left: '0', right: '0' },
+        timeout: 60000,
       })
+      console.log(`[pdf-render] CPC page.pdf() done, ${pdfBuffer.length} bytes`)
       return Buffer.from(pdfBuffer)
     } else {
       // ── Andersen: SVG topo header + footer via Puppeteer displayHeaderFooter ──
       const bodyHtml = buildPdfBodyHtml(markdown, opts)
       const { headerTemplate, footerTemplate } = buildPuppeteerTemplates({ ref_number: opts.ref_number })
-      // Andersen PDF body: fully inline HTML, no external resources.
-      // 'load' is sufficient; networkidle0 excluded from setContent types in Puppeteer v25.
-      await page.setContent(bodyHtml, { waitUntil: 'load' })
+      await page.setContent(bodyHtml, { waitUntil: 'load', timeout: 30000 })
+      console.log(`[pdf-render] Andersen content set, calling page.pdf()`)
       const pdfBuffer = await page.pdf({
         format: 'A4',
         printBackground: true,
         displayHeaderFooter: true,
         headerTemplate,
         footerTemplate,
-        // top: 29mm ≈ 109px reserves space for 87px header + 22px gap.
-        // bottom: 26mm ≈ 98px reserves space for 83px footer + 15px gap.
-        // (22mm was only ~83.1px — dangerously tight for the 83px footer.)
         margin: { top: '29mm', bottom: '26mm', left: '16mm', right: '16mm' },
+        timeout: 60000,
       })
+      console.log(`[pdf-render] Andersen page.pdf() done, ${pdfBuffer.length} bytes`)
       return Buffer.from(pdfBuffer)
     }
   } finally {
