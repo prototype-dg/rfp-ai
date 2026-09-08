@@ -12,6 +12,12 @@ export type Bindings = {
   // ── Inline OCR (Phase 2 — replaces pdf-sidecar) ───────────────────────────
   GOOGLE_VISION_API_KEY?: string
 
+  // ── VPS pdf-render sidecar ────────────────────────────────────────────────
+  // Primary PDF path: POST https://api.cpc-rfp.website/pdf/render-md-pdf
+  // Set via Azure App Setting / process.env; fallback to inline Puppeteer when absent.
+  PDF_RENDER_URL?: string      // e.g. https://api.cpc-rfp.website/pdf
+  PDF_RENDER_SECRET?: string   // Bearer token matching PDF_SERVICE_SECRET on sidecar
+
   // ── Azure Blob Storage (Phase 3 — replaces VPS upload relay) ─────────────
   AZURE_STORAGE_CONNECTION_STRING?: string
   AZURE_BLOB_CONTAINER?: string          // default: 'proposal-uploads'
