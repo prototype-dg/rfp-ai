@@ -1,6 +1,9 @@
 name: Deploy to Azure App Service
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 # Cancel any in-progress run on the same branch when a new run starts.
