@@ -865,8 +865,14 @@ Write the complete Markdown for section "${sectionSpec?.heading || sectionKey}" 
     }
   })()
 
-  // Keep Worker alive for the duration of the parallel generation
-  c.executionCtx.waitUntil(streamTask)
+  // Keep Worker alive for the duration of the parallel generation.
+  // On Cloudflare Workers, executionCtx.waitUntil() is required to prevent
+  // the Worker from being killed before the stream completes.
+  // On Azure App Service (Node.js), the HTTP response stream keeps the process
+  // alive automatically — executionCtx does not exist, so we guard against it.
+  if (c.executionCtx) {
+    c.executionCtx.waitUntil(streamTask)
+  }
 
   return new Response(readable, {
     headers: {
