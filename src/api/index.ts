@@ -275,8 +275,8 @@ apiRouter.get('/rfps/:id/pdf-content', async (c) => {
   })
 })
 
-// GET /rfps/:id/pdf — generate branded A4 PDF from stored markdown.
-// Three-tier: (1) VPS sidecar primary, (2) inline Puppeteer secondary, (3) browser-print fallback.
+// GET /rfps/:id/pdf — generate Andersen-branded A4 PDF from stored markdown.
+// Phase 1: rendered inline via Puppeteer browser pool (no VPS round-trip).
 apiRouter.get('/rfps/:id/pdf', async (c) => {
   const id = c.req.param('id')
   const rfp = await c.env.DB.prepare('SELECT * FROM rfps WHERE id=?').bind(id).first()
@@ -290,43 +290,6 @@ apiRouter.get('/rfps/:id/pdf', async (c) => {
   const refNumber = (rfp as any).ref_number as string || ''
   const rfpTitle  = (rfp as any).title as string || 'Request for Proposal'
 
-  const renderUrl    = (c.env as any).PDF_RENDER_URL    || process.env.PDF_RENDER_URL    || ''
-  const renderSecret = (c.env as any).PDF_RENDER_SECRET || process.env.PDF_RENDER_SECRET || ''
-
-  // ── Tier 1: VPS sidecar (Puppeteer runs on VPS, not Azure container) ──────
-  if (renderUrl && renderSecret) {
-    try {
-      console.log(`[pdf-render] calling sidecar at ${renderUrl}/render-md-pdf for RFP ${id}`)
-      const renderRes = await fetch(`${renderUrl}/render-md-pdf`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${renderSecret}`,
-        },
-        body: JSON.stringify({ markdown, ref_number: refNumber, rfp_title: rfpTitle }),
-        signal: AbortSignal.timeout(120000),
-      })
-      if (renderRes.ok) {
-        const pdfBytes = await renderRes.arrayBuffer()
-        console.log(`[pdf-render] sidecar returned ${pdfBytes.byteLength} bytes for RFP ${id}`)
-        return new Response(pdfBytes, {
-          status: 200,
-          headers: {
-            'Content-Type': 'application/pdf',
-            'Content-Disposition': `attachment; filename="${filename}"`,
-            'Cache-Control': 'no-cache',
-          },
-        })
-      }
-      throw new Error(`Sidecar returned HTTP ${renderRes.status}`)
-    } catch (err: any) {
-      console.error('[pdf-render] sidecar failed, falling back to inline Puppeteer:', err.message)
-    }
-  } else {
-    console.warn('[pdf-render] PDF_RENDER_URL or PDF_RENDER_SECRET not set — skipping sidecar')
-  }
-
-  // ── Tier 2: Inline Puppeteer (may fail on Azure if Chrome absent) ─────────
   try {
     const pdfBuffer = await renderMarkdownToPdf(markdown, { ref_number: refNumber, rfp_title: rfpTitle })
     console.log(`[pdf-render] inline rendered ${pdfBuffer.length} bytes for RFP ${id}`)
@@ -340,14 +303,12 @@ apiRouter.get('/rfps/:id/pdf', async (c) => {
     })
   } catch (err: any) {
     console.error('[pdf-render] inline render failed, falling back to print-HTML:', err.message)
-  }
-
-  // ── Tier 3: Browser-print HTML page (last resort) ─────────────────────────
-  const printHtml = profilePageHtml({
-    title:       rfpTitle,
-    refNumber,
-    showToolbar: true,
-    bodyHtml:    `<div id="rfp-content-inner"></div>
+    // Fallback: browser-print HTML page
+    const printHtml = profilePageHtml({
+      title:       rfpTitle,
+      refNumber,
+      showToolbar: true,
+      bodyHtml:    `<div id="rfp-content-inner"></div>
 <script src="https://cdn.jsdelivr.net/npm/marked@13/marked.min.js"><\/script>
 <script>
 (function(){
@@ -360,15 +321,16 @@ apiRouter.get('/rfps/:id/pdf', async (c) => {
   }
 })();
 <\/script>`,
-  })
-  return new Response(printHtml, {
-    status: 200,
-    headers: {
-      'Content-Type': 'text/html; charset=utf-8',
-      'Content-Disposition': `inline; filename="${filename}.html"`,
-      'Cache-Control': 'no-cache',
-    },
-  })
+    })
+    return new Response(printHtml, {
+      status: 200,
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Content-Disposition': `inline; filename="${filename}.html"`,
+        'Cache-Control': 'no-cache',
+      },
+    })
+  }
 })
 
 apiRouter.post('/rfps', async (c) => {

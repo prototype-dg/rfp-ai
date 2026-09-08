@@ -85,9 +85,7 @@ jobs:
               OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}" \
               RESEND_API_KEY="${{ secrets.RESEND_API_KEY }}" \
               DEMO_SWITCH_PIN="${{ secrets.DEMO_SWITCH_PIN }}" \
-              PUPPETEER_CACHE_DIR="/home/site/wwwroot/puppeteer-cache" \
-              PDF_RENDER_URL="https://api.cpc-rfp.website/pdf" \
-              PDF_RENDER_SECRET="${{ secrets.PDF_RENDER_SECRET }}"
+              PUPPETEER_CACHE_DIR="/home/site/wwwroot/puppeteer-cache"
           echo "✅ App settings configured"
 
       - name: Set startup command
