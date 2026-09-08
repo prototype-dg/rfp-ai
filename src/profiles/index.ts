@@ -130,7 +130,7 @@ export const ANDERSEN_PROFILE: BrandProfile = {
   procurementEmail: 'procurement@andersenlab.com.pl',
   procurementEmailLabel: 'Andersen Procurement',
 
-  logoPath: '/static/andersen-logo.png',
+  logoPath: '/static/andersen-logo-full.png',
   logoAlt: 'Andersen Logo',
   faviconColor: '#FFDB00',
 

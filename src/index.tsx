@@ -12,6 +12,7 @@ import styleCss from '../public/static/style.css?raw'
 import submitJs from '../public/static/submit.js?raw'
 import patternSvg from '../public/static/pattern.svg?raw'
 import { emblemPngBase64 } from './emblem-data'
+import { logoFullDataUri } from './brand-assets'
 import { profileMiddleware } from './profiles/middleware'
 
 const app = new Hono<{ Bindings: Bindings }>()
@@ -81,6 +82,18 @@ app.get('/static/cpc-emblem.png', (c) => {
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
   return c.body(bytes, 200, {
     'Content-Type': 'image/jpeg',
+    'Cache-Control': 'public, max-age=86400',
+  })
+})
+
+app.get('/static/andersen-logo-full.png', (c) => {
+  // Serve Andersen full wordmark logo from brand-assets data URI
+  const base64 = logoFullDataUri.replace(/^data:image\/png;base64,/, '')
+  const bin = atob(base64)
+  const bytes = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+  return c.body(bytes, 200, {
+    'Content-Type': 'image/png',
     'Cache-Control': 'public, max-age=86400',
   })
 })
