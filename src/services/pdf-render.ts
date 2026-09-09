@@ -715,13 +715,67 @@ export async function renderMarkdownToPdf(
 
   try {
     if (profile.id === 'cpc') {
-      // ── CPC: background-image letterhead, no Puppeteer header/footer chrome ──
-      const { profilePdfBodyHtml } = await import('../brand/letterhead')
-      marked.setOptions({ gfm: true, breaks: false } as any)
-      const renderedBody = marked.parse(markdown || '') as string
-      const fullHtml = profilePdfBodyHtml({ bodyHtml: renderedBody, refNumber: opts.ref_number, title: opts.rfp_title })
-      await page.setContent(fullHtml, { waitUntil: 'load', timeout: 30000 })
-      console.log(`[pdf-render] CPC content set, calling page.pdf()`)
+      // ── CPC: JS paginator approach — identical architecture to Andersen ──
+      //
+      // WHY the old position:fixed approach failed:
+      //   profilePdfBodyHtml() used `position:fixed; top:-Xmm` on the header div,
+      //   expecting Chromium to repeat it at the top of every printed page.
+      //   In reality, Puppeteer/Chromium print mode renders position:fixed elements
+      //   ONCE, relative to the first-page viewport only — it does NOT repeat them
+      //   per page. The header appeared at a fixed absolute position (≈85% down
+      //   page 1) and was invisible on all other pages.
+      //
+      // FIX: use the same approach as Andersen —
+      //   profilePageHtml() (the browser preview) already produces a JS-paginated
+      //   document where each .cpc-page div contains the CPC header <img> as a
+      //   normal block child. Since the header is a real DOM element inside every
+      //   page div, Chromium renders it at the top of each page naturally.
+      //   Inject @media print CSS to strip screen chrome and force page breaks,
+      //   then call page.pdf() with margin:0 (all spacing comes from the page divs).
+      const { profilePageHtml } = await import('../brand/letterhead')
+      const paginatorHtml = profilePageHtml({
+        title:     opts.rfp_title || 'Request for Proposal',
+        bodyHtml:  marked.parse(markdown || '') as string,
+        refNumber: opts.ref_number,
+      })
+
+      // Strip the Google Fonts network request — Puppeteer on Azure may not reach
+      // fonts.googleapis.com; system font fallbacks are fine for PDF output.
+      // The <link> is the first (and only) external stylesheet in profilePageHtml.
+      const noFontsHtml = paginatorHtml.replace(/<link[^>]*fonts\.googleapis\.com[^>]*>/g, '')
+
+      // Inject print-only overrides — mirrors the Andersen print block exactly,
+      // adapted for CPC class names (.cpc-page instead of .a-page).
+      const printHtml = noFontsHtml.replace('</head>', `
+<style>
+@media print {
+  @page { size: A4; margin: 0; }
+  html, body { background: #fff !important; margin: 0; padding: 0; }
+  #cpc-measure { display: none !important; }
+  .cpc-page {
+    width: 794px !important;
+    height: 1123px !important;
+    min-height: 1123px !important;
+    max-height: 1123px !important;
+    margin: 0 !important;
+    box-shadow: none !important;
+    page-break-after: always !important;
+    break-after: page !important;
+    overflow: hidden !important;
+  }
+  .cpc-page:last-child { page-break-after: auto !important; break-after: auto !important; }
+}
+</style>
+</head>`)
+
+      await page.setContent(printHtml, { waitUntil: 'load', timeout: 45000 })
+      // Wait for the CPC JS paginator to finish populating #cpc-pages
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await page.waitForFunction(
+        () => (globalThis as any).document.querySelectorAll('.cpc-page').length > 0,
+        { timeout: 15000 }
+      )
+      console.log(`[pdf-render] CPC paginator done, calling page.pdf()`)
       const pdfBuffer = await page.pdf({
         format: 'A4',
         printBackground: true,
