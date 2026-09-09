@@ -829,6 +829,11 @@ export function profilePageHtml(opts: {
   .cpc-pg-body pre code { background: transparent; padding: 0; }
   .cpc-pg-body strong { color: #3A332B; }
 
+  /* Cover table (first table in the document): hide the 'Field | Value' thead
+     because it is a label-value metadata block, not a data table with meaningful
+     column names. All other tables retain their headers. */
+  .cpc-pg-body table:first-of-type thead { display: none; }
+
   /* Hidden measurement div */
   #cpc-measure { position:fixed; top:-9999px; left:0; width:682px; visibility:hidden; pointer-events:none;
     font-family:${p.fonts.body}; font-size:10.5pt; line-height:1.65; color:${p.css.ink}; }
@@ -898,18 +903,44 @@ ${opts.showToolbar ? `
       var tag = el.tagName;
 
       if (tag === 'TABLE') {
+        // Collect all body rows (skip thead rows)
         var thead = el.querySelector('thead');
         var theadHtml = thead ? thead.outerHTML : '';
-        var rows = el.querySelectorAll('tr');
-        var tableOpen = '<table style="' + (el.getAttribute('style') || '') + '">';
-        var tableClose = '</table>';
-        for (var ri = 0; ri < rows.length; ri++) {
-          var row = rows[ri];
-          if (row.closest('thead')) continue;
-          var rowH = row.offsetHeight || 24;
-          if (currentH() + rowH > BODY_H && currentH() > 0) newPage();
-          addHtml(tableOpen + (theadHtml ? '<thead>' + theadHtml + '</thead>' : '') + '<tbody>' + row.outerHTML + '</tbody>' + tableClose, rowH);
+        var allRows = el.querySelectorAll('tr');
+        var bodyRows = [];
+        for (var ri = 0; ri < allRows.length; ri++) {
+          if (!allRows[ri].closest('thead')) bodyRows.push(allRows[ri]);
         }
+        // Measure thead height once
+        var theadH = 0;
+        if (thead) {
+          var tc = thead.cloneNode(true);
+          measureContent.appendChild(tc);
+          theadH = tc.getBoundingClientRect().height || tc.offsetHeight || 0;
+          measureContent.removeChild(tc);
+        }
+        // Batch rows into page segments — emit ONE table per segment (not per row)
+        var segRows = [], segH = 0;
+        function flushTableSeg() {
+          if (segRows.length === 0) return;
+          addHtml('<table>' + theadHtml + '<tbody>' + segRows.join('') + '</tbody></table>', segH + theadH);
+          segRows = []; segH = 0;
+        }
+        // If thead alone barely fits, start a new page before the table
+        if (theadH > 0 && currentH() + theadH + 20 > BODY_H) { flushTableSeg(); newPage(); }
+        for (var rj = 0; rj < bodyRows.length; rj++) {
+          var row = bodyRows[rj];
+          var rc = row.cloneNode(true);
+          measureContent.appendChild(rc);
+          var rh = rc.getBoundingClientRect().height || rc.offsetHeight || 24;
+          measureContent.removeChild(rc);
+          // First row of a segment needs room for thead too
+          var needed = (segRows.length === 0 ? theadH : 0) + rh;
+          if (currentH() + segH + needed > BODY_H && segRows.length > 0) { flushTableSeg(); newPage(); }
+          segRows.push(row.outerHTML);
+          segH += rh;
+        }
+        flushTableSeg();
         return;
       }
 
