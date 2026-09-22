@@ -3554,10 +3554,11 @@ ${proposalText.slice(0, 30_000)}${proposalText.length > 30_000 ? '\n\n[... text 
   // plus ~1k chars of system/user prompt scaffolding.
   //   • Reasoning ≈ 1× input tokens under parallel load.
   //   • Output JSON (line_items + total) is ≈ 300–600 tokens.
-  //   • Formula: ceil(inputChars / 4) * 2 + 1000 (answer headroom)
-  //   • Clamp to [8000, 32000] — budget JSON is small so 32k ceiling is sufficient.
+  //   • Formula: ceil(inputChars / 4) * 3 + 1000 (×3: 1× reasoning + 1× headroom + 1× safety margin)
+  //   • Clamp to [16000, 64000] — raised from [8k,32k] to handle 2.5×+ reasoning expansion under parallel load.
+  //   • At 31800 input chars: ceil(31800/4)*3+1000 = 7950*3+1000 = 24850 (was 16900 with ×2).
   const budgetInputChars = systemPrompt.length + userPrompt.length
-  const budgetMaxTokens  = Math.min(32000, Math.max(8000, Math.ceil(budgetInputChars / 4) * 2 + 1000))
+  const budgetMaxTokens  = Math.min(64000, Math.max(16000, Math.ceil(budgetInputChars / 4) * 3 + 1000))
   console.log(`[budget-tokens] inputChars=${budgetInputChars} → max_completion_tokens=${budgetMaxTokens}`)
   const rawBudget = await callLLM(systemPrompt, userPrompt, env || {}, 'gpt-5.4-mini', budgetMaxTokens)
 
@@ -3679,6 +3680,7 @@ apiRouter.post('/rfps/:rfpId/proposals/:proposalId/evaluate', async (c) => {
         ai_evaluated_at=datetime('now'), evaluation_data=?,
         budget_amount=COALESCE(?, budget_amount),
         budget_currency=COALESCE(?, budget_currency),
+        proposed_duration=COALESCE(?, proposed_duration),
         updated_at=datetime('now')
       WHERE id=?
     `).bind(
@@ -3688,6 +3690,7 @@ apiRouter.post('/rfps/:rfpId/proposals/:proposalId/evaluate', async (c) => {
       JSON.stringify(evalResult),
       evalResult.budget_extracted ?? null,
       evalResult.budget_currency ?? null,
+      evalResult.duration_extracted ?? null,
       proposalId
     ).run()
 
@@ -3735,6 +3738,7 @@ apiRouter.post('/rfps/:rfpId/proposals/evaluate-all', async (c) => {
             ai_evaluated_at=datetime('now'), evaluation_data=?,
             budget_amount=COALESCE(?, budget_amount),
             budget_currency=COALESCE(?, budget_currency),
+            proposed_duration=COALESCE(?, proposed_duration),
             updated_at=datetime('now')
           WHERE id=?
         `).bind(
@@ -3744,6 +3748,7 @@ apiRouter.post('/rfps/:rfpId/proposals/evaluate-all', async (c) => {
           JSON.stringify(evalResult),
           evalResult.budget_extracted ?? null,
           evalResult.budget_currency ?? null,
+          evalResult.duration_extracted ?? null,
           proposal.id
         ).run()
 
