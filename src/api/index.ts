@@ -3189,7 +3189,18 @@ Now return the JSON evaluation object.`
   let complianceBreakdown: any[] = []
 
   try {
-    const rawEval = await callLLM(evalSystemPrompt, evalUserPrompt, env, 'gpt-5.4-mini', 16000)
+    // Dynamic token budget: estimate input tokens from combined prompt length, then
+    // reserve enough output tokens for reasoning + structured JSON answer.
+    //   • ~4 chars per token (GPT tokeniser approximation)
+    //   • Reasoning models consume reasoning tokens from the same max_completion_tokens budget
+    //     before emitting content tokens.  Reasoning ≈ 1× input tokens under parallel load.
+    //   • Output JSON for eval is ≈ 800–2000 tokens.
+    //   • Formula: ceil(inputChars / 4) * 2  (1× for reasoning, 1× headroom) + 3000 (answer)
+    //   • Clamp to [16000, 64000] — 16k minimum matches prior behaviour; 64k is API ceiling.
+    const evalInputChars = evalSystemPrompt.length + evalUserPrompt.length
+    const evalMaxTokens  = Math.min(64000, Math.max(16000, Math.ceil(evalInputChars / 4) * 2 + 3000))
+    console.log(`[eval-tokens] inputChars=${evalInputChars} → max_completion_tokens=${evalMaxTokens}`)
+    const rawEval = await callLLM(evalSystemPrompt, evalUserPrompt, env, 'gpt-5.4-mini', evalMaxTokens)
     console.log(`[eval-v48] LLM raw response length=${rawEval.length} preview="${rawEval.slice(0, 200)}"`)
 
     // Strip markdown fences if present
@@ -3539,7 +3550,16 @@ Example:
 Vendor proposal text:
 ${proposalText.slice(0, 30_000)}${proposalText.length > 30_000 ? '\n\n[... text truncated at 30k chars; price tables are typically in the first section ...]' : ''}`
 
-  const rawBudget = await callLLM(systemPrompt, userPrompt, env || {}, 'gpt-5.4-mini', 16000)
+  // Dynamic token budget: budget LLM input is capped at 30k chars of proposal text
+  // plus ~1k chars of system/user prompt scaffolding.
+  //   • Reasoning ≈ 1× input tokens under parallel load.
+  //   • Output JSON (line_items + total) is ≈ 300–600 tokens.
+  //   • Formula: ceil(inputChars / 4) * 2 + 1000 (answer headroom)
+  //   • Clamp to [8000, 32000] — budget JSON is small so 32k ceiling is sufficient.
+  const budgetInputChars = systemPrompt.length + userPrompt.length
+  const budgetMaxTokens  = Math.min(32000, Math.max(8000, Math.ceil(budgetInputChars / 4) * 2 + 1000))
+  console.log(`[budget-tokens] inputChars=${budgetInputChars} → max_completion_tokens=${budgetMaxTokens}`)
+  const rawBudget = await callLLM(systemPrompt, userPrompt, env || {}, 'gpt-5.4-mini', budgetMaxTokens)
 
   // Strip markdown fences
   let cleanRaw = rawBudget.trim()
@@ -4538,9 +4558,7 @@ async function callLLM(systemPrompt: string, userPrompt: string, env: any, model
     if (payload === '[DONE]') break
     try {
       const chunk = JSON.parse(payload)
-      content += chunk?.choices?.[0]?.delta?.content
-              ?? chunk?.choices?.[0]?.delta?.reasoning_content
-              ?? ''
+      content += chunk?.choices?.[0]?.delta?.content ?? ''
     } catch { /* skip malformed SSE lines */ }
   }
   return content
