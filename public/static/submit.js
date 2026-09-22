@@ -46,6 +46,9 @@
             document.getElementById('formCard').style.display = 'none';
             return;
           }
+          // Guard: if the user already submitted successfully, don't overwrite the success screen
+          // with a late-resolving loadRfp() error (race condition — POST can complete before GET).
+          if (document.getElementById('successScreen').style.display === 'block') return;
           showRfpError(result.data.error || 'This RFP is not available for submission.');
           document.getElementById('formCard').style.display = 'none';
           return;

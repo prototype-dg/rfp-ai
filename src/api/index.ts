@@ -3656,13 +3656,18 @@ apiRouter.post('/rfps/:rfpId/proposals/:proposalId/evaluate', async (c) => {
     await c.env.DB.prepare(`
       UPDATE proposals SET
         ai_total_score=?, ai_recommendation=?, ai_validation_status=?,
-        ai_evaluated_at=datetime('now'), evaluation_data=?, updated_at=datetime('now')
+        ai_evaluated_at=datetime('now'), evaluation_data=?,
+        budget_amount=COALESCE(?, budget_amount),
+        budget_currency=COALESCE(?, budget_currency),
+        updated_at=datetime('now')
       WHERE id=?
     `).bind(
       evalResult.total_score ?? null,
       evalResult.recommendation ?? null,
       evalResult.validation_status ?? null,
       JSON.stringify(evalResult),
+      evalResult.budget_extracted ?? null,
+      evalResult.budget_currency ?? null,
       proposalId
     ).run()
 
@@ -3707,13 +3712,18 @@ apiRouter.post('/rfps/:rfpId/proposals/evaluate-all', async (c) => {
         await c.env.DB.prepare(`
           UPDATE proposals SET
             ai_total_score=?, ai_recommendation=?, ai_validation_status=?,
-            ai_evaluated_at=datetime('now'), evaluation_data=?, updated_at=datetime('now')
+            ai_evaluated_at=datetime('now'), evaluation_data=?,
+            budget_amount=COALESCE(?, budget_amount),
+            budget_currency=COALESCE(?, budget_currency),
+            updated_at=datetime('now')
           WHERE id=?
         `).bind(
           evalResult.total_score ?? null,
           evalResult.recommendation ?? null,
           evalResult.validation_status ?? null,
           JSON.stringify(evalResult),
+          evalResult.budget_extracted ?? null,
+          evalResult.budget_currency ?? null,
           proposal.id
         ).run()
 
@@ -4528,7 +4538,9 @@ async function callLLM(systemPrompt: string, userPrompt: string, env: any, model
     if (payload === '[DONE]') break
     try {
       const chunk = JSON.parse(payload)
-      content += chunk?.choices?.[0]?.delta?.content ?? ''
+      content += chunk?.choices?.[0]?.delta?.content
+              ?? chunk?.choices?.[0]?.delta?.reasoning_content
+              ?? ''
     } catch { /* skip malformed SSE lines */ }
   }
   return content
