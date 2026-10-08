@@ -32,6 +32,7 @@ const app = new Hono<{ Bindings: Bindings }>()
 const ALLOWED_ORIGINS = [
   'https://rfp-ai.andersenlab.com',
   'https://app-rfp-tool.azurewebsites.net',
+  'https://demo.andersenlab.com',
 ]
 app.use('*', cors({
   origin: (origin) => ALLOWED_ORIGINS.includes(origin) ? origin : null,
@@ -142,6 +143,15 @@ app.use('/api/*', async (c, next) => {
 
   // Public paths — skip auth check entirely
   if (path.startsWith('/api/submit/') || path.startsWith('/api/webhook/')) {
+    return next()
+  }
+
+  // Demo switcher paths — called cross-origin from demo.andersenlab.com.
+  // /api/demo/status is read-only (no auth needed).
+  // /api/admin/set-profile is PIN-protected at the handler level (DEMO_SWITCH_PIN),
+  // which is a separate credential from ADMIN_API_KEY — the PIN is its own
+  // auth mechanism, so X-Admin-Key is not required here.
+  if (path === '/api/demo/status' || path === '/api/admin/set-profile') {
     return next()
   }
 
