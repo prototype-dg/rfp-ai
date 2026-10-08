@@ -259,54 +259,6 @@ apiRouter.get('/rfps/:id/preview-html', async (c) => {
   }
 })
 
-// GET /pdf-diag — diagnostic endpoint: dumps Puppeteer env state without launching a browser.
-// Tells us exactly what binary path is resolved and whether the file exists on disk.
-// Remove after confirming PDF works on Azure.
-apiRouter.get('/pdf-diag', async (c) => {
-  const fs   = require('fs')   as typeof import('fs')
-  const path = require('path') as typeof import('path')
-
-  const cacheDir   = process.env.PUPPETEER_CACHE_DIR    || '(not set)'
-  const execPath   = process.env.PUPPETEER_EXECUTABLE_PATH || '(not set)'
-  const skipChrome = process.env.PUPPETEER_CHROME_SKIP_DOWNLOAD || '(not set)'
-  const wwwroot    = '/home/site/wwwroot'
-
-  // Try to find the headless-shell binary
-  let foundBinary  = '(not found)'
-  let binaryExists = false
-  if (process.env.PUPPETEER_CACHE_DIR) {
-    const shellBase = path.join(process.env.PUPPETEER_CACHE_DIR, 'chrome-headless-shell')
-    try {
-      const revDirs = fs.readdirSync(shellBase)
-      for (const rev of revDirs) {
-        const candidate = path.join(shellBase, rev, 'chrome-headless-shell-linux64', 'chrome-headless-shell')
-        if (fs.existsSync(candidate)) { foundBinary = candidate; binaryExists = true; break }
-      }
-      if (!binaryExists) foundBinary = `(shell base exists at ${shellBase} but no binary inside; revDirs=${JSON.stringify(revDirs)})`
-    } catch (e: any) { foundBinary = `(error scanning ${shellBase}: ${e.message})` }
-  }
-
-  // List top-level puppeteer-cache dirs if they exist
-  const cacheList: string[] = []
-  const cacheAbs = process.env.PUPPETEER_CACHE_DIR || ''
-  if (cacheAbs) {
-    try { cacheList.push(...fs.readdirSync(cacheAbs)) } catch { cacheList.push('(error reading dir)') }
-  }
-
-  // Check wwwroot exists
-  let wwwrootFiles: string[] = []
-  try { wwwrootFiles = fs.readdirSync(wwwroot).slice(0, 30) } catch (e: any) { wwwrootFiles = [`error: ${e.message}`] }
-
-  return c.json({
-    env: { PUPPETEER_CACHE_DIR: cacheDir, PUPPETEER_EXECUTABLE_PATH: execPath, PUPPETEER_CHROME_SKIP_DOWNLOAD: skipChrome },
-    resolvedBinary: foundBinary,
-    binaryExists,
-    cacheContents: cacheList,
-    wwwrootTopLevel: wwwrootFiles,
-    cwd: process.cwd(),
-    nodeVersion: process.version,
-  })
-})
 
 // GET /rfps/:id/pdf-content — returns raw RFP markdown content
 // Used by clients that need the raw markdown (e.g. debug, re-render).

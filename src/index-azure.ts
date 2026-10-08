@@ -62,6 +62,60 @@ app.use('*', async (c, next) => {
 // ── Profile loader — runs after DB adapter so c.env.DB is always set ────────
 app.use('*', profileMiddleware)
 
+// ── Security headers ─────────────────────────────────────────────────────────
+// Applied to every response before any route handler runs.
+// These headers reduce the blast radius of XSS (CSP, X-Content-Type-Options),
+// prevent clickjacking (X-Frame-Options), force HTTPS (HSTS), and stop
+// referrer leakage (Referrer-Policy).
+//
+// X-Content-Type-Options: nosniff — critical for the file-upload XSS vector:
+//   an HTML file stored in R2 and served via /api/proposals/pdf/:key would be
+//   executed as HTML by Chrome if the browser sniffs its MIME type. This header
+//   forces browsers to honour the declared Content-Type instead.
+//
+// Content-Security-Policy: intentionally permissive for script-src because the
+//   SPA loads CDN scripts (Chart.js, marked, html2pdf, FontAwesome). A strict
+//   hash/nonce-based CSP would break those. The policy here blocks the most
+//   dangerous vectors (object-src, base-uri, form-action) without breaking
+//   the existing CDN-loaded frontend.
+app.use('*', async (c, next) => {
+  await next()
+  // HSTS — tell browsers this host is HTTPS-only for 1 year, include subdomains
+  c.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
+  // Prevent MIME-type sniffing (blocks HTML-upload-to-R2 XSS path)
+  c.header('X-Content-Type-Options', 'nosniff')
+  // Deny framing from any origin (clickjacking protection)
+  c.header('X-Frame-Options', 'DENY')
+  // Don't send Referer header to third-party origins
+  c.header('Referrer-Policy', 'strict-origin-when-cross-origin')
+  // Disable browser features not used by this app
+  c.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
+  // CSP — blocks the most dangerous injection vectors while allowing CDN scripts
+  c.header(
+    'Content-Security-Policy',
+    [
+      "default-src 'self'",
+      // CDN scripts used by the SPA (Chart.js, marked, html2pdf, html2canvas, jsPDF)
+      "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://cdn.tailwindcss.com",
+      // Fonts and icons from Google Fonts and FontAwesome CDN
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net",
+      "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net",
+      // Images: self + data URIs (brand asset data URIs in layout) + blob (PDF generation)
+      "img-src 'self' data: blob:",
+      // fetch() / XHR: same origin only — admin API calls are all same-origin
+      "connect-src 'self'",
+      // Block all plugin content (Flash, Silverlight, etc.)
+      "object-src 'none'",
+      // Prevent base tag injection (would redirect all relative URLs)
+      "base-uri 'self'",
+      // Block form submissions to external origins
+      "form-action 'self'",
+      // Block framing (belt-and-suspenders with X-Frame-Options)
+      "frame-ancestors 'none'",
+    ].join('; ')
+  )
+})
+
 // Global error handler
 app.onError((err, c) => {
   console.error('Unhandled error:', err.message, err.stack)

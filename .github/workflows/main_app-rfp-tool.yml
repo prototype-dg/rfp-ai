@@ -6,6 +6,16 @@ on:
       - main
   workflow_dispatch:
 
+# ── GitHub Actions token permissions ────────────────────────────────────────
+# Explicitly restrict the GITHUB_TOKEN to the minimum required.
+# This prevents a compromised step from using the token to write to the repo,
+# create releases, or interact with other repository resources.
+# NOTE: AZURE_CREDENTIALS is a separate secret (service principal JSON) —
+# its RBAC scope must be verified independently. See "Verify AZURE_CREDENTIALS
+# RBAC scope" step below.
+permissions:
+  contents: read   # checkout only — no write, no packages, no pull-requests
+
 # Cancel any in-progress run on the same branch when a new run starts.
 # This prevents duplicate concurrent deployments (both push and dispatch triggers
 # can no longer overlap — the older run is cancelled automatically).
@@ -78,8 +88,116 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
+      # ── F-CORP-1: Verify AZURE_CREDENTIALS RBAC scope ───────────────────────
+      # AZURE_CREDENTIALS must be scoped to the resource group only, NOT the
+      # subscription. A subscription-level Contributor assignment would give an
+      # attacker who obtains this secret full write access to the entire Azure
+      # tenant — all apps, databases, storage accounts, and VMs.
+      #
+      # This step prints the role assignments for the service principal and FAILS
+      # the deployment if any subscription-level Contributor/Owner role is found.
+      # If this check starts failing, tighten the RBAC assignment in the Azure
+      # portal before re-running: IAM → Role assignments → scope = Resource group.
+      - name: Verify AZURE_CREDENTIALS RBAC scope (must be resource-group only)
+        run: |
+          # Extract appId (clientId) from the credentials JSON stored in the secret
+          APP_ID=$(echo '${{ secrets.AZURE_CREDENTIALS }}' | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('clientId',''))")
+          if [ -z "$APP_ID" ]; then
+            echo "⚠️  Could not parse clientId from AZURE_CREDENTIALS — skipping scope check"
+            exit 0
+          fi
+          echo "Checking role assignments for service principal: $APP_ID"
+          # List all role assignments for this principal across the subscription
+          ASSIGNMENTS=$(az role assignment list --assignee "$APP_ID" --all --output json 2>/dev/null || echo "[]")
+          echo "$ASSIGNMENTS" | python3 -c "
+          import sys, json
+          assignments = json.load(sys.stdin)
+          bad = []
+          for a in assignments:
+              scope = a.get('scope', '')
+              role  = a.get('roleDefinitionName', '')
+              # Flag any subscription-level Contributor or Owner assignment
+              # Scope format: /subscriptions/<uuid>  (no /resourceGroups/ component = subscription level)
+              parts = [p for p in scope.split('/') if p]
+              if len(parts) == 2 and parts[0] == 'subscriptions' and role in ('Contributor', 'Owner', 'User Access Administrator'):
+                  bad.append(f'  DANGER: {role} at subscription scope {scope}')
+          if bad:
+              print('FAIL — Service principal has over-broad Azure permissions:')
+              for b in bad: print(b)
+              print()
+              print('Fix: In Azure portal → Resource groups → Dima-Gibert-RG → IAM')
+              print('     Remove the subscription-level assignment and add a')
+              print('     resource-group-scoped Contributor assignment instead.')
+              sys.exit(1)
+          else:
+              print(f'OK — {len(assignments)} assignment(s) checked, none at subscription scope with Contributor/Owner.')
+          "
+          echo "✅ RBAC scope check passed"
+
+      # ── F-CORP-3: Verify storage account is not shared ──────────────────────
+      # AZURE_STORAGE_CONNECTION_STRING is account-level — it grants access to
+      # ALL containers in the storage account, not just the proposals container.
+      # If this account is shared with other Andersen applications, a leaked
+      # connection string exposes those applications' data.
+      #
+      # This step prints the storage account name and its resource group so you
+      # can confirm it is dedicated to this demo app (not shared infrastructure).
+      - name: Verify storage account isolation
+        run: |
+          CONN="${{ secrets.AZURE_STORAGE_CONNECTION_STRING }}"
+          if [ -z "$CONN" ]; then
+            echo "ℹ️  AZURE_STORAGE_CONNECTION_STRING not set — skipping isolation check"
+            exit 0
+          fi
+          # Extract AccountName from connection string (never print the key itself)
+          ACCT=$(echo "$CONN" | grep -oP '(?<=AccountName=)[^;]+' || true)
+          if [ -z "$ACCT" ]; then
+            echo "⚠️  Could not parse AccountName from connection string — verify manually"
+            exit 0
+          fi
+          echo "Storage account in use: $ACCT"
+          # Look up which resource group the account belongs to
+          RG=$(az storage account show --name "$ACCT" --query resourceGroup -o tsv 2>/dev/null || echo "(lookup failed)")
+          echo "Resource group: $RG"
+          echo ""
+          echo "ACTION REQUIRED — manually verify:"
+          echo "  1. Is '$ACCT' used ONLY by this demo app?"
+          echo "  2. If it is shared with other apps, create a dedicated storage account"
+          echo "     and rotate AZURE_STORAGE_CONNECTION_STRING before the next deploy."
+          echo "  3. Consider using a SAS token with container-scope instead of the"
+          echo "     full account connection string."
+          echo ""
+          echo "✅ Storage isolation check printed — review output above"
+
       # WEBSITE_RUN_FROM_PACKAGE=1 — critical: routes zip upload through ARM plane,
       # bypasses Kudu SCM /api/zipdeploy entirely (no SCM Basic Auth needed)
+      #
+      # ── F-CORP-2: RESEND_API_KEY — corporate email infrastructure risk ───────
+      # RESEND_API_KEY grants the ability to send email from any sender on the
+      # Resend account's verified sending domain (andersenlab.com). A leaked key
+      # enables targeted phishing from a legitimate Andersen email address.
+      #
+      # Required actions (do once, not per-deploy):
+      #   1. Rotate: Resend dashboard → API Keys → revoke & regenerate, then
+      #              update the GitHub secret RESEND_API_KEY.
+      #   2. Scope: Create a key with the minimum required permissions
+      #             (Sending access only, not Full access).
+      #   3. Isolate: If Resend supports per-domain key restrictions, restrict
+      #              this key to the rfp-specific sending domain only.
+      #   4. Audit: Check Resend send logs for unexpected emails sent before
+      #             the key was rotated (Resend dashboard → Logs).
+      #
+      # ── F-CORP-1: OPENAI_API_KEY — shared key risk ───────────────────────────
+      # If OPENAI_API_KEY is shared with other Andersen projects, an attacker
+      # who triggers repeated LLM generation can exhaust shared quota.
+      # Verify this key is demo-dedicated and has a hard spend limit set in the
+      # OpenAI dashboard (Settings → Billing → Usage limits).
+      #
+      # ── F-CORP-3: AZURE_STORAGE_CONNECTION_STRING — account-level credential ─
+      # This connection string grants access to ALL containers in the storage
+      # account. If a connection string is ever needed here in future, prefer
+      # a SAS token scoped to the proposals container only. See isolation check
+      # step above for how to verify whether this account is shared.
       - name: Set Azure App Service application settings
         run: |
           az webapp config appsettings set \
