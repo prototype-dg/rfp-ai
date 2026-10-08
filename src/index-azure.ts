@@ -20,7 +20,26 @@ import { profileMiddleware } from './profiles/middleware'
 
 const app = new Hono<{ Bindings: Bindings }>()
 
-app.use('*', cors())
+// ── CORS — explicit origin allowlist, NOT wildcard ──────────────────────────
+// Only the two production hostnames are trusted origins.
+// Browser preflight (OPTIONS) and actual cross-origin requests from any other
+// origin will receive no Access-Control-Allow-Origin header, which causes the
+// browser to block the response before the JS can read it.
+//
+// Routes that must accept requests from external vendor browsers
+// (/api/submit/*, /api/webhook/*) are called directly from the vendor portal
+// page served by THIS same origin, so they do not need cross-origin access.
+const ALLOWED_ORIGINS = [
+  'https://rfp-ai.andersenlab.com',
+  'https://app-rfp-tool.azurewebsites.net',
+]
+app.use('*', cors({
+  origin: (origin) => ALLOWED_ORIGINS.includes(origin) ? origin : null,
+  allowMethods: ['GET', 'HEAD', 'PUT', 'POST', 'DELETE', 'PATCH'],
+  allowHeaders: ['Content-Type', 'Authorization', 'X-Admin-Key'],
+  exposeHeaders: [],
+  credentials: false,
+}))
 
 // ── Azure adapter injection ─────────────────────────────────────────────────
 // MUST be registered BEFORE profileMiddleware so c.env.DB is available when
@@ -36,6 +55,7 @@ app.use('*', async (c, next) => {
   if (!c.env.GSK_PROJECT_ID) (c.env as any).GSK_PROJECT_ID = process.env.GSK_PROJECT_ID
   if (!(c.env as any).GOOGLE_VISION_API_KEY) (c.env as any).GOOGLE_VISION_API_KEY = process.env.GOOGLE_VISION_API_KEY
   if (!(c.env as any).AZURE_STORAGE_CONNECTION_STRING) (c.env as any).AZURE_STORAGE_CONNECTION_STRING = process.env.AZURE_STORAGE_CONNECTION_STRING
+  if (!(c.env as any).ADMIN_API_KEY) (c.env as any).ADMIN_API_KEY = process.env.ADMIN_API_KEY
   await next()
 })
 
@@ -51,6 +71,41 @@ app.onError((err, c) => {
 // ── Static files served from disk (not Vite ?raw bundled) ─────────────────
 // Files live in public/static/ relative to the project root
 app.use('/static/*', serveStatic({ root: './public' }))
+
+// ── Admin API key authentication ────────────────────────────────────────────
+// All /api/* routes require the X-Admin-Key header to match ADMIN_API_KEY,
+// EXCEPT the two paths that external parties (vendors, email providers) must
+// reach without credentials:
+//
+//   /api/submit/*          — vendor proposal submission portal (public link)
+//   /api/webhook/*         — inbound-email webhook from Resend (no shared secret possible)
+//
+// The SPA (same-origin) sends the key as a request header on every fetch.
+// The key is stored as an Azure App Setting (ADMIN_API_KEY) and injected into
+// c.env by the adapter middleware above.
+app.use('/api/*', async (c, next) => {
+  const path = c.req.path
+
+  // Public paths — skip auth check entirely
+  if (path.startsWith('/api/submit/') || path.startsWith('/api/webhook/')) {
+    return next()
+  }
+
+  const adminKey: string = (c.env as any)?.ADMIN_API_KEY || process.env.ADMIN_API_KEY || ''
+
+  // If ADMIN_API_KEY is not configured on this instance, refuse all requests
+  // rather than silently running open — fail-closed is intentional.
+  if (!adminKey) {
+    return c.json({ error: 'API authentication not configured' }, 503)
+  }
+
+  const provided = c.req.header('X-Admin-Key') || ''
+  if (provided !== adminKey) {
+    return c.json({ error: 'Unauthorized' }, 401)
+  }
+
+  return next()
+})
 
 // API routes
 app.route('/api', apiRouter)
@@ -71,9 +126,12 @@ app.get('/submit/:rfpId', (c) => {
 // SPA — profile-aware HTML must never be cached by browser or proxy.
 // layout.ts injects profile-specific font-family and org name server-side,
 // so a stale cached page would show the wrong brand after a profile switch.
+// The ADMIN_API_KEY is embedded as window._adminKey so app.js can include it
+// in X-Admin-Key headers on every API request.
 app.get('*', (c) => {
   c.header('Cache-Control', 'no-store')
-  return c.html(getLayout())
+  const adminKey: string = (c.env as any)?.ADMIN_API_KEY || process.env.ADMIN_API_KEY || ''
+  return c.html(getLayout(adminKey))
 })
 
 export default app

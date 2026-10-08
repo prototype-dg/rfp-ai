@@ -94,6 +94,7 @@ jobs:
               OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}" \
               RESEND_API_KEY="${{ secrets.RESEND_API_KEY }}" \
               DEMO_SWITCH_PIN="${{ secrets.DEMO_SWITCH_PIN }}" \
+              ADMIN_API_KEY="${{ secrets.ADMIN_API_KEY }}" \
               PUPPETEER_CACHE_DIR="/home/site/wwwroot/puppeteer-cache" \
               PUPPETEER_CHROME_SKIP_DOWNLOAD="true"
           echo "✅ App settings configured"

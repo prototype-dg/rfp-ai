@@ -1,7 +1,7 @@
 import { logoFullDataUri, bgDarkDataUri, bgLightDataUri } from './brand-assets'
 import { getActiveProfile } from './profiles/index'
 
-export function getLayout(): string {
+export function getLayout(adminKey?: string): string {
   const p = getActiveProfile()
   const isCpc = p.id === 'cpc'
   return `<!DOCTYPE html>
@@ -1617,6 +1617,7 @@ export function getLayout(): string {
 <!-- Vendor hover card (shared, repositioned by JS) -->
 <div id="vendorHoverCard" class="vendor-hover-card"></div>
 
+<script>window._adminKey = ${adminKey ? JSON.stringify(adminKey) : "''"}<\/script>
 <script src="/static/app.js" defer><\/script>
 </body>
 </html>`;

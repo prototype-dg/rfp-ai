@@ -8,6 +8,10 @@ export type Bindings = {
   OPENAI_BASE_URL?: string
   GSK_API_KEY?: string
   GSK_PROJECT_ID?: string
+  // ── API authentication ───────────────────────────────────────────────────
+  // All /api/* routes (except /api/submit/* and /api/webhook/*) require
+  // X-Admin-Key: <ADMIN_API_KEY> on every request.
+  ADMIN_API_KEY?: string
 
   // ── Inline OCR (Phase 2 — replaces pdf-sidecar) ───────────────────────────
   GOOGLE_VISION_API_KEY?: string

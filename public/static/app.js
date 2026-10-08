@@ -4,6 +4,16 @@
 'use strict';
 const API = '/api';
 
+// ── Admin API key — injected server-side into window._adminKey by layout.ts ──
+// Sent as X-Admin-Key on every internal API request. Public routes
+// (/api/submit/*, /api/webhook/*) are excluded server-side; this header
+// causes no harm if present on those routes.
+function _getAdminHeaders(extra) {
+  var key = (typeof window._adminKey !== 'undefined') ? window._adminKey : '';
+  var h = Object.assign({ 'X-Admin-Key': key }, extra || {});
+  return h;
+}
+
 // ============================================================
 // INTERNATIONALISATION (Arabic / English)
 // ============================================================
@@ -3468,7 +3478,7 @@ async function apiCall(method, path, data, opts_) {
       await new Promise(function(res){ setTimeout(res, 300 * (1 << (_attempt - 1))); });
     }
     try {
-      var opts = { method: method, headers: { 'Content-Type': 'application/json' } };
+      var opts = { method: method, headers: _getAdminHeaders({ 'Content-Type': 'application/json' }) };
       if (data !== undefined) opts.body = JSON.stringify(data);
       var r = await fetch(API + path, opts);
       var json = await r.json();
@@ -5111,7 +5121,7 @@ async function generateRfpDoc(rfpId) {
   try {
     var response = await fetch('/api/rfps/' + rfpId + '/generate', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: _getAdminHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(data),
     });
 
@@ -5325,7 +5335,7 @@ async function advanceRfpStage(rfpId, stage) {
 // can render it without CORS issues.
 async function fetchLetterheadDataUri() {
   try {
-    var res = await fetch('/api/proposals/pdf/letterhead/bg_a4.png');
+    var res = await fetch('/api/proposals/pdf/letterhead/bg_a4.png', { headers: _getAdminHeaders() });
     if (!res.ok) return null;
     var blob = await res.blob();
     return await new Promise(function(resolve) {
@@ -5576,7 +5586,7 @@ function downloadRfpPdf(rfpId) {
   var filename = safeRef + '.pdf';
 
   showToast('Generating PDF — please wait…', 'info', 30000);
-  fetch('/api/rfps/' + rfpId + '/pdf')
+  fetch('/api/rfps/' + rfpId + '/pdf', { headers: _getAdminHeaders() })
     .then(function(res) {
       if (!res.ok) throw new Error('Server returned ' + res.status);
       var ct = res.headers.get('Content-Type') || '';
@@ -5852,7 +5862,7 @@ async function confirmSendInvitations(rfpId) {
         var safeRef = (rfp.ref_number || rfp.title || String(rfpId)).replace(/[^a-zA-Z0-9_\-]/g, '_');
         // Default filename — overridden below if server sends Content-Disposition
         pdfFilename = safeRef + '.pdf';
-        var pdfRes = await fetch('/api/rfps/' + rfpId + '/pdf');
+        var pdfRes = await fetch('/api/rfps/' + rfpId + '/pdf', { headers: _getAdminHeaders() });
         if (!pdfRes.ok) throw new Error('PDF service returned ' + pdfRes.status);
         // Read server-supplied filename from Content-Disposition (profile-aware)
         var cdHdr = pdfRes.headers.get('Content-Disposition') || '';
@@ -9423,7 +9433,7 @@ async function uploadRfpPdf() {
     fd.append('rfp_currency', currency);
     fd.append('country_of_issue', country);
 
-    var resp = await fetch(API + '/rfps/upload-rfp-pdf', { method: 'POST', body: fd });
+    var resp = await fetch(API + '/rfps/upload-rfp-pdf', { method: 'POST', headers: _getAdminHeaders(), body: fd });
     if (!resp.ok) {
       var err = await resp.json().catch(function(){ return {}; });
       throw new Error(err.error || 'Upload failed (' + resp.status + ')');
@@ -9453,7 +9463,7 @@ function _startRfpFieldPoll(rfpId) {
   _rfpFieldPollTimer = setInterval(async function() {
     attempts++;
     try {
-      var r = await fetch(API + '/rfps/' + rfpId);
+      var r = await fetch(API + '/rfps/' + rfpId, { headers: _getAdminHeaders() });
       if (!r.ok) return;
       var rfp = await r.json();
       var aiStatus = rfp.ai_extraction_status || null;
@@ -9532,7 +9542,7 @@ async function createRfp() {
           const fd = new FormData();
           fd.append('file', docEntry.file);
           fd.append('doc_label', docEntry.label);
-          await fetch(API + '/rfps/' + rfp.id + '/upload-arch-doc', { method: 'POST', body: fd });
+          await fetch(API + '/rfps/' + rfp.id + '/upload-arch-doc', { method: 'POST', headers: _getAdminHeaders(), body: fd });
         } catch(uploadErr) {
           showToast('Could not upload "' + docEntry.label + '"', 'info', 3000);
         }
