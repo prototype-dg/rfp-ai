@@ -157,6 +157,21 @@ app.use('/api/*', async (c, next) => {
     return next()
   }
 
+  // Browser-navigation paths — loaded as iframe src= or window.open(), not via fetch().
+  // The browser never sends custom headers on direct navigations, so X-Admin-Key
+  // cannot be attached. These endpoints are all read-only and serve content only
+  // for RFPs/proposals that already exist (no mutation possible).
+  //   /api/rfps/:id/preview-html  — RFP letterhead preview rendered in iframe
+  //   /api/proposals/pdf/*        — proposal PDF streamed inline in iframe or new tab
+  //   /api/rfps/:id/pdf           — generated RFP PDF opened in new tab
+  if (
+    /^\/api\/rfps\/\d+\/preview-html$/.test(path) ||
+    /^\/api\/rfps\/\d+\/pdf$/.test(path) ||
+    path.startsWith('/api/proposals/pdf/')
+  ) {
+    return next()
+  }
+
   const adminKey: string = (c.env as any)?.ADMIN_API_KEY || process.env.ADMIN_API_KEY || ''
 
   // If ADMIN_API_KEY is not configured on this instance, refuse all requests
