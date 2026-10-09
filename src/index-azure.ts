@@ -85,8 +85,10 @@ app.use('*', async (c, next) => {
   c.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
   // Prevent MIME-type sniffing (blocks HTML-upload-to-R2 XSS path)
   c.header('X-Content-Type-Options', 'nosniff')
-  // Deny framing from any origin (clickjacking protection)
-  c.header('X-Frame-Options', 'DENY')
+  // Allow same-origin framing only — the SPA uses iframes to render RFP preview
+  // (/api/rfps/:id/preview-html) and uploaded PDFs (/api/proposals/pdf/:key).
+  // SAMEORIGIN blocks cross-origin clickjacking while permitting same-origin iframes.
+  c.header('X-Frame-Options', 'SAMEORIGIN')
   // Don't send Referer header to third-party origins
   c.header('Referrer-Policy', 'strict-origin-when-cross-origin')
   // Disable browser features not used by this app
@@ -111,8 +113,8 @@ app.use('*', async (c, next) => {
       "base-uri 'self'",
       // Block form submissions to external origins
       "form-action 'self'",
-      // Block framing (belt-and-suspenders with X-Frame-Options)
-      "frame-ancestors 'none'",
+      // Allow same-origin framing only (belt-and-suspenders with X-Frame-Options: SAMEORIGIN)
+      "frame-ancestors 'self'",
     ].join('; ')
   )
 })
